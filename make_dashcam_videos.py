@@ -62,7 +62,8 @@ OUT_FPS      = 30
 PIP_W, PIP_H = 576, 324                        # rear inset (was 480x270; +20%)
 PIP_MARGIN   = 24
 TS_FONT_SIZE = 36
-SPEED_FONT_SIZE = 35                           # was 44; -20%
+SPEED_FONT_SIZE = 24
+SPEED_MARGIN_V  = 88                           # sits just above the timestamp box
 
 # Hardware encoder settings (VideoToolbox uses bitrate, not CRF)
 VT_BITRATE   = "8M"
@@ -269,14 +270,14 @@ def build_filter_complex(
         )
 
     if speed_srt is not None:
-        # libass force_style: bottom-left, sitting above the timestamp box
-        # Timestamp box is ~24+TS_FONT_SIZE+2*boxborderw ≈ 80 px from the bottom,
-        # so push the speed readout up so its bottom sits ~96 px above the frame bottom.
+        # libass force_style: bottom-left, sitting just above the timestamp box.
+        # Timestamp box top is ~80 px from the bottom; MarginV sets where the
+        # speed text bottom sits, so a small gap lands the speed neatly above it.
         style = (
             f"Alignment=1,FontName=Courier New,FontSize={SPEED_FONT_SIZE},"
             "PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,"
             "BackColour=&H80000000,BorderStyle=4,Outline=2,Shadow=0,"
-            "MarginV=96,MarginL=24"
+            f"MarginV={SPEED_MARGIN_V},MarginL=24"
         )
         # Single-quote the path so colons inside it don't get parsed as option separators
         chain += f",subtitles=filename='{speed_srt.as_posix()}':force_style='{style}'"
