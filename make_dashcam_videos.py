@@ -184,15 +184,62 @@ def parse_gpx_speeds(gpx_path: Path) -> list[float]:
     return speeds
 
 
-def find_gpx_for(timestamp: str, gps_dir: Path) -> Path | None:
-    """Match a clip timestamp like '20260511180649' to its GPX file (any duration suffix)."""
-    if not gps_dir.is_dir():
-        return None
-    for f in os.listdir(gps_dir):
-        m = GPX_RE.match(f)
-        if m and m.group(1) == timestamp:
-            return gps_dir / f
+def find_gpx_for(timestamp: str, *dirs: Path) -> Path | None:
+    """Match a clip timestamp like '20260511180649' to a GPX in any of the given dirs."""
+    for d in dirs:
+        if d is None or not d.is_dir():
+            continue
+        for f in os.listdir(d):
+            m = GPX_RE.match(f)
+            if m and m.group(1) == timestamp:
+                return d / f
+            # Some tarred members lack the trailing _D, e.g. 20260506122637_0060.gpx
+            m2 = re.match(r"^(\d{14})_\d+\.gpx$", f)
+            if m2 and m2.group(1) == timestamp:
+                return d / f
     return None
+
+
+import tarfile  # noqa: E402  (kept near use site for clarity)
+
+
+def harvest_tarred_gpx(tar_dir: Path, cache_dir: Path) -> tuple[int, int]:
+    """
+    Extract every *.gpx member from every '*.git' tar archive in tar_dir into cache_dir.
+    The dashcam mis-labels these archives with a .git extension but they're standard
+    POSIX tar files containing the same NMEA-style .gpx logs.
+    Returns (n_archives_processed, n_gpx_extracted).
+    """
+    if not tar_dir.is_dir():
+        return (0, 0)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    n_arch = 0
+    n_gpx = 0
+    for name in sorted(os.listdir(tar_dir)):
+        if not name.endswith(".git") or name.startswith("._"):
+            continue
+        path = tar_dir / name
+        try:
+            with tarfile.open(path, "r") as tf:
+                n_arch += 1
+                for member in tf.getmembers():
+                    base = os.path.basename(member.name)
+                    if not base.endswith(".gpx") or base.startswith("._"):
+                        continue
+                    dest = cache_dir / base
+                    if dest.exists() and dest.stat().st_size == member.size:
+                        continue  # already extracted
+                    try:
+                        f = tf.extractfile(member)
+                        if f is None:
+                            continue
+                        dest.write_bytes(f.read())
+                        n_gpx += 1
+                    except Exception:
+                        pass
+        except (tarfile.TarError, OSError):
+            continue
+    return (n_arch, n_gpx)
 
 
 def write_speed_srt(speeds: list[float], srt_path: Path) -> bool:
@@ -290,13 +337,13 @@ def encode_clip(
     font_path: str,
     use_vt: bool,
     with_timestamp: bool,
-    gps_dir: Path | None,
+    gps_dirs: tuple[Path | None, ...],
     with_speed: bool,
 ) -> None:
     # If GPS data exists for this clip, write a sidecar SRT and pass it to the filter
     speed_srt: Path | None = None
-    if with_speed and gps_dir is not None:
-        gpx = find_gpx_for(clip.timestamp, gps_dir)
+    if with_speed:
+        gpx = find_gpx_for(clip.timestamp, *gps_dirs)
         if gpx is not None:
             speeds = parse_gpx_speeds(gpx)
             srt_path = out_path.with_suffix(".speed.srt")
@@ -378,10 +425,12 @@ def main() -> int:
     front_dir = root / "DCIM" / "200video" / "front"
     rear_dir  = root / "DCIM" / "200video" / "rear"
     gps_dir   = root / "DCIM" / "203gps"
+    tar_dir   = gps_dir / "tar"
     if not front_dir.is_dir() or not rear_dir.is_dir():
         print(f"ERROR: expected {front_dir} and {rear_dir}", file=sys.stderr)
         return 1
     gps_dir = gps_dir if gps_dir.is_dir() else None
+    tar_dir = tar_dir if (tar_dir and tar_dir.is_dir()) else None
 
     if not shutil.which("ffmpeg"):
         print("ERROR: ffmpeg not found. Install with:  brew install ffmpeg", file=sys.stderr)
@@ -410,20 +459,31 @@ def main() -> int:
     font_path = resolve_font() if with_timestamp else ""
 
     # Decide whether we can / should burn in the GPS speed
-    with_speed = not args.no_speed and gps_dir is not None
+    with_speed = not args.no_speed and (gps_dir is not None or tar_dir is not None)
     if with_speed and not has_subtitles():
         print("WARNING: ffmpeg lacks the 'subtitles' filter (libass missing); speed overlay disabled.",
               file=sys.stderr)
         with_speed = False
-    n_gpx = 0
-    if gps_dir is not None:
-        n_gpx = sum(1 for f in os.listdir(gps_dir) if GPX_RE.match(f))
+
+    # Harvest GPX from tarred archives into a cache (one-time per run)
+    tar_cache_dir: Path | None = None
+    if with_speed and tar_dir is not None:
+        tar_cache_dir = out_dir / ".gpx_cache"
+        n_arch, n_new = harvest_tarred_gpx(tar_dir, tar_cache_dir)
+        if n_arch:
+            print(f"Tarred GPS: extracted {n_new} new .gpx files from {n_arch} archives "
+                  f"into {tar_cache_dir}")
+
+    gps_dirs = (gps_dir, tar_cache_dir)
+
+    n_gpx_loose = sum(1 for f in os.listdir(gps_dir) if GPX_RE.match(f)) if gps_dir else 0
+    n_gpx_tar   = sum(1 for f in os.listdir(tar_cache_dir) if f.endswith(".gpx")) if tar_cache_dir else 0
 
     print(f"Encoder:   {encoder_name}")
     print(f"Timestamp: {'on (' + font_path + ')' if with_timestamp else 'off'}")
     if with_speed:
-        print(f"Speed:     on (GPS data for {n_gpx} clips found in {gps_dir})")
-    elif gps_dir is None:
+        print(f"Speed:     on ({n_gpx_loose} loose .gpx + {n_gpx_tar} from tar archives)")
+    elif gps_dir is None and tar_dir is None:
         print(f"Speed:     off (no DCIM/203gps folder)")
     elif args.no_speed:
         print(f"Speed:     off (--no-speed)")
@@ -491,7 +551,7 @@ def main() -> int:
             inter = work_dir / f"{group_kind}{idx:02d}_clip{ci:03d}_{clip.timestamp}.mp4"
             if not inter.exists():
                 print(f"  [{ci:>3}/{len(group)}] {clip.timestamp}  encoding ...")
-                encode_clip(clip, inter, font_path, use_vt, with_timestamp, gps_dir, with_speed)
+                encode_clip(clip, inter, font_path, use_vt, with_timestamp, gps_dirs, with_speed)
             else:
                 print(f"  [{ci:>3}/{len(group)}] {clip.timestamp}  (cached)")
             intermediates.append(inter)
