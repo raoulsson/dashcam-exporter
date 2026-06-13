@@ -59,11 +59,12 @@ FALLBACK_FONT = "/System/Library/Fonts/Menlo.ttc"
 # Output video parameters
 OUT_W, OUT_H = 1920, 1080                      # 1080p
 OUT_FPS      = 30
-PIP_W, PIP_H = 576, 324                        # rear inset (was 480x270; +20%)
+PIP_W, PIP_H = 662, 372                        # rear inset (was 576x324; +15%)
 PIP_MARGIN   = 24
 TS_FONT_SIZE = 36
 SPEED_FONT_SIZE = 24
-SPEED_MARGIN_V  = 88                           # sits just above the timestamp box
+SPEED_MARGIN_V  = 24                           # bottom-right corner with small margin
+SPEED_MARGIN_R  = 24
 
 # Hardware encoder settings (VideoToolbox uses bitrate, not CRF)
 VT_BITRATE   = "8M"
@@ -270,14 +271,12 @@ def build_filter_complex(
         )
 
     if speed_srt is not None:
-        # libass force_style: bottom-left, sitting just above the timestamp box.
-        # Timestamp box top is ~80 px from the bottom; MarginV sets where the
-        # speed text bottom sits, so a small gap lands the speed neatly above it.
+        # libass force_style: bottom-right speed readout
         style = (
-            f"Alignment=1,FontName=Courier New,FontSize={SPEED_FONT_SIZE},"
+            f"Alignment=3,FontName=Courier New,FontSize={SPEED_FONT_SIZE},"
             "PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,"
             "BackColour=&H80000000,BorderStyle=4,Outline=2,Shadow=0,"
-            f"MarginV={SPEED_MARGIN_V},MarginL=24"
+            f"MarginV={SPEED_MARGIN_V},MarginR={SPEED_MARGIN_R}"
         )
         # Single-quote the path so colons inside it don't get parsed as option separators
         chain += f",subtitles=filename='{speed_srt.as_posix()}':force_style='{style}'"
