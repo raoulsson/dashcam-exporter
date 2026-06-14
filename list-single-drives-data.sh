@@ -3,7 +3,7 @@
 # ---------------------------
 # Dry-run the script in DRIVE mode (gap-based grouping). Each engine-on
 # session is shown as a separate group with its 1-based index — pass that
-# index to `make-single-drives.sh` to encode just that drive.
+# index to `make-single-drives-rendered.sh` to encode just that drive.
 #
 # Edit the OPTS line below to pre-set any flags you regularly use that you
 # DON'T want in config.txt (e.g. a non-default --root for a copied SD card,
