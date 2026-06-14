@@ -238,6 +238,25 @@ source .venv/bin/activate
 ./make-daily-drives-rendered.sh 8       # encode just day 8
 ```
 
+Each invocation of a `make-…` script tees stdout+stderr into
+`./logs/{daily|single}-YYYYMMDD-HHMMSS.log` (full history kept). At the end
+of the run, a copy of that log lands next to every `.mp4` the run produced
+— e.g. `day_2026-05-11.log` alongside `day_2026-05-11.mp4` in your output
+folder, so the log lives with the data it describes. Override the log
+location via the `LOG_DIR` environment variable.
+
+The make-scripts also forward arbitrary flags through to the Python:
+
+```sh
+./make-daily-drives-rendered.sh 8 --force                       # overwrite existing
+./make-daily-drives-rendered.sh --sidecars-only                 # refresh sidecars only
+./make-daily-drives-rendered.sh --clear-cache 8 --output-height 720
+```
+
+Leading integers are treated as group indices for `--drives`; the first
+non-integer arg ends index parsing and everything from there onward is
+passed straight to Python.
+
 
 ## Fragment / loop-recording handling
 
@@ -354,26 +373,33 @@ config.txt > built-in default**. Highlights:
 
 | Flag | Effect |
 |------|--------|
-| `--config PATH`         | Use a config.txt at a non-default location. |
-| `--write-config PATH`   | Dump the fully-commented config template and exit. |
-| `--root PATH`           | Dashcam SD-card / backup root (default: `/Volumes/NO NAME`). |
-| `--out PATH`            | Output folder (default: `~/Desktop/Dashcam_Videos`). |
-| `--daily`               | Group clips by calendar date instead of by gap. |
-| `--gap N`               | Seconds-between-clips threshold for drive grouping (default 90). |
-| `--drives N [N …]`      | Only process specific group numbers (1-based). |
-| `--software`            | Force libx264 instead of VideoToolbox. |
-| `--no-timestamp`        | Skip the date/time overlay. |
-| `--no-speed`            | Skip the GPS speed overlay even when GPX data exists. |
-| `--no-audio`            | Strip audio from the output. |
-| `--no-map-sidecars`     | Skip the `.html` / `.gpx` / `_links.txt` sidecars. |
-| `--no-map-widget`       | Skip the burn-in map panel (output stays 1920×1080). |
-| `--sidecars-only`       | Only (re-)generate sidecars; don't re-encode video. |
-| `--no-skip-parking`     | Disable parking-skip. |
-| `--parking-min-secs N`  | Minimum parked-run length (s) before we skip (default 300). |
-| `--parking-pad-secs N`  | Seconds kept at each end of a skipped run (default 10). |
-| `--output-height N`     | Downscale final composite to this height in px (0 = native). |
-| `--keep-intermediates`  | Don't delete per-clip intermediates after concat. |
-| `--dry-run`             | List drives / days and exit without encoding. |
+| `--config PATH`               | Use a config.txt at a non-default location. |
+| `--write-config PATH`         | Dump the fully-commented config template and exit. Pass `.` to write `./config.txt`. |
+| `--root PATH`                 | Dashcam SD-card / backup root (default: `/Volumes/NO NAME`). |
+| `--out PATH`                  | Output folder (default: `~/Desktop/Dashcam_Videos`). |
+| `--daily`                     | Group clips by calendar date instead of by gap. |
+| `--gap N`                     | Seconds-between-clips threshold for drive grouping (default 90). |
+| `--drives N [N …]`            | Only process specific group numbers (1-based). Bypasses min-clips skip for those groups. |
+| `--min-clips-per-group N`     | Auto-skip groups smaller than N clips (default 4). Loop-recording fragments. |
+| `--inter-clip-gap-secs N`     | Insert a "Fast forwarding…" slide whenever consecutive clips are >N s apart (default 60). |
+| `--force`                     | Re-encode groups whose `.mp4` already exists (default: skipped). |
+| `--clear-cache`               | Wipe `.gpx_cache/` and `.intermediates/` under `--out` before running. |
+| `--sidecars-only`             | Only (re-)generate `.html` / `.gpx` / `_links.txt`; skip video encoding. |
+| `--no-map-sidecars`           | Don't generate the sidecars either. |
+| `--no-map-widget`             | Skip the burn-in side panel (output stays 1920×1080). |
+| `--no-timestamp`              | Skip the date/time overlay. |
+| `--no-speed`                  | Skip the GPS speed overlay even when GPX data exists. |
+| `--no-audio`                  | Strip audio (passenger-conversation privacy). |
+| `--no-skip-parking`           | Disable parking-skip altogether. |
+| `--parking-min-secs N`        | Minimum parked-run length (s) before parking-skip fires (default 300). |
+| `--parking-entry-pad N`       | Seconds of footage kept BEFORE the FF slide (default 5). |
+| `--parking-exit-pad N`        | Seconds of footage kept AFTER the FF slide before drive-resume (default 10). |
+| `--exit-skip-secs N`          | Seek N seconds into the exit clip when GPS-detected drive-resume isn't conclusive (default 45). |
+| `--drive-resume-sustain-secs N` | Consecutive seconds of GPS motion required to count as "real drive" (default 30). |
+| `--output-height N`           | Downscale final composite to this height (0 = native 1080). |
+| `--software`                  | Force libx264 instead of macOS VideoToolbox. |
+| `--keep-intermediates`        | Don't delete per-clip intermediates after concat. |
+| `--dry-run`                   | List groups and exit without encoding. |
 
 
 ## How grouping works

@@ -2,34 +2,49 @@
 """
 make_dashcam_videos.py
 ----------------------
-Turn the raw front/rear clips from your dashcam SD card into one polished
-1080p MP4 per drive, with:
-  - the front camera as the main view
-  - the rear camera as a small picture-in-picture in the top-right corner
-  - a burned-in wall-clock timestamp in the bottom-left corner
-  - all 60-second clips that belong to the same drive concatenated together
+DDPAI dashcam SD card -> one polished MP4 per drive (or per day in --daily
+mode), with all of the following composed in one pass:
 
-Designed to run on macOS (uses the VideoToolbox hardware H.264 encoder for
-speed). Falls back to software libx264 if VideoToolbox isn't available.
+  - front camera filling the main 1920x1080 frame (configurable crop)
+  - rear camera picture-in-picture (bottom-middle default; top-left/middle/
+    right also supported); auto-disabled if no rear footage exists
+  - burned-in `YYYY-MM-DD HH:MM:SS` timestamp in the bottom-left
+  - per-second GPS speed (km/h or mph) in the bottom-right corner
+  - small ©-watermark in any chosen corner (text + size configurable)
+  - 480-wide side panel (right or left) with stats + a moving-marker map
+    widget that uses real OSM tiles when reachable, PIL fallback otherwise
+  - automatic parking-skip: long stationary runs collapse to entry slice +
+    "Fast forwarding…" slide + exit slice anchored on actual drive-resume
+  - automatic inter-clip-gap detection: engine-off intervals between clips
+    get their own "Fast forwarding…" slide with the elapsed time
+  - per-group sidecars: interactive Leaflet .html map, standard .gpx,
+    _links.txt with Google/Apple Maps URLs and trip stats
+
+Runs on macOS (with hardware-accelerated VideoToolbox encoding) and Linux
+(with software libx264). Tested on macOS; should work on Linux. Untested
+on Windows but should largely work — see the README for caveats.
 
 USAGE
 -----
-    python3 make_dashcam_videos.py
-        # processes every drive on /Volumes/NO NAME into ~/Desktop/Dashcam_Videos
+    python3 make_dashcam_videos.py                     # encode every drive on the card
+    python3 make_dashcam_videos.py --daily             # one MP4 per calendar day
+    python3 make_dashcam_videos.py --daily --drives 8  # only day 8
+    python3 make_dashcam_videos.py --sidecars-only     # refresh .html/.gpx without encoding
+    python3 make_dashcam_videos.py --force             # overwrite existing .mp4s
+    python3 make_dashcam_videos.py --clear-cache       # wipe .gpx_cache/ + .intermediates/ first
+    python3 make_dashcam_videos.py --write-config .    # dump a fully commented config.txt
 
-    python3 make_dashcam_videos.py --drives 10 12 13
-        # only drives #10, #12, #13
-
-    python3 make_dashcam_videos.py --root /Volumes/MYCAM --out ~/dashcam
-    python3 make_dashcam_videos.py --software         # use libx264 instead of VideoToolbox
-    python3 make_dashcam_videos.py --keep-intermediates
+`config.txt` (next to the script, or at --config PATH) overrides built-in
+defaults; CLI flags override config. Run with --help for the full flag list.
 
 REQUIREMENTS
 ------------
-    brew install ffmpeg
+    brew install ffmpeg-full   # macOS — needs drawtext + subtitles filters
+    pip install -r requirements.txt   # Pillow + staticmap (for the map widget)
 
-The script is restartable: if a drive's final .mp4 already exists in the
-output folder, it is skipped. Delete the file to force a re-encode.
+The script is restartable: a group whose final .mp4 already exists is
+skipped unless --force is passed. Per-clip intermediates in .intermediates/
+and harvested GPX in .gpx_cache/ are reused across runs.
 """
 
 from __future__ import annotations
@@ -277,6 +292,11 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # min-clips check is bypassed when --drives is explicit).
 #min_clips_per_group = 4
 
+# Cache housekeeping: files in .gpx_cache/ and .intermediates/ older than
+# this many days are auto-deleted at the start of each run. Stops the disk
+# from filling up silently over weeks of usage. Set to 0 to disable.
+#cache_max_age_days = 20
+
 
 # ============================================================================
 # OUTPUT SIZE / QUALITY
@@ -328,6 +348,11 @@ DEFAULT_INTER_CLIP_GAP_SECS = 60
 # SD card rolled around. The user can still force-encode them by naming the
 # group index explicitly via --drives.
 DEFAULT_MIN_CLIPS_PER_GROUP = 4
+# Cache housekeeping: files in .gpx_cache/ and .intermediates/ older than this
+# many days get auto-deleted at the start of each run. Stops the user's disk
+# from filling up silently when they encode many days over weeks of usage.
+# Set to 0 to disable the TTL eviction.
+DEFAULT_CACHE_MAX_AGE_DAYS  = 20
 TRANSITION_SECS             = 2      # length of the "Fast forwarding..." slide
 TRANSITION_TEXT             = "Fast forwarding..."
 TRANSITION_FONT_SIZE        = 72
@@ -1904,6 +1929,18 @@ def main() -> int:
                     help="Use libx264 instead of VideoToolbox")
     ap.add_argument("--keep-intermediates", action="store_true", default=default_keep_inter,
                     help="Keep per-clip processed files")
+    ap.add_argument("--force", action="store_true", default=cb("force", False),
+                    help="Re-encode groups even when the final .mp4 already exists "
+                         "(default: existing files are skipped).")
+    ap.add_argument("--clear-cache", action="store_true",
+                    help="Wipe the harvested GPX cache (.gpx_cache/) and per-clip "
+                         "intermediates (.intermediates/) under --out before doing "
+                         "anything else, then continue with the normal run.")
+    ap.add_argument("--cache-max-age-days", type=int,
+                    default=ci("cache_max_age_days", DEFAULT_CACHE_MAX_AGE_DAYS),
+                    help="Auto-delete cache files (.gpx_cache/ + .intermediates/) "
+                         "older than this many days at the start of each run. "
+                         "Set to 0 to disable. Default 20.")
     ap.add_argument("--dry-run", action="store_true", help="List drives and exit without encoding")
     ap.add_argument("--no-timestamp", action="store_true", default=default_no_timestamp,
                     help="Skip the burned-in date/time overlay")
@@ -1983,6 +2020,35 @@ def main() -> int:
     root = Path(args.root).expanduser()
     out_dir = Path(args.out).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.clear_cache:
+        for sub in (".gpx_cache", ".intermediates"):
+            target = out_dir / sub
+            if target.is_dir():
+                n = sum(1 for _ in target.rglob("*"))
+                shutil.rmtree(target, ignore_errors=True)
+                print(f"cleared {target}  ({n} entries removed)")
+
+    # TTL eviction: housekeep stale entries in both cache dirs so the user's
+    # disk doesn't fill up silently over weeks of usage. Runs every time
+    # unless --cache-max-age-days is 0.
+    if args.cache_max_age_days > 0:
+        cutoff = datetime.now().timestamp() - args.cache_max_age_days * 86400
+        for sub in (".gpx_cache", ".intermediates"):
+            target = out_dir / sub
+            if not target.is_dir():
+                continue
+            removed = 0
+            for p in target.rglob("*"):
+                if p.is_file() and p.stat().st_mtime < cutoff:
+                    try:
+                        p.unlink()
+                        removed += 1
+                    except OSError:
+                        pass
+            if removed:
+                print(f"  cache TTL: removed {removed} file(s) older than "
+                      f"{args.cache_max_age_days}d from {target}")
 
     front_dir = root / "DCIM" / "200video" / "front"
     rear_dir  = root / "DCIM" / "200video" / "rear"
@@ -2149,8 +2215,17 @@ def main() -> int:
             continue
 
         if final.exists():
-            print(f"  video: {final.name} already exists — skipping (delete to re-encode)")
-            continue
+            if args.force:
+                print(f"  video: {final.name} already exists — re-encoding (--force)")
+                try:
+                    final.unlink()
+                except OSError as e:
+                    print(f"  ! could not remove {final}: {e}", file=sys.stderr)
+                    continue
+            else:
+                print(f"  video: {final.name} already exists — skipping "
+                      "(re-run with --force to overwrite)")
+                continue
 
         # Pre-render the burn-in right panel (stats on top + map + optional QR)
         base_panel = None

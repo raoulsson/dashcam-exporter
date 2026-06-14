@@ -9,6 +9,9 @@
 .intermediates/
 .gpx_cache/
 
+# Per-script run logs (overwritten each run)
+logs/
+
 # Python
 __pycache__/
 *.pyc
