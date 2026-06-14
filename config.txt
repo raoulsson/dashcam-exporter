@@ -135,6 +135,32 @@
 # Black gutter between the main video and the panel.
 #map_panel_gutter_px = 2
 
+# Padding (px) reserved around the route's bounding box inside the map panel.
+# Smaller values produce a tighter frame around the route. Default 12.
+#map_track_pad = 12
+
+# Bump the auto-chosen OSM tile zoom by this many integer steps. staticmap's
+# auto-zoom rounds DOWN to fit the bbox; the smaller map_track_pad already
+# tightens the frame, so 0 (default) keeps a comfortable amount of context.
+# Set to 1 for ~2x detail (route endpoints may sit right at the panel edges),
+# 2 for very tight crops (endpoints may clip outside the panel).
+#map_zoom_boost = 0
+
+# Drop GPS segments shorter than this many consecutive fixes (= seconds at the
+# dashcam's 1 Hz sample rate). Tiny segments are usually phantom fixes — the
+# GPS briefly reports a position kilometers away, then snaps back — and would
+# otherwise bloat the map's bounding box so the auto-zoom shows a regional
+# view rather than the actual drive. Default 5. Raise to be stricter, lower
+# to 1 to keep every fix.
+#gps_segment_min_points = 5
+
+# Per-clip GPX time-window. The DDPAI dashcam sometimes dumps stale GPS data
+# from a previous drive into the start of a new clip's GPX file (parking-mode
+# buffer leftovers). When the parsed points span much more than this many
+# seconds, only the densest window of this length is kept — which is the
+# actual clip's data. Default 60 (one clip duration). Set to 0 to disable.
+#clip_gpx_window_seconds = 60
+
 
 # ============================================================================
 # PARKING SKIP — drop long standstills, replace with a 'Fast forwarding…' slide
