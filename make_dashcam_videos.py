@@ -303,10 +303,11 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # ============================================================================
 
 # Final-output downscale of the composite for web/mobile delivery.
-# 540 (default) is web/phone-friendly, ~700–900 MB per hour of source.
-# 0 keeps the native 2402x1080 (~3.5–4 GB per hour — archive size).
-# 720 sits in between (~1.5–2 GB per hour). Aspect ratio is preserved.
-#output_height = 540
+# 720 (default) is the quality / size sweet spot — detail-rich enough to read
+# plates and signs, ~1.5–2 GB per hour of source. 540 is web/phone-friendly
+# (~400–500 MB per hour). 0 keeps the native 2402x1080 (~3.5–4 GB per hour —
+# archive size). Aspect ratio is preserved; VT bitrate auto-scales.
+#output_height = 720
 
 # Encoder selection.
 # software = true forces libx264 even if VideoToolbox (Mac hardware) is available.
@@ -470,6 +471,28 @@ def has_videotoolbox() -> bool:
         return "h264_videotoolbox" in out
     except Exception:
         return False
+
+
+def _scale_bitrate_string(bitrate: str, output_height: int) -> str:
+    """
+    Scale a VideoToolbox-style bitrate string (e.g. '8M', '500k') to match the
+    output resolution. 8 Mbps is right for 1080p, but at 540p it over-encodes
+    by ~4x — pixel count scales with height squared (16:9 aspect).
+    Returns the original string if scaling isn't applicable.
+    """
+    if not output_height or output_height == OUT_H:
+        return bitrate
+    m = re.match(r"^(\d+(?:\.\d+)?)([KkMm]?)$", bitrate.strip())
+    if not m:
+        return bitrate
+    val = float(m.group(1))
+    unit = m.group(2).upper()
+    kbps = val * (1000 if unit == "M" else 1)
+    scaled = max(500, int(round(kbps * (output_height / OUT_H) ** 2)))
+    if scaled >= 1000:
+        whole = scaled // 1000
+        return f"{whole}M" if scaled % 1000 == 0 else f"{scaled / 1000:.1f}M"
+    return f"{scaled}k"
 
 
 def file_has_audio(path: Path) -> bool:
@@ -1643,10 +1666,15 @@ def encode_clip(
     filt = build_filter_complex(font_path, actual_epoch, with_timestamp, speed_srt,
                                 with_map_widget, with_rear=with_rear)
     if use_vt:
+        # Scale the hardware bitrate to the downscaled resolution so 540p
+        # output doesn't get 8 Mbps of bitrate (=tiny gain, big file).
+        # libx264 uses CRF, which auto-adjusts with resolution, so no scaling needed there.
+        vt_b = _scale_bitrate_string(VT_BITRATE, output_height)
+        vt_m = _scale_bitrate_string(VT_MAXRATE, output_height)
         venc = [
             "-c:v", "h264_videotoolbox",
-            "-b:v", VT_BITRATE,
-            "-maxrate", VT_MAXRATE,
+            "-b:v", vt_b,
+            "-maxrate", vt_m,
             "-profile:v", "high",
         ]
     else:
@@ -1749,8 +1777,12 @@ def generate_transition_slide(
         height = output_height
     font_escaped = font_path.replace(":", r"\:")
     if use_vt:
-        venc = ["-c:v", "h264_videotoolbox", "-b:v", VT_BITRATE,
-                "-maxrate", VT_MAXRATE, "-profile:v", "high"]
+        # Match the main encode's scaled bitrate so the slide and clips share
+        # comparable encoder parameters (helps concat-demuxer keep the stream).
+        vt_b = _scale_bitrate_string(VT_BITRATE, output_height)
+        vt_m = _scale_bitrate_string(VT_MAXRATE, output_height)
+        venc = ["-c:v", "h264_videotoolbox", "-b:v", vt_b,
+                "-maxrate", vt_m, "-profile:v", "high"]
     else:
         venc = ["-c:v", "libx264", "-preset", X264_PRESET, "-crf", X264_CRF]
     cmd = [
@@ -1911,10 +1943,11 @@ def main() -> int:
         MAP_PANEL_POSITION = "right"
 
     # Final-output downscaling (e.g. for web/mobile delivery).
-    # Default 540p — small enough to share via web / messaging while still
-    # readable on a phone. Set output_height = 0 in config.txt to keep
-    # the native 1080p composite (much bigger files).
-    output_height_cfg = ci("output_height", 540)
+    # Default 720p — a quality / size sweet spot: still detail-rich enough
+    # for plates and signs, but ~1/2 the bitrate of native 1080p thanks to
+    # the (h/1080)^2 VT-bitrate auto-scale. Set output_height = 0 in
+    # config.txt for native 1080p, or 540 for a smaller phone-friendly file.
+    output_height_cfg = ci("output_height", 720)
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(config_path),
@@ -2003,8 +2036,9 @@ def main() -> int:
                          "exit-slice anchoring (default 30).")
     ap.add_argument("--output-height", type=int, default=output_height_cfg,
                     help="Downscale the final composite to this height in px "
-                         "(0 = keep native 1080). Default 540, a web/mobile "
-                         "friendly size.")
+                         "(0 = keep native 1080). Default 720, a quality / "
+                         "size sweet spot. Use 540 for a smaller phone-sized "
+                         "file.")
     args = ap.parse_args()
 
     # Handle --write-config and exit
@@ -2187,15 +2221,32 @@ def main() -> int:
         start = group[0].dt
         end   = group[-1].dt + timedelta(seconds=group[-1].duration)
         secs  = (end - start).total_seconds()
+        # Final filename: bake the chosen output height into the name (when
+        # downscaling) so re-rendering at a different height doesn't overwrite
+        # the previous file and the format is obvious from the name on disk
+        # (e.g. day_2026-05-11_h540.mp4). Sidecars stay un-tagged because GPS
+        # data is the same regardless of video resolution — one .html/.gpx per
+        # drive/day, even if the user renders multiple sizes.
+        size_tag = f"_h{args.output_height}" if args.output_height else ""
         if args.daily:
             label = start.strftime("%Y-%m-%d")
-            final = out_dir / f"day_{label}.mp4"
+            sidecar_base = out_dir / f"day_{label}"
         else:
             label = start.strftime("%Y-%m-%d_%H-%M")
-            final = out_dir / f"drive_{idx:02d}_{label}.mp4"
+            sidecar_base = out_dir / f"drive_{idx:02d}_{label}"
+        final = sidecar_base.with_name(sidecar_base.name + f"{size_tag}.mp4")
 
         print(f"\n[{group_word} {idx}/{len(groups)}] {start:%Y-%m-%d %H:%M} → {end:%H:%M}  "
               f"({len(group)} clips, ~{fmt_secs(secs)})")
+        if size_tag:
+            # Make the resize visible in the log so it's clear which format
+            # this run produced (and which bitrate the encoder ended up using).
+            vt_b = _scale_bitrate_string(VT_BITRATE, args.output_height)
+            vt_m = _scale_bitrate_string(VT_MAXRATE, args.output_height)
+            print(f"  output: downscaled to {args.output_height}p "
+                  f"(VT bitrate {VT_BITRATE} → {vt_b}, maxrate {VT_MAXRATE} → {vt_m})")
+        else:
+            print(f"  output: native 1080p (no downscale)")
 
         # Emit map sidecars (HTML / GPX / links.txt) using whatever GPS data is available.
         # Done unconditionally — even when the final .mp4 already exists — so the
@@ -2205,9 +2256,9 @@ def main() -> int:
         if not args.no_map_sidecars and group_track:
             title = (f"Drive {idx} — {start:%Y-%m-%d %H:%M}" if not args.daily
                      else f"Day — {start:%Y-%m-%d}")
-            html_path  = final.with_suffix(".html")
-            gpx_path   = final.with_suffix(".gpx")
-            links_path = final.with_name(final.stem + "_links.txt")
+            html_path  = sidecar_base.with_suffix(".html")
+            gpx_path   = sidecar_base.with_suffix(".gpx")
+            links_path = sidecar_base.with_name(sidecar_base.name + "_links.txt")
             write_html_map(html_path, group_track, title)
             write_gpx_export(gpx_path, group_track, title)
             write_links_sidecar(links_path, group_track, title)
