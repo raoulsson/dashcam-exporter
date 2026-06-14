@@ -3,7 +3,7 @@
 # --------------------------
 # Dry-run the script in DAILY mode. Every clip from the same calendar date
 # is shown as one group with its 1-based index — pass that index to
-# `make-daily-drives.sh` to encode just that day.
+# `make-daily-drives-rendered.sh` to encode just that day.
 #
 # Edit the OPTS line below to pre-set any flags you regularly use that you
 # DON'T want in config.txt (e.g. a non-default --root for a copied SD card,
