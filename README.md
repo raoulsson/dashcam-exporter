@@ -55,8 +55,8 @@ calendar day in `--daily` mode — the script produces:
 
 | File | What it is |
 |------|------------|
-| `drive_NN_YYYY-MM-DD_HH-MM.mp4` | Final video. 2402×1080 with map widget, or 1920×1080 without. |
-| `drive_NN_….html`                | Self-contained Leaflet/OSM interactive map. |
+| `drive_NN_YYYY-MM-DD_HH-MM_h720.mp4` | Final video. Composed at 2402×1080 with map widget (or 1920×1080 without) and downscaled to the chosen height. The `_h720` tag reflects `output_height` (720 default; 540 for phone-sized, 0 for native 1080 → no tag). VT bitrate auto-scales to match, so smaller heights mean proportionally smaller files. Rendering at multiple heights produces side-by-side files instead of overwriting. |
+| `drive_NN_….html`                | Self-contained Leaflet/OSM interactive map. Un-tagged — one per drive regardless of video size. |
 | `drive_NN_….gpx`                 | Standards-compliant GPX. Opens in Google Earth, Strava, Maps.me, Komoot. |
 | `drive_NN_…_links.txt`           | Google Maps + Apple Maps URLs and trip stats. |
 
