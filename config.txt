@@ -42,8 +42,13 @@
 # Burn date/time into the bottom-left of the main video frame.
 #timestamp = true
 
-# Burn GPS speed (NN km/h) into the bottom-right of the main video frame.
+# Burn GPS speed (NN km/h) into the corner of the main video frame.
+# Always bottom-right (matches dashcam convention). Tune size + margins below.
 #speed = true
+#speed_font_size = 24
+# Distance from the bottom edge / right edge in pixels. Lower = closer to corner.
+#speed_margin_v = 12
+#speed_margin_r = 12
 
 # Render the per-day side panel (stats + map widget with moving marker).
 #map_widget = true
@@ -51,10 +56,14 @@
 # Save .html (Leaflet), .gpx (standard GPX), and _links.txt next to each video.
 #map_sidecars = true
 
-# Tiny watermark in the main video's bottom-left corner.
-# Leave watermark_text empty to disable.
+# Small watermark on the main video.
+# Leave watermark_text empty to disable. Position one of:
+#   bottom-right (default), bottom-left, top-right, top-left
+# When bottom-right, the watermark sits ABOVE the speed readout so the two
+# don't overlap when speed_margin_v is small.
 #watermark_text = (c) Raoul Marc Schmidiger
-#watermark_font_size = 8
+#watermark_font_size = 16
+#watermark_position = bottom-right
 
 
 # ============================================================================
@@ -78,8 +87,17 @@
 
 
 # ============================================================================
-# REAR PiP (picture-in-picture, always bottom-center)
+# REAR PiP (picture-in-picture)
 # ============================================================================
+
+# Set to false if your dashcam has no rear camera (also auto-disabled when the
+# DCIM/200video/rear folder is missing or empty).
+#rear_pip = true
+
+# Where the PiP sits inside the main video frame:
+#   bottom-middle (default), bottom-left, bottom-right,
+#   top-middle,              top-left,    top-right
+#rear_pip_position = bottom-middle
 
 #rear_pip_w      = 662
 #rear_pip_h      = 372

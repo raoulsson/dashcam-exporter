@@ -1,10 +1,10 @@
-# dashcam-exporter
+# dashcam-exporter (for "DDPAI Mola N3 Pro" model)
 
 Turn the raw front + rear clips from a DDPAI dashcam SD card into one polished
 1080p/1440p (with side map) MP4 per drive or per day, with burned-in date/time,
 GPS speed, and an animated route map.
 
-Tested with **DDPAI mola N3 Pro** and **DDPAI Z60 Pro**. Should work with any
+Tested with **DDPAI Mola N3 Pro**. Should work with any
 DDPAI variant that lays out the card as:
 
     /Volumes/NO NAME/DCIM/

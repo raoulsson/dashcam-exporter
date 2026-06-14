@@ -61,10 +61,15 @@ OUT_W, OUT_H = 1920, 1080                      # 1080p
 OUT_FPS      = 30
 PIP_W, PIP_H = 662, 372                        # rear inset (was 576x324; +15%)
 PIP_MARGIN   = 24
+# Where the rear PiP sits inside the main video frame.
+#   bottom-middle (default), bottom-left, bottom-right,
+#   top-middle,              top-left,    top-right
+REAR_PIP_POSITION = "bottom-middle"
+REAR_PIP_ENABLED  = True   # auto-disabled when no rear/ folder is present
 TS_FONT_SIZE = 36
 SPEED_FONT_SIZE = 24
-SPEED_MARGIN_V  = 24                           # bottom-right corner with small margin
-SPEED_MARGIN_R  = 24
+SPEED_MARGIN_V  = 12                           # px from bottom edge (smaller = closer)
+SPEED_MARGIN_R  = 12                           # px from right edge
 
 # Hardware encoder settings (VideoToolbox uses bitrate, not CRF)
 VT_BITRATE   = "8M"
@@ -119,8 +124,13 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # Burn date/time into the bottom-left of the main video frame.
 #timestamp = true
 
-# Burn GPS speed (NN km/h) into the bottom-right of the main video frame.
+# Burn GPS speed (NN km/h) into the corner of the main video frame.
+# Always bottom-right (matches dashcam convention). Tune size + margins below.
 #speed = true
+#speed_font_size = 24
+# Distance from the bottom edge / right edge in pixels. Lower = closer to corner.
+#speed_margin_v = 12
+#speed_margin_r = 12
 
 # Render the per-day side panel (stats + map widget with moving marker).
 #map_widget = true
@@ -128,10 +138,14 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # Save .html (Leaflet), .gpx (standard GPX), and _links.txt next to each video.
 #map_sidecars = true
 
-# Tiny watermark in the main video's bottom-left corner.
-# Leave watermark_text empty to disable.
+# Small watermark on the main video.
+# Leave watermark_text empty to disable. Position one of:
+#   bottom-right (default), bottom-left, top-right, top-left
+# When bottom-right, the watermark sits ABOVE the speed readout so the two
+# don't overlap when speed_margin_v is small.
 #watermark_text = (c) Raoul Marc Schmidiger
-#watermark_font_size = 8
+#watermark_font_size = 16
+#watermark_position = bottom-right
 
 
 # ============================================================================
@@ -155,8 +169,17 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 
 
 # ============================================================================
-# REAR PiP (picture-in-picture, always bottom-center)
+# REAR PiP (picture-in-picture)
 # ============================================================================
+
+# Set to false if your dashcam has no rear camera (also auto-disabled when the
+# DCIM/200video/rear folder is missing or empty).
+#rear_pip = true
+
+# Where the PiP sits inside the main video frame:
+#   bottom-middle (default), bottom-left, bottom-right,
+#   top-middle,              top-left,    top-right
+#rear_pip_position = bottom-middle
 
 #rear_pip_w      = 662
 #rear_pip_h      = 372
@@ -232,7 +255,10 @@ TRANSITION_FONT_SIZE        = 72
 PANEL_STATS_TOP_PX = 30      # px from top of right panel to start drawing stats
 PANEL_MAP_TOP_PX   = 340     # y offset of the map block within the 480x1080 right panel
 COPYRIGHT_TEXT     = "(c) Raoul Marc Schmidiger"
-COPYRIGHT_FONT_SIZE = 8
+COPYRIGHT_FONT_SIZE = 16
+# Where the watermark sits inside the main video frame:
+#   bottom-right (default), bottom-left, top-right, top-left
+COPYRIGHT_POSITION = "bottom-right"
 
 # Front camera default crop (top + bottom rows removed before scale to 1080p).
 # Different dashcam mounts show more / less of the bonnet — tune in config.txt.
@@ -265,14 +291,14 @@ class Clip:
     epoch_utc: int           # filename time treated as UTC -> for drawtext gmtime
     duration: int            # clip duration in seconds (from filename)
     front: Path
-    rear: Path
+    rear: Path | None        # None if the dashcam has no rear camera
 
     @property
     def dt(self) -> datetime:
         return datetime.strptime(self.timestamp, "%Y%m%d%H%M%S")
 
 
-def find_clips(front_dir: Path, rear_dir: Path) -> list[Clip]:
+def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
     front_map: dict[str, tuple[Path, int]] = {}
     for f in sorted(os.listdir(front_dir)):
         m = FRONT_RE.match(f)
@@ -280,19 +306,22 @@ def find_clips(front_dir: Path, rear_dir: Path) -> list[Clip]:
             front_map[m.group(1)] = (front_dir / f, int(m.group(2)))
 
     rear_map: dict[str, Path] = {}
-    for f in sorted(os.listdir(rear_dir)):
-        m = REAR_RE.match(f)
-        if m:
-            rear_map[m.group(1)] = rear_dir / f
+    if rear_dir is not None and rear_dir.is_dir():
+        for f in sorted(os.listdir(rear_dir)):
+            m = REAR_RE.match(f)
+            if m:
+                rear_map[m.group(1)] = rear_dir / f
 
     clips: list[Clip] = []
     for ts in sorted(front_map):
-        if ts not in rear_map:
-            print(f"  ! no rear pair for {ts}, skipping", file=sys.stderr)
-            continue
         path_f, dur = front_map[ts]
         epoch = calendar.timegm(datetime.strptime(ts, "%Y%m%d%H%M%S").timetuple())
-        clips.append(Clip(ts, epoch, dur, path_f, rear_map[ts]))
+        rear_path: Path | None = rear_map.get(ts)
+        if REAR_PIP_ENABLED and rear_dir is not None and rear_path is None:
+            # Rear cam expected but this clip is missing its rear pair.
+            print(f"  ! no rear pair for {ts}, skipping", file=sys.stderr)
+            continue
+        clips.append(Clip(ts, epoch, dur, path_f, rear_path))
     return clips
 
 
@@ -403,6 +432,25 @@ def gather_track(clips: list[Clip], gps_dirs: tuple[Path | None, ...]) -> list[t
         if gpx is not None:
             out.extend(parse_gpx_track(gpx))
     return out
+
+
+def find_drive_resume_second(
+    clip: Clip, gps_dirs: tuple[Path | None, ...]
+) -> int:
+    """
+    First second in this clip where speed crosses the parking threshold.
+    If no GPS data, or movement is already underway at second 0, returns 0.
+    Used to anchor the exit slice so the 'about to drive' moment lands at the
+    end of the slice — not somewhere we've already left behind.
+    """
+    gpx = find_gpx_for(clip.timestamp, *gps_dirs)
+    if gpx is None:
+        return 0
+    speeds = parse_gpx_speeds(gpx)
+    for i, s in enumerate(speeds):
+        if s > PARKING_SPEED_THRESHOLD_KMH:
+            return i
+    return 0
 
 
 def clip_is_parked(clip: Clip, gps_dirs: tuple[Path | None, ...]) -> bool:
@@ -1187,6 +1235,7 @@ def build_filter_complex(
     with_timestamp: bool,
     speed_srt: Path | None,
     with_map_widget: bool = False,
+    with_rear: bool = True,
 ) -> str:
     """
     Front 2560x1600 -> crop to 16:9 (lose 80 px top/bottom) -> scale 1920x1080
@@ -1196,13 +1245,38 @@ def build_filter_complex(
       - burn 'YYYY-MM-DD HH:MM:SS' in bottom-left
       - render a per-second 'NN km/h' subtitle on the left, above the timestamp
     """
+    # Front always — crop the bonnet rows, then scale to 1080p.
     base = (
         f"[0:v]crop={FRONT_W}:{FRONT_H - FRONT_CROP_TOP - FRONT_CROP_BOTTOM}:0:{FRONT_CROP_TOP},"
         f"scale={OUT_W}:{OUT_H},setsar=1,fps={OUT_FPS}[front];"
-        f"[1:v]scale={PIP_W}:{PIP_H},setsar=1,fps={OUT_FPS},"
-        f"drawbox=x=0:y=0:w=iw:h=ih:color=white@0.9:t=3[rear];"
-        f"[front][rear]overlay=(W-w)/2:H-h-{PIP_MARGIN}"
     )
+    if REAR_PIP_ENABLED:
+        # Overlay coords by position, all relative to the main 1920x1080 frame.
+        pos = (REAR_PIP_POSITION or "bottom-middle").lower()
+        m = PIP_MARGIN
+        ov_x = {
+            "bottom-left":   f"{m}",
+            "bottom-middle": "(W-w)/2",
+            "bottom-right":  f"W-w-{m}",
+            "top-left":      f"{m}",
+            "top-middle":    "(W-w)/2",
+            "top-right":     f"W-w-{m}",
+        }.get(pos, "(W-w)/2")
+        ov_y = {
+            "bottom-left":   f"H-h-{m}",
+            "bottom-middle": f"H-h-{m}",
+            "bottom-right":  f"H-h-{m}",
+            "top-left":      f"{m}",
+            "top-middle":    f"{m}",
+            "top-right":     f"{m}",
+        }.get(pos, f"H-h-{m}")
+        base += (
+            f"[1:v]scale={PIP_W}:{PIP_H},setsar=1,fps={OUT_FPS},"
+            f"drawbox=x=0:y=0:w=iw:h=ih:color=white@0.9:t=3[rear];"
+            f"[front][rear]overlay={ov_x}:{ov_y}"
+        )
+    else:
+        base += "[front]null"   # front already labelled; just pass it through
 
     chain = base
     last_label = ""  # currently the output of `base` is unnamed
@@ -1228,49 +1302,50 @@ def build_filter_complex(
         # Single-quote the path so colons inside it don't get parsed as option separators
         chain += f",subtitles=filename='{speed_srt.as_posix()}':force_style='{style}'"
 
-    if with_map_widget:
-        # Tag the main composed video, build the panel from input [2:v]
-        # at its native 480x1080 (stats burned-in PIL-side), pad a small
-        # black gutter on the side facing the main video, then hstack.
-        chain += "[video_part];"
-        gutter = MAP_PANEL_GUTTER_PX
-        on_left = (MAP_PANEL_POSITION or "right").lower() == "left"
-        # Gutter goes on the OPPOSITE side of the panel-to-video edge.
-        # panel=right  → gutter on the LEFT edge of the panel
-        # panel=left   → gutter on the RIGHT edge of the panel
-        pad_x = gutter if not on_left else 0
-        chain += (
-            f"[2:v]scale={MAP_PANEL_SIZE}:{OUT_H},setsar=1,fps={OUT_FPS},"
-            f"pad={MAP_PANEL_SIZE + gutter}:{OUT_H}:{pad_x}:0:color=black[map_part];"
-        )
-        if on_left:
-            chain += "[map_part][video_part]hstack[stacked]"
-        else:
-            chain += "[video_part][map_part]hstack[stacked]"
-        # Tiny ©-watermark on the hstacked canvas at the main-video's bottom-left.
-        # When the panel is on the left, the main video starts after the panel,
-        # so shift x past the panel + gutter.
-        font_escaped = font_path.replace(":", r"\:") if font_path else ""
-        if font_escaped and COPYRIGHT_TEXT:
-            wm_x = 6 if not on_left else (MAP_PANEL_SIZE + MAP_PANEL_GUTTER_PX + 6)
-            chain += (
-                f";[stacked]drawtext=fontfile={font_escaped}:"
-                f"text='{_escape_drawtext(COPYRIGHT_TEXT)}':"
-                f"fontcolor=white@0.55:fontsize={COPYRIGHT_FONT_SIZE}:"
-                f"x={wm_x}:y=h-10[out]"
-            )
-        else:
-            chain += ";[stacked]copy[out]"
-        return chain
-    # No map widget: still drop the watermark on the main video frame.
+    # Watermark — drawn on the main video stream BEFORE the hstack so x/y
+    # use the 1920x1080 frame's own coordinate system (no need to know which
+    # side the map panel ends up on).
     font_escaped = font_path.replace(":", r"\:") if font_path else ""
     if font_escaped and COPYRIGHT_TEXT:
+        pos = (COPYRIGHT_POSITION or "bottom-right").lower()
+        # When the watermark sits at the bottom-right, stack it ABOVE the speed
+        # readout instead of next to it, so reducing speed_margin_v doesn't
+        # cause overlap. libass scales FontSize by video_height / PlayResY
+        # (PlayResY defaults to 288), so a "24px" font actually renders at
+        # ~90px on a 1080p frame; the formula below accounts for that.
+        ass_scale = OUT_H / 288
+        clearance = SPEED_MARGIN_V + int(SPEED_FONT_SIZE * ass_scale * 1.2) + 12
+        if pos == "bottom-left":
+            wm_x, wm_y = "8", "h-th-6"
+        elif pos == "top-right":
+            wm_x, wm_y = "w-tw-8", "6"
+        elif pos == "top-left":
+            wm_x, wm_y = "8", "6"
+        else:  # bottom-right (default)
+            wm_x, wm_y = "w-tw-8", f"h-th-{clearance}"
         chain += (
             f",drawtext=fontfile={font_escaped}:"
             f"text='{_escape_drawtext(COPYRIGHT_TEXT)}':"
-            f"fontcolor=white@0.55:fontsize={COPYRIGHT_FONT_SIZE}:"
-            f"x=6:y=h-10"
+            f"fontcolor=white@0.85:fontsize={COPYRIGHT_FONT_SIZE}:"
+            f"borderw=2:bordercolor=black@0.6:"
+            f"x={wm_x}:y={wm_y}"
         )
+
+    if with_map_widget:
+        chain += "[video_part];"
+        gutter = MAP_PANEL_GUTTER_PX
+        on_left = (MAP_PANEL_POSITION or "right").lower() == "left"
+        pad_x = gutter if not on_left else 0
+        map_in = "[2:v]" if with_rear else "[1:v]"
+        chain += (
+            f"{map_in}scale={MAP_PANEL_SIZE}:{OUT_H},setsar=1,fps={OUT_FPS},"
+            f"pad={MAP_PANEL_SIZE + gutter}:{OUT_H}:{pad_x}:0:color=black[map_part];"
+        )
+        if on_left:
+            chain += "[map_part][video_part]hstack[out]"
+        else:
+            chain += "[video_part][map_part]hstack[out]"
+        return chain
     return chain + "[out]"
 
 
@@ -1349,7 +1424,9 @@ def encode_clip(
                 speed_srt = srt_path
 
     with_map_widget = map_video is not None
-    filt = build_filter_complex(font_path, actual_epoch, with_timestamp, speed_srt, with_map_widget)
+    with_rear = REAR_PIP_ENABLED and clip.rear is not None
+    filt = build_filter_complex(font_path, actual_epoch, with_timestamp, speed_srt,
+                                with_map_widget, with_rear=with_rear)
     if use_vt:
         venc = [
             "-c:v", "h264_videotoolbox",
@@ -1370,9 +1447,12 @@ def encode_clip(
     if trim_start:
         cmd += ["-ss", str(trim_start)]
     cmd += ["-i", str(clip.front)]
-    if trim_start:
-        cmd += ["-ss", str(trim_start)]
-    cmd += ["-i", str(clip.rear)]
+    # Rear input only when we have one and we're configured to use it.
+    use_rear = REAR_PIP_ENABLED and clip.rear is not None
+    if use_rear:
+        if trim_start:
+            cmd += ["-ss", str(trim_start)]
+        cmd += ["-i", str(clip.rear)]
     if with_map_widget:
         cmd += ["-i", str(map_video)]
     if trim_seconds is not None:
@@ -1539,14 +1619,17 @@ def main() -> int:
 
     # Override the structural module-level constants from config (these are read
     # by build_filter_complex et al. at call-time, so updating here is sufficient).
-    global PIP_W, PIP_H, PIP_MARGIN
+    global PIP_W, PIP_H, PIP_MARGIN, REAR_PIP_POSITION, REAR_PIP_ENABLED
     global MAP_PANEL_SIZE, MAP_PANEL_POSITION, MAP_PANEL_GUTTER_PX
     global FRONT_CROP_TOP, FRONT_CROP_BOTTOM
-    global COPYRIGHT_TEXT, COPYRIGHT_FONT_SIZE
+    global COPYRIGHT_TEXT, COPYRIGHT_FONT_SIZE, COPYRIGHT_POSITION
+    global SPEED_MARGIN_V, SPEED_MARGIN_R, SPEED_FONT_SIZE
     global VT_BITRATE, VT_MAXRATE, X264_PRESET, X264_CRF
     PIP_W              = ci("rear_pip_w",         PIP_W)
     PIP_H              = ci("rear_pip_h",         PIP_H)
     PIP_MARGIN         = ci("rear_pip_margin",    PIP_MARGIN)
+    REAR_PIP_POSITION  = cs("rear_pip_position",  REAR_PIP_POSITION).lower()
+    REAR_PIP_ENABLED   = cb("rear_pip",           REAR_PIP_ENABLED)
     MAP_PANEL_SIZE     = ci("map_panel_w",        MAP_PANEL_SIZE)
     MAP_PANEL_POSITION = cs("map_panel_position", MAP_PANEL_POSITION).lower()
     MAP_PANEL_GUTTER_PX = ci("map_panel_gutter_px", MAP_PANEL_GUTTER_PX)
@@ -1554,6 +1637,10 @@ def main() -> int:
     FRONT_CROP_BOTTOM  = ci("front_crop_bottom",  FRONT_CROP_BOTTOM)
     COPYRIGHT_TEXT     = cs("watermark_text",     COPYRIGHT_TEXT)
     COPYRIGHT_FONT_SIZE = ci("watermark_font_size", COPYRIGHT_FONT_SIZE)
+    COPYRIGHT_POSITION = cs("watermark_position", COPYRIGHT_POSITION).lower()
+    SPEED_FONT_SIZE    = ci("speed_font_size",    SPEED_FONT_SIZE)
+    SPEED_MARGIN_V     = ci("speed_margin_v",     SPEED_MARGIN_V)
+    SPEED_MARGIN_R     = ci("speed_margin_r",     SPEED_MARGIN_R)
     VT_BITRATE         = cs("vt_bitrate",         VT_BITRATE)
     VT_MAXRATE         = cs("vt_maxrate",         VT_MAXRATE)
     X264_PRESET        = cs("x264_preset",        X264_PRESET)
@@ -1628,9 +1715,15 @@ def main() -> int:
     rear_dir  = root / "DCIM" / "200video" / "rear"
     gps_dir   = root / "DCIM" / "203gps"
     tar_dir   = gps_dir / "tar"
-    if not front_dir.is_dir() or not rear_dir.is_dir():
-        print(f"ERROR: expected {front_dir} and {rear_dir}", file=sys.stderr)
+    if not front_dir.is_dir():
+        print(f"ERROR: expected front folder at {front_dir}", file=sys.stderr)
         return 1
+    rear_present = rear_dir.is_dir() and any(REAR_RE.match(f) for f in os.listdir(rear_dir))
+    if REAR_PIP_ENABLED and not rear_present:
+        print(f"  note: no rear clips found at {rear_dir} — rear PiP auto-disabled",
+              file=sys.stderr)
+        REAR_PIP_ENABLED = False
+    rear_dir = rear_dir if rear_present else None
     gps_dir = gps_dir if gps_dir.is_dir() else None
     tar_dir = tar_dir if (tar_dir and tar_dir.is_dir()) else None
 
@@ -1842,13 +1935,20 @@ def main() -> int:
             if action == "skip":
                 continue
 
-            # Both entry and exit slices keep the FIRST `pad` seconds of their clip,
-            # since "exit" now points at the next moving clip (the actual drive
-            # resume), not at the tail of the parking footage.
+            # Entry slice: first `pad` seconds of the first parked clip.
+            # Exit slice: anchored to the actual drive-resume moment within the
+            # next moving clip. We back up by `pad` seconds from that moment
+            # (so the slice ends just as the car starts moving) and run to the
+            # end of the clip. If the clip was already moving from second 0
+            # (engine started after motion began), we just play it from the top.
             trim_start = 0
             trim_seconds: int | None = None
-            if action in ("entry", "exit"):
+            if action == "entry":
                 trim_seconds = pad
+            elif action == "exit":
+                drive_sec = find_drive_resume_second(clip, gps_dirs)
+                trim_start = max(0, drive_sec - pad)
+                trim_seconds = None     # run to end of clip
 
             # Per-slice intermediate filename. Suffix the action so re-runs
             # can find / cache them correctly.
