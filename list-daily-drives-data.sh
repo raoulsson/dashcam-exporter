@@ -18,4 +18,4 @@ OPTS=()
 # OPTS+=(--root "$HOME/dashcam_backup/2026-05-11")
 # OPTS+=(--out  "$HOME/Movies/Dashcam")
 
-python3 make_dashcam_videos.py --daily --dry-run "${OPTS[@]}" "$@"
+python3 make_dashcam_videos.py --daily --dry-run ${OPTS[@]+"${OPTS[@]}"} "$@"

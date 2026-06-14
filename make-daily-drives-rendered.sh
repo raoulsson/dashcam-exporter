@@ -32,4 +32,4 @@ if [ "$#" -gt 0 ]; then
     OPTS+=(--drives "$@")
 fi
 
-python3 make_dashcam_videos.py --daily "${OPTS[@]}"
+python3 make_dashcam_videos.py --daily ${OPTS[@]+"${OPTS[@]}"}

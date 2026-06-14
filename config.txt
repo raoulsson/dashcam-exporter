@@ -185,6 +185,13 @@
 # parking-run detector doesn't fire for them. Default 60 (1 minute).
 #inter_clip_gap_secs = 60
 
+# Auto-skip groups that have fewer than this many clips. These are typically
+# loop-recording fragments left over after the SD card rolled around — a
+# minute or two of footage from a session whose first portion has been
+# overwritten. To force-encode a fragment, pass its index via --drives (the
+# min-clips check is bypassed when --drives is explicit).
+#min_clips_per_group = 4
+
 
 # ============================================================================
 # OUTPUT SIZE / QUALITY

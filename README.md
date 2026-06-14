@@ -239,6 +239,34 @@ source .venv/bin/activate
 ```
 
 
+## Fragment / loop-recording handling
+
+Dashcams loop-record onto the SD card — old footage gets overwritten when
+the card fills up. The script will see those overwritten sessions as small
+"fragments" (1–3 clips, a minute or two) at the head of the timeline. They
+usually aren't useful as standalone videos.
+
+By default the script **auto-skips groups smaller than `min_clips_per_group`
+clips** (default 4). You'll see a one-line notice listing what got skipped:
+
+```
+Auto-skipping 7 fragment day(s): #1 (1 clip), #2 (3 clips), #3 (1 clip), …
+(force-encode by naming the index via --drives.)
+```
+
+To force-encode a fragment anyway, pass its 1-based index via `--drives`:
+
+```
+./make-daily-drives-rendered.sh 1 2     # encode fragments 1 and 2 even though they're short
+```
+
+> The bundled example dataset is exactly this case: only Day 8
+> (May 11, 104 clips, ~1h45m of driving) is a complete day. The other 7
+> days are 1–3 clip fragments left from the loop overwriting earlier
+> footage. With defaults you'll get just `day_2026-05-11.mp4`; the rest are
+> noted and skipped.
+
+
 ## Groups & indices
 
 The script always processes "groups" of clips. What a group is depends on the
