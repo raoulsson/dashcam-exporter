@@ -283,4 +283,4 @@ dashcam-exporter/
 
 MIT — see [LICENSE](LICENSE).
 
-Copyright © 2025 Raoul Marc Schmidiger ([hello@raoulsson.com](mailto:hello@raoulsson.com)).
+Copyright © 2026 Raoul Marc Schmidiger ([hello@raoulsson.com](mailto:hello@raoulsson.com)).
