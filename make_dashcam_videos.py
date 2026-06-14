@@ -154,7 +154,7 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # Leave watermark_text empty to disable. Position one of:
 #   bottom-right (default), bottom-left, top-right, top-left
 # Bottom-right sits BELOW the speed readout in the same corner.
-#watermark_text = (c) Raoul Marc Schmidiger
+#watermark_text = https://github.com/raoulsson/dashcam-exporter
 #watermark_font_size = 16
 #watermark_position = bottom-right
 # Distance from the closest horizontal / vertical edge in pixels.
