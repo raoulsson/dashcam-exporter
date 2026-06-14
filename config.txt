@@ -203,10 +203,11 @@
 # ============================================================================
 
 # Final-output downscale of the composite for web/mobile delivery.
-# 540 (default) is web/phone-friendly, ~700–900 MB per hour of source.
-# 0 keeps the native 2402x1080 (~3.5–4 GB per hour — archive size).
-# 720 sits in between (~1.5–2 GB per hour). Aspect ratio is preserved.
-#output_height = 540
+# 720 (default) is the quality / size sweet spot — detail-rich enough to read
+# plates and signs, ~1.5–2 GB per hour of source. 540 is web/phone-friendly
+# (~400–500 MB per hour). 0 keeps the native 2402x1080 (~3.5–4 GB per hour —
+# archive size). Aspect ratio is preserved; VT bitrate auto-scales.
+#output_height = 720
 
 # Encoder selection.
 # software = true forces libx264 even if VideoToolbox (Mac hardware) is available.
@@ -215,7 +216,10 @@
 # Keep the per-clip intermediate .mp4 files after concat.
 #keep_intermediates = false
 
-# Hardware H.264 (VideoToolbox) bitrates.
+# Hardware H.264 (VideoToolbox) bitrates. These are tuned for 1080p; when
+# output_height is lower, both values are scaled down by (output_height/1080)^2
+# automatically (e.g. 540p → 2M / 2.5M) so smaller frames produce smaller
+# files instead of over-allocating bits. Libx264 uses CRF and self-adjusts.
 #vt_bitrate = 8M
 #vt_maxrate = 10M
 

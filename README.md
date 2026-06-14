@@ -329,25 +329,36 @@ in doubt.
 
 The pipeline composes every frame at the native **2402×1080** (1920 main
 video + 2 px gutter + 480 panel) and downscales at the very end. The
-default downscale is **540p**, which is web / phone-friendly. Override
-with `--output-height` or `output_height` in `config.txt`.
+default downscale is **720p**, a quality / size sweet spot. Override with
+`--output-height` or `output_height` in `config.txt`.
+
+The hardware (VideoToolbox) bitrate auto-scales by `(output_height/1080)²`
+so a smaller frame produces a proportionally smaller file instead of being
+over-encoded at 1080p-tier bitrate. Libx264 uses CRF and self-adjusts.
 
 | Setting | Composite size | Typical file size, 1 h source | Best for |
 |---------|----------------|--------------------------------|----------|
 | `output_height = 0`           | 2402 × 1080 | ~3.5 – 4 GB | Archive, big-screen viewing |
-| `output_height = 720`         | 1601 × 720  | ~1.5 – 2 GB | Web / streaming, decent on phones |
-| `output_height = 540` (default) | 1201 × 540 | ~700 – 900 MB | Sharing, messaging, mobile playback |
+| `output_height = 720` (default) | 1601 × 720 | ~1.5 – 2 GB | Detail-rich sharing — plates, signs |
+| `output_height = 540`         | 1201 × 540  | ~400 – 500 MB | Phone-sized messaging / streaming |
 
 These are end-pipeline scales — the encoder still composes on the native
 2402×1080 frame so the overlays stay crisp, then scales the finished frame
-down once. File sizes assume default `vt_bitrate = 8M` / `x264_crf = 23`;
-tune those if you need smaller. Above 720p is usually lost to internet
-compression on upload anyway, so 540 is the sweet spot for sharing and 0
-is the right call for archiving.
+down once. File sizes assume default `vt_bitrate = 8M` / `x264_crf = 23`
+(VT bitrate auto-scaled per the formula above); tune those if you need
+smaller still. 720 keeps plates and signs legible without ballooning files;
+540 if you only ever watch on a phone; 0 is the right call for archiving.
 
-The intermediate filenames bake in the chosen height (e.g.
-`day08_clip001_..._h540.mp4`) so switching between 540 / 720 / 0 doesn't
-silently reuse cached MP4s at the previous size.
+Both the intermediate **and the final** filenames bake in the chosen
+height — e.g. `drive_13_2026-05-11_15-30_h540.mp4` and
+`day_2026-05-11_h720.mp4`. `output_height = 0` produces the un-tagged
+native-1080 name (`drive_13_…mp4`). Rendering the same drive at multiple
+heights produces side-by-side files instead of overwriting each other,
+and the format you have on disk is obvious from the name.
+
+Sidecars (`.html`, `.gpx`, `_links.txt`) stay un-tagged — they only depend
+on the GPS track, not the video resolution, so one set covers every
+rendered size.
 
 When `map_widget = false` the panel is dropped and the composite is just
 1920×1080 (or `output_height` × 16:9), shaving roughly 20 % off file size.
@@ -377,7 +388,7 @@ config.txt > built-in default**. Highlights:
 - `watermark_text`, `watermark_position`, `watermark_font_size`,
   `watermark_margin_h/v`
 - `speed_font_size`, `speed_margin_v`, `speed_margin_r`
-- `output_height` — 0 for native, 720 for web, 540 for mobile-friendly
+- `output_height` — 720 (default) for web sharing, 540 for phone, 0 for native 1080
 - `vt_bitrate`, `vt_maxrate`, `x264_preset`, `x264_crf`
 
 
@@ -408,7 +419,7 @@ config.txt > built-in default**. Highlights:
 | `--parking-exit-pad N`        | Seconds of footage kept AFTER the FF slide before drive-resume (default 10). |
 | `--exit-skip-secs N`          | Seek N seconds into the exit clip when GPS-detected drive-resume isn't conclusive (default 45). |
 | `--drive-resume-sustain-secs N` | Consecutive seconds of GPS motion required to count as "real drive" (default 30). |
-| `--output-height N`           | Downscale final composite to this height. **Default 540** (web/mobile friendly). 0 keeps native 1080. |
+| `--output-height N`           | Downscale final composite to this height. **Default 720** (quality / size sweet spot). 540 for phone-sized; 0 keeps native 1080. |
 | `--software`                  | Force libx264 instead of macOS VideoToolbox. |
 | `--keep-intermediates`        | Don't delete per-clip intermediates after concat. |
 | `--dry-run`                   | List groups and exit without encoding. |
