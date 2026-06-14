@@ -312,6 +312,12 @@ def write_speed_srt(speeds: list[float], srt_path: Path) -> bool:
 import json
 import math
 
+# A "real" driving sample should be within these gaps of the previous one.
+# Larger gaps indicate engine-off intervals, tunnels, or signal loss — we don't
+# want to draw a straight line across town through buildings.
+SEGMENT_GAP_SECONDS = 30
+SEGMENT_GAP_METERS  = 200
+
 
 def _haversine_km(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> float:
     R = 6371.0
@@ -322,20 +328,49 @@ def _haversine_km(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> flo
     return 2 * R * math.asin(math.sqrt(h))
 
 
+def segment_track(points: list[tuple[float, float, float, datetime]]
+                  ) -> list[list[tuple[float, float, float, datetime]]]:
+    """
+    Split the flat list of GPS fixes into contiguous-driving segments. Any
+    consecutive pair that is more than SEGMENT_GAP_SECONDS apart in time OR
+    more than SEGMENT_GAP_METERS apart in distance starts a new segment.
+    """
+    if not points:
+        return []
+    segments: list[list[tuple[float, float, float, datetime]]] = [[points[0]]]
+    for prev, cur in zip(points, points[1:]):
+        time_gap = (cur[3] - prev[3]).total_seconds()
+        dist_m = _haversine_km(prev[0], prev[1], cur[0], cur[1]) * 1000
+        if time_gap > SEGMENT_GAP_SECONDS or dist_m > SEGMENT_GAP_METERS:
+            segments.append([cur])
+        else:
+            segments[-1].append(cur)
+    return segments
+
+
 def _track_stats(points: list[tuple[float, float, float, datetime]]) -> dict:
     if not points:
         return {"n": 0, "distance_km": 0.0, "max_kmh": 0.0, "avg_kmh": 0.0,
-                "duration_min": 0.0, "start": None, "end": None}
+                "duration_min": 0.0, "moving_min": 0.0, "n_segments": 0,
+                "start": None, "end": None}
+    segs = segment_track(points)
+    # Distance: only sum within segments (skips engine-off jumps)
     dist = 0.0
-    for i in range(1, len(points)):
-        dist += _haversine_km(points[i-1][0], points[i-1][1], points[i][0], points[i][1])
+    moving_secs = 0.0
+    for seg in segs:
+        for i in range(1, len(seg)):
+            dist += _haversine_km(seg[i-1][0], seg[i-1][1], seg[i][0], seg[i][1])
+        if len(seg) >= 2:
+            moving_secs += (seg[-1][3] - seg[0][3]).total_seconds()
     speeds = [p[2] for p in points if p[2] > 0]
     return {
         "n": len(points),
+        "n_segments": len(segs),
         "distance_km": dist,
         "max_kmh": max((p[2] for p in points), default=0.0),
         "avg_kmh": (sum(speeds) / len(speeds)) if speeds else 0.0,
         "duration_min": ((points[-1][3] - points[0][3]).total_seconds() / 60.0),
+        "moving_min": moving_secs / 60.0,
         "start": points[0],
         "end": points[-1],
     }
@@ -369,31 +404,67 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <div id="map"></div>
 </div>
 <script>
-var points = {points_json};
+// `segments` is an array of segments; each segment is an array of [lat, lon, kmh, "time"] tuples.
+// Segments are visually disconnected: GPS gaps (engine off / tunnels) are NOT bridged
+// by straight lines across the city.
+var segments = {segments_json};
 var map = L.map('map');
 L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
     maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
 }}).addTo(map);
 
-function colorFor(kmh) {{
-  if (kmh < 20)  return '#1a9850';   // green: slow / city
-  if (kmh < 40)  return '#fee08b';   // yellow
-  if (kmh < 60)  return '#fdae61';   // orange
-  if (kmh < 80)  return '#f46d43';   // red-orange
-  return '#a50026';                  // dark red: highway
+var COLORS = ['#6baed6', '#2171b5', '#08519c', '#08306b', '#031432'];
+function speedBucket(kmh) {{
+  if (kmh < 20) return 0;
+  if (kmh < 40) return 1;
+  if (kmh < 60) return 2;
+  if (kmh < 80) return 3;
+  return 4;
+}}
+function drawRun(latlngs, bucket) {{
+  if (latlngs.length < 2) return;
+  // White halo underneath for contrast over arterials and beige residentials
+  L.polyline(latlngs, {{color: '#ffffff', weight: 8, opacity: 0.85,
+                       lineJoin: 'round', lineCap: 'round'}}).addTo(map);
+  L.polyline(latlngs, {{color: COLORS[bucket], weight: 5, opacity: 1.0,
+                       lineJoin: 'round', lineCap: 'round'}}).addTo(map);
 }}
 
 var bounds = L.latLngBounds([]);
-for (var i = 1; i < points.length; i++) {{
-  var p0 = points[i-1], p1 = points[i];
-  L.polyline([[p0[0],p0[1]], [p1[0],p1[1]]],
-             {{color: colorFor(p1[2]), weight: 5, opacity: 0.85}}).addTo(map);
-  bounds.extend([p1[0], p1[1]]);
+for (var s = 0; s < segments.length; s++) {{
+  var seg = segments[s];
+  if (seg.length < 2) continue;
+  // Walk the segment, grouping consecutive points of the same speed bucket
+  // into one continuous polyline.
+  var runPoints = [[seg[0][0], seg[0][1]]];
+  var runBucket = speedBucket(seg[1][2]);
+  for (var i = 1; i < seg.length; i++) {{
+    var pb = speedBucket(seg[i][2]);
+    if (pb === runBucket) {{
+      runPoints.push([seg[i][0], seg[i][1]]);
+    }} else {{
+      drawRun(runPoints, runBucket);
+      runPoints = [[seg[i-1][0], seg[i-1][1]], [seg[i][0], seg[i][1]]];
+      runBucket = pb;
+    }}
+    bounds.extend([seg[i][0], seg[i][1]]);
+  }}
+  drawRun(runPoints, runBucket);
+  // Mark the seam between segments with a small grey dot so the gap is obvious
+  if (seg.length) {{
+    var last = seg[seg.length - 1];
+    if (s < segments.length - 1) {{
+      L.circleMarker([last[0], last[1]], {{
+        radius: 4, color: '#666', fillColor: '#fff', fillOpacity: 1, weight: 1
+      }}).addTo(map).bindPopup('Segment break<br>last fix: ' + last[3]);
+    }}
+  }}
 }}
-if (points.length) {{
-  L.marker([points[0][0], points[0][1]]).addTo(map).bindPopup('<b>Start</b><br>' + points[0][3]);
-  L.marker([points[points.length-1][0], points[points.length-1][1]]).addTo(map)
-   .bindPopup('<b>End</b><br>' + points[points.length-1][3]);
+if (segments.length && segments[0].length) {{
+  var first = segments[0][0];
+  var last  = segments[segments.length - 1][segments[segments.length - 1].length - 1];
+  L.marker([first[0], first[1]]).addTo(map).bindPopup('<b>Start</b><br>' + first[3]);
+  L.marker([last[0], last[1]]).addTo(map).bindPopup('<b>End</b><br>' + last[3]);
   map.fitBounds(bounds, {{padding: [30, 30]}});
 }} else {{
   map.setView([0,0], 2);
@@ -404,11 +475,11 @@ legend.onAdd = function() {{
   var div = L.DomUtil.create('div', 'legend');
   div.innerHTML =
     '<div><b>Speed</b></div>' +
-    '<div class="row"><div class="swatch" style="background:#1a9850"></div>&lt; 20 km/h</div>' +
-    '<div class="row"><div class="swatch" style="background:#fee08b"></div>20–40</div>' +
-    '<div class="row"><div class="swatch" style="background:#fdae61"></div>40–60</div>' +
-    '<div class="row"><div class="swatch" style="background:#f46d43"></div>60–80</div>' +
-    '<div class="row"><div class="swatch" style="background:#a50026"></div>&gt; 80</div>';
+    '<div class="row"><div class="swatch" style="background:#6baed6"></div>&lt; 20 km/h</div>' +
+    '<div class="row"><div class="swatch" style="background:#2171b5"></div>20–40</div>' +
+    '<div class="row"><div class="swatch" style="background:#08519c"></div>40–60</div>' +
+    '<div class="row"><div class="swatch" style="background:#08306b"></div>60–80</div>' +
+    '<div class="row"><div class="swatch" style="background:#031432"></div>&gt; 80</div>';
   return div;
 }};
 legend.addTo(map);
@@ -423,17 +494,22 @@ def write_html_map(out_path: Path, points: list[tuple[float, float, float, datet
         return
     stats = _track_stats(points)
     subtitle = (
-        f"<span>{stats['distance_km']:.1f} km</span>"
+        f"<span>{stats['distance_km']:.1f} km driven</span>"
+        f"<span>{stats['moving_min']:.0f} min moving</span>"
         f"<span>max {stats['max_kmh']:.0f} km/h</span>"
         f"<span>avg {stats['avg_kmh']:.0f} km/h</span>"
-        f"<span>{stats['n']} GPS fixes</span>"
+        f"<span>{stats['n_segments']} segments / {stats['n']} fixes</span>"
     )
-    js_points = [[round(lat, 6), round(lon, 6), round(kmh, 1), dt.strftime("%Y-%m-%d %H:%M:%S UTC")]
-                 for (lat, lon, kmh, dt) in points]
+    segments = segment_track(points)
+    js_segments = [
+        [[round(lat, 6), round(lon, 6), round(kmh, 1), dt.strftime("%Y-%m-%d %H:%M:%S UTC")]
+         for (lat, lon, kmh, dt) in seg]
+        for seg in segments
+    ]
     html = HTML_TEMPLATE.format(
         title=title,
         subtitle=subtitle,
-        points_json=json.dumps(js_points, separators=(",", ":")),
+        segments_json=json.dumps(js_segments, separators=(",", ":")),
     )
     out_path.write_text(html, encoding="utf-8")
 
@@ -444,14 +520,19 @@ def write_gpx_export(out_path: Path, points: list[tuple[float, float, float, dat
     lines = ['<?xml version="1.0" encoding="UTF-8"?>',
              '<gpx version="1.1" creator="make_dashcam_videos.py" '
              'xmlns="http://www.topografix.com/GPX/1/1">',
-             f'  <trk><name>{title}</name><trkseg>']
-    for lat, lon, kmh, dt in points:
-        lines.append(
-            f'    <trkpt lat="{lat:.6f}" lon="{lon:.6f}">'
-            f'<time>{dt.strftime("%Y-%m-%dT%H:%M:%SZ")}</time>'
-            f'<extensions><speed>{kmh / 3.6:.2f}</speed></extensions></trkpt>'
-        )
-    lines.append('  </trkseg></trk>')
+             f'  <trk><name>{title}</name>']
+    # One <trkseg> per contiguous-driving segment, so consumers like Google Earth
+    # and Strava don't bridge engine-off gaps with straight lines.
+    for seg in segment_track(points):
+        lines.append('    <trkseg>')
+        for lat, lon, kmh, dt in seg:
+            lines.append(
+                f'      <trkpt lat="{lat:.6f}" lon="{lon:.6f}">'
+                f'<time>{dt.strftime("%Y-%m-%dT%H:%M:%SZ")}</time>'
+                f'<extensions><speed>{kmh / 3.6:.2f}</speed></extensions></trkpt>'
+            )
+        lines.append('    </trkseg>')
+    lines.append('  </trk>')
     lines.append('</gpx>')
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -464,11 +545,12 @@ MAP_TRACK_PAD  = 28            # px padding around bounding box of the route
 
 
 def _speed_color(kmh: float) -> tuple[int, int, int]:
-    if kmh < 20:  return (26, 152, 80)
-    if kmh < 40:  return (254, 224, 139)
-    if kmh < 60:  return (253, 174, 97)
-    if kmh < 80:  return (244, 109, 67)
-    return (165, 0, 38)
+    # Matches the Leaflet COLORS[] blue ramp (darker palette for OSM contrast).
+    if kmh < 20:  return (107, 174, 214)   # #6baed6
+    if kmh < 40:  return ( 33, 113, 181)   # #2171b5
+    if kmh < 60:  return (  8,  81, 156)   # #08519c
+    if kmh < 80:  return (  8,  48, 107)   # #08306b
+    return (  3,  20,  50)                 # #031432
 
 
 def _project_track(points: list[tuple[float, float, float, datetime]],
@@ -518,15 +600,29 @@ def render_base_route_panel(points: list[tuple[float, float, float, datetime]],
     px_list, _bbox = _project_track(points, size, MAP_TRACK_PAD)
 
     # Try the nicer OSM-tile background first
+    # Pre-compute segments and the per-point index → segment_index mapping for
+    # the per-segment polyline draws below.
+    segments = segment_track(points)
+    seg_index_of_point: list[int] = []
+    for seg_i, seg in enumerate(segments):
+        seg_index_of_point.extend([seg_i] * len(seg))
+
     img = None
     try:
         from staticmap import StaticMap, Line as SMLine, CircleMarker as SMMarker
         m = StaticMap(size, size, padding_x=MAP_TRACK_PAD, padding_y=MAP_TRACK_PAD,
                       url_template="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png")
-        coords = [(p[1], p[0]) for p in points]
-        m.add_line(SMLine(coords, "#d62728", 4))
-        m.add_marker(SMMarker(coords[0], "#1a9850", 9))
-        m.add_marker(SMMarker(coords[-1], "#2b6cb0", 9))
+        # Draw one Line per segment so gaps stay visually broken.
+        # Navy chosen to pop against OSM's beige/yellow/orange road palette.
+        for seg in segments:
+            if len(seg) < 2:
+                continue
+            coords = [(p[1], p[0]) for p in seg]
+            m.add_line(SMLine(coords, "#084594", 5))
+        if segments and segments[0]:
+            m.add_marker(SMMarker((segments[0][0][1], segments[0][0][0]), "#1a9850", 9))
+        if segments and segments[-1]:
+            m.add_marker(SMMarker((segments[-1][-1][1], segments[-1][-1][0]), "#2b6cb0", 9))
         img = m.render()
         # Re-project on top of staticmap's projection so the marker lands precisely
         zoom = m._calculate_zoom()
@@ -543,17 +639,19 @@ def render_base_route_panel(points: list[tuple[float, float, float, datetime]],
         img = None
 
     if img is None:
-        # Offline fallback: plain background + colored polyline + start/end dots
+        # Offline fallback: plain background + per-segment colored polylines + start/end dots
         img = Image.new("RGB", (size, size), MAP_BG_COLOR)
         draw = ImageDraw.Draw(img)
         # Soft grid for scale reference
         for g in range(0, size, 40):
             draw.line([(g, 0), (g, size)], fill=(225, 220, 210), width=1)
             draw.line([(0, g), (size, g)], fill=(225, 220, 210), width=1)
-        # Polyline coloured by speed of the second point of each segment
+        # Draw polylines per segment, never across segment boundaries
         for i in range(1, len(points)):
+            if seg_index_of_point[i] != seg_index_of_point[i-1]:
+                continue
             draw.line([px_list[i-1], px_list[i]], fill=_speed_color(points[i][2]), width=5)
-        # Start / end dots
+        # Start dot from first segment, end dot from last segment
         sx, sy = px_list[0]
         ex, ey = px_list[-1]
         draw.ellipse([sx-9, sy-9, sx+9, sy+9], fill=(26, 152, 80), outline=(255, 255, 255), width=2)
@@ -624,7 +722,7 @@ def render_clip_marker_video(
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         str(out_video),
     ]
-    subprocess.run(cmd, check=True)
+    run_ffmpeg(cmd)
 
     # Clean up the PNGs (best-effort; tolerate sandboxed / non-removable files)
     for png in work.glob("*.png"):
@@ -655,7 +753,7 @@ def _render_static_panel_video(base_panel: object, duration: int, out_video: Pat
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         str(out_video),
     ]
-    subprocess.run(cmd, check=True)
+    run_ffmpeg(cmd)
     tmp_png.unlink(missing_ok=True)
     return True
 
@@ -790,6 +888,31 @@ def build_filter_complex(
     return chain + "[out]"
 
 
+_NOISY_FFMPEG_PATTERNS = (
+    # The DDPAI custom telemetry track triggers this on every clip; the stream
+    # is auto-discarded anyway, the message is purely informational.
+    "have zero duration",
+    "stream set to be discarded by default",
+)
+
+
+def run_ffmpeg(cmd: list[str]) -> None:
+    """
+    Run an ffmpeg command, streaming stderr through a line filter that drops
+    known harmless DDPAI-metadata noise. Real warnings still pass through.
+    Raises subprocess.CalledProcessError on non-zero exit.
+    """
+    proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True, bufsize=1)
+    assert proc.stderr is not None
+    for line in proc.stderr:
+        if any(p in line for p in _NOISY_FFMPEG_PATTERNS):
+            continue
+        sys.stderr.write(line)
+    proc.wait()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+
 def encode_clip(
     clip: Clip,
     out_path: Path,
@@ -842,7 +965,7 @@ def encode_clip(
         "-c:a", "aac", "-b:a", "96k",
         str(out_path),
     ]
-    subprocess.run(cmd, check=True)
+    run_ffmpeg(cmd)
 
 
 def concat_clips(intermediate_paths: list[Path], out_path: Path) -> None:
@@ -858,7 +981,7 @@ def concat_clips(intermediate_paths: list[Path], out_path: Path) -> None:
         "-movflags", "+faststart",
         str(out_path),
     ]
-    subprocess.run(cmd, check=True)
+    run_ffmpeg(cmd)
     list_file.unlink(missing_ok=True)
 
 
@@ -885,6 +1008,8 @@ def main() -> int:
                     help="Skip the per-group .html / .gpx / _links.txt map sidecars")
     ap.add_argument("--no-map-widget", action="store_true",
                     help="Skip the burned-in mini-map panel on the right of the video frame")
+    ap.add_argument("--sidecars-only", action="store_true",
+                    help="Only (re-)generate the .html / .gpx / _links.txt sidecars, skip video encoding")
     args = ap.parse_args()
 
     root = Path(args.root).expanduser()
@@ -1008,14 +1133,13 @@ def main() -> int:
             label = start.strftime("%Y-%m-%d_%H-%M")
             final = out_dir / f"drive_{idx:02d}_{label}.mp4"
 
-        if final.exists():
-            print(f"\n[{group_word} {idx}/{len(groups)}] {final.name} already exists — skipping (delete to re-encode)")
-            continue
-
         print(f"\n[{group_word} {idx}/{len(groups)}] {start:%Y-%m-%d %H:%M} → {end:%H:%M}  "
               f"({len(group)} clips, ~{fmt_secs(secs)})")
 
-        # Emit map sidecars (HTML / GPX / links.txt) using whatever GPS data is available
+        # Emit map sidecars (HTML / GPX / links.txt) using whatever GPS data is available.
+        # Done unconditionally — even when the final .mp4 already exists — so the
+        # user can refresh the sidecars after segmentation/render fixes without
+        # re-encoding 1.9 hours of video.
         group_track = gather_track(group, gps_dirs) if with_speed else []
         if not args.no_map_sidecars and group_track:
             title = (f"Drive {idx} — {start:%Y-%m-%d %H:%M}" if not args.daily
@@ -1027,17 +1151,27 @@ def main() -> int:
             write_gpx_export(gpx_path, group_track, title)
             write_links_sidecar(links_path, group_track, title)
             stats = _track_stats(group_track)
-            print(f"  map: {stats['distance_km']:.1f} km, {stats['n']} fixes "
-                  f"→ {html_path.name}, {gpx_path.name}, {links_path.name}")
+            print(f"  map: {stats['distance_km']:.1f} km in {stats['n_segments']} segments, "
+                  f"{stats['n']} fixes → {html_path.name}, {gpx_path.name}, {links_path.name}")
         elif not args.no_map_sidecars:
             print(f"  map: (no GPS data for this {group_kind})")
+
+        if args.sidecars_only:
+            continue
+
+        if final.exists():
+            print(f"  video: {final.name} already exists — skipping (delete to re-encode)")
+            continue
 
         # Pre-render the burn-in base panel (one per group)
         base_panel = None
         group_pixels: list[tuple[int, int]] = []
         if not args.no_map_widget and group_track:
             rendered = render_base_route_panel(group_track)
-            if rendered is not None:
+            if rendered is None:
+                print("  ! map widget skipped: PIL/Pillow not installed."
+                      " Run: pip3 install -r requirements.txt")
+            else:
                 base_panel, group_pixels = rendered
 
         intermediates: list[Path] = []

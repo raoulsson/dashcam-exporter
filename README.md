@@ -80,12 +80,20 @@ brew link --overwrite ffmpeg-full
 Then the Python dependencies (only needed for the burn-in map widget):
 
 ```sh
-pip3 install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-(They are `staticmap` for OSM-tile background fetching and `Pillow` for marker
-compositing. If you don't install them, the script still runs but skips the
-map widget — pass `--no-map-widget` to suppress the warning.)
+The venv step matters because Homebrew's Python 3.12+ refuses system-wide
+`pip install` per PEP 668 (you'll see *"externally-managed-environment"* if
+you skip the venv). Re-activate the venv (`source .venv/bin/activate`) at the
+start of every new terminal session before running the script.
+
+The deps are `staticmap` for OSM-tile background fetching and `Pillow` for
+marker compositing. If you don't install them, the script still runs but
+skips the burn-in map widget — pass `--no-map-widget` to suppress the
+warning.
 
 
 ## Quick start
@@ -266,6 +274,14 @@ The video is yuv420p with square pixels; reload it or try a different player
 internet, or pass `--no-map-widget`. The HTML map (Leaflet) still works
 fine without the widget since OSM tiles are loaded in your browser at view
 time.
+
+**`error: externally-managed-environment`** — Homebrew's Python blocks
+system-wide `pip install` (PEP 668). Use the venv recipe in Install.
+
+**`! map widget skipped: PIL/Pillow not installed`** — You forgot to
+activate the venv before running, or never ran `pip install -r
+requirements.txt`. The video will still encode at 1920×1080 with all other
+overlays — only the right-side map panel is missing.
 
 
 ## Repo layout
