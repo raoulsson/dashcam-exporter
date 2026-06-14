@@ -155,7 +155,7 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 #   bottom-right (default), bottom-left, top-right, top-left
 # Bottom-right sits BELOW the speed readout in the same corner.
 #watermark_text = https://github.com/raoulsson/dashcam-exporter
-#watermark_font_size = 16
+#watermark_font_size = 20
 #watermark_position = bottom-right
 # Distance from the closest horizontal / vertical edge in pixels.
 #watermark_margin_h = 8
