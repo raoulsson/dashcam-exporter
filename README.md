@@ -327,22 +327,27 @@ in doubt.
 
 ## Output sizes
 
-The composite video frame is **2402×1080** by default (1920 main video + 2 px
-gutter + 480 panel). Use `--output-height` (or `output_height` in
-`config.txt`) to downscale the whole composite at the end of the pipeline.
-Aspect ratio is preserved automatically.
+The pipeline composes every frame at the native **2402×1080** (1920 main
+video + 2 px gutter + 480 panel) and downscales at the very end. The
+default downscale is **540p**, which is web / phone-friendly. Override
+with `--output-height` or `output_height` in `config.txt`.
 
 | Setting | Composite size | Typical file size, 1 h source | Best for |
 |---------|----------------|--------------------------------|----------|
-| `output_height = 0` (default) | 2402 × 1080 | ~3.5 – 4 GB | Archive, big-screen viewing |
+| `output_height = 0`           | 2402 × 1080 | ~3.5 – 4 GB | Archive, big-screen viewing |
 | `output_height = 720`         | 1601 × 720  | ~1.5 – 2 GB | Web / streaming, decent on phones |
-| `output_height = 540`         | 1201 × 540  | ~700 – 900 MB | Mobile sharing, email-ish |
+| `output_height = 540` (default) | 1201 × 540 | ~700 – 900 MB | Sharing, messaging, mobile playback |
 
-These are end-pipeline scales — the encoder still works on the native
-2402×1080 frame, so the overlays stay crisp. File sizes assume the default
-`vt_bitrate = 8M` / `x264_crf = 23`; tune those if you need smaller. Quality
-above 720p is generally lost to internet compression once you upload, so
-`--output-height 720` is the sweet spot for sharing.
+These are end-pipeline scales — the encoder still composes on the native
+2402×1080 frame so the overlays stay crisp, then scales the finished frame
+down once. File sizes assume default `vt_bitrate = 8M` / `x264_crf = 23`;
+tune those if you need smaller. Above 720p is usually lost to internet
+compression on upload anyway, so 540 is the sweet spot for sharing and 0
+is the right call for archiving.
+
+The intermediate filenames bake in the chosen height (e.g.
+`day08_clip001_..._h540.mp4`) so switching between 540 / 720 / 0 doesn't
+silently reuse cached MP4s at the previous size.
 
 When `map_widget = false` the panel is dropped and the composite is just
 1920×1080 (or `output_height` × 16:9), shaving roughly 20 % off file size.
@@ -403,7 +408,7 @@ config.txt > built-in default**. Highlights:
 | `--parking-exit-pad N`        | Seconds of footage kept AFTER the FF slide before drive-resume (default 10). |
 | `--exit-skip-secs N`          | Seek N seconds into the exit clip when GPS-detected drive-resume isn't conclusive (default 45). |
 | `--drive-resume-sustain-secs N` | Consecutive seconds of GPS motion required to count as "real drive" (default 30). |
-| `--output-height N`           | Downscale final composite to this height (0 = native 1080). |
+| `--output-height N`           | Downscale final composite to this height. **Default 540** (web/mobile friendly). 0 keeps native 1080. |
 | `--software`                  | Force libx264 instead of macOS VideoToolbox. |
 | `--keep-intermediates`        | Don't delete per-clip intermediates after concat. |
 | `--dry-run`                   | List groups and exit without encoding. |

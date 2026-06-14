@@ -192,14 +192,20 @@
 # min-clips check is bypassed when --drives is explicit).
 #min_clips_per_group = 4
 
+# Cache housekeeping: files in .gpx_cache/ and .intermediates/ older than
+# this many days are auto-deleted at the start of each run. Stops the disk
+# from filling up silently over weeks of usage. Set to 0 to disable.
+#cache_max_age_days = 20
+
 
 # ============================================================================
 # OUTPUT SIZE / QUALITY
 # ============================================================================
 
-# Optional final downscale of the composite output for web/mobile delivery.
-# 0 = keep native (1080p + map panel = 2400x1080).
-# 720 gives 720p high. 540 gives 540p mobile-friendly. Aspect ratio is preserved.
+# Final-output downscale of the composite for web/mobile delivery.
+# 540 (default) is web/phone-friendly, ~700–900 MB per hour of source.
+# 0 keeps the native 2402x1080 (~3.5–4 GB per hour — archive size).
+# 720 sits in between (~1.5–2 GB per hour). Aspect ratio is preserved.
 #output_height = 540
 
 # Encoder selection.

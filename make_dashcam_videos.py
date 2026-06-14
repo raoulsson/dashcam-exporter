@@ -302,9 +302,10 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # OUTPUT SIZE / QUALITY
 # ============================================================================
 
-# Optional final downscale of the composite output for web/mobile delivery.
-# 0 = keep native (1080p + map panel = 2400x1080).
-# 720 gives 720p high. 540 gives 540p mobile-friendly. Aspect ratio is preserved.
+# Final-output downscale of the composite for web/mobile delivery.
+# 540 (default) is web/phone-friendly, ~700–900 MB per hour of source.
+# 0 keeps the native 2402x1080 (~3.5–4 GB per hour — archive size).
+# 720 sits in between (~1.5–2 GB per hour). Aspect ratio is preserved.
 #output_height = 540
 
 # Encoder selection.
@@ -1615,7 +1616,7 @@ def encode_clip(
     trim_start: int = 0,
     trim_seconds: int | None = None,
     no_audio: bool = False,
-    output_height: int = 540,
+    output_height: int = 0,
 ) -> None:
     """
     Encode one clip (or one trimmed slice of it) to `out_path`.
@@ -1910,7 +1911,10 @@ def main() -> int:
         MAP_PANEL_POSITION = "right"
 
     # Final-output downscaling (e.g. for web/mobile delivery).
-    output_height_cfg = ci("output_height", 0)        # 0 = no downscale
+    # Default 540p — small enough to share via web / messaging while still
+    # readable on a phone. Set output_height = 0 in config.txt to keep
+    # the native 1080p composite (much bigger files).
+    output_height_cfg = ci("output_height", 540)
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(config_path),
@@ -1998,7 +2002,9 @@ def main() -> int:
                          "consider a moving block as 'real drive' for "
                          "exit-slice anchoring (default 30).")
     ap.add_argument("--output-height", type=int, default=output_height_cfg,
-                    help="Downscale the final composite to this height in px (0 = native)")
+                    help="Downscale the final composite to this height in px "
+                         "(0 = keep native 1080). Default 540, a web/mobile "
+                         "friendly size.")
     args = ap.parse_args()
 
     # Handle --write-config and exit
@@ -2379,9 +2385,17 @@ def main() -> int:
                                              max(0, clip.duration - exit_pad))
 
             # Per-slice intermediate filename. Suffix the action so re-runs
-            # can find / cache them correctly.
+            # can find / cache them correctly. The requested output_height is
+            # also baked into the filename, otherwise switching between
+            # 1080p / 720p / 540p in config would silently reuse old cached
+            # MP4s at the previous size (which is why "tweaking
+            # output_height in config does nothing" felt broken before).
             suffix = f"_{action}" if action else ""
-            inter = work_dir / f"{group_kind}{idx:02d}_clip{ci:03d}_{clip.timestamp}{suffix}.mp4"
+            size_tag = f"_h{args.output_height}" if args.output_height else ""
+            inter = work_dir / (
+                f"{group_kind}{idx:02d}_clip{ci:03d}"
+                f"_{clip.timestamp}{suffix}{size_tag}.mp4"
+            )
 
             # Per-clip map widget video (trimmed if we're trimming the video).
             map_video: Path | None = None
