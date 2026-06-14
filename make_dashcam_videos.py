@@ -285,7 +285,7 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # Optional final downscale of the composite output for web/mobile delivery.
 # 0 = keep native (1080p + map panel = 2400x1080).
 # 720 gives 720p high. 540 gives 540p mobile-friendly. Aspect ratio is preserved.
-#output_height = 0
+#output_height = 540
 
 # Encoder selection.
 # software = true forces libx264 even if VideoToolbox (Mac hardware) is available.
@@ -1967,8 +1967,14 @@ def main() -> int:
     # Handle --write-config and exit
     if args.write_config:
         target = Path(args.write_config).expanduser()
+        # Convenience: if the user passes a directory (e.g. "." or "~/"), write
+        # the template into config.txt inside it instead of refusing to write
+        # a file into a directory path.
+        if target.is_dir():
+            target = target / "config.txt"
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(CONFIG_TEMPLATE, encoding="utf-8")
-        print(f"wrote {target}")
+        print(f"wrote {target.resolve()}")
         return 0
 
     if cfg:

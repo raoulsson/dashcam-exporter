@@ -200,7 +200,7 @@
 # Optional final downscale of the composite output for web/mobile delivery.
 # 0 = keep native (1080p + map panel = 2400x1080).
 # 720 gives 720p high. 540 gives 540p mobile-friendly. Aspect ratio is preserved.
-#output_height = 0
+#output_height = 540
 
 # Encoder selection.
 # software = true forces libx264 even if VideoToolbox (Mac hardware) is available.
