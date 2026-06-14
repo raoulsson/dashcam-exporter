@@ -74,6 +74,179 @@ VT_MAXRATE   = "10M"
 X264_PRESET  = "veryfast"
 X264_CRF     = "23"
 
+# Default config.txt template, dumped by `--write-config PATH`
+CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
+#
+# Every setting here is OPTIONAL. Uncomment the lines you want to change.
+# Precedence: command-line flag  >  this file  >  built-in default.
+# Booleans accept: true / false / yes / no / 1 / 0.
+#
+# Pass --config /path/to/this.txt to use a non-default location, or run
+#   python3 make_dashcam_videos.py --write-config ./config.txt
+# to regenerate this template anytime.
+
+
+# ============================================================================
+# INPUT / OUTPUT
+# ============================================================================
+
+# Where the dashcam SD card (or a local copy of it) lives. The script expects
+# DCIM/200video/{front,rear} and (optionally) DCIM/203gps inside this folder.
+# When the SD card is in the car, point this at a local backup directory
+# you've copied the DCIM tree into.
+#root = /Volumes/NO NAME
+
+# Where the rendered videos and sidecars get written.
+#out = ~/Desktop/Dashcam_Videos
+
+
+# ============================================================================
+# GROUPING
+# ============================================================================
+
+# false (default): each gap-separated drive becomes its own .mp4
+# true:            all clips on the same calendar date go into one .mp4
+#daily = false
+
+# In drive-mode, clips farther than this many seconds apart start a new drive.
+#gap = 90
+
+
+# ============================================================================
+# OVERLAYS
+# ============================================================================
+
+# Burn date/time into the bottom-left of the main video frame.
+#timestamp = true
+
+# Burn GPS speed (NN km/h) into the bottom-right of the main video frame.
+#speed = true
+
+# Render the per-day side panel (stats + map widget with moving marker).
+#map_widget = true
+
+# Save .html (Leaflet), .gpx (standard GPX), and _links.txt next to each video.
+#map_sidecars = true
+
+# Tiny watermark in the main video's bottom-left corner.
+# Leave watermark_text empty to disable.
+#watermark_text = (c) Raoul Marc Schmidiger
+#watermark_font_size = 8
+
+
+# ============================================================================
+# AUDIO
+# ============================================================================
+
+# audio=false strips audio from the output. Useful when passenger conversation
+# is on the recording and you don't want it shared.
+#audio = true
+
+
+# ============================================================================
+# FRONT CAMERA CROP
+# ============================================================================
+
+# Source clips are 2560x1600. We crop pixels off the top and bottom before
+# scaling to 1080p so the bonnet doesn't dominate. If you mount your dashcam
+# higher or lower, tune these. (Effective height: 1600 - top - bottom)
+#front_crop_top    = 80
+#front_crop_bottom = 80
+
+
+# ============================================================================
+# REAR PiP (picture-in-picture, always bottom-center)
+# ============================================================================
+
+#rear_pip_w      = 662
+#rear_pip_h      = 372
+#rear_pip_margin = 24
+
+
+# ============================================================================
+# MAP WIDGET PANEL
+# ============================================================================
+
+# Side panel width in pixels. The map itself is square at this width.
+#map_panel_w = 480
+
+# Where the panel sits relative to the main video. Today: 'right' (default) or 'left'.
+# 'top' / 'bottom' aren't implemented yet (would require a horizontal panel layout).
+#map_panel_position = right
+
+# Black gutter between the main video and the panel.
+#map_panel_gutter_px = 2
+
+
+# ============================================================================
+# PARKING SKIP — drop long standstills, replace with a 'Fast forwarding…' slide
+# ============================================================================
+
+# Default true: when the car is parked for a long time AND the dashcam keeps
+# recording, the script keeps 10s at each end and slides through the middle.
+#skip_parking = true
+
+# Minimum length (s) of a parked run before we trigger the skip.
+# 300 = 5 minutes. Shorter values are more aggressive.
+#parking_min_secs = 300
+
+# How many seconds of footage to keep at each end of a skipped parking run.
+#parking_pad_secs = 10
+
+
+# ============================================================================
+# OUTPUT SIZE / QUALITY
+# ============================================================================
+
+# Optional final downscale of the composite output for web/mobile delivery.
+# 0 = keep native (1080p + map panel = 2400x1080).
+# 720 gives 720p high. 540 gives 540p mobile-friendly. Aspect ratio is preserved.
+#output_height = 0
+
+# Encoder selection.
+# software = true forces libx264 even if VideoToolbox (Mac hardware) is available.
+#software = false
+
+# Keep the per-clip intermediate .mp4 files after concat.
+#keep_intermediates = false
+
+# Hardware H.264 (VideoToolbox) bitrates.
+#vt_bitrate = 8M
+#vt_maxrate = 10M
+
+# Software H.264 (libx264) tuning.
+#x264_preset = veryfast
+#x264_crf    = 23
+"""
+
+# Parking detection / "Fast forwarding..." transition defaults
+PARKING_SPEED_THRESHOLD_KMH = 3.0    # below this we consider the car stationary
+PARKING_CLIP_FRACTION       = 0.75   # fraction of seconds-in-clip below threshold
+DEFAULT_PARKING_MIN_SECS    = 300    # minimum run length (s) before we skip (5 min)
+DEFAULT_PARKING_PAD_SECS    = 10     # seconds kept at each end of a skipped run
+TRANSITION_SECS             = 2      # length of the "Fast forwarding..." slide
+TRANSITION_TEXT             = "Fast forwarding..."
+TRANSITION_FONT_SIZE        = 72
+
+# Right-side stats panel + copyright watermark
+PANEL_STATS_TOP_PX = 30      # px from top of right panel to start drawing stats
+PANEL_MAP_TOP_PX   = 340     # y offset of the map block within the 480x1080 right panel
+COPYRIGHT_TEXT     = "(c) Raoul Marc Schmidiger"
+COPYRIGHT_FONT_SIZE = 8
+
+# Front camera default crop (top + bottom rows removed before scale to 1080p).
+# Different dashcam mounts show more / less of the bonnet — tune in config.txt.
+FRONT_CROP_TOP    = 80
+FRONT_CROP_BOTTOM = 80
+FRONT_W           = 2560
+FRONT_H           = 1600
+
+# Side of the main video the map panel is hstacked on. Currently only
+# "right" (default) and "left" are supported — "top" / "bottom" would require
+# a wholly different panel orientation and aren't implemented yet.
+MAP_PANEL_POSITION = "right"
+MAP_PANEL_GUTTER_PX = 2
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -230,6 +403,56 @@ def gather_track(clips: list[Clip], gps_dirs: tuple[Path | None, ...]) -> list[t
         if gpx is not None:
             out.extend(parse_gpx_track(gpx))
     return out
+
+
+def clip_is_parked(clip: Clip, gps_dirs: tuple[Path | None, ...]) -> bool:
+    """
+    Decide whether a clip is stationary. Three signals all count as "parked":
+      1) GPX exists and >=75% of seconds are below 3 km/h (textbook standstill)
+      2) GPX exists but holds no valid fixes (indoor parking, lost lock)
+      3) No GPX file at all for this clip
+    Cases (2) and (3) cover the most common pattern: the dashcam keeps
+    recording while parked in a garage but loses GPS. find_parking_runs only
+    triggers a skip when the *total* run length is long enough, so brief
+    mid-drive GPS dropouts (a few clips through a tunnel) won't trip this.
+    """
+    gpx = find_gpx_for(clip.timestamp, *gps_dirs)
+    if gpx is None:
+        return True
+    speeds = parse_gpx_speeds(gpx)
+    if not speeds:
+        return True
+    slow = sum(1 for s in speeds if s < PARKING_SPEED_THRESHOLD_KMH)
+    return (slow / len(speeds)) >= PARKING_CLIP_FRACTION
+
+
+def find_parking_runs(
+    group: list[Clip],
+    gps_dirs: tuple[Path | None, ...],
+    min_run_secs: int,
+) -> list[tuple[int, int]]:
+    """
+    Find runs of consecutive parked clips where the total duration is at
+    least min_run_secs. Returns list of (first_idx, last_idx) inclusive
+    indices into `group`.
+    """
+    runs: list[tuple[int, int]] = []
+    cur_start: int | None = None
+    cur_secs = 0
+    for i, c in enumerate(group):
+        if clip_is_parked(c, gps_dirs):
+            if cur_start is None:
+                cur_start = i
+                cur_secs = 0
+            cur_secs += c.duration
+        else:
+            if cur_start is not None and cur_secs >= min_run_secs:
+                runs.append((cur_start, i - 1))
+            cur_start = None
+            cur_secs = 0
+    if cur_start is not None and cur_secs >= min_run_secs:
+        runs.append((cur_start, len(group) - 1))
+    return runs
 
 
 def find_gpx_for(timestamp: str, *dirs: Path) -> Path | None:
@@ -498,7 +721,7 @@ def write_html_map(out_path: Path, points: list[tuple[float, float, float, datet
         f"<span>{stats['moving_min']:.0f} min moving</span>"
         f"<span>max {stats['max_kmh']:.0f} km/h</span>"
         f"<span>avg {stats['avg_kmh']:.0f} km/h</span>"
-        f"<span>{stats['n_segments']} segments / {stats['n']} fixes</span>"
+        f"<span>{stats['n_segments']} segments / {stats['n']} points</span>"
     )
     segments = segment_track(points)
     js_segments = [
@@ -582,6 +805,83 @@ def _project_track(points: list[tuple[float, float, float, datetime]],
     return px_list, (min_lat, max_lat, min_lon, max_lon)
 
 
+def render_base_right_panel(
+    points: list[tuple[float, float, float, datetime]],
+    title: str,
+    font_path: str,
+) -> tuple[object, list[tuple[int, int]]] | None:
+    """
+    Render the full 480x1080 right-side panel:
+      - Title + stats on top (drawn with PIL ImageDraw)
+      - Map widget below (480x480, OSM-tiled or PIL-fallback polyline)
+    Returns (PIL.Image full panel, pixel coords per GPS point in PANEL-local
+    coordinates already offset for the map's vertical position) or None if PIL
+    is unavailable.
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        return None
+    if not points:
+        return None
+
+    # Render the 480x480 map block
+    map_result = render_base_route_panel(points)
+    if map_result is None:
+        return None
+    map_img, map_pixels = map_result
+
+    panel_w, panel_h = MAP_PANEL_SIZE, OUT_H
+    panel = Image.new("RGB", (panel_w, panel_h), (0, 0, 0))
+    draw = ImageDraw.Draw(panel)
+
+    def _load_font(size: int):
+        try:
+            return ImageFont.truetype(font_path, size) if font_path else ImageFont.load_default()
+        except Exception:
+            return ImageFont.load_default()
+
+    f_title = _load_font(26)
+    f_value = _load_font(22)
+    f_small = _load_font(15)
+
+    stats = _track_stats(points)
+
+    y = PANEL_STATS_TOP_PX
+    draw.text((24, y), title, fill=(255, 255, 255), font=f_title)
+    y += 38
+    # Hairline separator
+    draw.line([(24, y), (panel_w - 24, y)], fill=(90, 90, 90), width=1)
+    y += 18
+
+    rows = [
+        ("Distance",  f"{stats['distance_km']:.1f} km"),
+        ("Driven",    f"{stats['moving_min']:.0f} min"),
+        ("Max speed", f"{stats['max_kmh']:.0f} km/h"),
+        ("Avg",       f"{stats['avg_kmh']:.0f} km/h"),
+    ]
+    for label, value in rows:
+        draw.text((24, y), label, fill=(170, 170, 170), font=f_value)
+        bbox = draw.textbbox((0, 0), value, font=f_value)
+        value_w = bbox[2] - bbox[0]
+        draw.text((panel_w - 24 - value_w, y), value, fill=(255, 255, 255), font=f_value)
+        y += 30
+
+    y += 6
+    draw.text(
+        (24, y),
+        f"{stats['n_segments']} segments / {stats['n']} points",
+        fill=(140, 140, 140), font=f_small,
+    )
+
+    # Paste the map below the stats
+    panel.paste(map_img, (0, PANEL_MAP_TOP_PX))
+
+    # Marker pixel coordinates in panel-local space (map is offset by PANEL_MAP_TOP_PX)
+    adjusted = [(px, py + PANEL_MAP_TOP_PX) for (px, py) in map_pixels]
+    return panel, adjusted
+
+
 def render_base_route_panel(points: list[tuple[float, float, float, datetime]],
                             size: int = MAP_PANEL_SIZE) -> tuple[object, list[tuple[int, int]]] | None:
     """
@@ -609,6 +909,18 @@ def render_base_route_panel(points: list[tuple[float, float, float, datetime]],
 
     img = None
     try:
+        # OSM's tile usage policy requires a custom User-Agent identifying the
+        # app; without it the request gets a 429/403 and tile fetch returns no
+        # tiles, which in turn makes staticmap raise. Install a global opener
+        # with a sensible UA before any tile fetch.
+        import urllib.request
+        opener = urllib.request.build_opener()
+        opener.addheaders = [
+            ("User-Agent",
+             "dashcam-exporter/0.1 (+https://github.com/raoulsson/dashcam-exporter)")
+        ]
+        urllib.request.install_opener(opener)
+
         from staticmap import StaticMap, Line as SMLine, CircleMarker as SMMarker
         m = StaticMap(size, size, padding_x=MAP_TRACK_PAD, padding_y=MAP_TRACK_PAD,
                       url_template="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png")
@@ -624,18 +936,48 @@ def render_base_route_panel(points: list[tuple[float, float, float, datetime]],
         if segments and segments[-1]:
             m.add_marker(SMMarker((segments[-1][-1][1], segments[-1][-1][0]), "#2b6cb0", 9))
         img = m.render()
-        # Re-project on top of staticmap's projection so the marker lands precisely
-        zoom = m._calculate_zoom()
-        ext = m._calculate_extent(zoom)
-        x0, y0, x1, y1 = ext
+
+        # Re-project on top of staticmap's projection so the marker lands
+        # precisely. staticmap's private API has shifted between versions
+        # (0.5.7 dropped _calculate_extent), so do the web-mercator math
+        # ourselves using only the public-ish post-render attributes
+        # `m.zoom`, `m.x_center`, `m.y_center`. Each tile is 256 px wide.
+        TILE_PX = 256
+
+        def _ll_to_tile(lat: float, lon: float, z: int) -> tuple[float, float]:
+            n = 2 ** z
+            xt = (lon + 180.0) / 360.0 * n
+            lat_rad = math.radians(lat)
+            yt = (1.0 - math.log(math.tan(lat_rad) + 1.0 / math.cos(lat_rad)) / math.pi) / 2.0 * n
+            return xt, yt
+
+        # Pull zoom and center from the rendered StaticMap; fall back to
+        # computing them if the attribute names ever change again.
+        zoom = getattr(m, "zoom", None)
+        if zoom is None:
+            zoom = m._calculate_zoom() if hasattr(m, "_calculate_zoom") else 14
+        cx = getattr(m, "x_center", None)
+        cy = getattr(m, "y_center", None)
+        if cx is None or cy is None:
+            lats = [p[0] for p in points]
+            lons = [p[1] for p in points]
+            cx, cy = _ll_to_tile((min(lats) + max(lats)) / 2,
+                                 (min(lons) + max(lons)) / 2, zoom)
+
         px_list = []
         for lat, lon, _, _ in points:
-            xt = m._lon_to_x(lon, zoom)
-            yt = m._lat_to_y(lat, zoom)
-            px = int(round((xt - x0) / (x1 - x0) * size))
-            py = int(round((yt - y0) / (y1 - y0) * size))
+            xt, yt = _ll_to_tile(lat, lon, zoom)
+            px = int(round(size / 2 + (xt - cx) * TILE_PX))
+            py = int(round(size / 2 + (yt - cy) * TILE_PX))
             px_list.append((px, py))
-    except Exception:
+    except ImportError:
+        # staticmap not installed — fall through to PIL fallback silently
+        img = None
+    except Exception as e:
+        # Network / OSM error: log it so the user sees WHY we fell back, not
+        # just an unexpected beige grid in the burn-in widget.
+        print(f"  ! map widget: OSM tile fetch failed ({type(e).__name__}: {e});"
+              f" using plain polyline background", file=sys.stderr)
         img = None
 
     if img is None:
@@ -667,10 +1009,14 @@ def render_clip_marker_video(
     drive_pixels: list[tuple[int, int]],
     gps_dirs: tuple[Path | None, ...],
     out_video: Path,
+    trim_start: int = 0,
+    trim_seconds: int | None = None,
 ) -> bool:
     """
-    For one clip: render N=duration PNG frames (base panel + marker at current position)
-    and assemble into a 1-fps MP4. Returns False if the clip has no GPS coverage.
+    For one clip: render PNG frames (base panel + marker at current position)
+    and assemble into a 1-fps MP4. trim_start/trim_seconds restrict to a slice
+    of the clip's duration so the map matches the trimmed video.
+    Returns False if the clip has no GPS coverage.
     """
     try:
         from PIL import Image, ImageDraw
@@ -686,20 +1032,25 @@ def render_clip_marker_video(
         return False
 
     # Map each clip second to the nearest pixel on the drive map
-    n = clip.duration
-    # Build a per-second pixel sequence (clip GPX may have fewer entries than `n`)
-    per_second = []
-    if len(clip_points) >= n:
-        for i in range(n):
+    n_full = clip.duration
+    # Build a per-second pixel sequence (clip GPX may have fewer entries than `n_full`)
+    per_second_full: list[tuple[int, int]] = []
+    if len(clip_points) >= n_full:
+        for i in range(n_full):
             lat = clip_points[i][0]; lon = clip_points[i][1]
-            # find this point in drive_points and take its pixel; fallback: nearest
-            per_second.append(_nearest_pixel(lat, lon, drive_points, drive_pixels))
+            per_second_full.append(_nearest_pixel(lat, lon, drive_points, drive_pixels))
     else:
-        # Stretch the available points across n seconds
-        for i in range(n):
-            j = min(int(i * len(clip_points) / n), len(clip_points) - 1)
+        # Stretch the available points across n_full seconds
+        for i in range(n_full):
+            j = min(int(i * len(clip_points) / n_full), len(clip_points) - 1)
             lat = clip_points[j][0]; lon = clip_points[j][1]
-            per_second.append(_nearest_pixel(lat, lon, drive_points, drive_pixels))
+            per_second_full.append(_nearest_pixel(lat, lon, drive_points, drive_pixels))
+
+    # Restrict to the trim window
+    duration = trim_seconds if trim_seconds is not None else (n_full - trim_start)
+    per_second = per_second_full[trim_start:trim_start + duration]
+    if not per_second:
+        return False
 
     # Render frames to a temp dir, then ffmpeg the sequence
     work = out_video.with_suffix(".frames")
@@ -793,7 +1144,7 @@ def write_links_sidecar(out_path: Path, points: list[tuple[float, float, float, 
         f"Duration: {stats['duration_min']:.1f} minutes\n"
         f"Max speed: {stats['max_kmh']:.1f} km/h\n"
         f"Avg moving speed: {stats['avg_kmh']:.1f} km/h\n"
-        f"GPS fixes: {stats['n']}\n\n"
+        f"GPS points: {stats['n']}\n\n"
         f"Open in Google Maps (start):\n  {start_url}\n\n"
         f"Open in Google Maps (end):\n  {end_url}\n\n"
         f"Open in Apple Maps (start):\n  {apple_url}\n\n"
@@ -846,7 +1197,8 @@ def build_filter_complex(
       - render a per-second 'NN km/h' subtitle on the left, above the timestamp
     """
     base = (
-        f"[0:v]crop=2560:1440:0:80,scale={OUT_W}:{OUT_H},setsar=1,fps={OUT_FPS}[front];"
+        f"[0:v]crop={FRONT_W}:{FRONT_H - FRONT_CROP_TOP - FRONT_CROP_BOTTOM}:0:{FRONT_CROP_TOP},"
+        f"scale={OUT_W}:{OUT_H},setsar=1,fps={OUT_FPS}[front];"
         f"[1:v]scale={PIP_W}:{PIP_H},setsar=1,fps={OUT_FPS},"
         f"drawbox=x=0:y=0:w=iw:h=ih:color=white@0.9:t=3[rear];"
         f"[front][rear]overlay=(W-w)/2:H-h-{PIP_MARGIN}"
@@ -877,15 +1229,57 @@ def build_filter_complex(
         chain += f",subtitles=filename='{speed_srt.as_posix()}':force_style='{style}'"
 
     if with_map_widget:
-        # Tag the main composed video, then build a side panel from input [2:v] and hstack
+        # Tag the main composed video, build the panel from input [2:v]
+        # at its native 480x1080 (stats burned-in PIL-side), pad a small
+        # black gutter on the side facing the main video, then hstack.
         chain += "[video_part];"
+        gutter = MAP_PANEL_GUTTER_PX
+        on_left = (MAP_PANEL_POSITION or "right").lower() == "left"
+        # Gutter goes on the OPPOSITE side of the panel-to-video edge.
+        # panel=right  → gutter on the LEFT edge of the panel
+        # panel=left   → gutter on the RIGHT edge of the panel
+        pad_x = gutter if not on_left else 0
         chain += (
-            f"[2:v]scale={MAP_PANEL_SIZE}:{MAP_PANEL_SIZE},setsar=1,fps={OUT_FPS},"
-            f"pad={MAP_PANEL_SIZE}:{OUT_H}:0:(oh-ih)/2:color=black[map_part];"
+            f"[2:v]scale={MAP_PANEL_SIZE}:{OUT_H},setsar=1,fps={OUT_FPS},"
+            f"pad={MAP_PANEL_SIZE + gutter}:{OUT_H}:{pad_x}:0:color=black[map_part];"
         )
-        chain += "[video_part][map_part]hstack[out]"
+        if on_left:
+            chain += "[map_part][video_part]hstack[stacked]"
+        else:
+            chain += "[video_part][map_part]hstack[stacked]"
+        # Tiny ©-watermark on the hstacked canvas at the main-video's bottom-left.
+        # When the panel is on the left, the main video starts after the panel,
+        # so shift x past the panel + gutter.
+        font_escaped = font_path.replace(":", r"\:") if font_path else ""
+        if font_escaped and COPYRIGHT_TEXT:
+            wm_x = 6 if not on_left else (MAP_PANEL_SIZE + MAP_PANEL_GUTTER_PX + 6)
+            chain += (
+                f";[stacked]drawtext=fontfile={font_escaped}:"
+                f"text='{_escape_drawtext(COPYRIGHT_TEXT)}':"
+                f"fontcolor=white@0.55:fontsize={COPYRIGHT_FONT_SIZE}:"
+                f"x={wm_x}:y=h-10[out]"
+            )
+        else:
+            chain += ";[stacked]copy[out]"
         return chain
+    # No map widget: still drop the watermark on the main video frame.
+    font_escaped = font_path.replace(":", r"\:") if font_path else ""
+    if font_escaped and COPYRIGHT_TEXT:
+        chain += (
+            f",drawtext=fontfile={font_escaped}:"
+            f"text='{_escape_drawtext(COPYRIGHT_TEXT)}':"
+            f"fontcolor=white@0.55:fontsize={COPYRIGHT_FONT_SIZE}:"
+            f"x=6:y=h-10"
+        )
     return chain + "[out]"
+
+
+def _escape_drawtext(text: str) -> str:
+    """Escape special characters in a drawtext text= value."""
+    return (text
+            .replace("\\", r"\\")
+            .replace(":", r"\:")
+            .replace("'", r"\'"))
 
 
 _NOISY_FFMPEG_PATTERNS = (
@@ -893,6 +1287,13 @@ _NOISY_FFMPEG_PATTERNS = (
     # is auto-discarded anyway, the message is purely informational.
     "have zero duration",
     "stream set to be discarded by default",
+    # Concat-demuxer prints one of these per audio packet at segment boundaries
+    # when DTS doesn't perfectly line up across re-encoded segments. ffmpeg
+    # auto-corrects (you'd see the warning even on a clean file). Cosmetic.
+    "Non-monotonic DTS",
+    "Non-monotonous DTS",
+    # The harmless VideoToolbox note we already see on every hardware encode
+    "Color range not set for yuv420p",
 )
 
 
@@ -922,19 +1323,33 @@ def encode_clip(
     gps_dirs: tuple[Path | None, ...],
     with_speed: bool,
     map_video: Path | None = None,
+    trim_start: int = 0,
+    trim_seconds: int | None = None,
+    no_audio: bool = False,
+    output_height: int = 0,
 ) -> None:
-    # If GPS data exists for this clip, write a sidecar SRT and pass it to the filter
+    """
+    Encode one clip (or one trimmed slice of it) to `out_path`.
+    trim_start / trim_seconds are in source-clip seconds. If trim_seconds is
+    None, encode to the end of the clip.
+    """
+    duration = trim_seconds if trim_seconds is not None else (clip.duration - trim_start)
+    actual_epoch = clip.epoch_utc + trim_start
+
+    # If GPS data exists for this clip, write a sidecar SRT (sliced to the trim
+    # window) and pass it to the filter.
     speed_srt: Path | None = None
     if with_speed:
         gpx = find_gpx_for(clip.timestamp, *gps_dirs)
         if gpx is not None:
-            speeds = parse_gpx_speeds(gpx)
+            all_speeds = parse_gpx_speeds(gpx)
+            window = all_speeds[trim_start:trim_start + duration]
             srt_path = out_path.with_suffix(".speed.srt")
-            if write_speed_srt(speeds, srt_path):
+            if write_speed_srt(window, srt_path):
                 speed_srt = srt_path
 
     with_map_widget = map_video is not None
-    filt = build_filter_complex(font_path, clip.epoch_utc, with_timestamp, speed_srt, with_map_widget)
+    filt = build_filter_complex(font_path, actual_epoch, with_timestamp, speed_srt, with_map_widget)
     if use_vt:
         venc = [
             "-c:v", "h264_videotoolbox",
@@ -949,22 +1364,106 @@ def encode_clip(
             "-crf", X264_CRF,
         ]
 
-    cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
-        "-i", str(clip.front),
-        "-i", str(clip.rear),
-    ]
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning"]
+    # -ss before -i seeks to the trim_start; pts is rebased to 0 in the output,
+    # which is what drawtext (now using actual_epoch) expects.
+    if trim_start:
+        cmd += ["-ss", str(trim_start)]
+    cmd += ["-i", str(clip.front)]
+    if trim_start:
+        cmd += ["-ss", str(trim_start)]
+    cmd += ["-i", str(clip.rear)]
     if with_map_widget:
         cmd += ["-i", str(map_video)]
+    if trim_seconds is not None:
+        cmd += ["-t", str(trim_seconds)]
+    # Optional final downscale (output_height != 0) and audio strip
+    if output_height and output_height != OUT_H:
+        filt = filt.replace("[out]", "[pre_scaled];[pre_scaled]scale=-2:" +
+                            str(output_height) + "[out]", 1)
+    cmd += ["-filter_complex", filt, "-map", "[out]"]
+    if not no_audio:
+        cmd += ["-map", "0:a?", "-c:a", "aac", "-b:a", "96k"]
+    else:
+        cmd += ["-an"]
     cmd += [
-        "-filter_complex", filt,
-        "-map", "[out]", "-map", "0:a?",
         *venc,
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
-        "-c:a", "aac", "-b:a", "96k",
         str(out_path),
     ]
+    run_ffmpeg(cmd)
+
+
+def _fmt_skip_duration(secs: float) -> str:
+    m, s = divmod(int(round(secs)), 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h}h {m:02d}m skipped"
+    if m:
+        return f"{m}m {s:02d}s skipped"
+    return f"{s}s skipped"
+
+
+def generate_transition_slide(
+    out_video: Path,
+    duration: int,
+    font_path: str,
+    with_map_widget: bool,
+    use_vt: bool,
+    skipped_secs: float | None = None,
+    output_height: int = 0,
+    no_audio: bool = False,
+) -> None:
+    """
+    Render a `duration`-second black slide with the 'Fast forwarding...' text
+    centered, matching the dimensions and codec params of the regular per-clip
+    intermediates so it can be concat-demuxed alongside them. If skipped_secs
+    is given, the elapsed time is shown beneath the headline.
+    """
+    # +2 for the gutter that build_filter_complex adds between video and map.
+    width = OUT_W + (MAP_PANEL_SIZE + 2 if with_map_widget else 0)
+    height = OUT_H
+    # When the main encode is downscaled, the transition slide must match,
+    # otherwise concat-demuxer will refuse to splice them together.
+    if output_height and output_height != OUT_H:
+        scale = output_height / OUT_H
+        width = int(round(width * scale)) & ~1   # keep even
+        height = output_height
+    font_escaped = font_path.replace(":", r"\:")
+    if use_vt:
+        venc = ["-c:v", "h264_videotoolbox", "-b:v", VT_BITRATE,
+                "-maxrate", VT_MAXRATE, "-profile:v", "high"]
+    else:
+        venc = ["-c:v", "libx264", "-preset", X264_PRESET, "-crf", X264_CRF]
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
+        "-f", "lavfi", "-i",
+        f"color=c=black:s={width}x{height}:r={OUT_FPS}:d={duration}",
+    ]
+    if not no_audio:
+        cmd += ["-f", "lavfi", "-i",
+                f"anullsrc=channel_layout=stereo:sample_rate=48000:d={duration}"]
+    cmd += [
+        "-vf",
+        (
+            f"drawtext=fontfile={font_escaped}:text='{TRANSITION_TEXT}':"
+            f"fontcolor=white:fontsize={TRANSITION_FONT_SIZE}:"
+            f"x=(w-tw)/2:y=(h-th)/2-30"
+            + (
+                f",drawtext=fontfile={font_escaped}:"
+                f"text='{_fmt_skip_duration(skipped_secs)}':"
+                f"fontcolor=white@0.7:fontsize=32:"
+                f"x=(w-tw)/2:y=(h-th)/2+40"
+                if skipped_secs
+                else ""
+            )
+        ),
+        "-map", "0:v",
+    ]
+    if not no_audio:
+        cmd += ["-map", "1:a", "-c:a", "aac", "-b:a", "96k"]
+    cmd += [*venc, "-pix_fmt", "yuv420p", "-shortest", str(out_video)]
     run_ffmpeg(cmd)
 
 
@@ -989,28 +1488,137 @@ def concat_clips(intermediate_paths: list[Path], out_path: Path) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+def load_config_file(path: Path) -> dict[str, str]:
+    """Parse a key=value config file. # introduces a comment to end of line."""
+    if not path.is_file():
+        return {}
+    out: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        out[key.strip()] = value.strip()
+    return out
+
+
+def _cfg_bool(s: str) -> bool:
+    return s.strip().lower() in ("true", "yes", "1", "on")
+
+
+def _resolve_config_path(argv: list[str]) -> Path:
+    """Pre-parse argv to find --config PATH (so we can use it as defaults source)."""
+    for i, a in enumerate(argv):
+        if a == "--config" and i + 1 < len(argv):
+            return Path(argv[i + 1]).expanduser()
+        if a.startswith("--config="):
+            return Path(a.split("=", 1)[1]).expanduser()
+    # Defaults: look next to the script
+    return Path(__file__).resolve().parent / "config.txt"
+
+
 def main() -> int:
+    # --- Config file loading (CLI > config.txt > built-in defaults) ----------
+    config_path = _resolve_config_path(sys.argv[1:])
+    cfg = load_config_file(config_path)
+    cs = lambda k, d: cfg.get(k, d)
+    ci = lambda k, d: int(cfg[k]) if k in cfg and cfg[k] != "" else d
+    cb = lambda k, d: _cfg_bool(cfg[k]) if k in cfg else d
+
+    # Boolean knobs are stored POSITIVELY in config (timestamp=true rather than
+    # no_timestamp=false) — easier to read. Translate to the existing --no-* CLI.
+    default_no_timestamp     = not cb("timestamp",     True)
+    default_no_speed         = not cb("speed",         True)
+    default_no_map_widget    = not cb("map_widget",    True)
+    default_no_map_sidecars  = not cb("map_sidecars",  True)
+    default_no_skip_parking  = not cb("skip_parking",  True)
+    default_no_audio         = not cb("audio",         True)
+    default_daily            =     cb("daily",         False)
+    default_software         =     cb("software",      False)
+    default_keep_inter       =     cb("keep_intermediates", False)
+
+    # Override the structural module-level constants from config (these are read
+    # by build_filter_complex et al. at call-time, so updating here is sufficient).
+    global PIP_W, PIP_H, PIP_MARGIN
+    global MAP_PANEL_SIZE, MAP_PANEL_POSITION, MAP_PANEL_GUTTER_PX
+    global FRONT_CROP_TOP, FRONT_CROP_BOTTOM
+    global COPYRIGHT_TEXT, COPYRIGHT_FONT_SIZE
+    global VT_BITRATE, VT_MAXRATE, X264_PRESET, X264_CRF
+    PIP_W              = ci("rear_pip_w",         PIP_W)
+    PIP_H              = ci("rear_pip_h",         PIP_H)
+    PIP_MARGIN         = ci("rear_pip_margin",    PIP_MARGIN)
+    MAP_PANEL_SIZE     = ci("map_panel_w",        MAP_PANEL_SIZE)
+    MAP_PANEL_POSITION = cs("map_panel_position", MAP_PANEL_POSITION).lower()
+    MAP_PANEL_GUTTER_PX = ci("map_panel_gutter_px", MAP_PANEL_GUTTER_PX)
+    FRONT_CROP_TOP     = ci("front_crop_top",     FRONT_CROP_TOP)
+    FRONT_CROP_BOTTOM  = ci("front_crop_bottom",  FRONT_CROP_BOTTOM)
+    COPYRIGHT_TEXT     = cs("watermark_text",     COPYRIGHT_TEXT)
+    COPYRIGHT_FONT_SIZE = ci("watermark_font_size", COPYRIGHT_FONT_SIZE)
+    VT_BITRATE         = cs("vt_bitrate",         VT_BITRATE)
+    VT_MAXRATE         = cs("vt_maxrate",         VT_MAXRATE)
+    X264_PRESET        = cs("x264_preset",        X264_PRESET)
+    X264_CRF           = cs("x264_crf",           X264_CRF)
+    if MAP_PANEL_POSITION in ("top", "bottom"):
+        print(f"WARNING: map_panel_position='{MAP_PANEL_POSITION}' isn't implemented yet; "
+              "falling back to 'right'.", file=sys.stderr)
+        MAP_PANEL_POSITION = "right"
+
+    # Final-output downscaling (e.g. for web/mobile delivery).
+    output_height_cfg = ci("output_height", 0)        # 0 = no downscale
+
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--root",  default=DEFAULT_ROOT, help=f"Dashcam volume root (default: {DEFAULT_ROOT})")
-    ap.add_argument("--out",   default=DEFAULT_OUT,  help=f"Output folder (default: {DEFAULT_OUT})")
-    ap.add_argument("--gap",   type=int, default=DEFAULT_GAP, help="Seconds between clips to consider a new drive")
-    ap.add_argument("--drives", nargs="+", type=int, help="Only process specific drive numbers (1-based)")
-    ap.add_argument("--software", action="store_true", help="Use libx264 instead of VideoToolbox")
-    ap.add_argument("--keep-intermediates", action="store_true", help="Keep per-clip processed files")
+    ap.add_argument("--config", default=str(config_path),
+                    help=f"Path to config.txt (default: {config_path})")
+    ap.add_argument("--write-config", metavar="PATH",
+                    help="Write a fully-commented config.txt template to PATH and exit.")
+    ap.add_argument("--root",  default=cs("root", DEFAULT_ROOT),
+                    help=f"Dashcam volume root (default: {cs('root', DEFAULT_ROOT)})")
+    ap.add_argument("--out",   default=cs("out", DEFAULT_OUT),
+                    help=f"Output folder (default: {cs('out', DEFAULT_OUT)})")
+    ap.add_argument("--gap",   type=int, default=ci("gap", DEFAULT_GAP),
+                    help="Seconds between clips to consider a new drive")
+    ap.add_argument("--drives", nargs="+", type=int,
+                    help="Only process specific drive numbers (1-based)")
+    ap.add_argument("--software", action="store_true", default=default_software,
+                    help="Use libx264 instead of VideoToolbox")
+    ap.add_argument("--keep-intermediates", action="store_true", default=default_keep_inter,
+                    help="Keep per-clip processed files")
     ap.add_argument("--dry-run", action="store_true", help="List drives and exit without encoding")
-    ap.add_argument("--no-timestamp", action="store_true",
-                    help="Skip the burned-in date/time overlay (use if your ffmpeg lacks the drawtext filter)")
-    ap.add_argument("--no-speed", action="store_true",
+    ap.add_argument("--no-timestamp", action="store_true", default=default_no_timestamp,
+                    help="Skip the burned-in date/time overlay")
+    ap.add_argument("--no-speed", action="store_true", default=default_no_speed,
                     help="Skip the GPS speed overlay even when GPX data is available")
-    ap.add_argument("--daily", action="store_true",
-                    help="Group clips by calendar date instead of by gap, producing one MP4 per day")
-    ap.add_argument("--no-map-sidecars", action="store_true",
+    ap.add_argument("--no-audio", action="store_true", default=default_no_audio,
+                    help="Strip audio from the output (useful if passenger talk shouldn't be shared)")
+    ap.add_argument("--daily", action="store_true", default=default_daily,
+                    help="Group clips by calendar date, producing one MP4 per day")
+    ap.add_argument("--no-map-sidecars", action="store_true", default=default_no_map_sidecars,
                     help="Skip the per-group .html / .gpx / _links.txt map sidecars")
-    ap.add_argument("--no-map-widget", action="store_true",
+    ap.add_argument("--no-map-widget", action="store_true", default=default_no_map_widget,
                     help="Skip the burned-in mini-map panel on the right of the video frame")
     ap.add_argument("--sidecars-only", action="store_true",
                     help="Only (re-)generate the .html / .gpx / _links.txt sidecars, skip video encoding")
+    ap.add_argument("--no-skip-parking", action="store_true", default=default_no_skip_parking,
+                    help="Disable the parking-skip")
+    ap.add_argument("--parking-min-secs", type=int,
+                    default=ci("parking_min_secs", DEFAULT_PARKING_MIN_SECS),
+                    help=f"Minimum length (s) of a parked run before we skip it")
+    ap.add_argument("--parking-pad-secs", type=int,
+                    default=ci("parking_pad_secs", DEFAULT_PARKING_PAD_SECS),
+                    help=f"Seconds kept at each end of a skipped parking run")
+    ap.add_argument("--output-height", type=int, default=output_height_cfg,
+                    help="Downscale the final composite to this height in px (0 = native)")
     args = ap.parse_args()
+
+    # Handle --write-config and exit
+    if args.write_config:
+        target = Path(args.write_config).expanduser()
+        target.write_text(CONFIG_TEMPLATE, encoding="utf-8")
+        print(f"wrote {target}")
+        return 0
+
+    if cfg:
+        print(f"config:    loaded {len(cfg)} setting(s) from {config_path}")
 
     root = Path(args.root).expanduser()
     out_dir = Path(args.out).expanduser()
@@ -1152,7 +1760,7 @@ def main() -> int:
             write_links_sidecar(links_path, group_track, title)
             stats = _track_stats(group_track)
             print(f"  map: {stats['distance_km']:.1f} km in {stats['n_segments']} segments, "
-                  f"{stats['n']} fixes → {html_path.name}, {gpx_path.name}, {links_path.name}")
+                  f"{stats['n']} points → {html_path.name}, {gpx_path.name}, {links_path.name}")
         elif not args.no_map_sidecars:
             print(f"  map: (no GPS data for this {group_kind})")
 
@@ -1163,42 +1771,136 @@ def main() -> int:
             print(f"  video: {final.name} already exists — skipping (delete to re-encode)")
             continue
 
-        # Pre-render the burn-in base panel (one per group)
+        # Pre-render the burn-in right panel (stats on top + map + optional QR)
         base_panel = None
         group_pixels: list[tuple[int, int]] = []
         if not args.no_map_widget and group_track:
-            rendered = render_base_route_panel(group_track)
+            panel_title = (f"Drive {idx} — {start:%Y-%m-%d}" if not args.daily
+                           else f"Day — {start:%Y-%m-%d}")
+            rendered = render_base_right_panel(
+                group_track,
+                title=panel_title,
+                font_path=font_path,
+            )
             if rendered is None:
                 print("  ! map widget skipped: PIL/Pillow not installed."
                       " Run: pip3 install -r requirements.txt")
             else:
                 base_panel, group_pixels = rendered
+        with_map_widget = base_panel is not None
+
+        # Identify long parking runs we should skip past.
+        parking_runs: list[tuple[int, int]] = []
+        if not args.no_skip_parking and with_speed:
+            parking_runs = find_parking_runs(group, gps_dirs, args.parking_min_secs)
+
+        # Map clip-index → action.
+        #   entry  = first pad seconds of the FIRST parked clip
+        #   skip   = drop entirely (every clip in the parked run, including the last)
+        #   exit   = first pad seconds of the NEXT MOVING clip after the run
+        # This means the Fast-forwarding slide covers both the remaining parked
+        # footage AND any engine-off gap until the next drive resumes.
+        action_for: dict[int, str] = {}
+        skipped_secs_for: dict[int, float] = {}
+        for run_start, run_end in parking_runs:
+            action_for[run_start] = "entry"
+            for k in range(run_start + 1, run_end + 1):
+                action_for[k] = "skip"
+            next_idx = run_end + 1
+            if next_idx < len(group) and next_idx not in action_for:
+                action_for[next_idx] = "exit"
+                # Wall-clock seconds elapsed between the entry's last frame and
+                # the exit's first frame.
+                entry_end = group[run_start].dt + timedelta(seconds=args.parking_pad_secs)
+                exit_start = group[next_idx].dt
+                skipped_secs_for[run_start] = max(
+                    0.0, (exit_start - entry_end).total_seconds()
+                )
+
+        if parking_runs:
+            saved = 0
+            for s, e in parking_runs:
+                next_idx = e + 1
+                # How much wall-clock time we replace with (pad+TRANSITION+pad)
+                if next_idx < len(group):
+                    span = (group[next_idx].dt - group[s].dt).total_seconds() \
+                        + args.parking_pad_secs
+                else:
+                    span = (e - s + 1) * group[s].duration
+                saved += int(span - 2 * args.parking_pad_secs - TRANSITION_SECS)
+            print(f"  parking: {len(parking_runs)} run(s) skipped, "
+                  f"~{fmt_secs(max(saved, 0))} cut from the output")
+
+        pad = args.parking_pad_secs
 
         intermediates: list[Path] = []
         for ci, clip in enumerate(group, 1):
-            inter = work_dir / f"{group_kind}{idx:02d}_clip{ci:03d}_{clip.timestamp}.mp4"
+            ci0 = ci - 1
+            action = action_for.get(ci0)
 
-            # Per-clip map widget video (1fps marker animation on the base panel)
+            # Anywhere inside a parked run (including its last clip) — drop entirely.
+            if action == "skip":
+                continue
+
+            # Both entry and exit slices keep the FIRST `pad` seconds of their clip,
+            # since "exit" now points at the next moving clip (the actual drive
+            # resume), not at the tail of the parking footage.
+            trim_start = 0
+            trim_seconds: int | None = None
+            if action in ("entry", "exit"):
+                trim_seconds = pad
+
+            # Per-slice intermediate filename. Suffix the action so re-runs
+            # can find / cache them correctly.
+            suffix = f"_{action}" if action else ""
+            inter = work_dir / f"{group_kind}{idx:02d}_clip{ci:03d}_{clip.timestamp}{suffix}.mp4"
+
+            # Per-clip map widget video (trimmed if we're trimming the video).
             map_video: Path | None = None
-            if base_panel is not None:
+            if with_map_widget:
                 map_video = inter.with_suffix(".map.mp4")
                 if not map_video.exists():
                     ok = render_clip_marker_video(
-                        clip, base_panel, group_track, group_pixels, gps_dirs, map_video
+                        clip, base_panel, group_track, group_pixels, gps_dirs, map_video,
+                        trim_start=trim_start, trim_seconds=trim_seconds,
                     )
                     if not ok:
-                        # Render base-only panel so all clips share the same output size
-                        ok = _render_static_panel_video(base_panel, clip.duration, map_video)
+                        ok = _render_static_panel_video(
+                            base_panel,
+                            trim_seconds if trim_seconds is not None else clip.duration,
+                            map_video,
+                        )
                         if not ok:
                             map_video = None
 
             if not inter.exists():
-                print(f"  [{ci:>3}/{len(group)}] {clip.timestamp}  encoding ...")
-                encode_clip(clip, inter, font_path, use_vt, with_timestamp,
-                            gps_dirs, with_speed, map_video=map_video)
+                tag = f" ({action} slice, {trim_seconds}s)" if action else ""
+                print(f"  [{ci:>3}/{len(group)}] {clip.timestamp}{tag}  encoding ...")
+                encode_clip(
+                    clip, inter, font_path, use_vt, with_timestamp,
+                    gps_dirs, with_speed, map_video=map_video,
+                    trim_start=trim_start, trim_seconds=trim_seconds,
+                    no_audio=args.no_audio, output_height=args.output_height,
+                )
             else:
                 print(f"  [{ci:>3}/{len(group)}] {clip.timestamp}  (cached)")
             intermediates.append(inter)
+
+            # After the entry slice of a parking run, splice in the transition.
+            if action == "entry":
+                trans = work_dir / f"{group_kind}{idx:02d}_clip{ci:03d}_transition.mp4"
+                skipped = skipped_secs_for.get(ci0)
+                if not trans.exists():
+                    note = (f", ~{_fmt_skip_duration(skipped).replace(' skipped','')} ahead"
+                            if skipped else "")
+                    print(f"        + transition slide ({TRANSITION_SECS}s{note})")
+                    generate_transition_slide(
+                        trans, TRANSITION_SECS, font_path, with_map_widget, use_vt,
+                        skipped_secs=skipped,
+                        output_height=args.output_height,
+                        no_audio=args.no_audio,
+                    )
+                intermediates.append(trans)
 
         print(f"  concatenating {len(intermediates)} clips -> {final.name}")
         concat_clips(intermediates, final)

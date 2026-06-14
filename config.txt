@@ -1,0 +1,142 @@
+# dashcam-exporter — config.txt
+#
+# Every setting here is OPTIONAL. Uncomment the lines you want to change.
+# Precedence: command-line flag  >  this file  >  built-in default.
+# Booleans accept: true / false / yes / no / 1 / 0.
+#
+# Pass --config /path/to/this.txt to use a non-default location, or run
+#   python3 make_dashcam_videos.py --write-config ./config.txt
+# to regenerate this template anytime.
+
+
+# ============================================================================
+# INPUT / OUTPUT
+# ============================================================================
+
+# Where the dashcam SD card (or a local copy of it) lives. The script expects
+# DCIM/200video/{front,rear} and (optionally) DCIM/203gps inside this folder.
+# When the SD card is in the car, point this at a local backup directory
+# you've copied the DCIM tree into.
+#root = /Volumes/NO NAME
+
+# Where the rendered videos and sidecars get written.
+#out = ~/Desktop/Dashcam_Videos
+
+
+# ============================================================================
+# GROUPING
+# ============================================================================
+
+# false (default): each gap-separated drive becomes its own .mp4
+# true:            all clips on the same calendar date go into one .mp4
+#daily = false
+
+# In drive-mode, clips farther than this many seconds apart start a new drive.
+#gap = 90
+
+
+# ============================================================================
+# OVERLAYS
+# ============================================================================
+
+# Burn date/time into the bottom-left of the main video frame.
+#timestamp = true
+
+# Burn GPS speed (NN km/h) into the bottom-right of the main video frame.
+#speed = true
+
+# Render the per-day side panel (stats + map widget with moving marker).
+#map_widget = true
+
+# Save .html (Leaflet), .gpx (standard GPX), and _links.txt next to each video.
+#map_sidecars = true
+
+# Tiny watermark in the main video's bottom-left corner.
+# Leave watermark_text empty to disable.
+#watermark_text = (c) Raoul Marc Schmidiger
+#watermark_font_size = 8
+
+
+# ============================================================================
+# AUDIO
+# ============================================================================
+
+# audio=false strips audio from the output. Useful when passenger conversation
+# is on the recording and you don't want it shared.
+#audio = true
+
+
+# ============================================================================
+# FRONT CAMERA CROP
+# ============================================================================
+
+# Source clips are 2560x1600. We crop pixels off the top and bottom before
+# scaling to 1080p so the bonnet doesn't dominate. If you mount your dashcam
+# higher or lower, tune these. (Effective height: 1600 - top - bottom)
+#front_crop_top    = 80
+#front_crop_bottom = 80
+
+
+# ============================================================================
+# REAR PiP (picture-in-picture, always bottom-center)
+# ============================================================================
+
+#rear_pip_w      = 662
+#rear_pip_h      = 372
+#rear_pip_margin = 24
+
+
+# ============================================================================
+# MAP WIDGET PANEL
+# ============================================================================
+
+# Side panel width in pixels. The map itself is square at this width.
+#map_panel_w = 480
+
+# Where the panel sits relative to the main video. Today: 'right' (default) or 'left'.
+# 'top' / 'bottom' aren't implemented yet (would require a horizontal panel layout).
+#map_panel_position = right
+
+# Black gutter between the main video and the panel.
+#map_panel_gutter_px = 2
+
+
+# ============================================================================
+# PARKING SKIP — drop long standstills, replace with a 'Fast forwarding…' slide
+# ============================================================================
+
+# Default true: when the car is parked for a long time AND the dashcam keeps
+# recording, the script keeps 10s at each end and slides through the middle.
+#skip_parking = true
+
+# Minimum length (s) of a parked run before we trigger the skip.
+# 300 = 5 minutes. Shorter values are more aggressive.
+#parking_min_secs = 300
+
+# How many seconds of footage to keep at each end of a skipped parking run.
+#parking_pad_secs = 10
+
+
+# ============================================================================
+# OUTPUT SIZE / QUALITY
+# ============================================================================
+
+# Optional final downscale of the composite output for web/mobile delivery.
+# 0 = keep native (1080p + map panel = 2400x1080).
+# 720 gives 720p high. 540 gives 540p mobile-friendly. Aspect ratio is preserved.
+#output_height = 0
+
+# Encoder selection.
+# software = true forces libx264 even if VideoToolbox (Mac hardware) is available.
+#software = false
+
+# Keep the per-clip intermediate .mp4 files after concat.
+#keep_intermediates = false
+
+# Hardware H.264 (VideoToolbox) bitrates.
+#vt_bitrate = 8M
+#vt_maxrate = 10M
+
+# Software H.264 (libx264) tuning.
+#x264_preset = veryfast
+#x264_crf    = 23
