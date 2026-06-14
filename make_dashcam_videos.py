@@ -62,8 +62,9 @@ OUT_FPS      = 30
 PIP_W, PIP_H = 662, 372                        # rear inset (was 576x324; +15%)
 PIP_MARGIN   = 24
 # Where the rear PiP sits inside the main video frame.
-#   bottom-middle (default), bottom-left, bottom-right,
-#   top-middle,              top-left,    top-right
+# Choose from: bottom-middle (default), top-left, top-middle, top-right.
+# (The bottom-left/right corners are reserved for the timestamp + speed +
+# watermark overlays.)
 REAR_PIP_POSITION = "bottom-middle"
 REAR_PIP_ENABLED  = True   # auto-disabled when no rear/ folder is present
 TS_FONT_SIZE = 36
@@ -154,8 +155,11 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # Leave watermark_text empty to disable. Position one of:
 #   bottom-right (default), bottom-left, top-right, top-left
 # Bottom-right sits BELOW the speed readout in the same corner.
+# NOTE: font_size is in literal pixels (unlike the speed overlay, which is
+# libass-scaled ~3.75x at 1080p). On 1080p: 16 is barely visible, 28 is
+# comfortably readable, 36-40 is prominent.
 #watermark_text = https://github.com/raoulsson/dashcam-exporter
-#watermark_font_size = 20
+#watermark_font_size = 28
 #watermark_position = bottom-right
 # Distance from the closest horizontal / vertical edge in pixels.
 #watermark_margin_h = 8
@@ -191,10 +195,13 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 #rear_pip = true
 
 # Where the PiP sits inside the main video frame:
-#   bottom-middle (default), bottom-left, bottom-right,
-#   top-middle,              top-left,    top-right
+#   bottom-middle (default), top-left, top-middle, top-right
+# (the bottom-left/right corners are reserved for timestamp + speed/watermark
+# so those positions aren't offered)
 #rear_pip_position = bottom-middle
 
+# Set both, or set just one and the other auto-computes from the rear
+# camera's 16:9 native aspect (so you don't accidentally squash the picture).
 #rear_pip_w      = 662
 #rear_pip_h      = 372
 #rear_pip_margin = 24
@@ -226,8 +233,42 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # 300 = 5 minutes. Shorter values are more aggressive.
 #parking_min_secs = 300
 
-# How many seconds of footage to keep at each end of a skipped parking run.
-#parking_pad_secs = 10
+# How long the entry slice is (BEFORE the Fast-forwarding slide).
+# This is the bit where you see yourself parking / getting out.
+#parking_entry_pad = 5
+
+# How much pre-drive padding to keep AFTER the Fast-forwarding slide.
+# Larger = you see more "about to drive" before the actual drive-away.
+#parking_exit_pad = 10
+
+# Legacy combined knob — kept for back-compat. If parking_entry_pad /
+# parking_exit_pad above aren't set, this value is used for both.
+#parking_pad_secs = 5
+
+# Exit-clip handling after a parking gap.
+#
+# Drive-resume detection looks for N consecutive seconds of GPS motion
+# (>5 km/h, see drive_resume_sustain_secs). When found, the exit slice
+# anchors `parking_exit_pad` seconds before that moment.
+#
+# Most parking-mode dashcams produce GPS that's too scrambled to detect
+# reliably (random motion-triggered "passing car / pedestrian" wakeups that
+# get flushed into the first new clip), so the script falls through to the
+# value below and seeks this many seconds into the exit clip. Set to 0 to
+# play exit clips from second 0; 45 is the default and tends to land within
+# ~10 seconds of real drive-away on a 60-second clip.
+#exit_skip_secs = 45
+
+# How long a moving GPS block must be to count as "real drive" rather than
+# parking-mode jitter. Higher = stricter (more often falls through to
+# exit_skip_secs). Try 60 if 30 still fires on passing traffic.
+#drive_resume_sustain_secs = 30
+
+# Inter-clip gap detection: insert a 'Fast forwarding…' slide whenever the
+# wall-clock distance between consecutive clips is longer than this. Catches
+# engine-off intervals that AREN'T preceded by parked footage, so the
+# parking-run detector doesn't fire for them. Default 60 (1 minute).
+#inter_clip_gap_secs = 60
 
 
 # ============================================================================
@@ -259,7 +300,22 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 PARKING_SPEED_THRESHOLD_KMH = 3.0    # below this we consider the car stationary
 PARKING_CLIP_FRACTION       = 0.75   # fraction of seconds-in-clip below threshold
 DEFAULT_PARKING_MIN_SECS    = 300    # minimum run length (s) before we skip (5 min)
-DEFAULT_PARKING_PAD_SECS    = 10     # seconds kept at each end of a skipped run
+DEFAULT_PARKING_PAD_SECS    = 5      # legacy alias — kept for back-compat
+DEFAULT_PARKING_ENTRY_PAD   = 5      # entry slice length (before the FF)
+DEFAULT_PARKING_EXIT_PAD    = 10     # how many seconds of footage precede drive-resume after the FF
+# Standard exit-slice skip after a parking gap. The exit slice trims this
+# many seconds off the head of the first clip. Drive-resume detection
+# refines it when GPS clearly shows >=30s of continuous motion; otherwise
+# this value is used as-is. Most parking-mode dashcams produce GPS data
+# that's too scrambled to detect reliably (random motion-triggered bursts
+# of "passing car / walking pedestrian" wakeups), so this is the value
+# you'll see most of the time.
+DEFAULT_EXIT_SKIP_SECS      = 45
+# Minimum time gap (in wall-clock seconds) between consecutive clips before
+# a "Fast forwarding…" slide is auto-inserted between them. This catches
+# engine-off intervals that DIDN'T leave parked-but-recording footage on
+# either side (so the parking-run detector doesn't fire for them).
+DEFAULT_INTER_CLIP_GAP_SECS = 60
 TRANSITION_SECS             = 2      # length of the "Fast forwarding..." slide
 TRANSITION_TEXT             = "Fast forwarding..."
 TRANSITION_FONT_SIZE        = 72
@@ -268,7 +324,7 @@ TRANSITION_FONT_SIZE        = 72
 PANEL_STATS_TOP_PX = 30      # px from top of right panel to start drawing stats
 PANEL_MAP_TOP_PX   = 340     # y offset of the map block within the 480x1080 right panel
 COPYRIGHT_TEXT     = "(c) Raoul Marc Schmidiger"
-COPYRIGHT_FONT_SIZE = 16
+COPYRIGHT_FONT_SIZE = 28
 # Where the watermark sits inside the main video frame:
 #   bottom-right (default), bottom-left, top-right, top-left
 COPYRIGHT_POSITION = "bottom-right"
@@ -378,6 +434,21 @@ def has_videotoolbox() -> bool:
         return False
 
 
+def file_has_audio(path: Path) -> bool:
+    """True if the file has at least one audio stream (via ffprobe)."""
+    try:
+        out = subprocess.check_output(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=codec_name",
+             "-of", "default=noprint_wrappers=1:nokey=1",
+             str(path)],
+            text=True, stderr=subprocess.STDOUT,
+        )
+        return bool(out.strip())
+    except Exception:
+        return False
+
+
 def has_filter(name: str) -> bool:
     try:
         out = subprocess.check_output(
@@ -461,23 +532,39 @@ def gather_track(clips: list[Clip], gps_dirs: tuple[Path | None, ...]) -> list[t
     return out
 
 
+DRIVE_RESUME_THRESHOLD_KMH = 5.0   # higher than parking threshold to reject GPS jitter
+DRIVE_RESUME_SUSTAIN_SECS  = 30    # require N consecutive moving samples = real drive
+
 def find_drive_resume_second(
-    clip: Clip, gps_dirs: tuple[Path | None, ...]
-) -> int:
+    clip: Clip, gps_dirs: tuple[Path | None, ...],
+    sustain_secs: int = DRIVE_RESUME_SUSTAIN_SECS,
+    threshold_kmh: float = DRIVE_RESUME_THRESHOLD_KMH,
+) -> int | None:
     """
-    First second in this clip where speed crosses the parking threshold.
-    If no GPS data, or movement is already underway at second 0, returns 0.
-    Used to anchor the exit slice so the 'about to drive' moment lands at the
-    end of the slice — not somewhere we've already left behind.
+    Best-effort detection of when the car actually starts moving in this clip.
+    Returns the clip-second at which a sustained 30-second-long moving window
+    begins, or None if no such window exists (in which case the GPS data is
+    too noisy / scrambled to trust — caller falls back to a configurable
+    skip).
+
+    The 30-second sustain is intentional: parking-mode dashcams record short
+    bursts of motion-triggered video around a parked car (a passing car, a
+    pedestrian, dashcam reboot self-tests) which produce brief GPS spikes
+    that don't represent real driving. 30 seconds of continuous motion is a
+    solid indicator that the drive has actually started.
     """
     gpx = find_gpx_for(clip.timestamp, *gps_dirs)
     if gpx is None:
-        return 0
+        return None
     speeds = parse_gpx_speeds(gpx)
-    for i, s in enumerate(speeds):
-        if s > PARKING_SPEED_THRESHOLD_KMH:
+    if not speeds:
+        return None
+    if len(speeds) < sustain_secs:
+        return None
+    for i in range(len(speeds) - sustain_secs + 1):
+        if all(speeds[i + j] > threshold_kmh for j in range(sustain_secs)):
             return i
-    return 0
+    return None
 
 
 def clip_is_parked(clip: Clip, gps_dirs: tuple[Path | None, ...]) -> bool:
@@ -952,7 +1039,7 @@ def render_base_right_panel(
             ("Distance",  f"{stats['distance_display']:.1f} {dunit}"),
             ("Driven",    f"{stats['moving_min']:.0f} min"),
             ("Max speed", f"{stats['max_display']:.0f} {sunit}"),
-            ("Avg",       f"{stats['avg_display']:.0f} {sunit}"),
+            ("Avg speed", f"{stats['avg_display']:.0f} {sunit}"),
         ]
         for label, value in rows:
             draw.text((24, y), label, fill=(170, 170, 170), font=f_value)
@@ -1101,6 +1188,21 @@ def render_base_route_panel(points: list[tuple[float, float, float, datetime]],
     return img, px_list
 
 
+def _gpx_is_scrambled(points: list[tuple[float, float, float, datetime]]) -> bool:
+    """
+    True if consecutive GPS fixes jump by more than 60s in either direction.
+    The dashcam's parking-mode buffer dumps stale fixes into the first clip
+    of a new drive — those files have multiple disjoint time chunks and the
+    per-second marker positions become meaningless.
+    """
+    if len(points) < 2:
+        return False
+    for a, b in zip(points, points[1:]):
+        if abs((b[3] - a[3]).total_seconds()) > 60:
+            return True
+    return False
+
+
 def render_clip_marker_video(
     clip: Clip,
     base_panel: object,           # PIL.Image
@@ -1110,7 +1212,7 @@ def render_clip_marker_video(
     out_video: Path,
     trim_start: int = 0,
     trim_seconds: int | None = None,
-) -> bool:
+) -> tuple[bool, tuple[int, int] | None]:
     """
     For one clip: render PNG frames (base panel + marker at current position)
     and assemble into a 1-fps MP4. trim_start/trim_seconds restrict to a slice
@@ -1120,36 +1222,36 @@ def render_clip_marker_video(
     try:
         from PIL import Image, ImageDraw
     except ImportError:
-        return False
+        return False, None
 
     # Per-clip points
     gpx = find_gpx_for(clip.timestamp, *gps_dirs)
     if gpx is None:
-        return False
+        return False, None
     clip_points = parse_gpx_track(gpx)
     if not clip_points:
-        return False
+        return False, None
+    # Reject scrambled buffers (parking-mode stale-data dumps)
+    if _gpx_is_scrambled(clip_points):
+        return False, None
 
     # Map each clip second to the nearest pixel on the drive map
     n_full = clip.duration
-    # Build a per-second pixel sequence (clip GPX may have fewer entries than `n_full`)
     per_second_full: list[tuple[int, int]] = []
     if len(clip_points) >= n_full:
         for i in range(n_full):
             lat = clip_points[i][0]; lon = clip_points[i][1]
             per_second_full.append(_nearest_pixel(lat, lon, drive_points, drive_pixels))
     else:
-        # Stretch the available points across n_full seconds
         for i in range(n_full):
             j = min(int(i * len(clip_points) / n_full), len(clip_points) - 1)
             lat = clip_points[j][0]; lon = clip_points[j][1]
             per_second_full.append(_nearest_pixel(lat, lon, drive_points, drive_pixels))
 
-    # Restrict to the trim window
     duration = trim_seconds if trim_seconds is not None else (n_full - trim_start)
     per_second = per_second_full[trim_start:trim_start + duration]
     if not per_second:
-        return False
+        return False, None
 
     # Render frames to a temp dir, then ffmpeg the sequence
     work = out_video.with_suffix(".frames")
@@ -1163,7 +1265,6 @@ def render_clip_marker_video(
         d.ellipse([px-6, py-6, px+6, py+6], fill=(214, 39, 40))
         frame.save(work / f"f_{i:04d}.png", "PNG")
 
-    # PNG sequence -> mp4 at 1fps
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
         "-framerate", "1",
@@ -1174,27 +1275,40 @@ def render_clip_marker_video(
     ]
     run_ffmpeg(cmd)
 
-    # Clean up the PNGs (best-effort; tolerate sandboxed / non-removable files)
     for png in work.glob("*.png"):
-        try:
-            png.unlink()
-        except OSError:
-            pass
-    try:
-        work.rmdir()
-    except OSError:
-        pass
-    return True
+        try: png.unlink()
+        except OSError: pass
+    try: work.rmdir()
+    except OSError: pass
+
+    last_pixel = per_second[-1] if per_second else None
+    return True, last_pixel
 
 
-def _render_static_panel_video(base_panel: object, duration: int, out_video: Path) -> bool:
-    """Make a video of just the base panel (no marker) for clips with no GPS data."""
+def _render_static_panel_video(
+    base_panel: object,
+    duration: int,
+    out_video: Path,
+    marker_pixel: tuple[int, int] | None = None,
+) -> bool:
+    """
+    Make a video of just the base panel for clips with no GPS data.
+    If marker_pixel is given, paint a frozen marker dot at that pixel so the
+    map widget shows "we're still here" instead of an empty panel.
+    """
     try:
-        from PIL import Image  # noqa: F401
+        from PIL import Image, ImageDraw   # noqa: F401
     except ImportError:
         return False
     tmp_png = out_video.with_suffix(".still.png")
-    base_panel.convert("RGB").save(tmp_png, "PNG")
+    img = base_panel.convert("RGB").copy()
+    if marker_pixel is not None:
+        px, py = marker_pixel
+        d = ImageDraw.Draw(img)
+        r = 11
+        d.ellipse([px-r, py-r, px+r, py+r], fill=(255, 255, 255), outline=(0, 0, 0), width=2)
+        d.ellipse([px-6, py-6, px+6, py+6], fill=(214, 39, 40))
+    img.save(tmp_png, "PNG")
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
         "-loop", "1", "-framerate", "1", "-t", str(duration),
@@ -1319,21 +1433,19 @@ def build_filter_complex(
         f"scale={OUT_W}:{OUT_H},setsar=1,fps={OUT_FPS}[front];"
     )
     if REAR_PIP_ENABLED:
-        # Overlay coords by position, all relative to the main 1920x1080 frame.
+        # Overlay coords by position. Only positions that don't collide with
+        # the speed readout (bottom-right) or timestamp (bottom-left) are
+        # offered — bottom-middle plus the three top corners.
         pos = (REAR_PIP_POSITION or "bottom-middle").lower()
         m = PIP_MARGIN
         ov_x = {
-            "bottom-left":   f"{m}",
             "bottom-middle": "(W-w)/2",
-            "bottom-right":  f"W-w-{m}",
             "top-left":      f"{m}",
             "top-middle":    "(W-w)/2",
             "top-right":     f"W-w-{m}",
         }.get(pos, "(W-w)/2")
         ov_y = {
-            "bottom-left":   f"H-h-{m}",
             "bottom-middle": f"H-h-{m}",
-            "bottom-right":  f"H-h-{m}",
             "top-left":      f"{m}",
             "top-middle":    f"{m}",
             "top-right":     f"{m}",
@@ -1506,20 +1618,31 @@ def encode_clip(
             "-crf", X264_CRF,
         ]
 
+    # When we want audio in the output AND the source clip has no audio
+    # stream, we must inject a silent anullsrc input — otherwise the
+    # resulting intermediate would have no audio track, and the concat
+    # demuxer silently drops audio across the WHOLE output for every clip
+    # past the first audio-less one.
+    use_rear = REAR_PIP_ENABLED and clip.rear is not None
+    source_has_audio = (not no_audio) and file_has_audio(clip.front)
+    need_silent_audio = (not no_audio) and not source_has_audio
+
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning"]
     # -ss before -i seeks to the trim_start; pts is rebased to 0 in the output,
     # which is what drawtext (now using actual_epoch) expects.
     if trim_start:
         cmd += ["-ss", str(trim_start)]
     cmd += ["-i", str(clip.front)]
-    # Rear input only when we have one and we're configured to use it.
-    use_rear = REAR_PIP_ENABLED and clip.rear is not None
     if use_rear:
         if trim_start:
             cmd += ["-ss", str(trim_start)]
         cmd += ["-i", str(clip.rear)]
     if with_map_widget:
         cmd += ["-i", str(map_video)]
+    if need_silent_audio:
+        # Tracks the input index of the silent audio: appended after all video inputs.
+        cmd += ["-f", "lavfi", "-i",
+                "anullsrc=channel_layout=stereo:sample_rate=48000"]
     if trim_seconds is not None:
         cmd += ["-t", str(trim_seconds)]
     # Optional final downscale (output_height != 0) and audio strip
@@ -1527,10 +1650,21 @@ def encode_clip(
         filt = filt.replace("[out]", "[pre_scaled];[pre_scaled]scale=-2:" +
                             str(output_height) + "[out]", 1)
     cmd += ["-filter_complex", filt, "-map", "[out]"]
-    if not no_audio:
-        cmd += ["-map", "0:a?", "-c:a", "aac", "-b:a", "96k"]
-    else:
+    if no_audio:
         cmd += ["-an"]
+    else:
+        # Normalize audio to a consistent 48 kHz stereo AAC across every
+        # intermediate (sources are typically 16 kHz mono, the transition
+        # slide is 48 kHz stereo from anullsrc). Without this, the concat
+        # demuxer hits a layout mismatch at the first transition and silently
+        # drops audio for the rest of the output.
+        if source_has_audio:
+            cmd += ["-map", "0:a:0"]
+        else:
+            n_inputs = 1 + (1 if use_rear else 0) + (1 if with_map_widget else 0) + 1
+            silent_idx = n_inputs - 1
+            cmd += ["-map", f"{silent_idx}:a", "-shortest"]
+        cmd += ["-c:a", "aac", "-b:a", "96k", "-ar", "48000", "-ac", "2"]
     cmd += [
         *venc,
         "-pix_fmt", "yuv420p",
@@ -1607,7 +1741,7 @@ def generate_transition_slide(
         "-map", "0:v",
     ]
     if not no_audio:
-        cmd += ["-map", "1:a", "-c:a", "aac", "-b:a", "96k"]
+        cmd += ["-map", "1:a", "-c:a", "aac", "-b:a", "96k", "-ar", "48000", "-ac", "2"]
     cmd += [*venc, "-pix_fmt", "yuv420p", "-shortest", str(out_video)]
     run_ffmpeg(cmd)
 
@@ -1692,8 +1826,21 @@ def main() -> int:
     global SPEED_MARGIN_V, SPEED_MARGIN_R, SPEED_FONT_SIZE
     global VT_BITRATE, VT_MAXRATE, X264_PRESET, X264_CRF
     global SPEED_UNIT
-    PIP_W              = ci("rear_pip_w",         PIP_W)
-    PIP_H              = ci("rear_pip_h",         PIP_H)
+    # Rear PiP dimensions. If only one of width/height is set in config, the
+    # other is computed from the rear camera's native 16:9 aspect ratio so
+    # the user doesn't accidentally squash the picture.
+    REAR_SRC_RATIO = 16 / 9            # DDPAI rear is 1920x1080
+    has_w = "rear_pip_w" in cfg
+    has_h = "rear_pip_h" in cfg
+    if has_w and not has_h:
+        PIP_W = ci("rear_pip_w", PIP_W)
+        PIP_H = int(round(PIP_W / REAR_SRC_RATIO)) & ~1   # keep even
+    elif has_h and not has_w:
+        PIP_H = ci("rear_pip_h", PIP_H)
+        PIP_W = int(round(PIP_H * REAR_SRC_RATIO)) & ~1
+    else:
+        PIP_W = ci("rear_pip_w", PIP_W)
+        PIP_H = ci("rear_pip_h", PIP_H)
     PIP_MARGIN         = ci("rear_pip_margin",    PIP_MARGIN)
     REAR_PIP_POSITION  = cs("rear_pip_position",  REAR_PIP_POSITION).lower()
     REAR_PIP_ENABLED   = cb("rear_pip",           REAR_PIP_ENABLED)
@@ -1765,9 +1912,37 @@ def main() -> int:
     ap.add_argument("--parking-min-secs", type=int,
                     default=ci("parking_min_secs", DEFAULT_PARKING_MIN_SECS),
                     help=f"Minimum length (s) of a parked run before we skip it")
+    # Legacy combined knob (still accepted) plus per-side overrides.
     ap.add_argument("--parking-pad-secs", type=int,
                     default=ci("parking_pad_secs", DEFAULT_PARKING_PAD_SECS),
-                    help=f"Seconds kept at each end of a skipped parking run")
+                    help="DEPRECATED: shorthand for both --parking-entry-pad and "
+                         "--parking-exit-pad. Prefer the explicit pair.")
+    ap.add_argument("--parking-entry-pad", type=int,
+                    default=ci("parking_entry_pad",
+                               ci("parking_pad_secs", DEFAULT_PARKING_ENTRY_PAD)),
+                    help="Seconds of footage BEFORE the Fast-forwarding slide "
+                         "(entry slice length). Default 5.")
+    ap.add_argument("--parking-exit-pad", type=int,
+                    default=ci("parking_exit_pad",
+                               ci("parking_pad_secs", DEFAULT_PARKING_EXIT_PAD)),
+                    help="Seconds of footage AFTER the FF slide before "
+                         "drive-resume (exit slice leading padding). Default 10.")
+    ap.add_argument("--inter-clip-gap-secs", type=int,
+                    default=ci("inter_clip_gap_secs", DEFAULT_INTER_CLIP_GAP_SECS),
+                    help="Insert a 'Fast forwarding…' transition slide "
+                         "whenever the wall-clock gap between consecutive "
+                         "clips exceeds this many seconds (default 60).")
+    ap.add_argument("--exit-skip-secs", type=int,
+                    default=ci("exit_skip_secs", DEFAULT_EXIT_SKIP_SECS),
+                    help="Standard seek into the exit clip after a parking "
+                         "gap. Drive-resume detection refines this when GPS "
+                         "clearly shows continuous motion; otherwise this "
+                         "value is used as-is (default 30).")
+    ap.add_argument("--drive-resume-sustain-secs", type=int,
+                    default=ci("drive_resume_sustain_secs", DRIVE_RESUME_SUSTAIN_SECS),
+                    help="Seconds of continuous GPS motion required to "
+                         "consider a moving block as 'real drive' for "
+                         "exit-slice anchoring (default 30).")
     ap.add_argument("--output-height", type=int, default=output_height_cfg,
                     help="Downscale the final composite to this height in px (0 = native)")
     args = ap.parse_args()
@@ -1980,7 +2155,7 @@ def main() -> int:
                 action_for[next_idx] = "exit"
                 # Wall-clock seconds elapsed between the entry's last frame and
                 # the exit's first frame.
-                entry_end = group[run_start].dt + timedelta(seconds=args.parking_pad_secs)
+                entry_end = group[run_start].dt + timedelta(seconds=args.parking_entry_pad)
                 exit_start = group[next_idx].dt
                 skipped_secs_for[run_start] = max(
                     0.0, (exit_start - entry_end).total_seconds()
@@ -1990,19 +2165,25 @@ def main() -> int:
             saved = 0
             for s, e in parking_runs:
                 next_idx = e + 1
-                # How much wall-clock time we replace with (pad+TRANSITION+pad)
                 if next_idx < len(group):
                     span = (group[next_idx].dt - group[s].dt).total_seconds() \
-                        + args.parking_pad_secs
+                        + args.parking_exit_pad
                 else:
                     span = (e - s + 1) * group[s].duration
-                saved += int(span - 2 * args.parking_pad_secs - TRANSITION_SECS)
+                saved += int(span - args.parking_entry_pad
+                             - args.parking_exit_pad - TRANSITION_SECS)
             print(f"  parking: {len(parking_runs)} run(s) skipped, "
                   f"~{fmt_secs(max(saved, 0))} cut from the output")
 
-        pad = args.parking_pad_secs
+        entry_pad = args.parking_entry_pad
+        exit_pad  = args.parking_exit_pad
 
         intermediates: list[Path] = []
+        prev_emitted_clip: Clip | None = None
+        # Last known good marker pixel — persisted across clips so parked /
+        # scrambled-GPS clips show a frozen dot at the last real location
+        # instead of disappearing or jumping to the route's start.
+        last_marker_pixel: tuple[int, int] | None = None
         for ci, clip in enumerate(group, 1):
             ci0 = ci - 1
             action = action_for.get(ci0)
@@ -2011,19 +2192,47 @@ def main() -> int:
             if action == "skip":
                 continue
 
+            # Inter-clip gap detection: insert a 'Fast forwarding…' slide when
+            # the wall-clock distance from the previous emitted clip exceeds
+            # the threshold. Parking-run exits ALREADY have their own FF
+            # inserted by the entry side, so skip in that case.
+            if prev_emitted_clip is not None and action != "exit":
+                prev_end = prev_emitted_clip.dt + timedelta(seconds=prev_emitted_clip.duration)
+                gap_secs = (clip.dt - prev_end).total_seconds()
+                if gap_secs > args.inter_clip_gap_secs:
+                    gap_trans = work_dir / f"{group_kind}{idx:02d}_clip{ci:03d}_gap_transition.mp4"
+                    if not gap_trans.exists():
+                        print(f"        + gap transition slide ({TRANSITION_SECS}s, "
+                              f"~{_fmt_skip_duration(gap_secs)})")
+                        generate_transition_slide(
+                            gap_trans, TRANSITION_SECS, font_path, with_map_widget, use_vt,
+                            skipped_secs=gap_secs,
+                            output_height=args.output_height,
+                            no_audio=args.no_audio,
+                        )
+                    intermediates.append(gap_trans)
+
             # Entry slice: first `pad` seconds of the first parked clip.
-            # Exit slice: anchored to the actual drive-resume moment within the
-            # next moving clip. We back up by `pad` seconds from that moment
-            # (so the slice ends just as the car starts moving) and run to the
-            # end of the clip. If the clip was already moving from second 0
-            # (engine started after motion began), we just play it from the top.
+            # Exit slice: anchored to the actual drive-resume moment within
+            # the next moving clip. When sustained motion is detected, back
+            # up by `pad` seconds so the slice ends just as the wheels start
+            # turning. When the GPS for the first-clip-after-parking is
+            # corrupted (the dashcam often flushes stale buffered data
+            # there), fall back to skipping a configurable amount of clip
+            # head so we land closer to the actual drive moment.
             trim_start = 0
             trim_seconds: int | None = None
             if action == "entry":
-                trim_seconds = pad
+                trim_seconds = entry_pad
             elif action == "exit":
-                drive_sec = find_drive_resume_second(clip, gps_dirs)
-                trim_start = max(0, drive_sec - pad)
+                drive_sec = find_drive_resume_second(
+                    clip, gps_dirs,
+                    sustain_secs=args.drive_resume_sustain_secs,
+                )
+                if drive_sec is None:
+                    trim_start = min(args.exit_skip_secs, max(0, clip.duration - exit_pad))
+                else:
+                    trim_start = max(0, drive_sec - exit_pad)
                 trim_seconds = None     # run to end of clip
 
             # Per-slice intermediate filename. Suffix the action so re-runs
@@ -2036,15 +2245,18 @@ def main() -> int:
             if with_map_widget:
                 map_video = inter.with_suffix(".map.mp4")
                 if not map_video.exists():
-                    ok = render_clip_marker_video(
+                    ok, last_pixel = render_clip_marker_video(
                         clip, base_panel, group_track, group_pixels, gps_dirs, map_video,
                         trim_start=trim_start, trim_seconds=trim_seconds,
                     )
+                    if ok and last_pixel is not None:
+                        last_marker_pixel = last_pixel
                     if not ok:
                         ok = _render_static_panel_video(
                             base_panel,
                             trim_seconds if trim_seconds is not None else clip.duration,
                             map_video,
+                            marker_pixel=last_marker_pixel,
                         )
                         if not ok:
                             map_video = None
@@ -2078,6 +2290,9 @@ def main() -> int:
                     )
                 intermediates.append(trans)
 
+            # Remember this clip so the next iteration can measure the gap.
+            prev_emitted_clip = clip
+
         print(f"  concatenating {len(intermediates)} clips -> {final.name}")
         concat_clips(intermediates, final)
         print(f"  ✓ {final}")
@@ -2087,6 +2302,9 @@ def main() -> int:
                 p.unlink(missing_ok=True)
                 p.with_suffix(".speed.srt").unlink(missing_ok=True)
                 p.with_suffix(".map.mp4").unlink(missing_ok=True)
+            # Also clean any *_gap_transition.mp4 files
+            for p in work_dir.glob(f"{group_kind}{idx:02d}_clip*_gap_transition.mp4"):
+                p.unlink(missing_ok=True)
 
     # Tidy up empty intermediate dir
     if not args.keep_intermediates:

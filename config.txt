@@ -70,8 +70,11 @@
 # Leave watermark_text empty to disable. Position one of:
 #   bottom-right (default), bottom-left, top-right, top-left
 # Bottom-right sits BELOW the speed readout in the same corner.
+# NOTE: font_size is in literal pixels (unlike the speed overlay, which is
+# libass-scaled ~3.75x at 1080p). On 1080p: 16 is barely visible, 28 is
+# comfortably readable, 36-40 is prominent.
 #watermark_text = https://github.com/raoulsson/dashcam-exporter
-#watermark_font_size = 20
+#watermark_font_size = 28
 #watermark_position = bottom-right
 # Distance from the closest horizontal / vertical edge in pixels.
 #watermark_margin_h = 8
@@ -107,10 +110,13 @@
 #rear_pip = true
 
 # Where the PiP sits inside the main video frame:
-#   bottom-middle (default), bottom-left, bottom-right,
-#   top-middle,              top-left,    top-right
+#   bottom-middle (default), top-left, top-middle, top-right
+# (the bottom-left/right corners are reserved for timestamp + speed/watermark
+# so those positions aren't offered)
 #rear_pip_position = bottom-middle
 
+# Set both, or set just one and the other auto-computes from the rear
+# camera's 16:9 native aspect (so you don't accidentally squash the picture).
 #rear_pip_w      = 662
 #rear_pip_h      = 372
 #rear_pip_margin = 24
@@ -142,8 +148,42 @@
 # 300 = 5 minutes. Shorter values are more aggressive.
 #parking_min_secs = 300
 
-# How many seconds of footage to keep at each end of a skipped parking run.
-#parking_pad_secs = 10
+# How long the entry slice is (BEFORE the Fast-forwarding slide).
+# This is the bit where you see yourself parking / getting out.
+#parking_entry_pad = 5
+
+# How much pre-drive padding to keep AFTER the Fast-forwarding slide.
+# Larger = you see more "about to drive" before the actual drive-away.
+#parking_exit_pad = 10
+
+# Legacy combined knob — kept for back-compat. If parking_entry_pad /
+# parking_exit_pad above aren't set, this value is used for both.
+#parking_pad_secs = 5
+
+# Exit-clip handling after a parking gap.
+#
+# Drive-resume detection looks for N consecutive seconds of GPS motion
+# (>5 km/h, see drive_resume_sustain_secs). When found, the exit slice
+# anchors `parking_exit_pad` seconds before that moment.
+#
+# Most parking-mode dashcams produce GPS that's too scrambled to detect
+# reliably (random motion-triggered "passing car / pedestrian" wakeups that
+# get flushed into the first new clip), so the script falls through to the
+# value below and seeks this many seconds into the exit clip. Set to 0 to
+# play exit clips from second 0; 45 is the default and tends to land within
+# ~10 seconds of real drive-away on a 60-second clip.
+#exit_skip_secs = 45
+
+# How long a moving GPS block must be to count as "real drive" rather than
+# parking-mode jitter. Higher = stricter (more often falls through to
+# exit_skip_secs). Try 60 if 30 still fires on passing traffic.
+#drive_resume_sustain_secs = 30
+
+# Inter-clip gap detection: insert a 'Fast forwarding…' slide whenever the
+# wall-clock distance between consecutive clips is longer than this. Catches
+# engine-off intervals that AREN'T preceded by parked footage, so the
+# parking-run detector doesn't fire for them. Default 60 (1 minute).
+#inter_clip_gap_secs = 60
 
 
 # ============================================================================
