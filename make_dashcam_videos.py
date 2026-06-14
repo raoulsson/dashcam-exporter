@@ -235,6 +235,32 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # Black gutter between the main video and the panel.
 #map_panel_gutter_px = 2
 
+# Padding (px) reserved around the route's bounding box inside the map panel.
+# Smaller values produce a tighter frame around the route. Default 12.
+#map_track_pad = 12
+
+# Bump the auto-chosen OSM tile zoom by this many integer steps. staticmap's
+# auto-zoom rounds DOWN to fit the bbox; the smaller map_track_pad already
+# tightens the frame, so 0 (default) keeps a comfortable amount of context.
+# Set to 1 for ~2x detail (route endpoints may sit right at the panel edges),
+# 2 for very tight crops (endpoints may clip outside the panel).
+#map_zoom_boost = 0
+
+# Drop GPS segments shorter than this many consecutive fixes (= seconds at the
+# dashcam's 1 Hz sample rate). Tiny segments are usually phantom fixes — the
+# GPS briefly reports a position kilometers away, then snaps back — and would
+# otherwise bloat the map's bounding box so the auto-zoom shows a regional
+# view rather than the actual drive. Default 5. Raise to be stricter, lower
+# to 1 to keep every fix.
+#gps_segment_min_points = 5
+
+# Per-clip GPX time-window. The DDPAI dashcam sometimes dumps stale GPS data
+# from a previous drive into the start of a new clip's GPX file (parking-mode
+# buffer leftovers). When the parsed points span much more than this many
+# seconds, only the densest window of this length is kept — which is the
+# actual clip's data. Default 60 (one clip duration). Set to 0 to disable.
+#clip_gpx_window_seconds = 60
+
 
 # ============================================================================
 # PARKING SKIP — drop long standstills, replace with a 'Fast forwarding…' slide
@@ -546,10 +572,27 @@ def parse_gpx_speeds(gpx_path: Path) -> list[float]:
     return [pt[2] for pt in parse_gpx_track(gpx_path)]
 
 
-def parse_gpx_track(gpx_path: Path) -> list[tuple[float, float, float, datetime]]:
+# How long (seconds) a single clip's GPX file is expected to span. The DDPAI
+# dashcam occasionally dumps stale GPS data from a previous drive into the
+# first clip of a new drive (parking-mode buffer leftovers). When the parsed
+# points span much more than this, parse_gpx_track keeps only the densest
+# window of this many seconds — which is the actual clip's data.
+CLIP_GPX_WINDOW_SECONDS = 60
+
+
+def parse_gpx_track(gpx_path: Path,
+                    window_seconds: int | None = None,
+                    ) -> list[tuple[float, float, float, datetime]]:
     """
     Return a list of (lat, lon, kmh, utc_datetime) tuples parsed from $GPRMC lines.
     Skips fixes marked invalid (status != 'A').
+
+    If the parsed points span much more than `window_seconds`, only the
+    densest window of that length is returned — discarding stale fixes the
+    dashcam firmware bundled in from a previous drive (a real-world failure
+    mode where drive N's clip GPX contains data from drive N-1's last
+    location, which would otherwise blow up the drive's bounding box and
+    make the marker animation jump across town).
     """
     points: list[tuple[float, float, float, datetime]] = []
     try:
@@ -580,7 +623,33 @@ def parse_gpx_track(gpx_path: Path) -> list[tuple[float, float, float, datetime]
                 points.append((lat, lon, kmh, dt))
     except OSError:
         pass
-    return points
+    # Resolve default at call time so config-loaded changes to the global
+    # take effect (default-arg values would freeze at import time).
+    if window_seconds is None:
+        window_seconds = CLIP_GPX_WINDOW_SECONDS
+    if not points or window_seconds <= 0:
+        return points
+    # If everything already fits within 1.5x the expected clip window, the
+    # GPX is correctly scoped — return as-is. Common case, fast-path.
+    points.sort(key=lambda p: p[3])
+    if (points[-1][3] - points[0][3]).total_seconds() <= window_seconds * 1.5:
+        return points
+    # File contains data from multiple time-disjoint recording sessions.
+    # The DDPAI firmware writes stale parking-mode-buffer data FIRST, then
+    # the actual clip's live recording SECOND. Density doesn't reliably tell
+    # them apart (the stale block can be longer than the real one if the
+    # real clip had weak GPS lock), so we pick by TIME position instead:
+    # walk backward from the latest fix, and keep accumulating until we hit
+    # a gap larger than `window_seconds`. That last contiguous cluster is
+    # the real clip data. If the file is a single uninterrupted run with no
+    # such gap, we keep everything.
+    cluster_start = 0
+    for i in range(len(points) - 1, 0, -1):
+        gap = (points[i][3] - points[i - 1][3]).total_seconds()
+        if gap > window_seconds:
+            cluster_start = i
+            break
+    return points[cluster_start:]
 
 
 def gather_track(clips: list[Clip], gps_dirs: tuple[Path | None, ...]) -> list[tuple[float, float, float, datetime]]:
@@ -766,6 +835,15 @@ import math
 SEGMENT_GAP_SECONDS = 30
 SEGMENT_GAP_METERS  = 200
 
+# A "real" driving segment should contain at least this many consecutive 1 Hz
+# GPS fixes (= seconds). Anything shorter is treated as GPS noise — a phantom
+# fix that landed kilometers away from the real position, broke segmentation,
+# but didn't trigger enough follow-up jumps to become its own segment chain.
+# These tiny outlier segments would otherwise blow up the route's bounding box
+# and pull the map widget's auto-zoom out to a regional view that has nothing
+# to do with the actual drive.
+SEGMENT_MIN_POINTS  = 5
+
 
 def _haversine_km(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> float:
     R = 6371.0
@@ -776,12 +854,20 @@ def _haversine_km(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> flo
     return 2 * R * math.asin(math.sqrt(h))
 
 
-def segment_track(points: list[tuple[float, float, float, datetime]]
+def segment_track(points: list[tuple[float, float, float, datetime]],
+                  min_points: int = SEGMENT_MIN_POINTS,
                   ) -> list[list[tuple[float, float, float, datetime]]]:
     """
     Split the flat list of GPS fixes into contiguous-driving segments. Any
     consecutive pair that is more than SEGMENT_GAP_SECONDS apart in time OR
     more than SEGMENT_GAP_METERS apart in distance starts a new segment.
+
+    Segments shorter than `min_points` fixes are pruned as GPS noise (a few
+    isolated phantom fixes that happen to fall outside the SEGMENT_GAP
+    threshold from their neighbours but don't represent real driving). Pass
+    `min_points=0` to keep every segment regardless of length. If pruning
+    would remove every segment, the unfiltered list is returned so the
+    caller still has something to work with.
     """
     if not points:
         return []
@@ -793,6 +879,10 @@ def segment_track(points: list[tuple[float, float, float, datetime]]
             segments.append([cur])
         else:
             segments[-1].append(cur)
+    if min_points > 1:
+        pruned = [s for s in segments if len(s) >= min_points]
+        if pruned:
+            return pruned
     return segments
 
 
@@ -1001,7 +1091,14 @@ def write_gpx_export(out_path: Path, points: list[tuple[float, float, float, dat
 
 MAP_PANEL_SIZE = 480           # square panel size in output pixels (480x480)
 MAP_BG_COLOR   = (245, 243, 235)
-MAP_TRACK_PAD  = 28            # px padding around bounding box of the route
+MAP_TRACK_PAD  = 12            # px padding around bounding box of the route
+# Bump the auto-chosen OSM tile zoom by this many integer steps. staticmap's
+# auto-zoom rounds DOWN to fit the bbox; the smaller MAP_TRACK_PAD above
+# already tightens the frame, so 0 (default) keeps a comfortable amount of
+# context around the route. Set to 1 for ~2x detail (route endpoints may sit
+# right at the panel edges on elongated routes), 2 for very tight (endpoints
+# may clip outside the panel).
+MAP_ZOOM_BOOST = 0
 
 
 def _speed_color(kmh: float) -> tuple[int, int, int]:
@@ -1182,7 +1279,17 @@ def render_base_route_panel(points: list[tuple[float, float, float, datetime]],
             m.add_marker(SMMarker((segments[0][0][1], segments[0][0][0]), "#1a9850", 9))
         if segments and segments[-1]:
             m.add_marker(SMMarker((segments[-1][-1][1], segments[-1][-1][0]), "#2b6cb0", 9))
-        img = m.render()
+        # staticmap's auto-zoom rounds DOWN to fit, leaving dead space on
+        # short routes. Compute its choice and bump by MAP_ZOOM_BOOST for a
+        # tighter frame. Clamp to OSM's max zoom 19.
+        zoom_override = None
+        if MAP_ZOOM_BOOST and hasattr(m, "_calculate_zoom"):
+            try:
+                auto_z = m._calculate_zoom()
+                zoom_override = min(19, auto_z + MAP_ZOOM_BOOST)
+            except Exception:
+                zoom_override = None
+        img = m.render(zoom=zoom_override) if zoom_override else m.render()
 
         # Re-project on top of staticmap's projection so the marker lands
         # precisely. staticmap's private API has shifted between versions
@@ -1890,6 +1997,7 @@ def main() -> int:
     # by build_filter_complex et al. at call-time, so updating here is sufficient).
     global PIP_W, PIP_H, PIP_MARGIN, REAR_PIP_POSITION, REAR_PIP_ENABLED
     global MAP_PANEL_SIZE, MAP_PANEL_POSITION, MAP_PANEL_GUTTER_PX
+    global MAP_TRACK_PAD, MAP_ZOOM_BOOST, SEGMENT_MIN_POINTS, CLIP_GPX_WINDOW_SECONDS
     global FRONT_CROP_TOP, FRONT_CROP_BOTTOM
     global COPYRIGHT_TEXT, COPYRIGHT_FONT_SIZE, COPYRIGHT_POSITION
     global COPYRIGHT_MARGIN_H, COPYRIGHT_MARGIN_V
@@ -1917,6 +2025,10 @@ def main() -> int:
     MAP_PANEL_SIZE     = ci("map_panel_w",        MAP_PANEL_SIZE)
     MAP_PANEL_POSITION = cs("map_panel_position", MAP_PANEL_POSITION).lower()
     MAP_PANEL_GUTTER_PX = ci("map_panel_gutter_px", MAP_PANEL_GUTTER_PX)
+    MAP_TRACK_PAD      = ci("map_track_pad",      MAP_TRACK_PAD)
+    MAP_ZOOM_BOOST     = ci("map_zoom_boost",     MAP_ZOOM_BOOST)
+    SEGMENT_MIN_POINTS = ci("gps_segment_min_points", SEGMENT_MIN_POINTS)
+    CLIP_GPX_WINDOW_SECONDS = ci("clip_gpx_window_seconds", CLIP_GPX_WINDOW_SECONDS)
     FRONT_CROP_TOP     = ci("front_crop_top",     FRONT_CROP_TOP)
     FRONT_CROP_BOTTOM  = ci("front_crop_bottom",  FRONT_CROP_BOTTOM)
     COPYRIGHT_TEXT     = cs("watermark_text",     COPYRIGHT_TEXT)
@@ -2252,7 +2364,26 @@ def main() -> int:
         # Done unconditionally — even when the final .mp4 already exists — so the
         # user can refresh the sidecars after segmentation/render fixes without
         # re-encoding 1.9 hours of video.
-        group_track = gather_track(group, gps_dirs) if with_speed else []
+        group_track_raw = gather_track(group, gps_dirs) if with_speed else []
+        # Prune GPS noise once, at the top of the pipeline. segment_track
+        # drops segments shorter than SEGMENT_MIN_POINTS — those are usually
+        # a few isolated phantom fixes that fall outside the gap thresholds
+        # but don't represent real driving. Flatten back to a single list so
+        # the rest of the pipeline (sidecars, stats, burn-in panel, per-second
+        # marker animation) all see the same set of points; otherwise the
+        # burn-in's auto-zoomed bbox gets pulled wide by stray outlier fixes
+        # that the leaflet sidecar happens to render less prominently.
+        if group_track_raw:
+            pruned_pts: list[tuple[float, float, float, datetime]] = []
+            for seg in segment_track(group_track_raw):
+                pruned_pts.extend(seg)
+            n_pruned = len(group_track_raw) - len(pruned_pts)
+            group_track = pruned_pts
+            if n_pruned:
+                print(f"  gps: pruned {n_pruned} noise-segment "
+                      f"fix{'es' if n_pruned != 1 else ''} from {len(group_track_raw)} raw")
+        else:
+            group_track = []
         if not args.no_map_sidecars and group_track:
             title = (f"Drive {idx} — {start:%Y-%m-%d %H:%M}" if not args.daily
                      else f"Day — {start:%Y-%m-%d}")
