@@ -281,5 +281,6 @@ dashcam-exporter/
 
 ## License
 
-Personal-use project — no formal license. If you want to fork or share, drop
-a note to the original author.
+MIT — see [LICENSE](LICENSE).
+
+Copyright © 2025 Raoul Marc Schmidiger ([hello@raoulsson.com](mailto:hello@raoulsson.com)).
