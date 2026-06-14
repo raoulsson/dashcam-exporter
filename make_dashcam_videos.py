@@ -270,6 +270,13 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # parking-run detector doesn't fire for them. Default 60 (1 minute).
 #inter_clip_gap_secs = 60
 
+# Auto-skip groups that have fewer than this many clips. These are typically
+# loop-recording fragments left over after the SD card rolled around — a
+# minute or two of footage from a session whose first portion has been
+# overwritten. To force-encode a fragment, pass its index via --drives (the
+# min-clips check is bypassed when --drives is explicit).
+#min_clips_per_group = 4
+
 
 # ============================================================================
 # OUTPUT SIZE / QUALITY
@@ -316,6 +323,11 @@ DEFAULT_EXIT_SKIP_SECS      = 45
 # engine-off intervals that DIDN'T leave parked-but-recording footage on
 # either side (so the parking-run detector doesn't fire for them).
 DEFAULT_INTER_CLIP_GAP_SECS = 60
+# Minimum number of clips a group must have before it gets auto-encoded.
+# Smaller groups are typically loop-recording fragments left over after the
+# SD card rolled around. The user can still force-encode them by naming the
+# group index explicitly via --drives.
+DEFAULT_MIN_CLIPS_PER_GROUP = 4
 TRANSITION_SECS             = 2      # length of the "Fast forwarding..." slide
 TRANSITION_TEXT             = "Fast forwarding..."
 TRANSITION_FONT_SIZE        = 72
@@ -1927,6 +1939,11 @@ def main() -> int:
                                ci("parking_pad_secs", DEFAULT_PARKING_EXIT_PAD)),
                     help="Seconds of footage AFTER the FF slide before "
                          "drive-resume (exit slice leading padding). Default 10.")
+    ap.add_argument("--min-clips-per-group", type=int,
+                    default=ci("min_clips_per_group", DEFAULT_MIN_CLIPS_PER_GROUP),
+                    help="Auto-skip groups with fewer than this many clips "
+                         "(typical loop-recording fragments). Force-encode "
+                         "anyway by naming the group via --drives. Default 4.")
     ap.add_argument("--inter-clip-gap-secs", type=int,
                     default=ci("inter_clip_gap_secs", DEFAULT_INTER_CLIP_GAP_SECS),
                     help="Insert a 'Fast forwarding…' transition slide "
@@ -2062,10 +2079,25 @@ def main() -> int:
               f"{len(g):3d} clips  ~{fmt_secs(secs)}")
     print(f"\nTotal: ~{fmt_secs(total_secs)} of footage")
 
+    # When --drives is given, ONLY those groups run (and the min-clips filter
+    # is bypassed for them — user explicitly asked). Otherwise, every group
+    # that has at least min_clips_per_group clips runs.
+    explicit_set = set(args.drives) if args.drives else None
+    if explicit_set is not None:
+        wanted = explicit_set
+    else:
+        wanted = {i for i, g in enumerate(groups, 1)
+                  if len(g) >= args.min_clips_per_group}
+        skipped_small = [(i, len(g)) for i, g in enumerate(groups, 1)
+                         if len(g) < args.min_clips_per_group]
+        if skipped_small:
+            note = ", ".join(f"#{i} ({n} clip{'s' if n != 1 else ''})"
+                             for i, n in skipped_small)
+            print(f"\nAuto-skipping {len(skipped_small)} fragment {group_kind}(s): "
+                  f"{note}\n(force-encode by naming the index via --drives.)")
+
     if args.dry_run:
         return 0
-
-    wanted = set(args.drives) if args.drives else set(range(1, len(groups) + 1))
 
     work_dir = out_dir / ".intermediates"
     work_dir.mkdir(exist_ok=True)
@@ -2252,10 +2284,17 @@ def main() -> int:
                     if ok and last_pixel is not None:
                         last_marker_pixel = last_pixel
                     if not ok:
+                        # IMPORTANT: when trim_seconds is None the video runs
+                        # to the end of the clip, which is (duration - trim_start)
+                        # seconds long. The static map panel must match that
+                        # length exactly, otherwise hstack waits for the longer
+                        # stream and the front/rear frame freezes for the
+                        # remainder. (The bug used to show as a ~minute pause
+                        # right after the GPS-fix transition.)
+                        actual_dur = (trim_seconds if trim_seconds is not None
+                                      else (clip.duration - trim_start))
                         ok = _render_static_panel_video(
-                            base_panel,
-                            trim_seconds if trim_seconds is not None else clip.duration,
-                            map_video,
+                            base_panel, actual_dur, map_video,
                             marker_pixel=last_marker_pixel,
                         )
                         if not ok:

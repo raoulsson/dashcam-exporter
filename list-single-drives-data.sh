@@ -19,4 +19,4 @@ OPTS=()
 # OPTS+=(--out  "$HOME/Movies/Dashcam")
 # OPTS+=(--gap  120)
 
-python3 make_dashcam_videos.py --dry-run "${OPTS[@]}" "$@"
+python3 make_dashcam_videos.py --dry-run ${OPTS[@]+"${OPTS[@]}"} "$@"
