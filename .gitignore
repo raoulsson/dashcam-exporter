@@ -1,4 +1,22 @@
-._make_dashcam_videos.py
-.fseventsd
-DCIM
-__pycache__
+# Encoded outputs (typically pointed elsewhere via --out, but if anyone runs
+# the script with --out . these will land here)
+*.mp4
+*.html
+*.gpx
+*_links.txt
+
+# Per-run intermediates and the harvested GPX cache
+.intermediates/
+.gpx_cache/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
