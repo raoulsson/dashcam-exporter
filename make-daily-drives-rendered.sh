@@ -44,4 +44,27 @@ if [ "${#INDICES[@]}" -gt 0 ]; then
     OPTS+=(--drives "${INDICES[@]}")
 fi
 
-python3 make_dashcam_videos.py --daily ${OPTS[@]+"${OPTS[@]}"} "$@"
+# Tee stdout+stderr into a timestamped log file so every run leaves a
+# paper trail. After the run, copy that log next to each successfully
+# encoded .mp4 (as day_YYYY-MM-DD.log alongside day_YYYY-MM-DD.mp4) so
+# the log lives with the data it describes.
+LOG_DIR="${LOG_DIR:-./logs}"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/daily-$(date +%Y%m%d-%H%M%S).log"
+echo "logging to $LOG_FILE"
+
+# -u forces unbuffered stdout so per-clip progress shows in the tee output
+# instead of being held in Python's buffer until the run completes.
+python3 -u make_dashcam_videos.py --daily ${OPTS[@]+"${OPTS[@]}"} "$@" 2>&1 | tee "$LOG_FILE"
+RC="${PIPESTATUS[0]}"
+
+# Parse "  ✓ /full/path/to/foo.mp4" lines from the log and drop a copy of
+# the log next to each one as foo.log.
+while IFS= read -r mp4; do
+    [ -f "$mp4" ] || continue
+    log_dest="${mp4%.mp4}.log"
+    cp "$LOG_FILE" "$log_dest"
+    echo "  saved log copy → $log_dest"
+done < <(grep -oE '✓ [^ ]+\.mp4' "$LOG_FILE" | sed 's/^✓ //')
+
+exit "$RC"
