@@ -1,11 +1,20 @@
 # dashcam-exporter (for "DDPAI Mola N3 Pro" model)
 
 Turn the raw front + rear clips from a DDPAI dashcam SD card into one polished
-1080p/1440p (with side map) MP4 per drive or per day, with burned-in date/time,
-GPS speed, and an animated route map.
+MP4 per drive — or per day — with a moving GPS map widget, speed overlay,
+date/time burn-in, automatic parking-skip, and per-day HTML / GPX / Google
+Maps sidecars.
 
-Tested with **DDPAI Mola N3 Pro**. Should work with any
-DDPAI variant that lays out the card as:
+> **DDPAI only.** The card layout, GPS log format, and clip naming convention
+> are specific to DDPAI cameras. Tested with **DDPAI Mola N3 Pro**. Should work
+> with any DDPAI variant that uses the layout shown below.
+>
+> **Developed and tested on macOS.** It should work on Linux. **It has not
+> been tested on Windows** — the basics (Python, ffmpeg, paths) are all
+> cross-platform via `pathlib`, but font detection and default file paths are
+> tuned for macOS. If you try it on Windows please open an issue.
+
+Expected SD-card layout:
 
     /Volumes/NO NAME/DCIM/
         200video/front/   YYYYMMDDhhmmss_NNNN.mp4
@@ -14,62 +23,86 @@ DDPAI variant that lays out the card as:
         203gps/tar/       YYYYMMDDhhmmss_NNNN.git          # tarred NMEA logs
 
 
-## What it does
+## What you get
 
-For each "drive" (a run of consecutive clips, default ≤90s gap) — or each
+For each "drive" (a run of consecutive clips, default ≤90 s gap) — or each
 calendar day in `--daily` mode — the script produces:
 
 | File | What it is |
 |------|------------|
-| `drive_NN_YYYY-MM-DD_HH-MM.mp4` | Final video. 2400×1080 (with map widget) or 1920×1080. |
-| `drive_NN_…html`                | Self-contained Leaflet/OSM interactive map. |
-| `drive_NN_…gpx`                 | Standards-compliant GPX. Opens in Google Earth, Strava, Maps.me, Komoot. |
-| `drive_NN_…_links.txt`          | Google Maps + Apple Maps URLs and trip stats. |
+| `drive_NN_YYYY-MM-DD_HH-MM.mp4` | Final video. 2402×1080 with map widget, or 1920×1080 without. |
+| `drive_NN_….html`                | Self-contained Leaflet/OSM interactive map. |
+| `drive_NN_….gpx`                 | Standards-compliant GPX. Opens in Google Earth, Strava, Maps.me, Komoot. |
+| `drive_NN_…_links.txt`           | Google Maps + Apple Maps URLs and trip stats. |
 
-The video frame layout:
+The video frame layout (defaults):
 
 ```
-+---------------------------------------+----------+
-|                                       |          |
-|                                       |          |
-|              FRONT CAMERA             | (black)  |
-|                                       |          |
-|                                       |  +----+  |
-|                                       |  |MAP |  |
-|        +------------------+           |  |    |  |
-|        |   REAR CAMERA    |           |  +----+  |
-|        +------------------+           |          |
-|                                       |          |
-| 2026-05-11 18:07:52     18 km/h       | (black)  |
-+---------------------------------------+----------+
-       1920 px (video)                    480 px
-                       2400 × 1080
++----------------------------------------+----------+
+|                                        | Day      |
+|                                        | 2026-…   |
+|              FRONT CAMERA              | Distance |
+|                                        | Driven   |
+|                                        | Max …    |
+|                                        | Avg …    |
+|                                        |          |
+|         +------------------+           | +------+ |
+|         |   REAR CAMERA    |           | | MAP  | |
+|         +------------------+           | |      | |
+|                                        | +------+ |
+|                                        |          |
+| 2026-05-11 18:07:52         19 km/h    |          |
+|                          (c) Raoul …   |          |
++----------------------------------------+----------+
+       1920 px main video                  480 px panel
+                       2402 × 1080
 ```
 
-Overlays, in order of how the filter graph composes them:
+Composed in this order:
 
-1. **Front camera** — cropped from 2560×1600 to 16:9, scaled to 1920×1080.
-2. **Rear PiP** — 662×372 with thin white border, sitting centered along the
-   bottom edge (covers the bonnet reflection nicely).
-3. **Timestamp** — `YYYY-MM-DD HH:MM:SS` burned in the bottom-left corner,
+1. **Front camera** — cropped (configurable bonnet trim) and scaled to 1920×1080.
+2. **Rear PiP** — 662×372 with a thin white border. Position configurable
+   (bottom-middle by default; also bottom-left/right, top-left/middle/right).
+   Auto-disabled if your dashcam has no rear camera.
+3. **Timestamp** — `YYYY-MM-DD HH:MM:SS` burned into the bottom-left,
    advancing per frame from the clip's filename timestamp.
-4. **Speed** — `NN km/h` rendered as 1-second SRT subtitles in the bottom-right
-   corner. Only present when GPS data exists for the clip.
-5. **Map widget** — 480×480 panel hstacked on the right side. Shows the full
-   drive's route coloured by speed, with a red marker dot moving once per
-   second to the current GPS position. Only present when the drive has any
-   GPS data.
+4. **Speed** — `NN km/h` (or `NN mph`) rendered as 1-second SRT subtitles in
+   the bottom-right corner. Only when GPS data exists for the clip.
+5. **Watermark** — small `©` line just below the speed (or any other corner
+   via config; text is configurable).
+6. **Stats panel** — Day title, distance, moving time, max + avg speed,
+   segments / GPS points, plus the route map with a moving marker. The full
+   route is shown coloured by speed; the marker steps once per second.
+   Stats text can be omitted while keeping the map.
 
-If the drive has no GPS at all, the script falls back to plain 1920×1080 output
-(no map widget, no speed overlay) so the per-drive output sizes stay
-consistent within a single run.
+When a drive has no GPS at all, the script falls back to plain 1920×1080
+output (no map widget, no speed overlay) so per-drive output sizes stay
+consistent within a run.
 
 
-## Install
+## Parking-skip
 
-The script needs **ffmpeg** with `drawtext` (libfreetype) and `subtitles`
-(libass) filters built in. The plain Homebrew `ffmpeg` formula doesn't include
-those — you need `ffmpeg-full`:
+`--daily` runs often contain long stretches of "engine on, parked" footage at
+your destination. By default the script:
+
+1. Detects parked runs of 5+ minutes (configurable).
+2. Keeps the **first 10 seconds** of the first parked clip (you & passengers
+   getting out).
+3. Inserts a 2-second `Fast forwarding… 46m 15s skipped` slide that also
+   reports the wall-clock time elided.
+4. Anchors the **exit slice** to the actual drive-resume moment in the next
+   moving clip — so you land exactly when the wheels start turning, not in
+   the middle of more parked footage.
+
+Disable with `--no-skip-parking`, or tune `parking_min_secs` /
+`parking_pad_secs` in `config.txt`.
+
+
+## Install (macOS)
+
+The script needs **ffmpeg** with the `drawtext` (libfreetype) and `subtitles`
+(libass) filters. The plain Homebrew `ffmpeg` doesn't include those — use
+`ffmpeg-full`:
 
 ```sh
 brew install ffmpeg-full
@@ -85,21 +118,60 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-The venv step matters because Homebrew's Python 3.12+ refuses system-wide
-`pip install` per PEP 668 (you'll see *"externally-managed-environment"* if
-you skip the venv). Re-activate the venv (`source .venv/bin/activate`) at the
-start of every new terminal session before running the script.
+The venv matters because Homebrew Python 3.12+ blocks system-wide `pip
+install` per PEP 668. Re-activate the venv (`source .venv/bin/activate`) at
+the start of every new terminal session.
 
-The deps are `staticmap` for OSM-tile background fetching and `Pillow` for
-marker compositing. If you don't install them, the script still runs but
-skips the burn-in map widget — pass `--no-map-widget` to suppress the
-warning.
+Dependencies: `staticmap` (OSM tile background) and `Pillow` (marker
+compositing). If you don't install them, the script still runs but skips the
+burn-in map widget. Pass `--no-map-widget` to silence the warning.
+
+
+## Install (Linux / WSL)
+
+Same idea, different package manager:
+
+```sh
+sudo apt install ffmpeg                    # Debian/Ubuntu — usually includes drawtext + subtitles
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+
+## Install (Windows — untested)
+
+Treat the steps below as best-effort guesses based on cross-platform
+behaviour. **The script has not been tested on Windows.**
+
+```powershell
+# ffmpeg — pick one
+winget install Gyan.FFmpeg          # or:  choco install ffmpeg-full
+                                    # or:  scoop install ffmpeg
+
+# Python deps
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+Things to watch out for:
+
+- Default `root = /Volumes/NO NAME` will not exist — set `root = E:\` (or
+  whatever drive letter your SD card mounts as) in `config.txt`.
+- Default `out = ~/Desktop/Dashcam_Videos` works via `pathlib` (resolves to
+  `C:\Users\<you>\Desktop\…`).
+- VideoToolbox doesn't exist on Windows; encoding will fall back to
+  software libx264 automatically (slower, but works).
+- The script tries macOS fonts first then a few common Windows fonts
+  (`courbd.ttf`, `cour.ttf`, `arial.ttf`). If none are found, pass
+  `--no-timestamp` and `--no-watermark`-equivalent (`watermark_text =`).
 
 
 ## Quick start
 
 ```sh
 cd ~/dev/dashcam-exporter
+source .venv/bin/activate           # macOS / Linux
 
 # Dry-run to see what would be encoded
 python3 make_dashcam_videos.py --dry-run
@@ -107,56 +179,93 @@ python3 make_dashcam_videos.py --dry-run
 # Encode every drive on the card with full overlays
 python3 make_dashcam_videos.py
 
-# Same but merge by date (one MP4 per calendar day)
+# Same but merge by calendar date (one MP4 per day)
 python3 make_dashcam_videos.py --daily
 
-# Only specific drives
+# Only specific groups (works for both modes)
 python3 make_dashcam_videos.py --drives 13 14
 
-# Send outputs elsewhere
-python3 make_dashcam_videos.py --daily --out ~/Movies/Dashcam
+# Just refresh the .html / .gpx / _links.txt sidecars without re-encoding video
+python3 make_dashcam_videos.py --daily --sidecars-only
+
+# Quick web/mobile sized output
+python3 make_dashcam_videos.py --output-height 720
 ```
 
-The default input is `/Volumes/NO NAME` and the default output is
-`~/Desktop/Dashcam_Videos/`. Override with `--root` and `--out`.
+
+## config.txt — the main way to tweak things
+
+Run once to dump a fully-commented template into the repo:
+
+```sh
+python3 make_dashcam_videos.py --write-config ./config.txt
+```
+
+Then uncomment whatever lines you want to change. Precedence is **CLI flag >
+config.txt > built-in default**. Highlights:
+
+- `root`, `out` — input / output paths
+- `daily` / `gap` — grouping
+- `audio = false` — strip audio entirely (passenger conversation privacy)
+- `speed_unit = kmh | mph` — unit shown on overlay + stats + HTML + links.txt
+  (GPX export is always m/s per the spec)
+- `front_crop_top` / `front_crop_bottom` — tune for different bonnet shapes
+- `rear_pip = true | false`, `rear_pip_position`, `rear_pip_w/h/margin`
+- `map_widget`, `map_panel_w`, `map_panel_position = right | left`,
+  `map_panel_gutter_px`, `panel_stats = true | false`
+- `skip_parking`, `parking_min_secs`, `parking_pad_secs`
+- `watermark_text`, `watermark_position`, `watermark_font_size`,
+  `watermark_margin_h/v`
+- `speed_font_size`, `speed_margin_v`, `speed_margin_r`
+- `output_height` — 0 for native, 720 for web, 540 for mobile-friendly
+- `vt_bitrate`, `vt_maxrate`, `x264_preset`, `x264_crf`
 
 
 ## CLI flags
 
 | Flag | Effect |
 |------|--------|
-| `--root PATH`           | Dashcam volume root. Default `/Volumes/NO NAME`. |
-| `--out PATH`            | Output folder. Default `~/Desktop/Dashcam_Videos`. |
+| `--config PATH`         | Use a config.txt at a non-default location. |
+| `--write-config PATH`   | Dump the fully-commented config template and exit. |
+| `--root PATH`           | Dashcam SD-card / backup root (default: `/Volumes/NO NAME`). |
+| `--out PATH`            | Output folder (default: `~/Desktop/Dashcam_Videos`). |
 | `--daily`               | Group clips by calendar date instead of by gap. |
-| `--gap N`               | Seconds-between-clips threshold for grouping (default 90, drives-mode only). |
-| `--drives N [N …]`      | Only process specific group numbers (1-based; works for both modes). |
-| `--software`            | Force libx264 software encode instead of VideoToolbox hardware. |
-| `--no-timestamp`        | Skip the date/time overlay. Required if your ffmpeg lacks `drawtext`. |
+| `--gap N`               | Seconds-between-clips threshold for drive grouping (default 90). |
+| `--drives N [N …]`      | Only process specific group numbers (1-based). |
+| `--software`            | Force libx264 instead of VideoToolbox. |
+| `--no-timestamp`        | Skip the date/time overlay. |
 | `--no-speed`            | Skip the GPS speed overlay even when GPX data exists. |
-| `--no-map-sidecars`     | Skip the `.html`, `.gpx`, and `_links.txt` sidecars. |
+| `--no-audio`            | Strip audio from the output. |
+| `--no-map-sidecars`     | Skip the `.html` / `.gpx` / `_links.txt` sidecars. |
 | `--no-map-widget`       | Skip the burn-in map panel (output stays 1920×1080). |
-| `--keep-intermediates`  | Don't delete per-clip processed files after concat. |
-| `--dry-run`             | List drives/days and exit without encoding. |
+| `--sidecars-only`       | Only (re-)generate sidecars; don't re-encode video. |
+| `--no-skip-parking`     | Disable parking-skip. |
+| `--parking-min-secs N`  | Minimum parked-run length (s) before we skip (default 300). |
+| `--parking-pad-secs N`  | Seconds kept at each end of a skipped run (default 10). |
+| `--output-height N`     | Downscale final composite to this height in px (0 = native). |
+| `--keep-intermediates`  | Don't delete per-clip intermediates after concat. |
+| `--dry-run`             | List drives / days and exit without encoding. |
 
 
 ## How grouping works
 
-The script reads every front clip filename, pairs it with the matching rear
-clip, and orders them by timestamp.
+Each front-clip filename is paired with its matching rear clip and the clips
+are ordered by timestamp.
 
 In **drive mode** (default), a new drive starts whenever the gap between the
-end of one clip and the start of the next exceeds `--gap` seconds (default 90).
-This usually corresponds to engine-off events.
+end of one clip and the start of the next exceeds `--gap` seconds. This
+usually corresponds to engine-off events.
 
-In **`--daily` mode**, all clips on the same calendar date go into one group,
-regardless of how long the engine was off between them.
+In **`--daily` mode**, all clips on the same calendar date go into one
+group, regardless of engine-off intervals.
 
 
 ## How GPS speed is sourced
 
-The dashcam writes GPS logs to `DCIM/203gps/` in NMEA format (mislabeled as
-`.gpx`). For older sessions it rolls them up into POSIX tar archives in
-`203gps/tar/` mislabeled as `.git`.
+The dashcam writes GPS logs to `DCIM/203gps/` in NMEA format
+(mislabeled with a `.gpx` extension). Older sessions are rolled up into
+POSIX tar archives in `203gps/tar/` (mislabeled with a `.git` extension —
+they are **not** Git data, just tar archives).
 
 On startup the script:
 
@@ -166,10 +275,13 @@ On startup the script:
 3. For each clip, looks for a matching `.gpx` in either location.
 
 The speed overlay is rendered per second from the `$GPRMC` speed-in-knots
-field, converted to km/h.
+field. For the demo card this expanded GPS coverage from **25 → 90 clips
+(out of 117)**.
 
-For the demo card this expanded GPS coverage from **25 clips → 90 clips**
-(out of 117).
+The GPS track is segmented before drawing so engine-off intervals don't get
+bridged by phantom straight lines across town, and the polyline is coloured
+by speed using a blue→navy palette that pops against OSM's yellow/orange
+roads.
 
 
 ## Output layout
@@ -180,7 +292,6 @@ After a typical `--daily` run:
 ~/Desktop/Dashcam_Videos/
 ├── day_2026-04-02.mp4
 ├── day_2026-04-11.mp4
-├── day_2026-04-22.mp4
 ├── …
 ├── day_2026-05-11.mp4
 ├── day_2026-05-11.html
@@ -191,57 +302,21 @@ After a typical `--daily` run:
 ```
 
 
-## Architecture
-
-Pipeline per clip:
-
-```
-front.mp4  ─┐
-            ├─► ffmpeg filter_complex:
-rear.mp4   ─┤    crop + scale front  →  [front]
-            │    scale + border rear  →  [rear]
-            │    overlay [rear] on [front] at bottom-center
-            │    drawtext timestamp (bottom-left)
-            │    subtitles speed.srt (bottom-right) ─── from per-clip SRT
-            │    [video_part]
-map.mp4    ─┤    [2:v] scale to 480×480 + pad to 480×1080  →  [map_part]
-            │    hstack [video_part][map_part]  →  [out]
-            ▼
-        clip_NN.mp4  (intermediate, 2400×1080)
-            ▼
-        concat-demuxer  (stream-copy, no re-encode)
-            ▼
-        final drive_NN.mp4
-```
-
-The map.mp4 is itself produced by PIL/staticmap:
-
-```
-all GPX points for the drive  →  base panel PNG (route + start/end markers)
-                                  +
-each second of clip            →  marker dot composited on base PNG
-                                  ↓
-                              PNG sequence
-                                  ↓
-                          ffmpeg 1-fps mp4  →  map.mp4
-```
-
-The 1-fps map gets upsampled to 30 fps by the main filter chain, so the marker
-visibly jumps once per second.
-
-
 ## Performance
 
 Hardware-accelerated encoding via `h264_videotoolbox` on an Apple-silicon Mac
 gets you roughly 5–10× realtime, so ~2 hours of source footage encodes in
-15–25 minutes. Map widget rendering adds a couple seconds per clip for PIL
-work plus tile fetches (cached locally inside `staticmap`).
+15–25 minutes. On Linux/Windows you fall back to software libx264 — still
+fine, just slower.
 
 The script is **restartable**:
 
 - If a final `.mp4` already exists in `--out`, that drive/day is skipped.
 - Per-clip intermediates in `.intermediates/` are reused if present.
 - Harvested GPX in `.gpx_cache/` is reused across runs.
+- Sidecars are emitted unconditionally (even when the .mp4 already exists),
+  so segmentation / palette / unit tweaks land via a quick `--sidecars-only`
+  run.
 
 To force a re-encode of one drive: delete its final `.mp4` (and the matching
 intermediates if you want fresh per-clip work too).
@@ -249,39 +324,71 @@ intermediates if you want fresh per-clip work too).
 
 ## Troubleshooting
 
-**`No such filter: 'drawtext'`** — Your ffmpeg was built without libfreetype.
-Install `ffmpeg-full` (see Install above), or re-run with `--no-timestamp`.
+**`No such filter: 'drawtext'`** — ffmpeg without libfreetype. Install
+`ffmpeg-full` (see Install), or run with `--no-timestamp`.
 
-**`Unable to open … speed.srt` / `subtitles` errors** — Your ffmpeg lacks
-libass. Install `ffmpeg-full`, or re-run with `--no-speed`.
+**`Unable to open … speed.srt` / `subtitles` errors** — ffmpeg without
+libass. Install `ffmpeg-full`, or run with `--no-speed`.
 
 **`no rear pair for YYYYMMDDhhmmss, skipping`** — A front clip exists with no
-matching rear file. The script silently drops it.
+matching rear. The script drops it. To use a front-only setup set
+`rear_pip = false` in `config.txt`.
 
-**`map: (no GPS data for this day)`** — The clip filenames in that group don't
-match any GPX (loose or tarred). For the demo card this is normal for the
-early-April / early-May days; the dashcam either didn't have GPS lock or those
-logs were overwritten by loop recording.
+**`map: (no GPS data for this day)`** — Clip filenames in that group don't
+match any GPX (loose or tarred). Normal for drives without GPS lock.
 
-**`All samples in data stream … have zero duration`** — Harmless. That's the
-DDPAI custom telemetry track inside the source MP4; ffmpeg ignores it.
+**`Output looks squashed horizontally`** — Player isn't honouring SAR. The
+video is yuv420p with square pixels; QuickTime / VLC / IINA all handle it.
 
-**Output looks squashed horizontally** — Your player isn't honouring SAR.
-The video is yuv420p with square pixels; reload it or try a different player
-(QuickTime, VLC, IINA all handle it correctly).
+**`OSM tile fetch failed (…)`** — Network problem during burn-in widget
+render. The HTML map (Leaflet) still works fine since OSM tiles load in your
+browser at view time.
 
-**OSM tile fetch failures during map widget render** — Check the user's
-internet, or pass `--no-map-widget`. The HTML map (Leaflet) still works
-fine without the widget since OSM tiles are loaded in your browser at view
-time.
-
-**`error: externally-managed-environment`** — Homebrew's Python blocks
+**`error: externally-managed-environment`** — Homebrew Python blocks
 system-wide `pip install` (PEP 668). Use the venv recipe in Install.
 
-**`! map widget skipped: PIL/Pillow not installed`** — You forgot to
-activate the venv before running, or never ran `pip install -r
-requirements.txt`. The video will still encode at 1920×1080 with all other
-overlays — only the right-side map panel is missing.
+**`! map widget skipped: PIL/Pillow not installed`** — venv not activated,
+or `pip install -r requirements.txt` was never run. Video still encodes at
+1920×1080 with all other overlays.
+
+
+## Architecture
+
+Pipeline per clip:
+
+```
+front.mp4 ─┐
+           ├─► ffmpeg filter_complex:
+rear.mp4  ─┤    crop + scale front  →  [front]
+           │    scale + border rear  →  [rear]
+           │    overlay [rear] on [front] at chosen position
+           │    drawtext timestamp (bottom-left)
+           │    subtitles speed.srt (bottom-right)
+           │    drawtext watermark (chosen corner)        → [video_part]
+map.mp4   ─┤    [2:v] scale to 480×1080 + 2-px gutter pad → [map_part]
+           │    hstack [video_part][map_part]              → [out]
+           ▼
+       clip_NN.mp4  (intermediate, 2402×1080)
+           ▼
+       concat-demuxer  (stream-copy, no re-encode)
+           ▼
+       final drive_NN.mp4
+```
+
+The map.mp4 is produced by PIL/staticmap:
+
+```
+all GPX points for the drive  →  base panel PNG (stats + route + start/end markers)
+                                 +
+each second of clip            →  marker dot composited on base PNG
+                                 ↓
+                             PNG sequence
+                                 ↓
+                         ffmpeg 1-fps mp4  →  map.mp4
+```
+
+The 1-fps map gets upsampled to 30 fps by the main filter chain, so the
+marker visibly steps once per second.
 
 
 ## Repo layout
@@ -289,10 +396,18 @@ overlays — only the right-side map panel is missing.
 ```
 dashcam-exporter/
 ├── make_dashcam_videos.py     # the single-file script (entry point)
-├── requirements.txt           # Pillow + staticmap (only for burn-in widget)
+├── config.txt                 # generated by --write-config; edit to taste
+├── requirements.txt           # Pillow + staticmap
 ├── .gitignore
+├── LICENSE
 └── README.md                  # this file
 ```
+
+
+## Funding
+
+- 🏅 https://github.com/sponsors/raoulsson
+- 🪙 https://www.buymeacoffee.com/raoulsson
 
 
 ## License
@@ -300,3 +415,7 @@ dashcam-exporter/
 MIT — see [LICENSE](LICENSE).
 
 Copyright © 2026 Raoul Marc Schmidiger ([hello@raoulsson.com](mailto:hello@raoulsson.com)).
+
+---
+
+**Happy Driving! 🎉**

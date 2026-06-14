@@ -42,16 +42,26 @@
 # Burn date/time into the bottom-left of the main video frame.
 #timestamp = true
 
-# Burn GPS speed (NN km/h) into the corner of the main video frame.
-# Always bottom-right (matches dashcam convention). Tune size + margins below.
+# Burn GPS speed into the bottom-right corner of the main video frame.
 #speed = true
+# Display unit on the overlay + stats panel + HTML legend + links.txt.
+#   kmh  -> "NN km/h"
+#   mph  -> "NN mph"  (with distance shown in miles, max/avg in mph)
+# GPX export always stays in m/s per the spec.
+#speed_unit = kmh
 #speed_font_size = 24
 # Distance from the bottom edge / right edge in pixels. Lower = closer to corner.
-#speed_margin_v = 12
+# Default 32 leaves room for the watermark BELOW the speed in the same corner.
+#speed_margin_v = 32
 #speed_margin_r = 12
 
 # Render the per-day side panel (stats + map widget with moving marker).
 #map_widget = true
+
+# Burn the stats block (Day title, Distance, Driven, Max speed, Avg, segments
+# / GPS points) into the top of the side panel. When false, the panel just
+# shows the map widget centred vertically.
+#panel_stats = true
 
 # Save .html (Leaflet), .gpx (standard GPX), and _links.txt next to each video.
 #map_sidecars = true
@@ -59,11 +69,13 @@
 # Small watermark on the main video.
 # Leave watermark_text empty to disable. Position one of:
 #   bottom-right (default), bottom-left, top-right, top-left
-# When bottom-right, the watermark sits ABOVE the speed readout so the two
-# don't overlap when speed_margin_v is small.
-#watermark_text = (c) Raoul Marc Schmidiger
+# Bottom-right sits BELOW the speed readout in the same corner.
+#watermark_text = https://github.com/raoulsson/dashcam-exporter
 #watermark_font_size = 16
 #watermark_position = bottom-right
+# Distance from the closest horizontal / vertical edge in pixels.
+#watermark_margin_h = 8
+#watermark_margin_v = 6
 
 
 # ============================================================================
@@ -111,8 +123,7 @@
 # Side panel width in pixels. The map itself is square at this width.
 #map_panel_w = 480
 
-# Where the panel sits relative to the main video. Today: 'right' (default) or 'left'.
-# 'top' / 'bottom' aren't implemented yet (would require a horizontal panel layout).
+# Where the panel sits relative to the main video: 'right' (default) or 'left'.
 #map_panel_position = right
 
 # Black gutter between the main video and the panel.

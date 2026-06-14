@@ -68,7 +68,9 @@ REAR_PIP_POSITION = "bottom-middle"
 REAR_PIP_ENABLED  = True   # auto-disabled when no rear/ folder is present
 TS_FONT_SIZE = 36
 SPEED_FONT_SIZE = 24
-SPEED_MARGIN_V  = 12                           # px from bottom edge (smaller = closer)
+# Speed sits ABOVE the watermark in the bottom-right corner, so this margin
+# also needs to leave room for the watermark below it.
+SPEED_MARGIN_V  = 32                           # px from bottom edge
 SPEED_MARGIN_R  = 12                           # px from right edge
 
 # Hardware encoder settings (VideoToolbox uses bitrate, not CRF)
@@ -124,16 +126,26 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # Burn date/time into the bottom-left of the main video frame.
 #timestamp = true
 
-# Burn GPS speed (NN km/h) into the corner of the main video frame.
-# Always bottom-right (matches dashcam convention). Tune size + margins below.
+# Burn GPS speed into the bottom-right corner of the main video frame.
 #speed = true
+# Display unit on the overlay + stats panel + HTML legend + links.txt.
+#   kmh  -> "NN km/h"
+#   mph  -> "NN mph"  (with distance shown in miles, max/avg in mph)
+# GPX export always stays in m/s per the spec.
+#speed_unit = kmh
 #speed_font_size = 24
 # Distance from the bottom edge / right edge in pixels. Lower = closer to corner.
-#speed_margin_v = 12
+# Default 32 leaves room for the watermark BELOW the speed in the same corner.
+#speed_margin_v = 32
 #speed_margin_r = 12
 
 # Render the per-day side panel (stats + map widget with moving marker).
 #map_widget = true
+
+# Burn the stats block (Day title, Distance, Driven, Max speed, Avg, segments
+# / GPS points) into the top of the side panel. When false, the panel just
+# shows the map widget centred vertically.
+#panel_stats = true
 
 # Save .html (Leaflet), .gpx (standard GPX), and _links.txt next to each video.
 #map_sidecars = true
@@ -141,11 +153,13 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # Small watermark on the main video.
 # Leave watermark_text empty to disable. Position one of:
 #   bottom-right (default), bottom-left, top-right, top-left
-# When bottom-right, the watermark sits ABOVE the speed readout so the two
-# don't overlap when speed_margin_v is small.
+# Bottom-right sits BELOW the speed readout in the same corner.
 #watermark_text = (c) Raoul Marc Schmidiger
 #watermark_font_size = 16
 #watermark_position = bottom-right
+# Distance from the closest horizontal / vertical edge in pixels.
+#watermark_margin_h = 8
+#watermark_margin_v = 6
 
 
 # ============================================================================
@@ -193,8 +207,7 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # Side panel width in pixels. The map itself is square at this width.
 #map_panel_w = 480
 
-# Where the panel sits relative to the main video. Today: 'right' (default) or 'left'.
-# 'top' / 'bottom' aren't implemented yet (would require a horizontal panel layout).
+# Where the panel sits relative to the main video: 'right' (default) or 'left'.
 #map_panel_position = right
 
 # Black gutter between the main video and the panel.
@@ -259,6 +272,9 @@ COPYRIGHT_FONT_SIZE = 16
 # Where the watermark sits inside the main video frame:
 #   bottom-right (default), bottom-left, top-right, top-left
 COPYRIGHT_POSITION = "bottom-right"
+# Distance from the edges. Smaller = tighter to the corner.
+COPYRIGHT_MARGIN_H = 8     # px from left/right edge depending on position
+COPYRIGHT_MARGIN_V = 6     # px from top/bottom edge depending on position
 
 # Front camera default crop (top + bottom rows removed before scale to 1080p).
 # Different dashcam mounts show more / less of the bonnet — tune in config.txt.
@@ -267,9 +283,7 @@ FRONT_CROP_BOTTOM = 80
 FRONT_W           = 2560
 FRONT_H           = 1600
 
-# Side of the main video the map panel is hstacked on. Currently only
-# "right" (default) and "left" are supported — "top" / "bottom" would require
-# a wholly different panel orientation and aren't implemented yet.
+# Side of the main video the map panel is hstacked on: "right" (default) or "left".
 MAP_PANEL_POSITION = "right"
 MAP_PANEL_GUTTER_PX = 2
 
@@ -283,6 +297,19 @@ REAR_RE  = re.compile(r"^(\d{14})_(\d+)_A\.mp4$")
 GPX_RE   = re.compile(r"^(\d{14})_(\d+)_D\.gpx$")
 
 KNOTS_TO_KMH = 1.852
+KMH_TO_MPH   = 0.621371
+
+# Speed unit displayed on the speed overlay, stats panel, HTML legend, and
+# links sidecar. GPX export always stays in m/s (the spec).
+SPEED_UNIT = "kmh"             # "kmh" or "mph"
+
+
+def _kmh_to_display(kmh: float) -> float:
+    return kmh * KMH_TO_MPH if SPEED_UNIT == "mph" else kmh
+
+
+def _speed_unit_label() -> str:
+    return "mph" if SPEED_UNIT == "mph" else "km/h"
 
 
 @dataclass
@@ -562,17 +589,19 @@ def harvest_tarred_gpx(tar_dir: Path, cache_dir: Path) -> tuple[int, int]:
 
 
 def write_speed_srt(speeds: list[float], srt_path: Path) -> bool:
-    """Write a 1-second-per-cue SRT file with km/h values. Returns False if no speeds."""
+    """Write a 1-second-per-cue SRT file with speed values. Returns False if no speeds."""
     if not speeds:
         return False
+    unit = _speed_unit_label()
     with srt_path.open("w") as fh:
         for i, kmh in enumerate(speeds):
             s, e = i, i + 1
             sh, sm, ss = s // 3600, (s % 3600) // 60, s % 60
             eh, em, es = e // 3600, (e % 3600) // 60, e % 60
+            value = _kmh_to_display(kmh)
             fh.write(f"{i+1}\n")
             fh.write(f"{sh:02d}:{sm:02d}:{ss:02d},000 --> {eh:02d}:{em:02d}:{es:02d},000\n")
-            fh.write(f"{kmh:.0f} km/h\n\n")
+            fh.write(f"{value:.0f} {unit}\n\n")
     return True
 
 
@@ -622,7 +651,10 @@ def segment_track(points: list[tuple[float, float, float, datetime]]
 def _track_stats(points: list[tuple[float, float, float, datetime]]) -> dict:
     if not points:
         return {"n": 0, "distance_km": 0.0, "max_kmh": 0.0, "avg_kmh": 0.0,
+                "max_display": 0.0, "avg_display": 0.0,
                 "duration_min": 0.0, "moving_min": 0.0, "n_segments": 0,
+                "distance_display": 0.0, "distance_unit": "km",
+                "speed_unit": _speed_unit_label(),
                 "start": None, "end": None}
     segs = segment_track(points)
     # Distance: only sum within segments (skips engine-off jumps)
@@ -634,12 +666,20 @@ def _track_stats(points: list[tuple[float, float, float, datetime]]) -> dict:
         if len(seg) >= 2:
             moving_secs += (seg[-1][3] - seg[0][3]).total_seconds()
     speeds = [p[2] for p in points if p[2] > 0]
+    max_kmh = max((p[2] for p in points), default=0.0)
+    avg_kmh = (sum(speeds) / len(speeds)) if speeds else 0.0
+    mph = SPEED_UNIT == "mph"
     return {
         "n": len(points),
         "n_segments": len(segs),
         "distance_km": dist,
-        "max_kmh": max((p[2] for p in points), default=0.0),
-        "avg_kmh": (sum(speeds) / len(speeds)) if speeds else 0.0,
+        "max_kmh": max_kmh,
+        "avg_kmh": avg_kmh,
+        "max_display": max_kmh * KMH_TO_MPH if mph else max_kmh,
+        "avg_display": avg_kmh * KMH_TO_MPH if mph else avg_kmh,
+        "distance_display": dist * KMH_TO_MPH if mph else dist,
+        "distance_unit": "mi" if mph else "km",
+        "speed_unit": _speed_unit_label(),
         "duration_min": ((points[-1][3] - points[0][3]).total_seconds() / 60.0),
         "moving_min": moving_secs / 60.0,
         "start": points[0],
@@ -745,8 +785,8 @@ var legend = L.control({{position: 'bottomright'}});
 legend.onAdd = function() {{
   var div = L.DomUtil.create('div', 'legend');
   div.innerHTML =
-    '<div><b>Speed</b></div>' +
-    '<div class="row"><div class="swatch" style="background:#6baed6"></div>&lt; 20 km/h</div>' +
+    '<div><b>Speed (km/h)</b></div>' +
+    '<div class="row"><div class="swatch" style="background:#6baed6"></div>&lt; 20</div>' +
     '<div class="row"><div class="swatch" style="background:#2171b5"></div>20–40</div>' +
     '<div class="row"><div class="swatch" style="background:#08519c"></div>40–60</div>' +
     '<div class="row"><div class="swatch" style="background:#08306b"></div>60–80</div>' +
@@ -764,11 +804,12 @@ def write_html_map(out_path: Path, points: list[tuple[float, float, float, datet
     if not points:
         return
     stats = _track_stats(points)
+    dunit, sunit = stats["distance_unit"], stats["speed_unit"]
     subtitle = (
-        f"<span>{stats['distance_km']:.1f} km driven</span>"
+        f"<span>{stats['distance_display']:.1f} {dunit} driven</span>"
         f"<span>{stats['moving_min']:.0f} min moving</span>"
-        f"<span>max {stats['max_kmh']:.0f} km/h</span>"
-        f"<span>avg {stats['avg_kmh']:.0f} km/h</span>"
+        f"<span>max {stats['max_display']:.0f} {sunit}</span>"
+        f"<span>avg {stats['avg_display']:.0f} {sunit}</span>"
         f"<span>{stats['n_segments']} segments / {stats['n']} points</span>"
     )
     segments = segment_track(points)
@@ -857,11 +898,14 @@ def render_base_right_panel(
     points: list[tuple[float, float, float, datetime]],
     title: str,
     font_path: str,
+    include_stats: bool = True,
 ) -> tuple[object, list[tuple[int, int]]] | None:
     """
     Render the full 480x1080 right-side panel:
-      - Title + stats on top (drawn with PIL ImageDraw)
+      - Title + stats on top when include_stats=True (PIL ImageDraw)
       - Map widget below (480x480, OSM-tiled or PIL-fallback polyline)
+    With include_stats=False, the title and stats block are omitted and the
+    map is centred vertically inside the panel.
     Returns (PIL.Image full panel, pixel coords per GPS point in PANEL-local
     coordinates already offset for the map's vertical position) or None if PIL
     is unavailable.
@@ -895,38 +939,45 @@ def render_base_right_panel(
 
     stats = _track_stats(points)
 
-    y = PANEL_STATS_TOP_PX
-    draw.text((24, y), title, fill=(255, 255, 255), font=f_title)
-    y += 38
-    # Hairline separator
-    draw.line([(24, y), (panel_w - 24, y)], fill=(90, 90, 90), width=1)
-    y += 18
+    if include_stats:
+        y = PANEL_STATS_TOP_PX
+        draw.text((24, y), title, fill=(255, 255, 255), font=f_title)
+        y += 38
+        draw.line([(24, y), (panel_w - 24, y)], fill=(90, 90, 90), width=1)
+        y += 18
 
-    rows = [
-        ("Distance",  f"{stats['distance_km']:.1f} km"),
-        ("Driven",    f"{stats['moving_min']:.0f} min"),
-        ("Max speed", f"{stats['max_kmh']:.0f} km/h"),
-        ("Avg",       f"{stats['avg_kmh']:.0f} km/h"),
-    ]
-    for label, value in rows:
-        draw.text((24, y), label, fill=(170, 170, 170), font=f_value)
-        bbox = draw.textbbox((0, 0), value, font=f_value)
-        value_w = bbox[2] - bbox[0]
-        draw.text((panel_w - 24 - value_w, y), value, fill=(255, 255, 255), font=f_value)
-        y += 30
+        dunit = stats["distance_unit"]
+        sunit = stats["speed_unit"]
+        rows = [
+            ("Distance",  f"{stats['distance_display']:.1f} {dunit}"),
+            ("Driven",    f"{stats['moving_min']:.0f} min"),
+            ("Max speed", f"{stats['max_display']:.0f} {sunit}"),
+            ("Avg",       f"{stats['avg_display']:.0f} {sunit}"),
+        ]
+        for label, value in rows:
+            draw.text((24, y), label, fill=(170, 170, 170), font=f_value)
+            bbox = draw.textbbox((0, 0), value, font=f_value)
+            value_w = bbox[2] - bbox[0]
+            draw.text((panel_w - 24 - value_w, y), value, fill=(255, 255, 255), font=f_value)
+            y += 30
 
-    y += 6
-    draw.text(
-        (24, y),
-        f"{stats['n_segments']} segments / {stats['n']} points",
-        fill=(140, 140, 140), font=f_small,
-    )
+        y += 6
+        draw.text(
+            (24, y),
+            f"{stats['n_segments']} segments / {stats['n']} points",
+            fill=(140, 140, 140), font=f_small,
+        )
+        map_top = PANEL_MAP_TOP_PX
+    else:
+        # Stats hidden — centre the 480×480 map vertically inside the 480×1080
+        # panel so the panel doesn't look top-heavy.
+        map_top = (panel_h - MAP_PANEL_SIZE) // 2
 
-    # Paste the map below the stats
-    panel.paste(map_img, (0, PANEL_MAP_TOP_PX))
+    # Paste the map at its chosen vertical position
+    panel.paste(map_img, (0, map_top))
 
-    # Marker pixel coordinates in panel-local space (map is offset by PANEL_MAP_TOP_PX)
-    adjusted = [(px, py + PANEL_MAP_TOP_PX) for (px, py) in map_pixels]
+    # Marker pixel coordinates in panel-local space (offset for the map position)
+    adjusted = [(px, py + map_top) for (px, py) in map_pixels]
     return panel, adjusted
 
 
@@ -1185,13 +1236,15 @@ def write_links_sidecar(out_path: Path, points: list[tuple[float, float, float, 
     end_url   = f"https://www.google.com/maps?q={points[-1][0]:.6f},{points[-1][1]:.6f}"
     apple_url = f"https://maps.apple.com/?ll={points[0][0]:.6f},{points[0][1]:.6f}"
     stats = _track_stats(points)
+    dunit = stats["distance_unit"]
+    sunit = stats["speed_unit"]
     body = (
         f"{title}\n"
         f"{'=' * len(title)}\n\n"
-        f"Distance: {stats['distance_km']:.2f} km\n"
+        f"Distance: {stats['distance_display']:.2f} {dunit}\n"
         f"Duration: {stats['duration_min']:.1f} minutes\n"
-        f"Max speed: {stats['max_kmh']:.1f} km/h\n"
-        f"Avg moving speed: {stats['avg_kmh']:.1f} km/h\n"
+        f"Max speed: {stats['max_display']:.1f} {sunit}\n"
+        f"Avg moving speed: {stats['avg_display']:.1f} {sunit}\n"
         f"GPS points: {stats['n']}\n\n"
         f"Open in Google Maps (start):\n  {start_url}\n\n"
         f"Open in Google Maps (end):\n  {end_url}\n\n"
@@ -1212,10 +1265,25 @@ def has_subtitles() -> bool:
 
 
 def resolve_font() -> str:
-    for f in (DEFAULT_FONT, FALLBACK_FONT):
+    # macOS, then common Linux distros, then Windows. First one that exists wins.
+    candidates = [
+        DEFAULT_FONT,
+        FALLBACK_FONT,
+        # Common Linux fonts (Debian/Ubuntu defaults)
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+        # Windows — best-effort, script is untested there
+        r"C:\Windows\Fonts\courbd.ttf",      # Courier New Bold
+        r"C:\Windows\Fonts\cour.ttf",        # Courier New Regular
+        r"C:\Windows\Fonts\consola.ttf",     # Consolas
+        r"C:\Windows\Fonts\arial.ttf",       # Arial Regular
+    ]
+    for f in candidates:
         if Path(f).exists():
             return f
-    # Last-ditch: let ffmpeg find a font by family name (drawtext supports `font=`)
+    # Last-ditch: hand the macOS default back; ffmpeg will error if it's not
+    # there, which is at least a clear actionable message.
     return DEFAULT_FONT
 
 
@@ -1308,21 +1376,18 @@ def build_filter_complex(
     font_escaped = font_path.replace(":", r"\:") if font_path else ""
     if font_escaped and COPYRIGHT_TEXT:
         pos = (COPYRIGHT_POSITION or "bottom-right").lower()
-        # When the watermark sits at the bottom-right, stack it ABOVE the speed
-        # readout instead of next to it, so reducing speed_margin_v doesn't
-        # cause overlap. libass scales FontSize by video_height / PlayResY
-        # (PlayResY defaults to 288), so a "24px" font actually renders at
-        # ~90px on a 1080p frame; the formula below accounts for that.
-        ass_scale = OUT_H / 288
-        clearance = SPEED_MARGIN_V + int(SPEED_FONT_SIZE * ass_scale * 1.2) + 12
+        mh, mv = COPYRIGHT_MARGIN_H, COPYRIGHT_MARGIN_V
+        # drawtext's `tw` and `th` are evaluated per-frame from the actual
+        # rendered glyph metrics, so `x = w - tw - mh` right-anchors the text
+        # regardless of character count.
         if pos == "bottom-left":
-            wm_x, wm_y = "8", "h-th-6"
+            wm_x, wm_y = f"{mh}", f"h-th-{mv}"
         elif pos == "top-right":
-            wm_x, wm_y = "w-tw-8", "6"
+            wm_x, wm_y = f"w-tw-{mh}", f"{mv}"
         elif pos == "top-left":
-            wm_x, wm_y = "8", "6"
-        else:  # bottom-right (default)
-            wm_x, wm_y = "w-tw-8", f"h-th-{clearance}"
+            wm_x, wm_y = f"{mh}", f"{mv}"
+        else:  # bottom-right (default) — tight to both edges, under the speed
+            wm_x, wm_y = f"w-tw-{mh}", f"h-th-{mv}"
         chain += (
             f",drawtext=fontfile={font_escaped}:"
             f"text='{_escape_drawtext(COPYRIGHT_TEXT)}':"
@@ -1623,8 +1688,10 @@ def main() -> int:
     global MAP_PANEL_SIZE, MAP_PANEL_POSITION, MAP_PANEL_GUTTER_PX
     global FRONT_CROP_TOP, FRONT_CROP_BOTTOM
     global COPYRIGHT_TEXT, COPYRIGHT_FONT_SIZE, COPYRIGHT_POSITION
+    global COPYRIGHT_MARGIN_H, COPYRIGHT_MARGIN_V
     global SPEED_MARGIN_V, SPEED_MARGIN_R, SPEED_FONT_SIZE
     global VT_BITRATE, VT_MAXRATE, X264_PRESET, X264_CRF
+    global SPEED_UNIT
     PIP_W              = ci("rear_pip_w",         PIP_W)
     PIP_H              = ci("rear_pip_h",         PIP_H)
     PIP_MARGIN         = ci("rear_pip_margin",    PIP_MARGIN)
@@ -1638,16 +1705,24 @@ def main() -> int:
     COPYRIGHT_TEXT     = cs("watermark_text",     COPYRIGHT_TEXT)
     COPYRIGHT_FONT_SIZE = ci("watermark_font_size", COPYRIGHT_FONT_SIZE)
     COPYRIGHT_POSITION = cs("watermark_position", COPYRIGHT_POSITION).lower()
+    COPYRIGHT_MARGIN_H = ci("watermark_margin_h", COPYRIGHT_MARGIN_H)
+    COPYRIGHT_MARGIN_V = ci("watermark_margin_v", COPYRIGHT_MARGIN_V)
     SPEED_FONT_SIZE    = ci("speed_font_size",    SPEED_FONT_SIZE)
     SPEED_MARGIN_V     = ci("speed_margin_v",     SPEED_MARGIN_V)
     SPEED_MARGIN_R     = ci("speed_margin_r",     SPEED_MARGIN_R)
+    SPEED_UNIT         = cs("speed_unit",         SPEED_UNIT).lower()
+    if SPEED_UNIT not in ("kmh", "mph"):
+        print(f"WARNING: unknown speed_unit='{SPEED_UNIT}'; using 'kmh'", file=sys.stderr)
+        SPEED_UNIT = "kmh"
+
+    panel_stats_enabled = cb("panel_stats", True)
     VT_BITRATE         = cs("vt_bitrate",         VT_BITRATE)
     VT_MAXRATE         = cs("vt_maxrate",         VT_MAXRATE)
     X264_PRESET        = cs("x264_preset",        X264_PRESET)
     X264_CRF           = cs("x264_crf",           X264_CRF)
-    if MAP_PANEL_POSITION in ("top", "bottom"):
-        print(f"WARNING: map_panel_position='{MAP_PANEL_POSITION}' isn't implemented yet; "
-              "falling back to 'right'.", file=sys.stderr)
+    if MAP_PANEL_POSITION not in ("right", "left"):
+        print(f"WARNING: map_panel_position='{MAP_PANEL_POSITION}' not recognised; "
+              "using 'right'.", file=sys.stderr)
         MAP_PANEL_POSITION = "right"
 
     # Final-output downscaling (e.g. for web/mobile delivery).
@@ -1874,6 +1949,7 @@ def main() -> int:
                 group_track,
                 title=panel_title,
                 font_path=font_path,
+                include_stats=panel_stats_enabled,
             )
             if rendered is None:
                 print("  ! map widget skipped: PIL/Pillow not installed."
