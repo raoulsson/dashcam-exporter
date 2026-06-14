@@ -52,7 +52,7 @@ The video frame layout (defaults):
 |                                        | +------+ |
 |                                        |          |
 | 2026-05-11 18:07:52         19 km/h    |          |
-|                          (c) Raoul …   |          |
+|                      (c) Watermark …   |          |
 +----------------------------------------+----------+
        1920 px main video                  480 px panel
                        2402 × 1080
@@ -66,7 +66,7 @@ Composed in this order:
    Auto-disabled if your dashcam has no rear camera.
 3. **Timestamp** — `YYYY-MM-DD HH:MM:SS` burned into the bottom-left,
    advancing per frame from the clip's filename timestamp.
-4. **Speed** — `NN km/h` (or `NN mph`) rendered as 1-second SRT subtitles in
+4. **Speed** — NN km/h (or NN mph) rendered as 1-second SRT subtitles in
    the bottom-right corner. Only when GPS data exists for the clip.
 5. **Watermark** — small `©` line just below the speed (or any other corner
    via config; text is configurable).
@@ -170,10 +170,9 @@ Things to watch out for:
 ## Quick start
 
 ```sh
-cd ~/dev/dashcam-exporter
 source .venv/bin/activate           # macOS / Linux
 
-# Dry-run to see what would be encoded
+# Dry-run to see what would be encoded (lists each group with its index)
 python3 make_dashcam_videos.py --dry-run
 
 # Encode every drive on the card with full overlays
@@ -182,15 +181,73 @@ python3 make_dashcam_videos.py
 # Same but merge by calendar date (one MP4 per day)
 python3 make_dashcam_videos.py --daily
 
-# Only specific groups (works for both modes)
+# Only specific groups — see "Groups & indices" below
 python3 make_dashcam_videos.py --drives 13 14
+
+# Read from a local backup instead of the SD card, write somewhere specific
+python3 make_dashcam_videos.py --root ~/dashcam_backup/2026-05-11 --out ~/Movies/Dashcam
 
 # Just refresh the .html / .gpx / _links.txt sidecars without re-encoding video
 python3 make_dashcam_videos.py --daily --sidecars-only
 
-# Quick web/mobile sized output
+# Smaller output file for web/mobile sharing
 python3 make_dashcam_videos.py --output-height 720
 ```
+
+
+## Groups & indices
+
+The script always processes "groups" of clips. What a group is depends on the
+mode:
+
+- **drive mode** (default): each group is a contiguous engine-on session —
+  i.e. a run of clips where consecutive timestamps are within `--gap`
+  seconds of each other (default 90 s).
+- **`--daily` mode**: each group is one calendar date; every clip on that
+  date belongs to one group regardless of engine-off intervals.
+
+Groups are numbered 1, 2, 3, … in the order they appear in `--dry-run`. The
+`--drives N [N …]` flag (the name is historical; it works in both modes)
+selects specific groups by index. Examples:
+
+```sh
+# See the indices first
+python3 make_dashcam_videos.py --daily --dry-run
+# →  Day  1  2026-04-02 12:30  ->  12:31     1 clips
+#    Day  2  2026-04-11 21:16  ->  21:24     3 clips
+#    …
+#    Day  8  2026-05-11 12:11  ->  19:07   104 clips
+
+# Then encode only Day 8
+python3 make_dashcam_videos.py --daily --drives 8
+```
+
+Indices are stable within a single run but can shift if you change `--gap`
+or `--daily`, since the grouping changes. Always do `--dry-run` first when
+in doubt.
+
+
+## Output sizes
+
+The composite video frame is **2402×1080** by default (1920 main video + 2 px
+gutter + 480 panel). Use `--output-height` (or `output_height` in
+`config.txt`) to downscale the whole composite at the end of the pipeline.
+Aspect ratio is preserved automatically.
+
+| Setting | Composite size | Typical file size, 1 h source | Best for |
+|---------|----------------|--------------------------------|----------|
+| `output_height = 0` (default) | 2402 × 1080 | ~3.5 – 4 GB | Archive, big-screen viewing |
+| `output_height = 720`         | 1601 × 720  | ~1.5 – 2 GB | Web / streaming, decent on phones |
+| `output_height = 540`         | 1201 × 540  | ~700 – 900 MB | Mobile sharing, email-ish |
+
+These are end-pipeline scales — the encoder still works on the native
+2402×1080 frame, so the overlays stay crisp. File sizes assume the default
+`vt_bitrate = 8M` / `x264_crf = 23`; tune those if you need smaller. Quality
+above 720p is generally lost to internet compression once you upload, so
+`--output-height 720` is the sweet spot for sharing.
+
+When `map_widget = false` the panel is dropped and the composite is just
+1920×1080 (or `output_height` × 16:9), shaving roughly 20 % off file size.
 
 
 ## config.txt — the main way to tweak things
