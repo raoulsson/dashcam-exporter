@@ -217,7 +217,7 @@ python3 make_dashcam_videos.py --root ~/dashcam_backup/2026-05-11 --out ~/Movies
 python3 make_dashcam_videos.py --daily --sidecars-only
 
 # Smaller output file for web/mobile sharing
-python3 make_dashcam_videos.py --output-height 720
+python3 make_dashcam_videos.py --output-height 529
 ```
 
 
@@ -469,9 +469,9 @@ After a typical `--daily` run:
 ```
 ~/Desktop/Dashcam_Videos/
 ├── day_2026-04-02.mp4
-├── day_2026-04-11.mp4
+├── day_2026-04-11_h720.mp4
 ├── …
-├── day_2026-05-11.mp4
+├── day_2026-05-11_h720.mp4
 ├── day_2026-05-11.html
 ├── day_2026-05-11.gpx
 ├── day_2026-05-11_links.txt
