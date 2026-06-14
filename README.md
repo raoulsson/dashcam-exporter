@@ -40,6 +40,13 @@ speed, segment-break dots, opens in any browser):
 
 ![Interactive HTML map sidecar](examples/gps-data-on-map.png)
 
+The standard `.gpx` sidecar opened in [gpx.studio](https://gpx.studio) —
+because the script emits one `<trkseg>` per contiguous-driving segment, each
+drive shows up as its own colored polyline so you can see the whole day's
+trips at a glance:
+
+![Per-drive GPX in gpx.studio](examples/gps-data-single-drives-on-gpx.studio.png)
+
 
 ## What you get
 

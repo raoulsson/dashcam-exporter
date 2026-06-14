@@ -1615,7 +1615,7 @@ def encode_clip(
     trim_start: int = 0,
     trim_seconds: int | None = None,
     no_audio: bool = False,
-    output_height: int = 0,
+    output_height: int = 540,
 ) -> None:
     """
     Encode one clip (or one trimmed slice of it) to `out_path`.
@@ -2247,8 +2247,12 @@ def main() -> int:
         with_map_widget = base_panel is not None
 
         # Identify long parking runs we should skip past.
+        # Only meaningful in --daily mode: a drive (gap-mode group) is already
+        # one engine-on session, so inserting "Fast forwarding…" inside it
+        # makes no sense and can leave the MP4 ending on the slide. In drive
+        # mode we skip the detection and let each drive play continuously.
         parking_runs: list[tuple[int, int]] = []
-        if not args.no_skip_parking and with_speed:
+        if args.daily and not args.no_skip_parking and with_speed:
             parking_runs = find_parking_runs(group, gps_dirs, args.parking_min_secs)
 
         # Map clip-index → action.
@@ -2308,8 +2312,11 @@ def main() -> int:
             # Inter-clip gap detection: insert a 'Fast forwarding…' slide when
             # the wall-clock distance from the previous emitted clip exceeds
             # the threshold. Parking-run exits ALREADY have their own FF
-            # inserted by the entry side, so skip in that case.
-            if prev_emitted_clip is not None and action != "exit":
+            # inserted by the entry side, so skip in that case. Only applies
+            # to --daily mode — drives are by definition gap-separated, so a
+            # within-drive FF would mean the drive grouping is wrong.
+            if (args.daily and prev_emitted_clip is not None
+                    and action != "exit"):
                 prev_end = prev_emitted_clip.dt + timedelta(seconds=prev_emitted_clip.duration)
                 gap_secs = (clip.dt - prev_end).total_seconds()
                 if gap_secs > args.inter_clip_gap_secs:
@@ -2347,6 +2354,29 @@ def main() -> int:
                 else:
                     trim_start = max(0, drive_sec - exit_pad)
                 trim_seconds = None     # run to end of clip
+            elif (not args.daily) and ci0 == 0 and with_speed:
+                # Drive mode + the FIRST clip of the drive. Trim "engine on
+                # but not driving yet" head footage when GPS clearly shows
+                # the car only started moving partway into the clip. Common
+                # for the first clip after a parking break, where the
+                # dashcam boots a few tens of seconds before the wheels turn.
+                drive_sec = find_drive_resume_second(
+                    clip, gps_dirs,
+                    sustain_secs=args.drive_resume_sustain_secs,
+                )
+                if drive_sec is not None and drive_sec > exit_pad:
+                    trim_start = max(0, drive_sec - exit_pad)
+                else:
+                    # No conclusive detection. If the GPX is scrambled
+                    # (parking-mode buffer dump = dashcam just booted),
+                    # use the exit_skip fallback. Clean / absent GPS is
+                    # treated as "drive is already underway", no trim.
+                    gpx = find_gpx_for(clip.timestamp, *gps_dirs)
+                    if gpx is not None:
+                        pts = parse_gpx_track(gpx)
+                        if pts and _gpx_is_scrambled(pts):
+                            trim_start = min(args.exit_skip_secs,
+                                             max(0, clip.duration - exit_pad))
 
             # Per-slice intermediate filename. Suffix the action so re-runs
             # can find / cache them correctly.
