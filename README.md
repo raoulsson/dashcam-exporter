@@ -1,4 +1,4 @@
-# dashcam-exporter (for "DDPAI Mola N3 Pro" model)
+# dashcam-exporter (for DDPAI dashcams)
 
 Turn the raw front + rear clips from a DDPAI dashcam SD card into one polished
 MP4 per drive — or per day — with a moving GPS map widget, speed overlay,
