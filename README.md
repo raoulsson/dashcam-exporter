@@ -257,7 +257,7 @@ The make-scripts also forward arbitrary flags through to the Python:
 ```sh
 ./make-daily-drives-rendered.sh 8 --force                       # overwrite existing
 ./make-daily-drives-rendered.sh --sidecars-only                 # refresh sidecars only
-./make-daily-drives-rendered.sh --clear-cache 8 --output-height 720
+./make-daily-drives-rendered.sh 8 --output-height 720           # day 8, 720p
 ```
 
 Leading integers are treated as group indices for `--drives`; the first
@@ -406,7 +406,6 @@ config.txt > built-in default**. Highlights:
 | `--min-clips-per-group N`     | Auto-skip groups smaller than N clips (default 4). Loop-recording fragments. |
 | `--inter-clip-gap-secs N`     | Insert a "Fast forwarding…" slide whenever consecutive clips are >N s apart (default 60). |
 | `--force`                     | Re-encode groups whose `.mp4` already exists (default: skipped). |
-| `--clear-cache`               | Wipe `.gpx_cache/` and `.intermediates/` under `--out` before running. |
 | `--sidecars-only`             | Only (re-)generate `.html` / `.gpx` / `_links.txt`; skip video encoding. |
 | `--no-map-sidecars`           | Don't generate the sidecars either. |
 | `--no-map-widget`             | Skip the burn-in side panel (output stays 1920×1080). |
@@ -476,7 +475,7 @@ After a typical `--daily` run:
 ├── day_2026-05-11.gpx
 ├── day_2026-05-11_links.txt
 ├── .gpx_cache/              # harvested tar contents, reused across runs
-└── .intermediates/          # per-clip work, cleaned up unless --keep-intermediates
+└── .intermediates/          # scratch — wiped at the start of every run
 ```
 
 
@@ -487,12 +486,18 @@ gets you roughly 5–10× realtime, so ~2 hours of source footage encodes in
 15–25 minutes. On Linux/Windows you fall back to software libx264 — still
 fine, just slower.
 
-The script is **restartable**:
+Caching policy:
 
 - If a final `.mp4` already exists in `--out`, that drive/day is skipped.
-- Per-clip intermediates in `.intermediates/` are reused if present.
-- Harvested GPX in `.gpx_cache/` is reused across runs.
-- Sidecars are emitted unconditionally (even when the .mp4 already exists),
+  Re-render by deleting the .mp4 (or passing `--force`).
+- Per-clip intermediates in `.intermediates/` are **scratch** — wiped at the
+  start of every run and regenerated against the current config. This means
+  any config tweak (head-trim pad, output_height, speed_unit, audio, …)
+  always takes effect on the next render, no flag needed.
+- Harvested GPX in `.gpx_cache/` IS cached across runs (expensive to redo
+  and unaffected by encoding config). Old entries TTL out via
+  `cache_max_age_days`.
+- Sidecars are emitted unconditionally, even when the .mp4 already exists,
   so segmentation / palette / unit tweaks land via a quick `--sidecars-only`
   run.
 

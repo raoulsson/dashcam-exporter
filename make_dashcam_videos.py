@@ -31,7 +31,6 @@ USAGE
     python3 make_dashcam_videos.py --daily --drives 8  # only day 8
     python3 make_dashcam_videos.py --sidecars-only     # refresh .html/.gpx without encoding
     python3 make_dashcam_videos.py --force             # overwrite existing .mp4s
-    python3 make_dashcam_videos.py --clear-cache       # wipe .gpx_cache/ + .intermediates/ first
     python3 make_dashcam_videos.py --write-config .    # dump a fully commented config.txt
 
 `config.txt` (next to the script, or at --config PATH) overrides built-in
@@ -44,7 +43,12 @@ REQUIREMENTS
 
 The script is restartable: a group whose final .mp4 already exists is
 skipped unless --force is passed. Per-clip intermediates in .intermediates/
-and harvested GPX in .gpx_cache/ are reused across runs.
+are SCRATCH — wiped at the start of every run and regenerated against the
+current config, so a tweak to head-trim pad / output_height / etc. always
+takes effect the next time you re-render. To re-render, delete the final
+.mp4 (or pass --force, which does that for you). Harvested GPX in
+.gpx_cache/ DOES persist (expensive to redo and unaffected by encoding
+config); it's TTL-evicted via --cache-max-age-days.
 """
 
 from __future__ import annotations
@@ -276,11 +280,21 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 
 # How long the entry slice is (BEFORE the Fast-forwarding slide).
 # This is the bit where you see yourself parking / getting out.
-#parking_entry_pad = 5
+#parking_entry_pad = 2
 
 # How much pre-drive padding to keep AFTER the Fast-forwarding slide.
 # Larger = you see more "about to drive" before the actual drive-away.
 #parking_exit_pad = 10
+
+# Drive-mode head-trim padding (in seconds). When the first clip of a drive
+# has GPS that proves the car only started moving partway in, the video is
+# trimmed to start this many seconds BEFORE the detected motion. Default 8 —
+# GPS only reports speeds reliably ≥5 km/h, so the car is typically visibly
+# rolling for ~3 seconds before GPS catches up; 8s of pad lands you with a
+# few visibly-parked seconds before the rollout, which reads as a natural
+# "about to drive" intro. Lower for a tighter drop-in, higher for more
+# pre-drive context.
+#drive_first_clip_pad_secs = 8
 
 # Legacy combined knob — kept for back-compat. If parking_entry_pad /
 # parking_exit_pad above aren't set, this value is used for both.
@@ -318,9 +332,10 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # min-clips check is bypassed when --drives is explicit).
 #min_clips_per_group = 4
 
-# Cache housekeeping: files in .gpx_cache/ and .intermediates/ older than
-# this many days are auto-deleted at the start of each run. Stops the disk
-# from filling up silently over weeks of usage. Set to 0 to disable.
+# Cache housekeeping: files in .gpx_cache/ older than this many days are
+# auto-deleted at the start of each run. Stops the disk from filling up
+# silently over weeks of usage. Set to 0 to disable. (.intermediates/ is
+# always wiped at the start of every run; it's scratch, not cache.)
 #cache_max_age_days = 20
 
 
@@ -356,7 +371,7 @@ PARKING_SPEED_THRESHOLD_KMH = 3.0    # below this we consider the car stationary
 PARKING_CLIP_FRACTION       = 0.75   # fraction of seconds-in-clip below threshold
 DEFAULT_PARKING_MIN_SECS    = 300    # minimum run length (s) before we skip (5 min)
 DEFAULT_PARKING_PAD_SECS    = 5      # legacy alias — kept for back-compat
-DEFAULT_PARKING_ENTRY_PAD   = 5      # entry slice length (before the FF)
+DEFAULT_PARKING_ENTRY_PAD   = 2      # entry slice length (before the FF)
 DEFAULT_PARKING_EXIT_PAD    = 10     # how many seconds of footage precede drive-resume after the FF
 # Standard exit-slice skip after a parking gap. The exit slice trims this
 # many seconds off the head of the first clip. Drive-resume detection
@@ -381,7 +396,7 @@ DEFAULT_MIN_CLIPS_PER_GROUP = 4
 # from filling up silently when they encode many days over weeks of usage.
 # Set to 0 to disable the TTL eviction.
 DEFAULT_CACHE_MAX_AGE_DAYS  = 20
-TRANSITION_SECS             = 2      # length of the "Fast forwarding..." slide
+TRANSITION_SECS             = 3      # length of the "Fast forwarding..." slide
 TRANSITION_TEXT             = "Fast forwarding..."
 TRANSITION_FONT_SIZE        = 72
 
@@ -572,6 +587,102 @@ def parse_gpx_speeds(gpx_path: Path) -> list[float]:
     return [pt[2] for pt in parse_gpx_track(gpx_path)]
 
 
+def _parse_camtime_header(gpx_path: Path) -> datetime | None:
+    """
+    Read the DDPAI-specific `$GPSCAMTIME YYYYMMDDhhmmss` header at the top of
+    a GPX file. The value is the dashcam's LOCAL wall-clock at the moment GPS
+    first reported a fix in this clip — which lets us compute the exact
+    LOCAL↔UTC offset for this device even when the dashcam's display clock
+    has drifted (a real-world case: the file we tested had a 7:56:46 offset
+    rather than a clean +8h timezone).
+    """
+    try:
+        with gpx_path.open(encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                line = line.strip()
+                if line.startswith("$GPSCAMTIME"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        try:
+                            return datetime.strptime(parts[1], "%Y%m%d%H%M%S")
+                        except ValueError:
+                            return None
+                # Header is right at the top; bail as soon as we hit GPS data.
+                if line.startswith("$GPRMC") or line.startswith("$GPGGA"):
+                    return None
+    except OSError:
+        pass
+    return None
+
+
+def parse_clip_speeds(clip: "Clip", gps_dirs: tuple[Path | None, ...]) -> list[float]:
+    """
+    Per-second km/h aligned to the clip's VIDEO timeline (not the GPS-fix
+    index). Three real-world wrinkles handled here:
+
+    1) GPS-lock-acquisition lag. Dashcam often starts recording a few seconds
+       before GPS reports its first fix. Those leading video seconds get a
+       0 km/h placeholder.
+    2) Mid-clip GPS dropouts. GPS can lose lock briefly (tunnel, urban
+       canyon, parking ceiling). Affected seconds get the previous-known
+       speed forward-filled, rather than the old behaviour of collapsing
+       the gap and shifting every subsequent speed earlier.
+    3) DDPAI dashcam clock drift. The wall-clock burned into the video can
+       be offset from GPS UTC by a non-integer-hour amount, so mod-3600
+       lag detection isn't enough. The `$GPSCAMTIME` header at the top of
+       the GPX file gives the exact LOCAL↔UTC offset for the device.
+
+    The combination of all three was producing speeds that ran ~10+ seconds
+    AHEAD of the video — the visible "speed already 14 km/h while wheels
+    haven't moved yet" symptom. After this fix, speeds[i] is the GPS reading
+    at the SAME video-second the user sees burned-in on the timestamp watermark.
+    """
+    gpx = find_gpx_for(clip.timestamp, *gps_dirs)
+    if gpx is None:
+        return []
+    points = parse_gpx_track(gpx)
+    if not points:
+        return []
+    try:
+        clip_dt = datetime.strptime(clip.timestamp, "%Y%m%d%H%M%S")
+    except ValueError:
+        return [p[2] for p in points]
+
+    # Prefer the exact `$GPSCAMTIME` offset when DDPAI writes it; fall back
+    # to the old mod-3600 lag-prepend behaviour for non-DDPAI files.
+    camtime_local = _parse_camtime_header(gpx)
+    if camtime_local is not None:
+        # offset = LOCAL_at_first_fix - UTC_at_first_fix
+        offset = camtime_local - points[0][3]
+        # Place each point at its true clip-second via its UTC timestamp.
+        raw: list[float | None] = [None] * clip.duration
+        for p in points:
+            local_time = p[3] + offset
+            clip_sec = int(round((local_time - clip_dt).total_seconds()))
+            if 0 <= clip_sec < clip.duration:
+                raw[clip_sec] = p[2]
+        # Forward-fill: missing seconds use the previous-known speed (or 0
+        # before the first reading). That way a mid-clip GPS dropout shows
+        # the last sensed speed rather than collapsing time.
+        speeds: list[float] = [0.0] * clip.duration
+        last = 0.0
+        for i in range(clip.duration):
+            if raw[i] is not None:
+                last = raw[i]
+            speeds[i] = last
+        return speeds
+
+    # Fallback for non-DDPAI files (no $GPSCAMTIME header).
+    speeds = [p[2] for p in points]
+    gps_dt = points[0][3]
+    clip_sih = clip_dt.minute * 60 + clip_dt.second
+    gps_sih = gps_dt.minute * 60 + gps_dt.second
+    lag = (gps_sih - clip_sih) % 3600
+    if 0 < lag <= clip.duration:
+        speeds = [0.0] * lag + speeds
+    return speeds
+
+
 # How long (seconds) a single clip's GPX file is expected to span. The DDPAI
 # dashcam occasionally dumps stale GPS data from a previous drive into the
 # first clip of a new drive (parking-mode buffer leftovers). When the parsed
@@ -634,22 +745,22 @@ def parse_gpx_track(gpx_path: Path,
     points.sort(key=lambda p: p[3])
     if (points[-1][3] - points[0][3]).total_seconds() <= window_seconds * 1.5:
         return points
-    # File contains data from multiple time-disjoint recording sessions.
-    # The DDPAI firmware writes stale parking-mode-buffer data FIRST, then
-    # the actual clip's live recording SECOND. Density doesn't reliably tell
-    # them apart (the stale block can be longer than the real one if the
-    # real clip had weak GPS lock), so we pick by TIME position instead:
-    # walk backward from the latest fix, and keep accumulating until we hit
-    # a gap larger than `window_seconds`. That last contiguous cluster is
-    # the real clip data. If the file is a single uninterrupted run with no
-    # such gap, we keep everything.
-    cluster_start = 0
-    for i in range(len(points) - 1, 0, -1):
-        gap = (points[i][3] - points[i - 1][3]).total_seconds()
-        if gap > window_seconds:
-            cluster_start = i
-            break
-    return points[cluster_start:]
+    # File contains more than one clip's worth of data. Two known failure modes:
+    #   1. Cross-drive stale data: DDPAI parking-mode buffer dumps points
+    #      from a previous drive (hours earlier) into the current clip's
+    #      GPX. These are time-disjoint and easy to drop.
+    #   2. Multi-clip bundle: the GPX file for clip N actually contains BOTH
+    #      clip N-1's and clip N's data, time-contiguous (no gap between
+    #      17:24:59 and 17:25:00). The speeds[] array then starts with the
+    #      WRONG clip's data, so the speed overlay shows the previous clip's
+    #      acceleration ramp burned onto the current clip's still-parked
+    #      footage (visible as "speed already 15 km/h when wheels haven't
+    #      moved yet").
+    # Both cases are handled by keeping only the points within
+    # `window_seconds` of the LATEST fix (= the actual clip's data, since
+    # DDPAI always writes the live recording last and any extra junk earlier).
+    latest = points[-1][3]
+    return [p for p in points if (latest - p[3]).total_seconds() <= window_seconds]
 
 
 def gather_track(clips: list[Clip], gps_dirs: tuple[Path | None, ...]) -> list[tuple[float, float, float, datetime]]:
@@ -665,35 +776,100 @@ def gather_track(clips: list[Clip], gps_dirs: tuple[Path | None, ...]) -> list[t
 DRIVE_RESUME_THRESHOLD_KMH = 5.0   # higher than parking threshold to reject GPS jitter
 DRIVE_RESUME_SUSTAIN_SECS  = 30    # require N consecutive moving samples = real drive
 
-def find_drive_resume_second(
-    clip: Clip, gps_dirs: tuple[Path | None, ...],
+def find_drive_resume_in_group(
+    head_clips: list[Clip],
+    gps_dirs: tuple[Path | None, ...],
     sustain_secs: int = DRIVE_RESUME_SUSTAIN_SECS,
     threshold_kmh: float = DRIVE_RESUME_THRESHOLD_KMH,
-) -> int | None:
+) -> tuple[int, int] | None:
     """
-    Best-effort detection of when the car actually starts moving in this clip.
-    Returns the clip-second at which a sustained 30-second-long moving window
-    begins, or None if no such window exists (in which case the GPS data is
-    too noisy / scrambled to trust — caller falls back to a configurable
-    skip).
+    Scan the speeds of the first few clips of a group, concatenated, to find
+    the first index at which `sustain_secs` consecutive samples are all above
+    `threshold_kmh`. Returns (clip_index, offset_within_clip) where the
+    sustained motion begins, or None if no such window exists.
 
-    The 30-second sustain is intentional: parking-mode dashcams record short
-    bursts of motion-triggered video around a parked car (a passing car, a
-    pedestrian, dashcam reboot self-tests) which produce brief GPS spikes
-    that don't represent real driving. 30 seconds of continuous motion is a
-    solid indicator that the drive has actually started.
+    The speeds are sourced via parse_clip_speeds so they're already aligned
+    to each clip's VIDEO timeline (with leading zeros prepended for any
+    GPS-acquisition lag at the start of a clip). That means the returned
+    offset_within_clip can be used directly as a trim_start for that clip.
+
+    Use case: drive-mode head-trim where the car may start moving in clip 0,
+    clip 1, or clip 2 of a drive. The caller can drop earlier clips entirely
+    via action_for[k] = "head_skip", then trim the clip containing motion to
+    start `pad` seconds before offset_within_clip.
     """
-    gpx = find_gpx_for(clip.timestamp, *gps_dirs)
-    if gpx is None:
-        return None
-    speeds = parse_gpx_speeds(gpx)
-    if not speeds:
-        return None
+    speeds: list[float] = []
+    boundaries: list[int] = [0]    # cumulative speed-count after each clip
+    for c in head_clips:
+        clip_speeds = parse_clip_speeds(c, gps_dirs)
+        if not clip_speeds:
+            # Gap in GPS coverage — can't reliably scan past this point.
+            break
+        speeds.extend(clip_speeds)
+        boundaries.append(len(speeds))
     if len(speeds) < sustain_secs:
         return None
     for i in range(len(speeds) - sustain_secs + 1):
         if all(speeds[i + j] > threshold_kmh for j in range(sustain_secs)):
-            return i
+            # Map global index i back to (clip_index, offset_within_clip).
+            for ci in range(len(boundaries) - 1):
+                if boundaries[ci] <= i < boundaries[ci + 1]:
+                    return ci, i - boundaries[ci]
+            return None
+    return None
+
+
+def find_drive_resume_second(
+    clip: Clip, gps_dirs: tuple[Path | None, ...],
+    sustain_secs: int = DRIVE_RESUME_SUSTAIN_SECS,
+    threshold_kmh: float = DRIVE_RESUME_THRESHOLD_KMH,
+    next_clips: list[Clip] | None = None,
+) -> int | None:
+    """
+    Best-effort detection of when the car actually starts moving in `clip`.
+    Returns the clip-second at which a sustained `sustain_secs`-long moving
+    window begins, or None if no such window exists (in which case the GPS
+    data is too noisy / scrambled to trust — caller falls back to a
+    configurable skip).
+
+    The 30-second default sustain is intentional: parking-mode dashcams
+    record short bursts of motion-triggered video around a parked car (a
+    passing car, a pedestrian, dashcam reboot self-tests) which produce
+    brief GPS spikes that don't represent real driving. 30 seconds of
+    continuous motion is a solid indicator that the drive has actually
+    started.
+
+    If `next_clips` is provided, their speeds are concatenated onto this
+    clip's, so a sustain window that STARTS in this clip and continues into
+    the next one(s) still counts. The returned index stays in this clip's
+    timeline — clamped to clip.duration - 1 if motion starts at the very
+    end of the clip — so the caller can still trim from second N onward.
+    Without this, a drive that starts at e.g. second 40 of a 60-second clip
+    can never satisfy a 30-second-within-one-clip rule and the head-trim
+    silently fails open (showing the whole pre-drive pause).
+    """
+    # Use parse_clip_speeds so the returned index is already in VIDEO-second
+    # space (with leading 0s prepended for any GPS-lock acquisition lag).
+    # That way the caller's trim_start = max(0, drive_sec - pad) lands on
+    # the correct video frame, not on the GPS-fix index — which would
+    # otherwise drop into action ~10 seconds before the wheels actually move.
+    speeds: list[float] = parse_clip_speeds(clip, gps_dirs)
+    if not speeds:
+        return None
+    clip_len = len(speeds)
+    if next_clips:
+        for nc in next_clips:
+            nspeeds = parse_clip_speeds(nc, gps_dirs)
+            if not nspeeds:
+                break  # gap — don't pretend the next-next clip is contiguous
+            speeds.extend(nspeeds)
+    if len(speeds) < sustain_secs:
+        return None
+    for i in range(len(speeds) - sustain_secs + 1):
+        if all(speeds[i + j] > threshold_kmh for j in range(sustain_secs)):
+            # Clamp to this clip's timeline so the caller's trim_start
+            # stays a valid offset inside this clip's source video.
+            return min(i, max(0, clip_len - 1))
     return None
 
 
@@ -1760,9 +1936,12 @@ def encode_clip(
     # window) and pass it to the filter.
     speed_srt: Path | None = None
     if with_speed:
-        gpx = find_gpx_for(clip.timestamp, *gps_dirs)
-        if gpx is not None:
-            all_speeds = parse_gpx_speeds(gpx)
+        # parse_clip_speeds aligns the GPS time-series to the clip's VIDEO
+        # timeline by prepending 0-km/h placeholders if the dashcam started
+        # recording before GPS reacquired lock. Without this, the speed
+        # overlay can be ~10 seconds AHEAD of what's actually visible.
+        all_speeds = parse_clip_speeds(clip, gps_dirs)
+        if all_speeds:
             window = all_speeds[trim_start:trim_start + duration]
             srt_path = out_path.with_suffix(".speed.srt")
             if write_speed_srt(window, srt_path):
@@ -1892,6 +2071,12 @@ def generate_transition_slide(
                 "-maxrate", vt_m, "-profile:v", "high"]
     else:
         venc = ["-c:v", "libx264", "-preset", X264_PRESET, "-crf", X264_CRF]
+    # Force every frame to be a keyframe (GOP size = 1). Without this, players
+    # can show ~1 second of black at the start/end of the slide while they
+    # prime the decoder past the first I-frame — which on a 3-second slide
+    # turns a "Fast forwarding…" message into a blink that's gone before
+    # you've read it. Slide is only 3s so the file-size hit is negligible.
+    venc += ["-g", "1"]
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
         "-f", "lavfi", "-i",
@@ -2081,15 +2266,13 @@ def main() -> int:
     ap.add_argument("--force", action="store_true", default=cb("force", False),
                     help="Re-encode groups even when the final .mp4 already exists "
                          "(default: existing files are skipped).")
-    ap.add_argument("--clear-cache", action="store_true",
-                    help="Wipe the harvested GPX cache (.gpx_cache/) and per-clip "
-                         "intermediates (.intermediates/) under --out before doing "
-                         "anything else, then continue with the normal run.")
     ap.add_argument("--cache-max-age-days", type=int,
                     default=ci("cache_max_age_days", DEFAULT_CACHE_MAX_AGE_DAYS),
-                    help="Auto-delete cache files (.gpx_cache/ + .intermediates/) "
-                         "older than this many days at the start of each run. "
-                         "Set to 0 to disable. Default 20.")
+                    help="Auto-delete cached .gpx_cache/ entries older than "
+                         "this many days at the start of each run. Set to 0 "
+                         "to disable. Default 20. (Per-clip intermediates in "
+                         ".intermediates/ are always wiped at the start of a "
+                         "run regardless — they're scratch, not cache.)")
     ap.add_argument("--dry-run", action="store_true", help="List drives and exit without encoding")
     ap.add_argument("--no-timestamp", action="store_true", default=default_no_timestamp,
                     help="Skip the burned-in date/time overlay")
@@ -2125,6 +2308,19 @@ def main() -> int:
                                ci("parking_pad_secs", DEFAULT_PARKING_EXIT_PAD)),
                     help="Seconds of footage AFTER the FF slide before "
                          "drive-resume (exit slice leading padding). Default 10.")
+    ap.add_argument("--drive-first-clip-pad-secs", type=int,
+                    default=ci("drive_first_clip_pad_secs", 8),
+                    help="Drive-mode head-trim: when the first clip of a "
+                         "drive has GPS that proves the car only started "
+                         "moving partway in, anchor the video to start this "
+                         "many seconds BEFORE the detected motion. Default 8 "
+                         "— GPS only reports speeds reliably ≥5 km/h, so the "
+                         "car is typically visibly rolling for ~3 seconds "
+                         "before GPS catches up; 8s of pad gives a few "
+                         "visibly-parked seconds before the rollout for a "
+                         "natural 'about to drive' intro. Separate from "
+                         "--parking-exit-pad which controls the daily-mode "
+                         "exit-from-parking slice.")
     ap.add_argument("--min-clips-per-group", type=int,
                     default=ci("min_clips_per_group", DEFAULT_MIN_CLIPS_PER_GROUP),
                     help="Auto-skip groups with fewer than this many clips "
@@ -2173,23 +2369,27 @@ def main() -> int:
     out_dir = Path(args.out).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.clear_cache:
-        for sub in (".gpx_cache", ".intermediates"):
-            target = out_dir / sub
-            if target.is_dir():
-                n = sum(1 for _ in target.rglob("*"))
-                shutil.rmtree(target, ignore_errors=True)
-                print(f"cleared {target}  ({n} entries removed)")
+    # Always wipe per-clip intermediates at the start of a run. Reusing them
+    # across runs is dangerous — config changes (head-trim pad, output_height,
+    # speed_unit, audio settings, etc.) silently produce stale outputs because
+    # the intermediate filename can't encode every relevant knob. The cleaner
+    # model: intermediates are scratch space for ONE run, finals persist and
+    # the user controls regeneration by deleting a final .mp4 (or passing
+    # --force, which deletes it for you).
+    inter_dir = out_dir / ".intermediates"
+    if inter_dir.is_dir():
+        n = sum(1 for _ in inter_dir.rglob("*"))
+        if n:
+            shutil.rmtree(inter_dir, ignore_errors=True)
+            print(f"cleared {inter_dir}  ({n} entries removed)")
 
-    # TTL eviction: housekeep stale entries in both cache dirs so the user's
-    # disk doesn't fill up silently over weeks of usage. Runs every time
-    # unless --cache-max-age-days is 0.
+    # TTL eviction for the GPX cache (harvested from tar archives — expensive
+    # to redo and unaffected by encoding config, so this one DOES cache across
+    # runs). Disk-friendly cleanup of stale entries.
     if args.cache_max_age_days > 0:
         cutoff = datetime.now().timestamp() - args.cache_max_age_days * 86400
-        for sub in (".gpx_cache", ".intermediates"):
-            target = out_dir / sub
-            if not target.is_dir():
-                continue
+        target = out_dir / ".gpx_cache"
+        if target.is_dir():
             removed = 0
             for p in target.rglob("*"):
                 if p.is_file() and p.stat().st_mtime < cutoff:
@@ -2444,13 +2644,45 @@ def main() -> int:
             parking_runs = find_parking_runs(group, gps_dirs, args.parking_min_secs)
 
         # Map clip-index → action.
-        #   entry  = first pad seconds of the FIRST parked clip
-        #   skip   = drop entirely (every clip in the parked run, including the last)
-        #   exit   = first pad seconds of the NEXT MOVING clip after the run
+        #   entry      = first pad seconds of the FIRST parked clip
+        #   skip       = drop entirely (every clip in the parked run, including the last)
+        #   exit       = first pad seconds of the NEXT MOVING clip after the run
+        #   head_skip  = drop entirely (drive-mode head trim before motion clip)
         # This means the Fast-forwarding slide covers both the remaining parked
         # footage AND any engine-off gap until the next drive resumes.
         action_for: dict[int, str] = {}
         skipped_secs_for: dict[int, float] = {}
+        # Drive-mode head trim: scan the first few clips for the moment the
+        # car actually starts moving (drive_resume_sustain_secs of sustained
+        # GPS motion). If motion starts in clip N, mark clips 0..N-1 as
+        # head_skip (drop entirely) and trim clip N to start `pad` seconds
+        # before motion. This handles drives where the engine-on→wheels-turn
+        # gap spans into the second or third clip (e.g., long warm-up,
+        # waiting at a light right after starting).
+        head_skip_count = 0
+        head_trim_for_motion_clip = 0
+        if (not args.daily) and with_speed and len(group) >= 1:
+            # Examine up to the first 3 clips — enough to find motion that
+            # starts late in clip 0 + 30s sustain spilling into clip 2.
+            resume = find_drive_resume_in_group(
+                group[:3], gps_dirs,
+                sustain_secs=args.drive_resume_sustain_secs,
+            )
+            if resume is not None:
+                motion_clip_idx, offset = resume
+                pad = args.drive_first_clip_pad_secs
+                head_skip_count = motion_clip_idx
+                head_trim_for_motion_clip = max(0, offset - pad)
+                if head_skip_count > 0:
+                    for k in range(head_skip_count):
+                        action_for[k] = "head_skip"
+                    print(f"  head-trim: skipping {head_skip_count} pre-drive "
+                          f"clip{'s' if head_skip_count != 1 else ''}, "
+                          f"motion detected in clip {head_skip_count + 1} at "
+                          f"second {offset}")
+                elif head_trim_for_motion_clip > 0:
+                    print(f"  head-trim: dropping first {head_trim_for_motion_clip}s "
+                          f"of clip 1, motion detected at second {offset}")
         for run_start, run_end in parking_runs:
             action_for[run_start] = "entry"
             for k in range(run_start + 1, run_end + 1):
@@ -2495,6 +2727,9 @@ def main() -> int:
 
             # Anywhere inside a parked run (including its last clip) — drop entirely.
             if action == "skip":
+                continue
+            # Drive-mode head trim: pre-motion clips dropped wholesale.
+            if action == "head_skip":
                 continue
 
             # Inter-clip gap detection: insert a 'Fast forwarding…' slide when
@@ -2542,29 +2777,11 @@ def main() -> int:
                 else:
                     trim_start = max(0, drive_sec - exit_pad)
                 trim_seconds = None     # run to end of clip
-            elif (not args.daily) and ci0 == 0 and with_speed:
-                # Drive mode + the FIRST clip of the drive. Trim "engine on
-                # but not driving yet" head footage when GPS clearly shows
-                # the car only started moving partway into the clip. Common
-                # for the first clip after a parking break, where the
-                # dashcam boots a few tens of seconds before the wheels turn.
-                drive_sec = find_drive_resume_second(
-                    clip, gps_dirs,
-                    sustain_secs=args.drive_resume_sustain_secs,
-                )
-                if drive_sec is not None and drive_sec > exit_pad:
-                    trim_start = max(0, drive_sec - exit_pad)
-                else:
-                    # No conclusive detection. If the GPX is scrambled
-                    # (parking-mode buffer dump = dashcam just booted),
-                    # use the exit_skip fallback. Clean / absent GPS is
-                    # treated as "drive is already underway", no trim.
-                    gpx = find_gpx_for(clip.timestamp, *gps_dirs)
-                    if gpx is not None:
-                        pts = parse_gpx_track(gpx)
-                        if pts and _gpx_is_scrambled(pts):
-                            trim_start = min(args.exit_skip_secs,
-                                             max(0, clip.duration - exit_pad))
+            elif (not args.daily) and ci0 == head_skip_count and with_speed:
+                # Drive mode + the first NON-SKIPPED clip = the motion clip.
+                # head_trim_for_motion_clip was computed in the pre-pass
+                # above. Use it directly as the trim_start.
+                trim_start = head_trim_for_motion_clip
 
             # Per-slice intermediate filename. Suffix the action so re-runs
             # can find / cache them correctly. The requested output_height is
@@ -2580,44 +2797,48 @@ def main() -> int:
             )
 
             # Per-clip map widget video (trimmed if we're trimming the video).
+            # Like the main intermediate, always regenerated — caching was the
+            # source of stale-trim bugs when head-trim params changed between
+            # runs.
             map_video: Path | None = None
             if with_map_widget:
                 map_video = inter.with_suffix(".map.mp4")
-                if not map_video.exists():
-                    ok, last_pixel = render_clip_marker_video(
-                        clip, base_panel, group_track, group_pixels, gps_dirs, map_video,
-                        trim_start=trim_start, trim_seconds=trim_seconds,
-                    )
-                    if ok and last_pixel is not None:
-                        last_marker_pixel = last_pixel
-                    if not ok:
-                        # IMPORTANT: when trim_seconds is None the video runs
-                        # to the end of the clip, which is (duration - trim_start)
-                        # seconds long. The static map panel must match that
-                        # length exactly, otherwise hstack waits for the longer
-                        # stream and the front/rear frame freezes for the
-                        # remainder. (The bug used to show as a ~minute pause
-                        # right after the GPS-fix transition.)
-                        actual_dur = (trim_seconds if trim_seconds is not None
-                                      else (clip.duration - trim_start))
-                        ok = _render_static_panel_video(
-                            base_panel, actual_dur, map_video,
-                            marker_pixel=last_marker_pixel,
-                        )
-                        if not ok:
-                            map_video = None
-
-            if not inter.exists():
-                tag = f" ({action} slice, {trim_seconds}s)" if action else ""
-                print(f"  [{ci:>3}/{len(group)}] {clip.timestamp}{tag}  encoding ...")
-                encode_clip(
-                    clip, inter, font_path, use_vt, with_timestamp,
-                    gps_dirs, with_speed, map_video=map_video,
+                ok, last_pixel = render_clip_marker_video(
+                    clip, base_panel, group_track, group_pixels, gps_dirs, map_video,
                     trim_start=trim_start, trim_seconds=trim_seconds,
-                    no_audio=args.no_audio, output_height=args.output_height,
                 )
-            else:
-                print(f"  [{ci:>3}/{len(group)}] {clip.timestamp}  (cached)")
+                if ok and last_pixel is not None:
+                    last_marker_pixel = last_pixel
+                if not ok:
+                    # IMPORTANT: when trim_seconds is None the video runs
+                    # to the end of the clip, which is (duration - trim_start)
+                    # seconds long. The static map panel must match that
+                    # length exactly, otherwise hstack waits for the longer
+                    # stream and the front/rear frame freezes for the
+                    # remainder. (The bug used to show as a ~minute pause
+                    # right after the GPS-fix transition.)
+                    actual_dur = (trim_seconds if trim_seconds is not None
+                                  else (clip.duration - trim_start))
+                    ok = _render_static_panel_video(
+                        base_panel, actual_dur, map_video,
+                        marker_pixel=last_marker_pixel,
+                    )
+                    if not ok:
+                        map_video = None
+
+            # Intermediates are scratch space, always re-encoded. The directory
+            # was wiped at the start of the run, so inter.exists() is False
+            # except in the rare case where two drives in the same run share a
+            # clip (the same one re-targeted) — and even then, re-encoding is
+            # cheap and safe.
+            tag = f" ({action} slice, {trim_seconds}s)" if action else ""
+            print(f"  [{ci:>3}/{len(group)}] {clip.timestamp}{tag}  encoding ...")
+            encode_clip(
+                clip, inter, font_path, use_vt, with_timestamp,
+                gps_dirs, with_speed, map_video=map_video,
+                trim_start=trim_start, trim_seconds=trim_seconds,
+                no_audio=args.no_audio, output_height=args.output_height,
+            )
             intermediates.append(inter)
 
             # After the entry slice of a parking run, splice in the transition.
