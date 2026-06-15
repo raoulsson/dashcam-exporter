@@ -176,11 +176,21 @@
 
 # How long the entry slice is (BEFORE the Fast-forwarding slide).
 # This is the bit where you see yourself parking / getting out.
-#parking_entry_pad = 5
+#parking_entry_pad = 2
 
 # How much pre-drive padding to keep AFTER the Fast-forwarding slide.
 # Larger = you see more "about to drive" before the actual drive-away.
 #parking_exit_pad = 10
+
+# Drive-mode head-trim padding (in seconds). When the first clip of a drive
+# has GPS that proves the car only started moving partway in, the video is
+# trimmed to start this many seconds BEFORE the detected motion. Default 8 —
+# GPS only reports speeds reliably ≥5 km/h, so the car is typically visibly
+# rolling for ~3 seconds before GPS catches up; 8s of pad lands you with a
+# few visibly-parked seconds before the rollout, which reads as a natural
+# "about to drive" intro. Lower for a tighter drop-in, higher for more
+# pre-drive context.
+#drive_first_clip_pad_secs = 8
 
 # Legacy combined knob — kept for back-compat. If parking_entry_pad /
 # parking_exit_pad above aren't set, this value is used for both.
@@ -218,9 +228,10 @@
 # min-clips check is bypassed when --drives is explicit).
 #min_clips_per_group = 4
 
-# Cache housekeeping: files in .gpx_cache/ and .intermediates/ older than
-# this many days are auto-deleted at the start of each run. Stops the disk
-# from filling up silently over weeks of usage. Set to 0 to disable.
+# Cache housekeeping: files in .gpx_cache/ older than this many days are
+# auto-deleted at the start of each run. Stops the disk from filling up
+# silently over weeks of usage. Set to 0 to disable. (.intermediates/ is
+# always wiped at the start of every run; it's scratch, not cache.)
 #cache_max_age_days = 20
 
 
