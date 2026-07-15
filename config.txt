@@ -174,9 +174,11 @@
 # 300 = 5 minutes. Shorter values are more aggressive.
 #parking_min_secs = 300
 
-# How long the entry slice is (BEFORE the Fast-forwarding slide).
-# This is the bit where you see yourself parking / getting out.
-#parking_entry_pad = 2
+# Seconds of "stopped" footage to keep AFTER park onset before the FF slide
+# kicks in. Park onset = first sustained drop below ~3 km/h in the smoothed
+# GPS speed (detected per-clip via find_park_second). Default 3 keeps a
+# brief "you've parked" beat so the FF doesn't feel jarring.
+#parking_entry_pad = 3
 
 # How much pre-drive padding to keep AFTER the Fast-forwarding slide.
 # Larger = you see more "about to drive" before the actual drive-away.
@@ -202,13 +204,13 @@
 # (>5 km/h, see drive_resume_sustain_secs). When found, the exit slice
 # anchors `parking_exit_pad` seconds before that moment.
 #
-# Most parking-mode dashcams produce GPS that's too scrambled to detect
-# reliably (random motion-triggered "passing car / pedestrian" wakeups that
-# get flushed into the first new clip), so the script falls through to the
-# value below and seeks this many seconds into the exit clip. Set to 0 to
-# play exit clips from second 0; 45 is the default and tends to land within
-# ~10 seconds of real drive-away on a 60-second clip.
-#exit_skip_secs = 45
+# When the exit clip's GPS is too sparse / noisy for drive-resume detection
+# to find a sustained moving window (e.g., GPS still acquiring lock at the
+# start of a drive), we fall back to seeking this many seconds in. Set to 0
+# to play the exit clip from second 0. Default 15 — lands you 10-20 seconds
+# after the actual drive-away on a typical 60-second clip, which matches
+# what feels natural after the FF transition.
+#exit_skip_secs = 15
 
 # How long a moving GPS block must be to count as "real drive" rather than
 # parking-mode jitter. Higher = stricter (more often falls through to

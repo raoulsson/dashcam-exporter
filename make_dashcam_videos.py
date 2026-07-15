@@ -278,9 +278,11 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # 300 = 5 minutes. Shorter values are more aggressive.
 #parking_min_secs = 300
 
-# How long the entry slice is (BEFORE the Fast-forwarding slide).
-# This is the bit where you see yourself parking / getting out.
-#parking_entry_pad = 2
+# Seconds of "stopped" footage to keep AFTER park onset before the FF slide
+# kicks in. Park onset = first sustained drop below ~3 km/h in the smoothed
+# GPS speed (detected per-clip via find_park_second). Default 3 keeps a
+# brief "you've parked" beat so the FF doesn't feel jarring.
+#parking_entry_pad = 3
 
 # How much pre-drive padding to keep AFTER the Fast-forwarding slide.
 # Larger = you see more "about to drive" before the actual drive-away.
@@ -306,13 +308,13 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # (>5 km/h, see drive_resume_sustain_secs). When found, the exit slice
 # anchors `parking_exit_pad` seconds before that moment.
 #
-# Most parking-mode dashcams produce GPS that's too scrambled to detect
-# reliably (random motion-triggered "passing car / pedestrian" wakeups that
-# get flushed into the first new clip), so the script falls through to the
-# value below and seeks this many seconds into the exit clip. Set to 0 to
-# play exit clips from second 0; 45 is the default and tends to land within
-# ~10 seconds of real drive-away on a 60-second clip.
-#exit_skip_secs = 45
+# When the exit clip's GPS is too sparse / noisy for drive-resume detection
+# to find a sustained moving window (e.g., GPS still acquiring lock at the
+# start of a drive), we fall back to seeking this many seconds in. Set to 0
+# to play the exit clip from second 0. Default 15 — lands you 10-20 seconds
+# after the actual drive-away on a typical 60-second clip, which matches
+# what feels natural after the FF transition.
+#exit_skip_secs = 15
 
 # How long a moving GPS block must be to count as "real drive" rather than
 # parking-mode jitter. Higher = stricter (more often falls through to
@@ -371,7 +373,7 @@ PARKING_SPEED_THRESHOLD_KMH = 3.0    # below this we consider the car stationary
 PARKING_CLIP_FRACTION       = 0.75   # fraction of seconds-in-clip below threshold
 DEFAULT_PARKING_MIN_SECS    = 300    # minimum run length (s) before we skip (5 min)
 DEFAULT_PARKING_PAD_SECS    = 5      # legacy alias — kept for back-compat
-DEFAULT_PARKING_ENTRY_PAD   = 2      # entry slice length (before the FF)
+DEFAULT_PARKING_ENTRY_PAD   = 3      # seconds AFTER park onset, before FF
 DEFAULT_PARKING_EXIT_PAD    = 10     # how many seconds of footage precede drive-resume after the FF
 # Standard exit-slice skip after a parking gap. The exit slice trims this
 # many seconds off the head of the first clip. Drive-resume detection
@@ -380,7 +382,7 @@ DEFAULT_PARKING_EXIT_PAD    = 10     # how many seconds of footage precede drive
 # that's too scrambled to detect reliably (random motion-triggered bursts
 # of "passing car / walking pedestrian" wakeups), so this is the value
 # you'll see most of the time.
-DEFAULT_EXIT_SKIP_SECS      = 45
+DEFAULT_EXIT_SKIP_SECS      = 15
 # Minimum time gap (in wall-clock seconds) between consecutive clips before
 # a "Fast forwarding…" slide is auto-inserted between them. This catches
 # engine-off intervals that DIDN'T leave parked-but-recording footage on
@@ -890,36 +892,168 @@ def clip_is_parked(clip: Clip, gps_dirs: tuple[Path | None, ...]) -> bool:
     speeds = parse_gpx_speeds(gpx)
     if not speeds:
         return True
+    # Sparse-coverage + fast-speed check: if the GPX file holds far fewer
+    # samples than the clip's duration would suggest (1 Hz nominal) AND
+    # those samples are all at highway-ish speeds, they're stale parking-
+    # buffer data from a previous drive that just happens to be all the
+    # GPS info this clip has. Real cars don't go from a parking-mode wake
+    # to 80 km/h, so this combination is a reliable "parked, GPS missing"
+    # signal. (A clip with SLOW sparse samples — e.g., GPS still acquiring
+    # at the start of a drive — falls through to the normal slow-ratio
+    # check, which handles both directions correctly.)
+    if len(speeds) < clip.duration * 0.2:
+        avg = sum(speeds) / len(speeds)
+        if avg > 40:
+            return True
     slow = sum(1 for s in speeds if s < PARKING_SPEED_THRESHOLD_KMH)
     return (slow / len(speeds)) >= PARKING_CLIP_FRACTION
+
+
+def _filter_gps_outliers(speeds: list[float], max_delta_kmh: float = 30.0) -> list[float]:
+    """
+    Replace single-sample GPS noise spikes — a sample that differs from BOTH
+    immediate neighbours by more than `max_delta_kmh` — with the mean of its
+    neighbours. Catches the classic "parked car suddenly reports 80 km/h for
+    one second" failure mode that breaks park-onset detection.
+    """
+    if len(speeds) < 3:
+        return list(speeds)
+    out = list(speeds)
+    for i in range(1, len(speeds) - 1):
+        prev, cur, nxt = speeds[i - 1], speeds[i], speeds[i + 1]
+        if abs(cur - prev) > max_delta_kmh and abs(cur - nxt) > max_delta_kmh:
+            out[i] = (prev + nxt) / 2.0
+    return out
+
+
+def _smooth_speeds(speeds: list[float], window: int = 5) -> list[float]:
+    """
+    Centre-aligned moving-average smoothing. Returns a same-length list. At
+    the edges the window is truncated to the available samples (no padding).
+    Used to extract the "middle line" from noisy GPS, so park-onset
+    detection isn't tripped by transient overshoots and undershoots.
+    """
+    n = len(speeds)
+    if n < 2:
+        return list(speeds)
+    half = window // 2
+    out: list[float] = []
+    for i in range(n):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        out.append(sum(speeds[lo:hi]) / (hi - lo))
+    return out
+
+
+def find_park_second(
+    clip: Clip,
+    gps_dirs: tuple[Path | None, ...],
+    sustain_secs: int = 30,
+    threshold_kmh: float = PARKING_SPEED_THRESHOLD_KMH,
+    next_clips: list[Clip] | None = None,
+) -> int | None:
+    """
+    First clip-second at which the smoothed GPS speed drops below
+    `threshold_kmh` and STAYS below for `sustain_secs` consecutive seconds.
+    Returns the clip-second of the park onset (relative to this clip's
+    video timeline), or None if no sustained drop exists across the clip
+    + any lookahead clips.
+
+    Outliers are filtered and the series is moving-averaged before the
+    sustain check, so a single noise spike up to 80 km/h on a parked car
+    doesn't push park onset 5 minutes later than it really happened.
+    """
+    speeds = parse_clip_speeds(clip, gps_dirs)
+    if not speeds:
+        return None
+    clip_len = len(speeds)
+    if next_clips:
+        for nc in next_clips:
+            nspeeds = parse_clip_speeds(nc, gps_dirs)
+            if not nspeeds:
+                break
+            speeds.extend(nspeeds)
+    filtered = _filter_gps_outliers(speeds)
+    smoothed = _smooth_speeds(filtered)
+    if len(smoothed) < sustain_secs:
+        return None
+    for i in range(len(smoothed) - sustain_secs + 1):
+        if all(smoothed[i + j] < threshold_kmh for j in range(sustain_secs)):
+            # Clamp the returned index to THIS clip's timeline — the caller
+            # uses it as a trim_seconds offset within the entry clip's source.
+            return min(i, max(0, clip_len - 1))
+    return None
 
 
 def find_parking_runs(
     group: list[Clip],
     gps_dirs: tuple[Path | None, ...],
     min_run_secs: int,
-) -> list[tuple[int, int]]:
+) -> list[tuple[int, int, int]]:
     """
-    Find runs of consecutive parked clips where the total duration is at
-    least min_run_secs. Returns list of (first_idx, last_idx) inclusive
-    indices into `group`.
+    Find runs of parking and return a list of
+    `(entry_idx, entry_park_sec, end_idx)` tuples.
+
+    `entry_idx` is the group-index of the clip in which the park onset is
+    detected (via find_park_second). `entry_park_sec` is the clip-second
+    at which sustained low-speed begins inside that clip — could be 0
+    (clip was already parked from frame 1) or up to clip.duration - 1
+    (parking onset late in the clip). `end_idx` is the last clip of the
+    parking run (subsequent clip = parking exit).
+
+    Total stopped duration includes the partial entry-clip tail, the fully
+    parked clips, AND the wall-clock engine-off gap to the next moving
+    clip. Threshold passed only if `total >= min_run_secs`.
     """
-    runs: list[tuple[int, int]] = []
-    cur_start: int | None = None
-    cur_secs = 0
-    for i, c in enumerate(group):
-        if clip_is_parked(c, gps_dirs):
-            if cur_start is None:
-                cur_start = i
-                cur_secs = 0
-            cur_secs += c.duration
+    runs: list[tuple[int, int, int]] = []
+    verbose = os.environ.get("PARKING_DEBUG") == "1"
+    i = 0
+    while i < len(group):
+        c = group[i]
+        # Look for park onset in clip i (with TWO-clip lookahead so a 30s
+        # sustain window straddling clip boundaries still counts, even when
+        # the immediately following clip has a few seconds of crawl-creep
+        # before settling.)
+        park_sec = find_park_second(
+            c, gps_dirs,
+            next_clips=group[i + 1: i + 3],
+        )
+        # Fallback: if smoothing-based detection misses, fall back to the
+        # whole-clip parked heuristic. This catches the case where the GPS
+        # data is too noisy / sparse for sustained-window detection but
+        # >=75% of seconds are still below 3 km/h. Park onset is treated
+        # as clip-second 0 in that case (we don't know more precisely).
+        if park_sec is None and clip_is_parked(c, gps_dirs):
+            park_sec = 0
+        if verbose:
+            print(f"    [park-debug] clip[{i}] {c.timestamp} "
+                  f"park_sec={park_sec}")
+        if park_sec is None:
+            i += 1
+            continue
+        # Park starts in clip i at second `park_sec`. Now follow the parked
+        # run forward by checking subsequent clips with clip_is_parked.
+        end_idx = i
+        for j in range(i + 1, len(group)):
+            if clip_is_parked(group[j], gps_dirs):
+                end_idx = j
+            else:
+                break
+        # Total stopped time = partial entry tail + fully-parked clips +
+        # wall-clock engine-off gap to next moving clip.
+        partial_entry = max(0, group[i].duration - park_sec)
+        skipped_clips_secs = sum(
+            group[k].duration for k in range(i + 1, end_idx + 1)
+        )
+        if end_idx + 1 < len(group):
+            last_end = group[end_idx].dt + timedelta(seconds=group[end_idx].duration)
+            gap = max(0.0, (group[end_idx + 1].dt - last_end).total_seconds())
         else:
-            if cur_start is not None and cur_secs >= min_run_secs:
-                runs.append((cur_start, i - 1))
-            cur_start = None
-            cur_secs = 0
-    if cur_start is not None and cur_secs >= min_run_secs:
-        runs.append((cur_start, len(group) - 1))
+            gap = 0.0
+        total = partial_entry + skipped_clips_secs + gap
+        if total >= min_run_secs:
+            runs.append((i, park_sec, end_idx))
+        i = end_idx + 1
     return runs
 
 
@@ -2071,12 +2205,13 @@ def generate_transition_slide(
                 "-maxrate", vt_m, "-profile:v", "high"]
     else:
         venc = ["-c:v", "libx264", "-preset", X264_PRESET, "-crf", X264_CRF]
-    # Force every frame to be a keyframe (GOP size = 1). Without this, players
-    # can show ~1 second of black at the start/end of the slide while they
-    # prime the decoder past the first I-frame — which on a 3-second slide
-    # turns a "Fast forwarding…" message into a blink that's gone before
-    # you've read it. Slide is only 3s so the file-size hit is negligible.
-    venc += ["-g", "1"]
+    # Force every frame to be a keyframe (GOP size = 1) and disable B-frames.
+    # Without this, players can show ~1 second of black at the start/end of
+    # the slide while they prime the decoder past the first I-frame — which
+    # on a 3-second slide turns a "Fast forwarding…" message into a blink
+    # that's gone before you've read it. Slide is only 3s so the file-size
+    # hit is negligible.
+    venc += ["-g", "1", "-bf", "0"]
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
         "-f", "lavfi", "-i",
@@ -2639,7 +2774,7 @@ def main() -> int:
         # one engine-on session, so inserting "Fast forwarding…" inside it
         # makes no sense and can leave the MP4 ending on the slide. In drive
         # mode we skip the detection and let each drive play continuously.
-        parking_runs: list[tuple[int, int]] = []
+        parking_runs: list[tuple[int, int, int]] = []
         if args.daily and not args.no_skip_parking and with_speed:
             parking_runs = find_parking_runs(group, gps_dirs, args.parking_min_secs)
 
@@ -2683,16 +2818,22 @@ def main() -> int:
                 elif head_trim_for_motion_clip > 0:
                     print(f"  head-trim: dropping first {head_trim_for_motion_clip}s "
                           f"of clip 1, motion detected at second {offset}")
-        for run_start, run_end in parking_runs:
+        # Map entry clip-index → park-onset second within that clip (so the
+        # main loop can compute trim_seconds = park_sec + entry_pad).
+        park_sec_for_entry: dict[int, int] = {}
+        for run_start, park_sec, run_end in parking_runs:
             action_for[run_start] = "entry"
+            park_sec_for_entry[run_start] = park_sec
             for k in range(run_start + 1, run_end + 1):
                 action_for[k] = "skip"
             next_idx = run_end + 1
             if next_idx < len(group) and next_idx not in action_for:
                 action_for[next_idx] = "exit"
-                # Wall-clock seconds elapsed between the entry's last frame and
-                # the exit's first frame.
-                entry_end = group[run_start].dt + timedelta(seconds=args.parking_entry_pad)
+                # Wall-clock seconds elapsed between the entry's last frame
+                # (= park onset + entry_pad seconds into the entry clip) and
+                # the exit clip's start.
+                entry_end = (group[run_start].dt +
+                             timedelta(seconds=park_sec + args.parking_entry_pad))
                 exit_start = group[next_idx].dt
                 skipped_secs_for[run_start] = max(
                     0.0, (exit_start - entry_end).total_seconds()
@@ -2700,13 +2841,14 @@ def main() -> int:
 
         if parking_runs:
             saved = 0
-            for s, e in parking_runs:
-                next_idx = e + 1
+            for run_start, park_sec, run_end in parking_runs:
+                next_idx = run_end + 1
                 if next_idx < len(group):
-                    span = (group[next_idx].dt - group[s].dt).total_seconds() \
-                        + args.parking_exit_pad
+                    # From park onset in entry clip to start of exit clip.
+                    span = ((group[next_idx].dt - group[run_start].dt).total_seconds()
+                            - park_sec + args.parking_exit_pad)
                 else:
-                    span = (e - s + 1) * group[s].duration
+                    span = (run_end - run_start + 1) * group[run_start].duration
                 saved += int(span - args.parking_entry_pad
                              - args.parking_exit_pad - TRANSITION_SECS)
             print(f"  parking: {len(parking_runs)} run(s) skipped, "
@@ -2754,6 +2896,14 @@ def main() -> int:
                             no_audio=args.no_audio,
                         )
                     intermediates.append(gap_trans)
+                    # After a gap-FF, treat this clip as a parking-exit so the
+                    # engine-on-but-not-moving head gets trimmed (the same way
+                    # parking-detected exits do). Without this, the next clip
+                    # plays from second 0 = engine-just-on, showing 20+s of
+                    # parked footage before the wheels turn even though we
+                    # just told the viewer we "fast-forwarded" past it.
+                    if action is None:
+                        action = "exit"
 
             # Entry slice: first `pad` seconds of the first parked clip.
             # Exit slice: anchored to the actual drive-resume moment within
@@ -2766,7 +2916,13 @@ def main() -> int:
             trim_start = 0
             trim_seconds: int | None = None
             if action == "entry":
-                trim_seconds = entry_pad
+                # Entry slice now anchors on within-clip park onset (when GPS
+                # speed first sustains below threshold) + entry_pad. So the
+                # FF slide kicks in entry_pad seconds AFTER the car actually
+                # stopped, rather than entry_pad seconds into a clip that
+                # might just happen to be classified as parked.
+                park_sec = park_sec_for_entry.get(ci0, 0)
+                trim_seconds = park_sec + entry_pad
             elif action == "exit":
                 drive_sec = find_drive_resume_second(
                     clip, gps_dirs,
@@ -2831,7 +2987,11 @@ def main() -> int:
             # except in the rare case where two drives in the same run share a
             # clip (the same one re-targeted) — and even then, re-encoding is
             # cheap and safe.
-            tag = f" ({action} slice, {trim_seconds}s)" if action else ""
+            if action:
+                secs_part = f", {trim_seconds}s" if trim_seconds is not None else ""
+                tag = f" ({action} slice{secs_part})"
+            else:
+                tag = ""
             print(f"  [{ci:>3}/{len(group)}] {clip.timestamp}{tag}  encoding ...")
             encode_clip(
                 clip, inter, font_path, use_vt, with_timestamp,
