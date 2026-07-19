@@ -133,12 +133,17 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # ============================================================================
 #
 # The publishing unit is a "trip": everything from leaving an anchor until one
-# of two boundaries fires first —
+# of these boundaries fires first —
 #   1. RETURN   the car comes back within trip_return_m of where the trip began
 #               (after first leaving by trip_leave_m). A -> B, hang out ANY
 #               length of time, B -> A = one trip, with the stop at B cut out.
 #               Duration is irrelevant: 10 minutes or 20 hours.
-#   2. ROLLOVER the wall clock crosses trip_day_rollover:00 between two clips.
+#   2. HOME     if a home location is set (see below), parking within its radius
+#               is a HARD boundary: arriving home ends a trip and the next
+#               departure starts a new one — even when the GPS anchor is wrong
+#               (loop-recording ate the departure, so a trip starts out on the
+#               highway).
+#   3. ROLLOVER the wall clock crosses trip_day_rollover:00 between two clips.
 #               The day boundary is 04:00, not midnight, so an evening drive
 #               ending 03:32 stays whole. Independent of the import folder. This
 #               also bounds a one-way relocation (drive to a base, sleep, drive
@@ -150,6 +155,10 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 #
 # Each trip is written as trip_<day>_<HH-MM>_<idx> with a _meta.json sidecar
 # carrying its day label, so a publishing UI can group a day's trips together.
+#
+# HOME LOCATION lives in a gitignored .env (SET_HOME_LAT / SET_HOME_LON /
+# SET_HOME_RADIUS_M), NOT here — this file is committed and your home address
+# should not be. Copy .env.example to .env and fill it in.
 
 # Return-to-anchor distance in metres. Back within this of where the trip
 # started closes the trip. Default 100.
@@ -519,8 +528,8 @@ def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
 # Trip grouping — the publishing unit
 # ---------------------------------------------------------------------------
 # A "trip" is not a single engine-on session (that's a gap-based drive). It is
-# everything from leaving an anchor until one of TWO boundaries fires, whichever
-# comes FIRST:
+# everything from leaving an anchor until one of these boundaries fires,
+# whichever comes FIRST:
 #
 #   1. RETURN   — the car comes back within `return_m` of where the trip began,
 #                 AFTER first travelling at least `leave_m` away (so it doesn't
@@ -528,7 +537,14 @@ def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
 #                 B, hang out ANY length of time, drive B → A = ONE trip, with
 #                 the stop at B cut out. Duration is irrelevant — 10 minutes or
 #                 20 hours, as long as you get back before the next rollover.
-#   2. ROLLOVER — the wall clock crosses `rollover_h`:00 between two clips. The
+#   2. HOME     — if a `home` (lat, lon) is configured, parking within
+#                 `home_radius_m` of it is a HARD boundary independent of the
+#                 anchor: arriving home always ends a trip, and the next
+#                 departure from home is a new trip. This is the ground-truth
+#                 version of RETURN — it still fires when the carried anchor is
+#                 wrong, e.g. loop-recording overwrote the home departure so a
+#                 trip's footage starts already out on the highway.
+#   3. ROLLOVER — the wall clock crosses `rollover_h`:00 between two clips. The
 #                 day boundary is 04:00, not midnight, so an evening drive that
 #                 ends 03:32 stays whole while a genuinely new morning starts a
 #                 new trip. Independent of the import folder's name/date. This
@@ -542,6 +558,7 @@ def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
 DEFAULT_TRIP_RETURN_M     = 100     # back within this of anchor => trip closes
 DEFAULT_TRIP_LEAVE_M      = 150     # must get this far out before a return counts
 DEFAULT_TRIP_DAY_ROLLOVER = 4       # trips/days roll over at 04:00, not midnight
+DEFAULT_HOME_RADIUS_M     = 100     # parking within this of `home` => hard boundary
 
 
 def trip_day_label(dt: datetime, rollover_h: int = DEFAULT_TRIP_DAY_ROLLOVER) -> str:
@@ -573,22 +590,31 @@ def group_into_trips(
     return_m: float = DEFAULT_TRIP_RETURN_M,
     leave_m: float = DEFAULT_TRIP_LEAVE_M,
     rollover_h: int = DEFAULT_TRIP_DAY_ROLLOVER,
+    home: "tuple[float, float] | None" = None,
+    home_radius_m: float = DEFAULT_HOME_RADIUS_M,
 ) -> "tuple[list[list[Clip]], list[bool]]":
-    """Segment chronologically-ordered clips into trips (see the block comment
-    above for the two boundary rules: return-to-anchor, or the 04:00 rollover).
+    """Segment chronologically-ordered clips into trips. A trip closes at
+    whichever fires first:
+
+      * RETURN   — the car comes back within `return_m` of the trip's anchor.
+      * HOME     — if `home` (lat, lon) is given, the car parks within
+                   `home_radius_m` of it. This is a HARD boundary independent of
+                   the anchor: arriving home always ends a trip and the next
+                   departure from home is a new trip. Robust where the carried
+                   anchor is wrong (loop-recording ate the home departure, so a
+                   trip starts already out on the highway).
+      * ROLLOVER — the wall clock crosses `rollover_h`:00 between two clips.
 
     Returns (trips, moved) where moved[i] is False for a trip that HAD GPS yet
     never travelled more than `leave_m` from its anchor — a stationary cluster
     of parking-mode motion-event clips, not a real drive. The caller auto-skips
-    those (a GPS-less trip is left moved=True since we can't tell it didn't go
-    anywhere).
+    those (a GPS-less trip is left moved=True since we can't tell).
 
     The anchor is NOT this trip's own first fix (which may be stale buffered GPS
     or, on a garage start, a point already minutes into the drive). It is where
     the car was last parked = the last good fix of the PREVIOUS trip, carried
-    forward. You start a trip where you ended the last one, so the return check
-    matches the true origin and doesn't false-fire on a mid-route point the
-    homeward leg happens to re-traverse."""
+    forward, so the return check matches the true origin and doesn't false-fire
+    on a mid-route point the homeward leg happens to re-traverse."""
     def dist_m(a, b) -> float:
         return _haversine_km(a[0], a[1], b[0], b[1]) * 1000.0
 
@@ -598,29 +624,43 @@ def group_into_trips(
     anchor: "tuple[float, float] | None" = None
     carry: "tuple[float, float] | None" = None   # last good fix = current park spot
     left_anchor = False
+    left_home = False
     had_gps = False
     max_dist = 0.0
 
     def begin(c, c_start, c_end):
-        nonlocal cur, anchor, left_anchor, had_gps, max_dist
+        nonlocal cur, anchor, left_anchor, left_home, had_gps, max_dist
         cur = [c]
         anchor = carry if carry is not None else c_start
         left_anchor = False
+        left_home = False
         had_gps = c_start is not None or c_end is not None
         max_dist = 0.0
         observe(c_start, c_end)
 
     def observe(c_start, c_end):
-        nonlocal left_anchor, max_dist
-        if anchor is None:
-            return
+        nonlocal left_anchor, left_home, max_dist
         for fix in (c_start, c_end):
-            if fix is not None:
+            if fix is None:
+                continue
+            if anchor is not None:
                 d = dist_m(anchor, fix)
                 if d > max_dist:
                     max_dist = d
                 if not left_anchor and d > leave_m:
                     left_anchor = True
+            if home is not None and not left_home and dist_m(home, fix) > leave_m:
+                left_home = True
+
+    def closes_at(c_end) -> bool:
+        # This clip's end returns to the anchor, or (hard boundary) to home.
+        if c_end is None:
+            return False
+        if left_anchor and anchor is not None and dist_m(anchor, c_end) <= return_m:
+            return True
+        if left_home and home is not None and dist_m(home, c_end) <= home_radius_m:
+            return True
+        return False
 
     def close():
         # moved=False only when we HAD GPS and it proves the car never left.
@@ -635,10 +675,10 @@ def group_into_trips(
         else:
             prev = cur[-1]
             prev_end_dt = prev.dt + timedelta(seconds=prev.duration)
-            # Boundary 2 (04:00 rollover) is decided by the gap BEFORE this clip,
-            # so `c` opens a fresh trip. There is deliberately NO long-gap rule:
-            # a mid-trip stop of any length stays inside the trip (cut as an FF
-            # slide); only a return or the rollover closes a trip.
+            # ROLLOVER is decided by the gap BEFORE this clip, so `c` opens a
+            # fresh trip. There is deliberately NO long-gap rule: a mid-trip stop
+            # of any length stays inside the trip (cut as an FF slide); only a
+            # return, a home arrival, or the rollover closes a trip.
             if _crosses_rollover(prev_end_dt, c.dt, rollover_h):
                 close()
                 begin(c, c_start, c_end)
@@ -649,10 +689,9 @@ def group_into_trips(
                 if anchor is None:
                     anchor = carry if carry is not None else c_start
                 observe(c_start, c_end)
-                # Boundary 1 (return): once we've left, close on the clip whose
-                # end lands back near the anchor. `c` belongs to the closing trip.
-                if (left_anchor and anchor is not None and c_end is not None
-                        and dist_m(anchor, c_end) <= return_m):
+                # Once we've left, close on the clip whose end lands back near
+                # the anchor or home. `c` belongs to the closing trip.
+                if closes_at(c_end):
                     # Update carry to the return point before closing so the next
                     # trip anchors on where we actually parked.
                     carry = c_end
@@ -660,6 +699,7 @@ def group_into_trips(
                     cur = []
                     anchor = None
                     left_anchor = False
+                    left_home = False
                     had_gps = False
                     max_dist = 0.0
         # Carry the last good fix forward (skip when a return already set it).
@@ -2451,6 +2491,38 @@ def _cfg_bool(s: str) -> bool:
     return s.strip().lower() in ("true", "yes", "1", "on")
 
 
+def load_dotenv(path: Path) -> None:
+    """Minimal .env loader: KEY=VALUE lines -> os.environ, WITHOUT overriding a
+    variable already present in the real environment. No python-dotenv needed.
+    Used for PERSONAL settings that must never live in the tracked config —
+    currently the home coordinates (SET_HOME_LAT / SET_HOME_LON /
+    SET_HOME_RADIUS_M). `.env` is gitignored; `.env.example` shows the format."""
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+    except OSError:
+        pass
+
+
+def _env_float(key: str) -> "float | None":
+    """Read an env var as float, or None if unset/blank/malformed."""
+    val = os.environ.get(key, "").strip()
+    if not val:
+        return None
+    try:
+        return float(val)
+    except ValueError:
+        print(f"  ! ignoring {key}={val!r}: not a number", file=sys.stderr)
+        return None
+
+
 def _resolve_config_path(argv: list[str]) -> Path:
     """Pre-parse argv to find --config PATH (so we can use it as defaults source)."""
     for i, a in enumerate(argv):
@@ -2463,6 +2535,18 @@ def _resolve_config_path(argv: list[str]) -> Path:
 
 
 def main() -> int:
+    # --- Personal settings via .env (never the tracked config) ---------------
+    # Home coordinates identify where you live, so they live in a gitignored
+    # .env as SET_HOME_LAT / SET_HOME_LON / SET_HOME_RADIUS_M, loaded here.
+    # A real environment variable of the same name wins over the .env file.
+    script_dir = Path(__file__).resolve().parent
+    for env_path in (script_dir / ".env", Path.cwd() / ".env"):
+        load_dotenv(env_path)
+    home_lat = _env_float("SET_HOME_LAT")
+    home_lon = _env_float("SET_HOME_LON")
+    home = (home_lat, home_lon) if home_lat is not None and home_lon is not None else None
+    home_radius_m = _env_float("SET_HOME_RADIUS_M") or DEFAULT_HOME_RADIUS_M
+
     # --- Config file loading (CLI > config.txt > built-in defaults) ----------
     config_path = _resolve_config_path(sys.argv[1:])
     cfg = load_config_file(config_path)
@@ -2791,8 +2875,11 @@ def main() -> int:
         print(f"Speed:     off (--no-speed)")
     else:
         print(f"Speed:     off")
+    # Don't print the actual home coordinates (they'd land in logs) — just note
+    # that a home boundary is active, sourced from .env.
+    home_note = f" / home r{home_radius_m:.0f}m (from .env)" if home is not None else ""
     print(f"Grouping:  by trip (return {args.trip_return_m:.0f}m / "
-          f"rollover {args.trip_day_rollover:02d}:00)")
+          f"rollover {args.trip_day_rollover:02d}:00{home_note})")
     print(f"Output:    {out_dir}")
     print(f"Scanning:  {front_dir}")
 
@@ -2807,6 +2894,8 @@ def main() -> int:
         return_m=args.trip_return_m,
         leave_m=args.trip_leave_m,
         rollover_h=args.trip_day_rollover,
+        home=home,
+        home_radius_m=home_radius_m,
     )
     group_kind, group_word = "trip", "Trip"
     # Day label (04:00 rollover) each trip belongs to — the UI groups on this.

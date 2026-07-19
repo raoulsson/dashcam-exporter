@@ -29,6 +29,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Prefer the project venv if present (the map widget needs Pillow/staticmap,
+# which Homebrew's externally-managed python3 can't install into directly).
+PY="python3"
+[ -x ".venv/bin/python" ] && PY=".venv/bin/python"
+
 OPTS=()
 # Examples — uncomment + adapt:
 # OPTS+=(--root "$HOME/rsc-data/Import_Dashcam/2026-05-11")
@@ -58,7 +63,7 @@ echo "logging to $LOG_FILE"
 
 # -u forces unbuffered stdout so per-clip progress shows in the tee output
 # instead of being held in Python's buffer until the run completes.
-python3 -u make_dashcam_videos.py ${OPTS[@]+"${OPTS[@]}"} "$@" 2>&1 | tee "$LOG_FILE"
+"$PY" -u make_dashcam_videos.py ${OPTS[@]+"${OPTS[@]}"} "$@" 2>&1 | tee "$LOG_FILE"
 RC="${PIPESTATUS[0]}"
 
 # Parse "  ✓ /full/path/to/foo.mp4" lines from the log and drop a copy of

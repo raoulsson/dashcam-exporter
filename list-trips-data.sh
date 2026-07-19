@@ -19,10 +19,14 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Prefer the project venv if present (keeps parity with make-trips-rendered.sh).
+PY="python3"
+[ -x ".venv/bin/python" ] && PY=".venv/bin/python"
+
 OPTS=()
 # Examples — uncomment + adapt:
 # OPTS+=(--root "$HOME/rsc-data/Import_Dashcam/2026-05-11")
 # OPTS+=(--out  "$HOME/rsc-data/Dashcam_Videos_working")
 # OPTS+=(--trip-return-m 120)
 
-python3 make_dashcam_videos.py --dry-run ${OPTS[@]+"${OPTS[@]}"} "$@"
+"$PY" make_dashcam_videos.py --dry-run ${OPTS[@]+"${OPTS[@]}"} "$@"

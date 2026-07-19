@@ -28,12 +28,17 @@
 # ============================================================================
 #
 # The publishing unit is a "trip": everything from leaving an anchor until one
-# of two boundaries fires first —
+# of these boundaries fires first —
 #   1. RETURN   the car comes back within trip_return_m of where the trip began
 #               (after first leaving by trip_leave_m). A -> B, hang out ANY
 #               length of time, B -> A = one trip, with the stop at B cut out.
 #               Duration is irrelevant: 10 minutes or 20 hours.
-#   2. ROLLOVER the wall clock crosses trip_day_rollover:00 between two clips.
+#   2. HOME     if a home location is set (see below), parking within its radius
+#               is a HARD boundary: arriving home ends a trip and the next
+#               departure starts a new one — even when the GPS anchor is wrong
+#               (loop-recording ate the departure, so a trip starts out on the
+#               highway).
+#   3. ROLLOVER the wall clock crosses trip_day_rollover:00 between two clips.
 #               The day boundary is 04:00, not midnight, so an evening drive
 #               ending 03:32 stays whole. Independent of the import folder. This
 #               also bounds a one-way relocation (drive to a base, sleep, drive
@@ -45,6 +50,10 @@
 #
 # Each trip is written as trip_<day>_<HH-MM>_<idx> with a _meta.json sidecar
 # carrying its day label, so a publishing UI can group a day's trips together.
+#
+# HOME LOCATION lives in a gitignored .env (SET_HOME_LAT / SET_HOME_LON /
+# SET_HOME_RADIUS_M), NOT here — this file is committed and your home address
+# should not be. Copy .env.example to .env and fill it in.
 
 # Return-to-anchor distance in metres. Back within this of where the trip
 # started closes the trip. Default 100.

@@ -5,6 +5,11 @@
 *.gpx
 *_links.txt
 
+# Personal settings (home coordinates etc.) — never commit. .env.example,
+# which shows the format with placeholder values, IS committed.
+.env
+!.env.example
+
 # Per-run intermediates and the harvested GPX cache
 .intermediates/
 .gpx_cache/

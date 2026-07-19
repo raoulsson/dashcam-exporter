@@ -431,25 +431,48 @@ config.txt > built-in default**. Highlights:
 
 Each front-clip filename is paired with its matching rear clip and the clips
 are ordered by timestamp. Then they're segmented into **trips**. A trip is
-everything from leaving an **anchor** (the trip's own first GPS fix) until one
-of three boundaries fires, **whichever comes first**:
+everything from leaving an **anchor** until one of the boundaries below fires,
+**whichever comes first**. (The anchor is *carried forward* from where the car
+last parked — the previous trip's final fix — not read from this trip's own
+first clip, so a stale-GPS or underground-garage start still anchors on the
+true origin.)
 
 1. **RETURN** — the car comes back within `--trip-return-m` metres (default
-   100) of where the trip began, *after* first travelling at least
-   `--trip-leave-m` metres away (default 150, so it doesn't close on the
-   driveway). Drive **A → B, hang out any length of time, B → A** and that is
-   **one trip** with the stop at B cut out — whether the whole thing takes 10
-   minutes or 20 hours. The anchor is *carried forward* from where the car last
-   parked (the previous trip's final fix), not read from this trip's own first
-   clip, so a stale-GPS or underground-garage start still anchors on the true
-   origin.
-2. **ROLLOVER** — the wall clock crosses `--trip-day-rollover`:00 (default 4,
+   100) of the anchor, *after* first travelling at least `--trip-leave-m`
+   metres away (default 150, so it doesn't close on the driveway). Drive
+   **A → B, hang out any length of time, B → A** and that is **one trip** with
+   the stop at B cut out — whether the whole thing takes 10 minutes or 20 hours.
+2. **HOME** *(optional)* — if you set a home location (see below), the car
+   parking within its radius is a **hard boundary**: arriving home ends a trip
+   and the next departure from home starts a new one. This is the ground-truth
+   version of RETURN — it still fires when the carried anchor is unreliable,
+   e.g. loop-recording overwrote your drive away from home so a trip's footage
+   *starts already out on the highway* 20 km from home. That morning drive is
+   still one trip, closed cleanly when you pull into your driveway.
+3. **ROLLOVER** — the wall clock crosses `--trip-day-rollover`:00 (default 4,
    i.e. **04:00, not midnight**) between two clips. An evening drive ending
    03:32 stays one trip; a genuinely new morning starts a new one. This is
    independent of the import folder's name or date. It also bounds a **one-way
-   relocation**: drive **Muntinlupa → a holiday base**, sleep, drive back two
-   days later, and you get **two trips** — a 04:00 boundary falls between the
-   arrival and the return.
+   relocation**: drive to a holiday base, sleep, drive back two days later, and
+   you get **two trips** — a 04:00 boundary falls between arrival and return.
+
+### Setting your home location
+
+Home is **optional** but makes grouping far more robust. Because a home address
+is personal, it is read from a **gitignored `.env`** file, never from the
+committed `config.txt`. Copy the template and fill in your own coordinates:
+
+```bash
+cp .env.example .env
+# then edit .env:
+#   SET_HOME_LAT=<your latitude>
+#   SET_HOME_LON=<your longitude>
+#   SET_HOME_RADIUS_M=100      # metres counted as "at home"
+```
+
+Grab the coordinates from Google Maps — right-click your home and the first
+menu line is `lat, lon`. A real environment variable of the same name overrides
+the `.env` value. If no home is set, only RETURN and ROLLOVER apply.
 
 There is **deliberately no engine-off-duration rule.** A stop of *any* length
 — fuel, lunch, a 4-hour hangout, a hike — stays inside the trip and becomes a
@@ -464,9 +487,11 @@ label, not a render mode: a publishing UI can glob `trip_2026-05-11_*` to lay
 out that day's trips side by side.
 
 **Tuning.** Adjust `--trip-return-m` / `--trip-leave-m` if returns close too
-eagerly or not at all. Move `--trip-day-rollover` if your late-night driving
-lands on the wrong day. Because changing any threshold re-segments everything,
-the trip indices can shift — always `--dry-run` first after a change.
+eagerly or not at all. Bump `SET_HOME_RADIUS_M` in `.env` if you park on the
+street near home rather than in a fixed spot (100 m can be a touch tight).
+Move `--trip-day-rollover` if your late-night driving lands on the wrong day.
+Because changing any threshold re-segments everything, the trip indices can
+shift — always `--dry-run` first after a change.
 
 
 ## How GPS speed is sourced

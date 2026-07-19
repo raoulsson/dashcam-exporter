@@ -14,8 +14,7 @@ less code is better.
 
 A **trip** is the publishing unit. It is NOT a single engine-on session and it
 is NOT a calendar day — both of those older models are gone. `group_into_trips`
-walks clips chronologically and closes a trip at whichever fires FIRST of just
-TWO boundaries:
+walks clips chronologically and closes a trip at whichever fires FIRST:
 
 1. **Return** — back within `trip_return_m` (100 m) of the trip's anchor, after
    first leaving by `trip_leave_m` (150 m). A → B, hang out ANY length of time,
@@ -24,7 +23,15 @@ TWO boundaries:
    last parked (previous trip's last good fix), NOT its own first fix — that
    survives stale/garage-start GPS and a homeward leg re-crossing a mid-route
    point.
-2. **Rollover** — the clock crosses `trip_day_rollover`:00 (default 04:00, not
+2. **Home** (optional) — if `home` is configured, parking within `home_radius_m`
+   is a HARD boundary independent of the anchor: arriving home ends a trip, next
+   departure starts a new one. Ground-truth version of Return; fires even when
+   the carried anchor is wrong (loop-recording ate the home departure so a trip
+   starts out on the highway). Home coords come from a **gitignored `.env`**
+   (`SET_HOME_LAT` / `SET_HOME_LON` / `SET_HOME_RADIUS_M`), loaded by
+   `load_dotenv` — NEVER config.txt (that's committed; public repo). See
+   `.env.example`.
+3. **Rollover** — the clock crosses `trip_day_rollover`:00 (default 04:00, not
    midnight) between two clips. Import-folder name/date is irrelevant. This also
    bounds a one-way relocation (drive to a base, sleep, drive back days later =
    two trips, because a 04:00 boundary falls between arrival and return).
@@ -47,10 +54,20 @@ future publishing UI to group a day's trips side by side. Not a render mode.
 
 ### Tuning note
 
-Knobs: `trip_return_m`, `trip_leave_m`, `trip_day_rollover`. A day where you
-drive out and never return before 04:00 (one-way, or messy/incomplete data)
-stays one trip by design. Always `./list-trips-data.sh` (dry-run) before
-encoding — indices shift if you change the thresholds.
+Knobs: `trip_return_m`, `trip_leave_m`, `trip_day_rollover` (config/CLI) and
+`SET_HOME_RADIUS_M` (.env). A day where you drive out and never return home
+before 04:00 (one-way, or messy/incomplete data) stays one trip by design. 100 m
+home radius can be tight if you street-park near home. Always
+`./list-trips-data.sh` (dry-run) before encoding — indices shift if you change
+anything.
+
+### Env / venv
+
+Homebrew's `python3` is externally-managed (PEP 668), so Pillow/staticmap (map
+widget) can't install into it. Use `.venv` (`python3 -m venv .venv && .venv/bin/
+pip install -r requirements.txt`); the wrapper scripts auto-prefer `.venv/bin/
+python` when it exists. Without Pillow the render still works but silently drops
+the map-widget panel (prints a warning). `.venv/` and `.env` are gitignored.
 
 ## Data layout (outside the repo)
 
