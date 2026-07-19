@@ -91,7 +91,7 @@
 # Render the per-day side panel (stats + map widget with moving marker).
 #map_widget = true
 
-# Burn the stats block (Day title, Distance, Driven, Max speed, Avg, segments
+# Burn the stats block (Trip title, Distance, Moving, Max speed, Avg, segments
 # / GPS points) into the top of the side panel. When false, the panel just
 # shows the map widget centred vertically.
 #panel_stats = true

@@ -196,7 +196,7 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # Render the per-day side panel (stats + map widget with moving marker).
 #map_widget = true
 
-# Burn the stats block (Day title, Distance, Driven, Max speed, Avg, segments
+# Burn the stats block (Trip title, Distance, Moving, Max speed, Avg, segments
 # / GPS points) into the top of the side panel. When false, the panel just
 # shows the map widget centred vertically.
 #panel_stats = true
@@ -1714,7 +1714,10 @@ def render_base_right_panel(
         sunit = stats["speed_unit"]
         rows = [
             ("Distance",  f"{stats['distance_display']:.1f} {dunit}"),
-            ("Driven",    f"{stats['moving_min']:.0f} min"),
+            # "Moving" not "Driven": it's moving-time (parked time excluded), and
+            # Courier's thin lowercase r rendered "Driven" as an ambiguous
+            # "Diiven" at 720p. "Moving" also matches the sidecar's "moving speed".
+            ("Moving",    f"{stats['moving_min']:.0f} min"),
             ("Max speed", f"{stats['max_display']:.0f} {sunit}"),
             ("Avg speed", f"{stats['avg_display']:.0f} {sunit}"),
         ]
