@@ -1133,11 +1133,8 @@ except Exception:
     _HAVE_EGO = False
 
 
-def find_drive_away_by_video(clip: Clip) -> float | None:
-    """Return the video-second within `clip` at which the car starts driving
-    (ego-motion onset), robust to people/cars passing a parked car; or None if
-    OpenCV/numpy aren't installed, the clip can't be read, or no sustained
-    ego-motion is found (caller then falls back to GPS / a fixed skip)."""
+def _ego_extract_frames(clip: Clip):
+    """Sampled greyscale frames of a clip as an (n, H, W) uint8 array, or None."""
     if not _HAVE_EGO:
         return None
     cmd = ["ffmpeg", "-v", "error", "-i", str(clip.front),
@@ -1150,12 +1147,20 @@ def find_drive_away_by_video(clip: Clip) -> float | None:
         return None
     fsz = EGO_W * EGO_H
     n = len(raw) // fsz
-    if n < 4:
+    if n < 1:
         return None
-    frames = _np.frombuffer(raw[:n * fsz], dtype=_np.uint8).reshape(n, EGO_H, EGO_W)
+    return _np.frombuffer(raw[:n * fsz], dtype=_np.uint8).reshape(n, EGO_H, EGO_W)
+
+
+def _ego_median_flow(frames) -> "list[float]":
+    """Median Lucas-Kanade optical-flow magnitude between consecutive frames.
+    Index i is the motion from frame i-1 to i; index 0 is 0. Median rejects the
+    handful of features on passing objects, so it tracks WHOLE-frame ego-motion:
+    ~0 parked, large when the car actually drives."""
     lk = dict(winSize=(21, 21), maxLevel=3,
               criteria=(_cv2.TERM_CRITERIA_EPS | _cv2.TERM_CRITERIA_COUNT, 20, 0.03))
-    med = _np.zeros(n)
+    n = len(frames)
+    med = [0.0] * n
     prev = frames[0]
     for i in range(1, n):
         cur = frames[i]
@@ -1167,6 +1172,13 @@ def find_drive_away_by_video(clip: Clip) -> float | None:
                 d = (p1[g] - p0[g]).reshape(-1, 2)
                 med[i] = float(_np.median(_np.hypot(d[:, 0], d[:, 1])))
         prev = cur
+    return med
+
+
+def _ego_drive_onset(med: "list[float]") -> "int | None":
+    """First frame index of sustained driving in a median-flow signal, walked
+    back to where motion left the parked baseline. None if never driving."""
+    n = len(med)
     sustain = max(1, int(round(EGO_SUSTAIN_SECS * EGO_FPS)))
     run_start = None
     for i in range(1, n - sustain + 1):
@@ -1178,7 +1190,46 @@ def find_drive_away_by_video(clip: Clip) -> float | None:
     onset = run_start
     while onset > 1 and med[onset - 1] > EGO_THR_BASELINE:
         onset -= 1
-    return max(0.0, onset / EGO_FPS)
+    return onset
+
+
+def find_drive_away_by_video(clip: Clip) -> float | None:
+    """Video-second within `clip` at which the car starts driving (ego-motion),
+    robust to passing people/cars; None if unavailable or no motion found."""
+    frames = _ego_extract_frames(clip)
+    if frames is None or len(frames) < 4:
+        return None
+    onset = _ego_drive_onset(_ego_median_flow(frames))
+    return None if onset is None else max(0.0, onset / EGO_FPS)
+
+
+def find_drive_away_in_group_video(clips: "list[Clip]") -> "tuple[int, float] | None":
+    """Like find_drive_away_by_video but across the first few clips of a trip:
+    returns (clip_index, second_within_that_clip) of the departure, so a
+    head-trim can drop earlier parked clips and trim into the motion clip.
+    Used for the trip START (mirror of the parking-exit case)."""
+    if not _HAVE_EGO:
+        return None
+    allf = []
+    bounds = [0]
+    for c in clips:
+        f = _ego_extract_frames(c)
+        if f is None or len(f) == 0:
+            break  # gap in coverage — don't fuse a non-contiguous clip
+        allf.append(f)
+        bounds.append(bounds[-1] + len(f))
+    if not allf:
+        return None
+    frames = _np.concatenate(allf, axis=0)
+    if len(frames) < 4:
+        return None
+    onset = _ego_drive_onset(_ego_median_flow(frames))
+    if onset is None:
+        return None
+    for ci in range(len(bounds) - 1):
+        if bounds[ci] <= onset < bounds[ci + 1]:
+            return ci, (onset - bounds[ci]) / EGO_FPS
+    return None
 
 
 def clip_is_parked(clip: Clip, gps_dirs: tuple[Path | None, ...]) -> bool:
@@ -3246,27 +3297,41 @@ def main() -> int:
         head_skip_count = 0
         head_trim_for_motion_clip = 0
         if with_speed and len(group) >= 1:
-            # Examine up to the first 3 clips — enough to find motion that
-            # starts late in clip 0 + 30s sustain spilling into clip 2.
-            resume = find_drive_resume_in_group(
-                group[:3], gps_dirs,
-                sustain_secs=args.drive_resume_sustain_secs,
-            )
-            if resume is not None:
-                motion_clip_idx, offset = resume
-                pad = args.drive_first_clip_pad_secs
+            # Prefer VIDEO ego-motion to find the departure, same reason as the
+            # parking exit: GPS misses the low-speed pull-away amid passing
+            # traffic and lags several seconds, so it starts the trip late.
+            # Video pinpoints it → small EGO_CONTEXT_PAD; GPS needs its bigger
+            # drive_first_clip_pad_secs to compensate for the lag. Examine up to
+            # the first 3 clips (motion may start late in clip 0 and sustain
+            # into clip 2). Falls back to GPS when video is off/unavailable.
+            src = offset = None
+            vid = (None if args.no_video_drive_detect
+                   else find_drive_away_in_group_video(group[:3]))
+            if vid is not None:
+                motion_clip_idx, vsec = vid
                 head_skip_count = motion_clip_idx
-                head_trim_for_motion_clip = max(0, offset - pad)
+                head_trim_for_motion_clip = max(0, int(vsec) - EGO_CONTEXT_PAD)
+                src, offset = "video", int(vsec)
+            else:
+                resume = find_drive_resume_in_group(
+                    group[:3], gps_dirs,
+                    sustain_secs=args.drive_resume_sustain_secs,
+                )
+                if resume is not None:
+                    motion_clip_idx, offset = resume
+                    head_skip_count = motion_clip_idx
+                    head_trim_for_motion_clip = max(0, offset - args.drive_first_clip_pad_secs)
+                    src = "gps"
+            if src is not None:
                 if head_skip_count > 0:
                     for k in range(head_skip_count):
                         action_for[k] = "head_skip"
-                    print(f"  head-trim: skipping {head_skip_count} pre-drive "
-                          f"clip{'s' if head_skip_count != 1 else ''}, "
-                          f"motion detected in clip {head_skip_count + 1} at "
-                          f"second {offset}")
+                    print(f"  head-trim ({src}): skipping {head_skip_count} pre-drive "
+                          f"clip{'s' if head_skip_count != 1 else ''}, motion in "
+                          f"clip {head_skip_count + 1} at second {offset}")
                 elif head_trim_for_motion_clip > 0:
-                    print(f"  head-trim: dropping first {head_trim_for_motion_clip}s "
-                          f"of clip 1, motion detected at second {offset}")
+                    print(f"  head-trim ({src}): dropping first "
+                          f"{head_trim_for_motion_clip}s of clip 1, motion at second {offset}")
         # Map entry clip-index → park-onset second within that clip (so the
         # main loop can compute trim_seconds = park_sec + entry_pad).
         park_sec_for_entry: dict[int, int] = {}
