@@ -27,26 +27,21 @@
 # TRIP GROUPING
 # ============================================================================
 #
-# The publishing unit is a "trip": everything from leaving an anchor until one
-# of these boundaries fires first —
-#   1. RETURN   the car comes back within trip_return_m of where the trip began
-#               (after first leaving by trip_leave_m). A -> B, hang out ANY
-#               length of time, B -> A = one trip, with the stop at B cut out.
-#               Duration is irrelevant: 10 minutes or 20 hours.
-#   2. HOME     if a home location is set (see below), parking within its radius
-#               is a HARD boundary: arriving home ends a trip and the next
-#               departure starts a new one — even when the GPS anchor is wrong
-#               (loop-recording ate the departure, so a trip starts out on the
-#               highway).
-#   3. ROLLOVER the wall clock crosses trip_day_rollover:00 between two clips.
-#               The day boundary is 04:00, not midnight, so an evening drive
-#               ending 03:32 stays whole. Independent of the import folder. This
-#               also bounds a one-way relocation (drive to a base, sleep, drive
-#               back days later = two trips) — a 04:00 boundary falls between.
+# The publishing unit is a "trip": a park-to-park unit anchored on where the car
+# last parked (a configured home is an extra park target).
+#   DEPART (drive away from the anchor) -> drive -> ARRIVE + PARK (return and
+#   come to a stop). The departure and arrival are found by VIDEO ego-motion, so
+#   they land on the real pull-out / pull-in, not on a GPS radius crossing.
+# A stop ELSEWHERE (not the anchor) never closes a trip, so A -> B -> hang out
+# ANY length of time -> A is ONE trip with the stop at B cut out. Between trips
+# the car sits parked at the anchor; those idle clips belong to no trip. A
+# ROLLOVER across trip_day_rollover:00 (04:00, not midnight) also force-closes,
+# bounding a one-way relocation (drive to a base, sleep, drive back = two trips).
+# Every interior stop becomes a 'Fast forwarding...' slide (no duration split).
+# Video needs numpy + opencv; without them it falls back to the GPS radius.
 #
-# EVERY interior stop (fuel, lunch, a 4-hour hangout, a hike) stays inside the
-# trip regardless of length — it becomes a 'Fast forwarding...' slide. There is
-# deliberately no engine-off-duration split.
+# Each trip is written as trip_<day>_<HH-MM>_<idx> with a _meta.json sidecar
+# carrying its day label, so a publishing UI can group a day's trips together.
 #
 # Each trip is written as trip_<day>_<HH-MM>_<idx> with a _meta.json sidecar
 # carrying its day label, so a publishing UI can group a day's trips together.

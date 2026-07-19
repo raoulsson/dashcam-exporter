@@ -465,31 +465,36 @@ config.txt > built-in default**. Highlights:
 ## How trips are grouped
 
 Each front-clip filename is paired with its matching rear clip and the clips
-are ordered by timestamp. Then they're segmented into **trips**. A trip is
-everything from leaving an **anchor** until one of the boundaries below fires,
-**whichever comes first**. (The anchor is *carried forward* from where the car
-last parked — the previous trip's final fix — not read from this trip's own
-first clip, so a stale-GPS or underground-garage start still anchors on the
-true origin.)
+are ordered by timestamp. Then they're segmented into **trips**. A trip is a
+**park-to-park** unit anchored on where the car was last parked (carried
+forward; a configured **home** is an extra always-valid park point):
 
-1. **RETURN** — the car comes back within `--trip-return-m` metres (default
-   100) of the anchor, *after* first travelling at least `--trip-leave-m`
-   metres away (default 150, so it doesn't close on the driveway). Drive
-   **A → B, hang out any length of time, B → A** and that is **one trip** with
-   the stop at B cut out — whether the whole thing takes 10 minutes or 20 hours.
-2. **HOME** *(optional)* — if you set a home location (see below), the car
-   parking within its radius is a **hard boundary**: arriving home ends a trip
-   and the next departure from home starts a new one. This is the ground-truth
-   version of RETURN — it still fires when the carried anchor is unreliable,
-   e.g. loop-recording overwrote your drive away from home so a trip's footage
-   *starts already out on the highway* 20 km from home. That morning drive is
-   still one trip, closed cleanly when you pull into your driveway.
-3. **ROLLOVER** — the wall clock crosses `--trip-day-rollover`:00 (default 4,
-   i.e. **04:00, not midnight**) between two clips. An evening drive ending
-   03:32 stays one trip; a genuinely new morning starts a new one. This is
-   independent of the import folder's name or date. It also bounds a **one-way
-   relocation**: drive to a holiday base, sleep, drive back two days later, and
-   you get **two trips** — a 04:00 boundary falls between arrival and return.
+> **DEPART** (drive away from the anchor) → **drive** → **ARRIVE + PARK** (return
+> to the anchor/home and come to a stop).
+
+The two boundaries — the pull-away and the pull-in — are found by **video
+ego-motion**, not by a GPS radius. Departure = optical flow rising (the whole
+frame starts to move); arrival = flow falling back to the parked baseline and
+staying there. So a trip **includes the full pull-out and the full pull-in/park**
+and lands on the real moments, instead of:
+
+- ending ~10–15 s early because a GPS radius tripped while you were still
+  rolling toward home at 27 km/h, or
+- starting ~1 min late because near-home maneuvering re-crossed the radius and
+  split the departure into a throwaway fragment.
+
+Because only a **park at the anchor** closes a trip, an interior stop *elsewhere*
+never does: drive **A → B, hang out any length of time, B → A** and that's **one
+trip** with the stop at B cut out (B isn't the anchor). Between trips the car
+sits parked at the anchor — those idle clips belong to no trip. A **ROLLOVER**
+across `--trip-day-rollover`:00 (default **04:00, not midnight**) also
+force-closes a trip, which bounds a one-way relocation (drive to a holiday base,
+sleep, drive back days later = two trips).
+
+Video ego-motion needs `numpy` + `opencv-python-headless` (see
+[Parking-skip](#parking-skip)); without them, grouping falls back to the older
+GPS-radius boundary (and is ~50× faster, handy for quick `--dry-run` iteration
+via `--no-video-drive-detect`).
 
 ### Setting your home location
 
@@ -507,14 +512,17 @@ cp .env.example .env
 
 Grab the coordinates from Google Maps — right-click your home and the first
 menu line is `lat, lon`. A real environment variable of the same name overrides
-the `.env` value. If no home is set, only RETURN and ROLLOVER apply.
+the `.env` value. If no home is set, the anchor is just the carried park
+location (still works; home mainly helps when the carried anchor is unreliable,
+e.g. loop-recording ate the departure so a trip's footage starts already out on
+the highway).
 
-There is **deliberately no engine-off-duration rule.** A stop of *any* length
-— fuel, lunch, a 4-hour hangout, a hike — stays inside the trip and becomes a
-"Fast forwarding…" slide in the rendered video (the same machinery that handles
-parking-skip). A trip can therefore span multiple engine-on sessions and still
-play as one continuous video. (A trip that had GPS but never actually left its
-anchor — scattered parking-mode motion clips — is auto-skipped as stationary.)
+There is **deliberately no engine-off-duration rule** — a stop of any length
+away from the anchor stays inside the trip as a "Fast forwarding…" slide, so a
+trip can span multiple engine-on sessions and still play as one continuous
+video. (A "trip" whose noise-pruned GPS never reaches `--trip-min-m` from the
+anchor — near-home puttering, parking-mode motion clips, a lone phantom fix — is
+auto-skipped as stationary.)
 
 Every trip also carries a **day label** — the 04:00-rollover date — which
 leads all its output filenames and lives in its `_meta.json`. The day is a

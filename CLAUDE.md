@@ -12,33 +12,28 @@ less code is better.
 
 ## The trip model (core concept)
 
-A **trip** is the publishing unit. It is NOT a single engine-on session and it
-is NOT a calendar day — both of those older models are gone. `group_into_trips`
-walks clips chronologically and closes a trip at whichever fires FIRST:
+A **trip** is the publishing unit (NOT an engine-on session, NOT a calendar
+day). `group_into_trips` is a **park-to-park state machine**: a boundary is the
+car actually PARKING at the anchor, not a radius crossing.
 
-1. **Return** — back within `trip_return_m` (100 m) of the trip's anchor, after
-   first leaving by `trip_leave_m` (150 m). A → B, hang out ANY length of time,
-   B → A = one trip with the stop at B cut out. Duration is irrelevant (10 min
-   or 20 h). The **anchor is carried forward**: a trip anchors on where the car
-   last parked (previous trip's last good fix), NOT its own first fix — that
-   survives stale/garage-start GPS and a homeward leg re-crossing a mid-route
-   point.
-2. **Home** (optional) — if `home` is configured, parking within `home_radius_m`
-   is a HARD boundary independent of the anchor: arriving home ends a trip, next
-   departure starts a new one. Ground-truth version of Return; fires even when
-   the carried anchor is wrong (loop-recording ate the home departure so a trip
-   starts out on the highway). Home coords come from a **gitignored `.env`**
-   (`SET_HOME_LAT` / `SET_HOME_LON` / `SET_HOME_RADIUS_M`), loaded by
-   `load_dotenv` — NEVER config.txt (that's committed; public repo). See
-   `.env.example`.
-3. **Rollover** — the clock crosses `trip_day_rollover`:00 (default 04:00, not
-   midnight) between two clips. Import-folder name/date is irrelevant. This also
-   bounds a one-way relocation (drive to a base, sleep, drive back days later =
-   two trips, because a 04:00 boundary falls between arrival and return).
-
-There is **deliberately no long-gap / engine-off-duration split** — a stop of
-any length stays inside the trip. (Removed on purpose: it would split exactly
-the A→B→A round trips that must stay whole.)
+- **Anchor** = where the car last parked (carried forward; a configured `home`
+  is an extra always-valid park target). `home` comes from a **gitignored `.env`**
+  (`SET_HOME_LAT/LON/RADIUS_M`) via `load_dotenv`, NEVER config.txt (public repo).
+- **DEPART → drive → ARRIVE+PARK.** Departure found by `find_drive_away_by_video`
+  (median optical flow rises), arrival by `find_park_second_by_video` (flow
+  falls to baseline and stays). GPS position only gates WHICH clips get the
+  video check (near the anchor). Between trips the car is IDLE at the anchor →
+  those clips belong to no trip.
+- Boundaries land on the real pull-out / pull-in. The old radius-entry close
+  ended trips ~15 s early (still rolling in) and split near-home departure
+  maneuvering into skipped fragments; park-detection fixes both.
+- An interior stop **elsewhere** (not the anchor) never closes → A→B→hangout→A
+  is one trip, any duration. **ROLLOVER** (`trip_day_rollover`:00, default 04:00)
+  force-closes, bounding one-way relocations.
+- Falls back to the old radius-entry boundary without OpenCV/numpy (or
+  `--no-video-drive-detect`): ~1.5 s vs ~70 s, useful for quick dry-runs.
+- `moved` flag: a group whose NOISE-PRUNED track never reaches `trip_min_m` from
+  the anchor (puttering / parking-mode events / lone phantom fix) is auto-skipped.
 
 Every interior stop renders as a "Fast forwarding…" slide, so a trip spans
 multiple engine-on sessions and plays continuously. Trip rendering reuses the
