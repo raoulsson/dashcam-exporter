@@ -209,6 +209,12 @@
 # recording, the script keeps 10s at each end and slides through the middle.
 #skip_parking = true
 
+# ADVANCED: how the drive-away after a parking slide is found. Default true =
+# video ego-motion (median optical flow; robust to passing people/cars, needs
+# numpy + opencv). false = GPS speed only. Most people never touch this; the
+# real choice is skip_parking above. Has a real effect, so the knob exists.
+#video_drive_detect = true
+
 # Minimum length (s) of a parked run before we trigger the skip.
 # 300 = 5 minutes. Shorter values are more aggressive.
 #parking_min_secs = 300

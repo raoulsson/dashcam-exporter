@@ -117,31 +117,53 @@ consistent within a run.
 ## Parking-skip
 
 A trip can span several engine-on sessions, so it often contains long stretches
-of "engine on, parked" (or short engine-off gap) footage at an interior stop.
-By default the script:
+of "engine on, parked" footage at an interior stop.
 
-1. Detects parked runs of 5+ minutes (configurable).
-2. Keeps the **first 10 seconds** of the first parked clip (you & passengers
-   getting out).
-3. Inserts a 2-second `Fast forwarding… 46m 15s skipped` slide that also
-   reports the wall-clock time elided.
-4. Anchors the **exit slice** to the actual drive-resume moment in the next
-   moving clip — so you land exactly when the wheels start turning, not in
-   the middle of more parked footage.
+**What you get.** By default those standstills are collapsed to a short beat as
+you park, a `Fast forwarding… 46m 15s skipped` slide, and then a **clean cut to
+the moment you drive away** — you never sit through parked footage, and you land
+exactly when the car starts moving again.
 
-For step 4, GPS speed is unreliable: parking-mode clips are event snippets full
-of *other* things moving (passing people and cars), and the stale/jittery GPS
-can't tell that apart from real driving. So when `numpy` + `opencv-python-headless`
-are installed, the exit anchor is found by **video ego-motion** instead: track
-features frame-to-frame and take the median optical-flow magnitude — passing
-objects are a handful of outliers the median ignores, while the car actually
-rolling (even creeping out of a spot below the GPS speed floor) sweeps the whole
-frame. It falls back to GPS automatically when the libraries or a clear signal
-are missing. This is all internal — you just get a clean cut.
+**If you'd rather keep the parking movements** in the trip (backing out, jockeying
+around a lot), don't skip at all: **`--no-skip-parking`**. Tune the trigger with
+`parking_min_secs` / `parking_pad_secs` in `config.txt`.
 
-If instead you want the parking *movements* kept in the trip, don't skip parking
-at all: `--no-skip-parking`. Tune with `parking_min_secs` / `parking_pad_secs`
-in `config.txt`.
+That's the whole story for most people. The rest of this section is *how* the
+clean cut is found, and is safe to skip.
+
+<details>
+<summary><b>For the nerds — how the drive-away is detected</b></summary>
+
+The hard part is step "clean cut to the moment you drive away". The obvious
+signal, GPS speed, is unreliable here: parking-mode clips are event snippets the
+camera records whenever *something* moves nearby, so the footage is full of
+passing people and cars while your car sits still, and the stale/jittery GPS
+can't tell that apart from real driving. (This is what defeated an earlier
+attempt.)
+
+So when `numpy` + `opencv-python-headless` are installed, the exit anchor is
+found by **video ego-motion** instead:
+
+1. Sample the front clip at 4 fps, greyscale, downscaled.
+2. Track ~300 features frame-to-frame (Lucas–Kanade optical flow).
+3. Take the **median** flow magnitude. A passing car/person is a handful of
+   outliers the median ignores; the car *actually* rolling sweeps the **whole**
+   frame (features flow outward even driving straight; translate/rotate when
+   maneuvering out of a spot), so the median jumps by ~two orders of magnitude.
+4. Find the first sustained jump, walk back to where motion left the parked
+   baseline = the drive-away second.
+
+It reliably catches the car creeping out of a spot *below the GPS speed floor*,
+and falls back to GPS (`find_drive_resume_second`), then a fixed skip, when the
+libraries aren't installed or no clear signal is found. `--no-video-drive-detect`
+(or `video_drive_detect = false` in `config.txt`) forces GPS-only. It's an
+implementation detail — but one with a real-world effect, so the knob exists.
+
+Debug tip: `--fringe-secs 5` renders just the start / pauses / stop of a trip
+(~20 s instead of the full render) so you can eyeball exactly where the exit
+slice lands.
+
+</details>
 
 
 ## Install (macOS)

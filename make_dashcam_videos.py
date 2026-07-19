@@ -314,6 +314,12 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # recording, the script keeps 10s at each end and slides through the middle.
 #skip_parking = true
 
+# ADVANCED: how the drive-away after a parking slide is found. Default true =
+# video ego-motion (median optical flow; robust to passing people/cars, needs
+# numpy + opencv). false = GPS speed only. Most people never touch this; the
+# real choice is skip_parking above. Has a real effect, so the knob exists.
+#video_drive_detect = true
+
 # Minimum length (s) of a parked run before we trigger the skip.
 # 300 = 5 minutes. Shorter values are more aggressive.
 #parking_min_secs = 300
@@ -2782,6 +2788,16 @@ def main() -> int:
                          "reaches at least this many metres from its anchor; "
                          "closer clusters are near-home puttering / parking-mode "
                          f"events and are auto-skipped. Default {DEFAULT_TRIP_MIN_M}.")
+    # Advanced / implementation knob: force GPS-only drive-away detection at
+    # parking exits instead of the video ego-motion default. Rarely wanted (the
+    # end-user choice is clean-cut vs --no-skip-parking), but the method has a
+    # real-life effect so it stays available.
+    ap.add_argument("--no-video-drive-detect", action="store_true",
+                    default=not cb("video_drive_detect", True),
+                    help="ADVANCED: force GPS-only detection of the parking-exit "
+                         "drive-away instead of the default video ego-motion "
+                         "(needs numpy + opencv-python, used automatically when "
+                         "installed).")
     ap.add_argument("--fringe-secs", type=int, default=0, nargs="?", const=5,
                     help="DEBUG render: instead of the whole trip, emit only the "
                          "transitions — the start, each pause (this many seconds "
@@ -3398,8 +3414,10 @@ def main() -> int:
                 # back to GPS drive-resume, then a fixed skip, when video isn't
                 # available (no numpy/opencv) or finds nothing. The user only
                 # cares that the cut is clean, not how it's found; the choice to
-                # KEEP the parking movements instead is --no-skip-parking.
-                vid_sec = find_drive_away_by_video(clip)
+                # KEEP the parking movements instead is --no-skip-parking. The
+                # --no-video-drive-detect knob forces GPS-only (advanced).
+                vid_sec = (None if args.no_video_drive_detect
+                           else find_drive_away_by_video(clip))
                 if vid_sec is not None:
                     trim_start = max(0, int(vid_sec) - EGO_CONTEXT_PAD)
                     print(f"        exit: video drive-away at {vid_sec:.1f}s "
