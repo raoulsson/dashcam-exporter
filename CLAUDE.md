@@ -65,19 +65,19 @@ home radius can be tight if you street-park near home. Always
 `./list-trips-data.sh` (dry-run) before encoding — indices shift if you change
 anything.
 
-### Debug fringe render
+### Debug-cuts preview
 
-`--fringe-secs N` (bare = 5) renders only the transition moments — trip start,
-each pause (N s before the FF slide + the slide + N s after drive-resume) and
-the stop — dropping the driving middles. A 34-clip / 25-min trip becomes a ~5
--clip / ~23 s render, so parking / FF / drive-resume behaviour can be eyeballed
-fast. Writes a separate `*_fringeNs*.mp4` (never clobbers a real render). Two
-subtleties in the impl: dropped middles still update `prev_emitted_clip` so gap
-detection stays honest, and `gap_pre_pause` (precomputed over the emitted
-sequence) supplies the "before FF" tail for inter-clip gaps. Known open issue it
-surfaced: the parking exit slice can land on still-parked footage when GPS
-velocity is too unreliable for `find_drive_resume_second` (falls back to
-`exit_skip_secs`).
+`--debug-cuts N` (dest `args.debug_cuts`, bare = 5) produces a preview clip of
+only the transition moments — trip start, each pause (N s before the FF slide +
+the slide + N s after drive-resume) and the stop — dropping the driving middles.
+A 34-clip / 25-min trip becomes a ~5-clip / ~23 s clip, so parking / FF /
+drive-away behaviour is eyeballed fast. Writes a separate `*_debugcutsNs*.mp4`
+(never clobbers a real render). Two impl subtleties: dropped middles still
+update `prev_emitted_clip` so gap detection stays honest, and `gap_pre_pause`
+(precomputed over the emitted sequence) supplies the "before FF" tail for
+inter-clip gaps. It surfaced — and then verified the fix for — the parking exit
+slice landing on still-parked footage (now anchored by `find_drive_away_by_video`
+optical flow; see below).
 
 ### Parking-exit drive-away = video ego-motion, not GPS
 

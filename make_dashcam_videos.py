@@ -2798,15 +2798,18 @@ def main() -> int:
                          "drive-away instead of the default video ego-motion "
                          "(needs numpy + opencv-python, used automatically when "
                          "installed).")
-    ap.add_argument("--fringe-secs", type=int, default=0, nargs="?", const=5,
-                    help="DEBUG render: instead of the whole trip, emit only the "
-                         "transitions — the start, each pause (this many seconds "
-                         "before the 'Fast forwarding' slide + the slide + this "
-                         "many seconds after the car moves again) and the stop, "
-                         "with the driving middles dropped. A tiny, fast render "
-                         "to check parking / FF behaviour. Writes a separate "
-                         "*_fringe*.mp4 so it never overwrites a real render. "
-                         "Bare --fringe-secs uses 5. Default 0 (off).")
+    ap.add_argument("--debug-cuts", type=int, default=0, nargs="?", const=5,
+                    dest="debug_cuts", metavar="SECS",
+                    help="DEBUG PREVIEW, not a normal render: produce a short clip "
+                         "containing ONLY the cut points of a trip — the start, "
+                         "each parking/FF pause, and the stop — with all the "
+                         "driving in between dropped. SECS is how much context to "
+                         "keep around each event (before the 'Fast forwarding' "
+                         "slide and after the car moves again); it is NOT overall "
+                         "padding. Lets you eyeball where the cuts land in ~20s "
+                         "instead of a full render. Writes a separate "
+                         "*_debugcuts*.mp4 that never overwrites a real render. "
+                         "Bare --debug-cuts uses 5s. Default 0 (off).")
     ap.add_argument("--no-map-sidecars", action="store_true", default=default_no_map_sidecars,
                     help="Skip the per-group .html / .gpx / _links.txt map sidecars")
     ap.add_argument("--no-map-widget", action="store_true", default=default_no_map_widget,
@@ -3090,9 +3093,9 @@ def main() -> int:
         # group a day's trips by globbing the prefix; the start time and global
         # index disambiguate multiple trips on the same day.
         size_tag = f"_h{args.output_height}" if args.output_height else ""
-        # Debug fringe renders get their own suffix so they never overwrite the
+        # Debug-cuts previews get their own suffix so they never overwrite the
         # real full-length render of the same trip.
-        fringe_tag = f"_fringe{args.fringe_secs}s" if args.fringe_secs > 0 else ""
+        fringe_tag = f"_debugcuts{args.debug_cuts}s" if args.debug_cuts > 0 else ""
         day_label = day_labels[idx - 1]
         label = f"{day_label}_{start:%H-%M}_{idx:02d}"
         sidecar_base = out_dir / f"trip_{label}"
@@ -3100,9 +3103,10 @@ def main() -> int:
 
         print(f"\n[{group_word} {idx}/{len(groups)}] {start:%Y-%m-%d %H:%M} → {end:%H:%M}  "
               f"({len(group)} clips, ~{fmt_secs(secs)})")
-        if args.fringe_secs > 0:
-            print(f"  FRINGE debug render: start + pauses (±{args.fringe_secs}s) "
-                  f"+ stop only, middles dropped → {final.name}")
+        if args.debug_cuts > 0:
+            print(f"  DEBUG-CUTS preview (not a real render): start + pauses "
+                  f"(±{args.debug_cuts}s context) + stop only, driving dropped "
+                  f"→ {final.name}")
         if size_tag:
             # Make the resize visible in the log so it's clear which format
             # this run produced (and which bitrate the encoder ended up using).
@@ -3320,7 +3324,7 @@ def main() -> int:
         entry_pad = args.parking_entry_pad
         exit_pad  = args.parking_exit_pad
 
-        # For fringe/debug mode: the first and last clips that actually get
+        # For --debug-cuts preview: the first and last clips that actually get
         # emitted (skips/head-skips excluded) = the trip's "start" and "stop".
         _emit_idx = [k for k in range(len(group))
                      if action_for.get(k) not in ("skip", "head_skip")]
@@ -3331,7 +3335,7 @@ def main() -> int:
         # with the same rule the render loop uses, so it doesn't mistake a
         # dropped middle for a gap.
         gap_pre_pause: set[int] = set()
-        if args.fringe_secs > 0:
+        if args.debug_cuts > 0:
             _pk = None
             for k in _emit_idx:
                 if _pk is not None and action_for.get(k) != "exit":
@@ -3439,12 +3443,12 @@ def main() -> int:
                 # just before the wheels start turning.
                 trim_start = head_trim_for_motion_clip
 
-            # Fringe/debug mode: keep only the transition moments with `N` secs
-            # of context each, and drop the driving middles. This runs AFTER the
-            # normal trims are computed (start/exit trim_starts, entry slice
+            # --debug-cuts preview: keep only the transition moments with `N`
+            # secs of context each, and drop the driving middles. This runs AFTER
+            # the normal trims are computed (start/exit trim_starts, entry slice
             # length) so it just narrows them to a short window.
-            if args.fringe_secs > 0:
-                N = args.fringe_secs
+            if args.debug_cuts > 0:
+                N = args.debug_cuts
                 if action in ("entry", "entry_end"):
                     # last N secs of the entry (pre-FF) slice = the car stopping
                     full = park_sec_for_entry.get(ci0, 0) + entry_pad
