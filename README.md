@@ -1,9 +1,15 @@
 # dashcam-exporter (for DDPAI dashcams)
 
 Turn the raw front + rear clips from a DDPAI dashcam SD card into one polished
-MP4 per drive — or per day — with a moving GPS map widget, speed overlay,
-date/time burn-in, automatic parking-skip, and per-day HTML / GPX / Google
-Maps sidecars.
+MP4 per **trip** — with a moving GPS map widget, speed overlay, date/time
+burn-in, automatic parking-skip, and per-trip HTML / GPX / Google Maps /
+metadata sidecars.
+
+A **trip** is the publishing unit: everything from leaving an anchor until the
+car returns to it — or a long engine-off gap or the 04:00 day rollover ends it.
+Short interior stops (fuel, lunch, a short hike) don't split a trip; they become
+"Fast forwarding…" slides so the trip plays as one continuous video. See
+[How trips are grouped](#how-trips-are-grouped) for the exact rules.
 
 > **DDPAI only.** The card layout, GPS log format, and clip naming convention
 > are specific to DDPAI cameras. Tested with **DDPAI Mola N3 Pro**. Should work
@@ -42,29 +48,31 @@ speed, segment-break dots, opens in any browser):
 
 The standard `.gpx` sidecar opened in [gpx.studio](https://gpx.studio) —
 because the script emits one `<trkseg>` per contiguous-driving segment, each
-drive shows up as its own colored polyline so you can see the whole day's
-trips at a glance:
+engine-on leg of the trip shows up as its own colored polyline so you can see
+the whole trip at a glance:
 
-![Per-drive GPX in gpx.studio](examples/gps-data-single-drives-on-gpx.studio.png)
+![Per-trip GPX in gpx.studio](examples/gps-data-single-drives-on-gpx.studio.png)
 
 
 ## What you get
 
-For each "drive" (a run of consecutive clips, default ≤90 s gap) — or each
-calendar day in `--daily` mode — the script produces:
+For each trip the script produces a set of files whose names all lead with the
+trip's **day label** (the 04:00-rollover date), so a publishing UI can glob a
+whole day's trips by prefix:
 
 | File | What it is |
 |------|------------|
-| `drive_NN_YYYY-MM-DD_HH-MM_h720.mp4` | Final video. Composed at 2402×1080 with map widget (or 1920×1080 without) and downscaled to the chosen height. The `_h720` tag reflects `output_height` (720 default; 540 for phone-sized, 0 for native 1080 → no tag). VT bitrate auto-scales to match, so smaller heights mean proportionally smaller files. Rendering at multiple heights produces side-by-side files instead of overwriting. |
-| `drive_NN_….html`                | Self-contained Leaflet/OSM interactive map. Un-tagged — one per drive regardless of video size. |
-| `drive_NN_….gpx`                 | Standards-compliant GPX. Opens in Google Earth, Strava, Maps.me, Komoot. |
-| `drive_NN_…_links.txt`           | Google Maps + Apple Maps URLs and trip stats. |
+| `trip_YYYY-MM-DD_HH-MM_NN_h720.mp4` | Final video. Name is `trip_<day>_<start-time>_<global-index>_<size-tag>`, e.g. `trip_2026-05-11_12-11_08_h720.mp4`. Composed at 2402×1080 with map widget (or 1920×1080 without) and downscaled to the chosen height. The `_h720` tag reflects `output_height` (720 default; 540 for phone-sized, 0 for native 1080 → no tag). VT bitrate auto-scales to match, so smaller heights mean proportionally smaller files. Rendering at multiple heights produces side-by-side files instead of overwriting. |
+| `trip_….html`                | Self-contained Leaflet/OSM interactive map. Un-tagged — one per trip regardless of video size. |
+| `trip_….gpx`                 | Standards-compliant GPX. Opens in Google Earth, Strava, Maps.me, Komoot. |
+| `trip_…_links.txt`           | Google Maps + Apple Maps URLs and trip stats. |
+| `trip_…_meta.json`           | Machine-readable trip sidecar: `trip_index`, `day` (04:00 label), `start`, `end`, `duration_secs`, `n_clips`, `video`, `round_trip` (bool — `false` means a one-way relocation), `start_fix`, `end_fix`, `distance_km`. Un-tagged — one per trip. Meant for a publishing UI to group a day's trips and know each trip's shape without re-parsing GPS. |
 
 The video frame layout (defaults):
 
 ```
 +----------------------------------------+----------+
-|                                        | Day      |
+|                                        | Trip 8   |
 |                                        | 2026-…   |
 |              FRONT CAMERA              | Distance |
 |                                        | Driven   |
@@ -96,20 +104,21 @@ Composed in this order:
    the bottom-right corner. Only when GPS data exists for the clip.
 5. **Watermark** — small `©` line just below the speed (or any other corner
    via config; text is configurable).
-6. **Stats panel** — Day title, distance, moving time, max + avg speed,
-   segments / GPS points, plus the route map with a moving marker. The full
-   route is shown coloured by speed; the marker steps once per second.
-   Stats text can be omitted while keeping the map.
+6. **Stats panel** — Trip title (index + day label + start time), distance,
+   moving time, max + avg speed, segments / GPS points, plus the route map with
+   a moving marker. The full route is shown coloured by speed; the marker steps
+   once per second. Stats text can be omitted while keeping the map.
 
-When a drive has no GPS at all, the script falls back to plain 1920×1080
-output (no map widget, no speed overlay) so per-drive output sizes stay
+When a trip has no GPS at all, the script falls back to plain 1920×1080
+output (no map widget, no speed overlay) so per-trip output sizes stay
 consistent within a run.
 
 
 ## Parking-skip
 
-`--daily` runs often contain long stretches of "engine on, parked" footage at
-your destination. By default the script:
+A trip can span several engine-on sessions, so it often contains long stretches
+of "engine on, parked" (or short engine-off gap) footage at an interior stop.
+By default the script:
 
 1. Detects parked runs of 5+ minutes (configurable).
 2. Keeps the **first 10 seconds** of the first parked clip (you & passengers
@@ -198,32 +207,32 @@ Things to watch out for:
 ```sh
 source .venv/bin/activate           # macOS / Linux
 
-# Dry-run to see what would be encoded (lists each group with its index)
+# Dry-run to see what would be encoded (lists each trip with its index)
 python3 make_dashcam_videos.py --dry-run
 
-# Encode every drive on the card with full overlays
+# Encode every trip on the card with full overlays
 python3 make_dashcam_videos.py
 
-# Same but merge by calendar date (one MP4 per day)
-python3 make_dashcam_videos.py --daily
+# Only specific trips by index — see "Trips & indices" below
+python3 make_dashcam_videos.py --drives 8       # --trips 8 is an alias
 
-# Only specific groups — see "Groups & indices" below
-python3 make_dashcam_videos.py --drives 13 14
+# List the trips found on the card without encoding anything
+python3 make_dashcam_videos.py --dry-run
 
 # Read from a local backup instead of the SD card, write somewhere specific
 python3 make_dashcam_videos.py --root ~/dashcam_backup/2026-05-11 --out ~/Movies/Dashcam
 
-# Just refresh the .html / .gpx / _links.txt sidecars without re-encoding video
-python3 make_dashcam_videos.py --daily --sidecars-only
+# Just refresh the .html / .gpx / _links.txt / _meta.json sidecars without re-encoding video
+python3 make_dashcam_videos.py --sidecars-only
 
 # Smaller output file for web/mobile sharing
-python3 make_dashcam_videos.py --output-height 529
+python3 make_dashcam_videos.py --output-height 540
 ```
 
 
 ## Helper shell scripts
 
-For the common workflows there are four ready-to-run shell scripts in the
+For the common workflows there are two ready-to-run shell scripts in the
 repo root. **Open them once and uncomment the `OPTS+=(…)` lines for any
 settings you regularly want** that you DON'T already have in `config.txt`
 (e.g. `--root /path/to/local/sd-card-copy`, `--out ~/Movies/Dashcam`,
@@ -232,35 +241,33 @@ settings you regularly want** that you DON'T already have in `config.txt`
 
 | Script | What it does |
 |--------|--------------|
-| `./list-single-drives-data.sh`                  | Dry-run in drive mode. Lists every engine-on session with its 1-based index. |
-| `./list-daily-drives-data.sh`                   | Dry-run in daily mode. Lists each calendar day as one group with its 1-based index. |
-| `./make-single-drives-rendered.sh [N N …]`      | Encode in drive mode. Pass the indices you want; with no args, encodes every drive. |
-| `./make-daily-drives-rendered.sh  [N N …]`      | Encode in daily mode. Pass the indices you want; with no args, encodes every day. |
+| `./list-trips-data.sh`                  | Dry-run. Lists every trip with its 1-based index, 04:00-day label, start → end, clip count and duration. |
+| `./make-trips-rendered.sh [N N …]`      | Encode. Pass the trip indices you want; with no args, encodes every trip. |
 
 Typical end-to-end:
 
 ```sh
 source .venv/bin/activate
-./list-daily-drives-data.sh             # see what's on the card
-./make-daily-drives-rendered.sh 8       # encode just day 8
+./list-trips-data.sh             # see what's on the card
+./make-trips-rendered.sh 8       # encode just trip 8
 ```
 
-Each invocation of a `make-…` script tees stdout+stderr into
-`./logs/{daily|single}-YYYYMMDD-HHMMSS.log` (full history kept). At the end
-of the run, a copy of that log lands next to every `.mp4` the run produced
-— e.g. `day_2026-05-11.log` alongside `day_2026-05-11.mp4` in your output
-folder, so the log lives with the data it describes. Override the log
+Each invocation of `make-trips-rendered.sh` tees stdout+stderr into
+`./logs/trips-YYYYMMDD-HHMMSS.log` (full history kept). At the end of the
+run, a copy of that log lands next to every `.mp4` the run produced — e.g.
+`trip_2026-05-11_12-11_08_h720.log` alongside the matching `.mp4` in your
+output folder, so the log lives with the data it describes. Override the log
 location via the `LOG_DIR` environment variable.
 
-The make-scripts also forward arbitrary flags through to the Python:
+The script also forwards arbitrary flags through to the Python:
 
 ```sh
-./make-daily-drives-rendered.sh 8 --force                       # overwrite existing
-./make-daily-drives-rendered.sh --sidecars-only                 # refresh sidecars only
-./make-daily-drives-rendered.sh 8 --output-height 720           # day 8, 720p
+./make-trips-rendered.sh 8 --force                       # overwrite existing
+./make-trips-rendered.sh --sidecars-only                 # refresh sidecars only
+./make-trips-rendered.sh 8 --output-height 720           # trip 8, 720p
 ```
 
-Leading integers are treated as group indices for `--drives`; the first
+Leading integers are treated as trip indices for `--drives`; the first
 non-integer arg ends index parsing and everything from there onward is
 passed straight to Python.
 
@@ -272,57 +279,51 @@ the card fills up. The script will see those overwritten sessions as small
 "fragments" (1–3 clips, a minute or two) at the head of the timeline. They
 usually aren't useful as standalone videos.
 
-By default the script **auto-skips groups smaller than `min_clips_per_group`
+By default the script **auto-skips trips smaller than `min_clips_per_group`
 clips** (default 4). You'll see a one-line notice listing what got skipped:
 
 ```
-Auto-skipping 7 fragment day(s): #1 (1 clip), #2 (3 clips), #3 (1 clip), …
+Auto-skipping 7 fragment trip(s): #1 (1 clip), #2 (3 clips), #3 (1 clip), …
 (force-encode by naming the index via --drives.)
 ```
 
 To force-encode a fragment anyway, pass its 1-based index via `--drives`:
 
 ```
-./make-daily-drives-rendered.sh 1 2     # encode fragments 1 and 2 even though they're short
+./make-trips-rendered.sh 1 2     # encode fragments 1 and 2 even though they're short
 ```
 
-> The bundled example dataset is exactly this case: only Day 8
-> (May 11, 104 clips, ~1h45m of driving) is a complete day. The other 7
-> days are 1–3 clip fragments left from the loop overwriting earlier
-> footage. With defaults you'll get just `day_2026-05-11.mp4`; the rest are
-> noted and skipped.
+> The bundled example dataset is exactly this case: only trip 8
+> (May 11, 104 clips, ~1h45m of driving) is a complete trip. The other 7
+> are 1–3 clip fragments left from the loop overwriting earlier footage.
+> With defaults you'll get just `trip_2026-05-11_12-11_08_h720.mp4`; the
+> rest are noted and skipped.
 
 
-## Groups & indices
+## Trips & indices
 
-The script always processes "groups" of clips. What a group is depends on the
-mode:
-
-- **drive mode** (default): each group is a contiguous engine-on session —
-  i.e. a run of clips where consecutive timestamps are within `--gap`
-  seconds of each other (default 90 s).
-- **`--daily` mode**: each group is one calendar date; every clip on that
-  date belongs to one group regardless of engine-off intervals.
-
-Groups are numbered 1, 2, 3, … in the order they appear in `--dry-run`. The
-`--drives N [N …]` flag (the name is historical; it works in both modes)
-selects specific groups by index. Examples:
+The script groups all clips on the card into trips (see
+[How trips are grouped](#how-trips-are-grouped)). Trips are numbered
+1, 2, 3, … globally in the order they appear in `--dry-run`. The
+`--drives N [N …]` flag (aliased `--trips`; the `--drives` name is historical)
+selects specific trips by index. Examples:
 
 ```sh
 # See the indices first
-python3 make_dashcam_videos.py --daily --dry-run
-# →  Day  1  2026-04-02 12:30  ->  12:31     1 clips
-#    Day  2  2026-04-11 21:16  ->  21:24     3 clips
+python3 make_dashcam_videos.py --dry-run
+# →  Trip  1  day 2026-04-02  2026-04-02 12:30 -> 04-02 12:31     1 clips  ~1m
+#    Trip  2  day 2026-04-11  2026-04-11 21:16 -> 04-11 21:24     3 clips  ~8m
 #    …
-#    Day  8  2026-05-11 12:11  ->  19:07   104 clips
+#    Trip  8  day 2026-05-11  2026-05-11 12:11 -> 05-11 19:07   104 clips  ~1h45m
 
-# Then encode only Day 8
-python3 make_dashcam_videos.py --daily --drives 8
+# Then encode only trip 8
+python3 make_dashcam_videos.py --drives 8       # or: --trips 8
 ```
 
-Indices are stable within a single run but can shift if you change `--gap`
-or `--daily`, since the grouping changes. Always do `--dry-run` first when
-in doubt.
+Indices are stable within a single run but **can shift if you change any of
+the trip thresholds** (`--trip-return-m`, `--trip-leave-m`,
+`--trip-day-rollover`), since the grouping changes. Always do `--dry-run`
+first when in doubt.
 
 
 ## Output sizes
@@ -349,16 +350,16 @@ down once. File sizes assume default `vt_bitrate = 8M` / `x264_crf = 23`
 smaller still. 720 keeps plates and signs legible without ballooning files;
 540 if you only ever watch on a phone; 0 is the right call for archiving.
 
-Both the intermediate **and the final** filenames bake in the chosen
-height — e.g. `drive_13_2026-05-11_15-30_h540.mp4` and
-`day_2026-05-11_h720.mp4`. `output_height = 0` produces the un-tagged
-native-1080 name (`drive_13_…mp4`). Rendering the same drive at multiple
-heights produces side-by-side files instead of overwriting each other,
-and the format you have on disk is obvious from the name.
+The final filename bakes in the chosen height — e.g.
+`trip_2026-05-11_15-30_13_h540.mp4`. `output_height = 0` produces the
+un-tagged native-1080 name (`trip_2026-05-11_15-30_13.mp4`). Rendering the
+same trip at multiple heights produces side-by-side files instead of
+overwriting each other, and the format you have on disk is obvious from
+the name.
 
-Sidecars (`.html`, `.gpx`, `_links.txt`) stay un-tagged — they only depend
-on the GPS track, not the video resolution, so one set covers every
-rendered size.
+Sidecars (`.html`, `.gpx`, `_links.txt`, `_meta.json`) stay un-tagged — they
+only depend on the GPS track, not the video resolution, so one set covers
+every rendered size.
 
 When `map_widget = false` the panel is dropped and the composite is just
 1920×1080 (or `output_height` × 16:9), shaving roughly 20 % off file size.
@@ -376,7 +377,8 @@ Then uncomment whatever lines you want to change. Precedence is **CLI flag >
 config.txt > built-in default**. Highlights:
 
 - `root`, `out` — input / output paths
-- `daily` / `gap` — grouping
+- `trip_return_m`, `trip_leave_m`, `trip_day_rollover`
+  — trip grouping (see [How trips are grouped](#how-trips-are-grouped))
 - `audio = false` — strip audio entirely (passenger conversation privacy)
 - `speed_unit = kmh | mph` — unit shown on overlay + stats + HTML + links.txt
   (GPX export is always m/s per the spec)
@@ -400,12 +402,13 @@ config.txt > built-in default**. Highlights:
 | `--write-config PATH`         | Dump the fully-commented config template and exit. Pass `.` to write `./config.txt`. |
 | `--root PATH`                 | Dashcam SD-card / backup root (default: `/Volumes/NO NAME`). |
 | `--out PATH`                  | Output folder (default: `~/Desktop/Dashcam_Videos`). |
-| `--daily`                     | Group clips by calendar date instead of by gap. |
-| `--gap N`                     | Seconds-between-clips threshold for drive grouping (default 90). |
-| `--drives N [N …]`            | Only process specific group numbers (1-based). Bypasses min-clips skip for those groups. |
-| `--min-clips-per-group N`     | Auto-skip groups smaller than N clips (default 4). Loop-recording fragments. |
+| `--drives N [N …]` (alias `--trips`) | Only process specific trip numbers (1-based). Bypasses min-clips skip for those trips. |
+| `--trip-return-m M`           | Back within M metres of the trip's anchor closes the trip (default 100). |
+| `--trip-leave-m M`            | How far (m) the car must travel from the anchor before a return can close the trip (default 150). |
+| `--trip-day-rollover H`       | Hour of day the trip/day label rolls over instead of midnight (default 4 = 04:00). |
+| `--min-clips-per-group N`     | Auto-skip trips smaller than N clips (default 4). Loop-recording fragments. |
 | `--inter-clip-gap-secs N`     | Insert a "Fast forwarding…" slide whenever consecutive clips are >N s apart (default 60). |
-| `--force`                     | Re-encode groups whose `.mp4` already exists (default: skipped). |
+| `--force`                     | Re-encode trips whose `.mp4` already exists (default: skipped). |
 | `--sidecars-only`             | Only (re-)generate `.html` / `.gpx` / `_links.txt`; skip video encoding. |
 | `--no-map-sidecars`           | Don't generate the sidecars either. |
 | `--no-map-widget`             | Skip the burn-in side panel (output stays 1920×1080). |
@@ -421,20 +424,49 @@ config.txt > built-in default**. Highlights:
 | `--output-height N`           | Downscale final composite to this height. **Default 720** (quality / size sweet spot). 540 for phone-sized; 0 keeps native 1080. |
 | `--software`                  | Force libx264 instead of macOS VideoToolbox. |
 | `--keep-intermediates`        | Don't delete per-clip intermediates after concat. |
-| `--dry-run`                   | List groups and exit without encoding. |
+| `--dry-run`                   | List trips and exit without encoding. |
 
 
-## How grouping works
+## How trips are grouped
 
 Each front-clip filename is paired with its matching rear clip and the clips
-are ordered by timestamp.
+are ordered by timestamp. Then they're segmented into **trips**. A trip is
+everything from leaving an **anchor** (the trip's own first GPS fix) until one
+of three boundaries fires, **whichever comes first**:
 
-In **drive mode** (default), a new drive starts whenever the gap between the
-end of one clip and the start of the next exceeds `--gap` seconds. This
-usually corresponds to engine-off events.
+1. **RETURN** — the car comes back within `--trip-return-m` metres (default
+   100) of where the trip began, *after* first travelling at least
+   `--trip-leave-m` metres away (default 150, so it doesn't close on the
+   driveway). Drive **A → B, hang out any length of time, B → A** and that is
+   **one trip** with the stop at B cut out — whether the whole thing takes 10
+   minutes or 20 hours. The anchor is *carried forward* from where the car last
+   parked (the previous trip's final fix), not read from this trip's own first
+   clip, so a stale-GPS or underground-garage start still anchors on the true
+   origin.
+2. **ROLLOVER** — the wall clock crosses `--trip-day-rollover`:00 (default 4,
+   i.e. **04:00, not midnight**) between two clips. An evening drive ending
+   03:32 stays one trip; a genuinely new morning starts a new one. This is
+   independent of the import folder's name or date. It also bounds a **one-way
+   relocation**: drive **Muntinlupa → a holiday base**, sleep, drive back two
+   days later, and you get **two trips** — a 04:00 boundary falls between the
+   arrival and the return.
 
-In **`--daily` mode**, all clips on the same calendar date go into one
-group, regardless of engine-off intervals.
+There is **deliberately no engine-off-duration rule.** A stop of *any* length
+— fuel, lunch, a 4-hour hangout, a hike — stays inside the trip and becomes a
+"Fast forwarding…" slide in the rendered video (the same machinery that handles
+parking-skip). A trip can therefore span multiple engine-on sessions and still
+play as one continuous video. (A trip that had GPS but never actually left its
+anchor — scattered parking-mode motion clips — is auto-skipped as stationary.)
+
+Every trip also carries a **day label** — the 04:00-rollover date — which
+leads all its output filenames and lives in its `_meta.json`. The day is a
+label, not a render mode: a publishing UI can glob `trip_2026-05-11_*` to lay
+out that day's trips side by side.
+
+**Tuning.** Adjust `--trip-return-m` / `--trip-leave-m` if returns close too
+eagerly or not at all. Move `--trip-day-rollover` if your late-night driving
+lands on the wrong day. Because changing any threshold re-segments everything,
+the trip indices can shift — always `--dry-run` first after a change.
 
 
 ## How GPS speed is sourced
@@ -463,17 +495,19 @@ roads.
 
 ## Output layout
 
-After a typical `--daily` run:
+After a typical run (files lead with the 04:00-day label so a UI can glob a
+day's trips):
 
 ```
 ~/Desktop/Dashcam_Videos/
-├── day_2026-04-02.mp4
-├── day_2026-04-11_h720.mp4
+├── trip_2026-05-11_12-11_08_h720.mp4
+├── trip_2026-05-11_12-11_08.html
+├── trip_2026-05-11_12-11_08.gpx
+├── trip_2026-05-11_12-11_08_links.txt
+├── trip_2026-05-11_12-11_08_meta.json
+├── trip_2026-05-11_19-40_09_h720.mp4      # a second trip on the same day
+├── trip_2026-05-11_19-40_09.html
 ├── …
-├── day_2026-05-11_h720.mp4
-├── day_2026-05-11.html
-├── day_2026-05-11.gpx
-├── day_2026-05-11_links.txt
 ├── .gpx_cache/              # harvested tar contents, reused across runs
 └── .intermediates/          # scratch — wiped at the start of every run
 ```
@@ -488,7 +522,7 @@ fine, just slower.
 
 Caching policy:
 
-- If a final `.mp4` already exists in `--out`, that drive/day is skipped.
+- If a final `.mp4` already exists in `--out`, that trip is skipped.
   Re-render by deleting the .mp4 (or passing `--force`).
 - Per-clip intermediates in `.intermediates/` are **scratch** — wiped at the
   start of every run and regenerated against the current config. This means
@@ -501,7 +535,7 @@ Caching policy:
   so segmentation / palette / unit tweaks land via a quick `--sidecars-only`
   run.
 
-To force a re-encode of one drive: delete its final `.mp4` (and the matching
+To force a re-encode of one trip: delete its final `.mp4` (and the matching
 intermediates if you want fresh per-clip work too).
 
 
@@ -517,8 +551,8 @@ libass. Install `ffmpeg-full`, or run with `--no-speed`.
 matching rear. The script drops it. To use a front-only setup set
 `rear_pip = false` in `config.txt`.
 
-**`map: (no GPS data for this day)`** — Clip filenames in that group don't
-match any GPX (loose or tarred). Normal for drives without GPS lock.
+**`map: (no GPS data for this trip)`** — Clip filenames in that trip don't
+match any GPX (loose or tarred). Normal for trips without GPS lock.
 
 **`Output looks squashed horizontally`** — Player isn't honouring SAR. The
 video is yuv420p with square pixels; QuickTime / VLC / IINA all handle it.
@@ -555,13 +589,13 @@ map.mp4   ─┤    [2:v] scale to 480×1080 + 2-px gutter pad → [map_part]
            ▼
        concat-demuxer  (stream-copy, no re-encode)
            ▼
-       final drive_NN.mp4
+       final trip_….mp4
 ```
 
 The map.mp4 is produced by PIL/staticmap:
 
 ```
-all GPX points for the drive  →  base panel PNG (stats + route + start/end markers)
+all GPX points for the trip   →  base panel PNG (stats + route + start/end markers)
                                  +
 each second of clip            →  marker dot composited on base PNG
                                  ↓
@@ -581,10 +615,8 @@ dashcam-exporter/
 ├── make_dashcam_videos.py        # the single-file script (entry point)
 ├── config.txt                    # generated by --write-config; edit to taste
 ├── requirements.txt              # Pillow + staticmap
-├── list-single-drives-data.sh        # dry-run, drive mode
-├── list-daily-drives-data.sh         # dry-run, daily mode
-├── make-single-drives-rendered.sh    # encode a chosen drive (or all)
-├── make-daily-drives-rendered.sh     # encode a chosen day  (or all)
+├── list-trips-data.sh            # dry-run: list every trip with its index
+├── make-trips-rendered.sh        # encode a chosen trip (or all)
 ├── examples/                     # screenshots used in this README
 ├── .gitignore
 ├── LICENSE

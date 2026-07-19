@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# list-trips-data.sh
+# ------------------
+# Dry-run the script: list the TRIPS found on the card without encoding
+# anything. Each trip shows its 1-based index, the 04:00-rollover day it
+# belongs to, its start -> end, clip count and duration. Pass an index to
+# `make-trips-rendered.sh` to encode just that trip.
+#
+# Tune trip detection here or in config.txt if the grouping isn't what you
+# want, then re-run:
+#   --trip-return-m M         back within M metres of the anchor ends a trip
+#   --trip-day-rollover H     day/label boundary hour (default 4 = 04:00)
+#
+# Edit the OPTS line below to pre-set any flags you regularly use that you
+# DON'T want in config.txt (e.g. a non-default --root for a copied SD card).
+# Anything you put in config.txt is loaded automatically and doesn't need to
+# go here.
+
+set -euo pipefail
+cd "$(dirname "$0")"
+
+OPTS=()
+# Examples — uncomment + adapt:
+# OPTS+=(--root "$HOME/rsc-data/Import_Dashcam/2026-05-11")
+# OPTS+=(--out  "$HOME/rsc-data/Dashcam_Videos_working")
+# OPTS+=(--trip-return-m 120)
+
+python3 make_dashcam_videos.py --dry-run ${OPTS[@]+"${OPTS[@]}"} "$@"
