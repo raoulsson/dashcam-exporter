@@ -504,6 +504,20 @@ class Clip:
         return datetime.strptime(self.timestamp, "%Y%m%d%H%M%S")
 
 
+def probe_video_size(path: Path) -> "tuple[int, int] | None":
+    """(width, height) of a video's first stream via ffprobe, or None."""
+    try:
+        out = subprocess.check_output(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(path)],
+            text=True, stderr=subprocess.STDOUT,
+        ).strip().splitlines()[0]
+        w, h = out.split("x")[:2]
+        return int(w), int(h)
+    except Exception:
+        return None
+
+
 def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
     front_map: dict[str, tuple[Path, int]] = {}
     for f in sorted(os.listdir(front_dir)):
@@ -2745,7 +2759,7 @@ def main() -> int:
     global PIP_W, PIP_H, PIP_MARGIN, REAR_PIP_POSITION, REAR_PIP_ENABLED
     global MAP_PANEL_SIZE, MAP_PANEL_POSITION, MAP_PANEL_GUTTER_PX
     global MAP_TRACK_PAD, MAP_ZOOM_BOOST, SEGMENT_MIN_POINTS, CLIP_GPX_WINDOW_SECONDS
-    global FRONT_CROP_TOP, FRONT_CROP_BOTTOM
+    global FRONT_CROP_TOP, FRONT_CROP_BOTTOM, FRONT_W, FRONT_H
     global COPYRIGHT_TEXT, COPYRIGHT_FONT_SIZE, COPYRIGHT_POSITION
     global COPYRIGHT_MARGIN_H, COPYRIGHT_MARGIN_V
     global SPEED_MARGIN_V, SPEED_MARGIN_R, SPEED_FONT_SIZE
@@ -3011,6 +3025,21 @@ def main() -> int:
     if not front_dir.is_dir():
         print(f"ERROR: expected front folder at {front_dir}", file=sys.stderr)
         return 1
+
+    # Detect the actual front-camera resolution instead of assuming 2560x1600.
+    # DDPAI cams record at a few resolutions (e.g. 2560x1600 16:10, 1920x1080
+    # 16:9). We crop the source to the 16:9 output aspect BEFORE scaling so a
+    # 1080p clip isn't vertically stretched, and the crop default is derived
+    # from the real size (2560x1600 -> 80/80 as before; 1920x1080 -> 0/0). An
+    # explicit front_crop_top/bottom in config still overrides.
+    _first_front = next(iter(sorted(front_dir.glob("*.mp4"))), None)
+    _sz = probe_video_size(_first_front) if _first_front else None
+    if _sz:
+        FRONT_W, FRONT_H = _sz
+        print(f"Source:    front {FRONT_W}x{FRONT_H}")
+    _aspect_crop = max(0, FRONT_H - round(FRONT_W * OUT_H / OUT_W)) // 2
+    FRONT_CROP_TOP    = ci("front_crop_top",    _aspect_crop)
+    FRONT_CROP_BOTTOM = ci("front_crop_bottom", _aspect_crop)
     rear_present = rear_dir.is_dir() and any(REAR_RE.match(f) for f in os.listdir(rear_dir))
     if REAR_PIP_ENABLED and not rear_present:
         print(f"  note: no rear clips found at {rear_dir} — rear PiP auto-disabled",
