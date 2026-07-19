@@ -2,8 +2,9 @@
 """
 make_dashcam_videos.py
 ----------------------
-DDPAI dashcam SD card -> one polished MP4 per drive (or per day in --daily
-mode), with all of the following composed in one pass:
+DDPAI dashcam SD card -> one polished MP4 per trip (a trip = leave an anchor,
+return to it — or run until a long engine-off gap / the 04:00 day rollover;
+see group_into_trips), with all of the following composed in one pass:
 
   - front camera filling the main 1920x1080 frame (configurable crop)
   - rear camera picture-in-picture (bottom-middle default; top-left/middle/
@@ -17,8 +18,9 @@ mode), with all of the following composed in one pass:
     "Fast forwarding…" slide + exit slice anchored on actual drive-resume
   - automatic inter-clip-gap detection: engine-off intervals between clips
     get their own "Fast forwarding…" slide with the elapsed time
-  - per-group sidecars: interactive Leaflet .html map, standard .gpx,
-    _links.txt with Google/Apple Maps URLs and trip stats
+  - per-trip sidecars: interactive Leaflet .html map, standard .gpx,
+    _links.txt with Google/Apple Maps URLs and trip stats, and a _meta.json
+    carrying the trip's 04:00-rollover day label for the publishing UI
 
 Runs on macOS (with hardware-accelerated VideoToolbox encoding) and Linux
 (with software libx264). Tested on macOS; should work on Linux. Untested
@@ -26,10 +28,10 @@ on Windows but should largely work — see the README for caveats.
 
 USAGE
 -----
-    python3 make_dashcam_videos.py                     # encode every drive on the card
-    python3 make_dashcam_videos.py --daily             # one MP4 per calendar day
-    python3 make_dashcam_videos.py --daily --drives 8  # only day 8
-    python3 make_dashcam_videos.py --sidecars-only     # refresh .html/.gpx without encoding
+    python3 make_dashcam_videos.py                     # encode every trip on the card
+    python3 make_dashcam_videos.py --drives 8          # only trip 8
+    python3 make_dashcam_videos.py --dry-run           # list trips without encoding
+    python3 make_dashcam_videos.py --sidecars-only     # refresh sidecars without encoding
     python3 make_dashcam_videos.py --force             # overwrite existing .mp4s
     python3 make_dashcam_videos.py --write-config .    # dump a fully commented config.txt
 
@@ -71,7 +73,6 @@ from pathlib import Path
 
 DEFAULT_ROOT = "/Volumes/NO NAME"
 DEFAULT_OUT  = "~/Desktop/Dashcam_Videos"
-DEFAULT_GAP  = 90                              # seconds between clips => new drive
 DEFAULT_FONT = "/System/Library/Fonts/Supplemental/Courier New Bold.ttf"
 FALLBACK_FONT = "/System/Library/Fonts/Menlo.ttc"
 
@@ -128,15 +129,39 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 
 
 # ============================================================================
-# GROUPING
+# TRIP GROUPING
 # ============================================================================
+#
+# The publishing unit is a "trip": everything from leaving an anchor until one
+# of two boundaries fires first —
+#   1. RETURN   the car comes back within trip_return_m of where the trip began
+#               (after first leaving by trip_leave_m). A -> B, hang out ANY
+#               length of time, B -> A = one trip, with the stop at B cut out.
+#               Duration is irrelevant: 10 minutes or 20 hours.
+#   2. ROLLOVER the wall clock crosses trip_day_rollover:00 between two clips.
+#               The day boundary is 04:00, not midnight, so an evening drive
+#               ending 03:32 stays whole. Independent of the import folder. This
+#               also bounds a one-way relocation (drive to a base, sleep, drive
+#               back days later = two trips) — a 04:00 boundary falls between.
+#
+# EVERY interior stop (fuel, lunch, a 4-hour hangout, a hike) stays inside the
+# trip regardless of length — it becomes a 'Fast forwarding...' slide. There is
+# deliberately no engine-off-duration split.
+#
+# Each trip is written as trip_<day>_<HH-MM>_<idx> with a _meta.json sidecar
+# carrying its day label, so a publishing UI can group a day's trips together.
 
-# false (default): each gap-separated drive becomes its own .mp4
-# true:            all clips on the same calendar date go into one .mp4
-#daily = false
+# Return-to-anchor distance in metres. Back within this of where the trip
+# started closes the trip. Default 100.
+#trip_return_m = 100
 
-# In drive-mode, clips farther than this many seconds apart start a new drive.
-#gap = 90
+# How far (metres) the car must travel from the anchor before a return can
+# close the trip — stops it closing on the driveway. Default 150.
+#trip_leave_m = 150
+
+# Hour of day the trip/day label rolls over instead of midnight. A trip
+# starting before this hour is labelled the previous date. Default 4 (04:00).
+#trip_day_rollover = 4
 
 
 # ============================================================================
@@ -490,19 +515,163 @@ def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
     return clips
 
 
-def group_into_drives(clips: list[Clip], gap_seconds: int) -> list[list[Clip]]:
-    drives: list[list[Clip]] = []
+# ---------------------------------------------------------------------------
+# Trip grouping — the publishing unit
+# ---------------------------------------------------------------------------
+# A "trip" is not a single engine-on session (that's a gap-based drive). It is
+# everything from leaving an anchor until one of TWO boundaries fires, whichever
+# comes FIRST:
+#
+#   1. RETURN   — the car comes back within `return_m` of where the trip began,
+#                 AFTER first travelling at least `leave_m` away (so it doesn't
+#                 close on the driveway). This is the round-trip case: drive A →
+#                 B, hang out ANY length of time, drive B → A = ONE trip, with
+#                 the stop at B cut out. Duration is irrelevant — 10 minutes or
+#                 20 hours, as long as you get back before the next rollover.
+#   2. ROLLOVER — the wall clock crosses `rollover_h`:00 between two clips. The
+#                 day boundary is 04:00, not midnight, so an evening drive that
+#                 ends 03:32 stays whole while a genuinely new morning starts a
+#                 new trip. Independent of the import folder's name/date. This
+#                 also bounds a ONE-WAY relocation: drive to a holiday base,
+#                 sleep, drive back days later = two trips, because a 04:00
+#                 boundary falls between the arrival and the return.
+#
+# Every engine-off stop inside a trip (fuel, lunch, a 4-hour hangout, a hike) —
+# no matter how long — stays inside the trip and becomes a 'Fast forwarding…'
+# slide at render time, exactly as the old --daily path handled mid-day parking.
+DEFAULT_TRIP_RETURN_M     = 100     # back within this of anchor => trip closes
+DEFAULT_TRIP_LEAVE_M      = 150     # must get this far out before a return counts
+DEFAULT_TRIP_DAY_ROLLOVER = 4       # trips/days roll over at 04:00, not midnight
+
+
+def trip_day_label(dt: datetime, rollover_h: int = DEFAULT_TRIP_DAY_ROLLOVER) -> str:
+    """The calendar day a trip belongs to, with the rollover at `rollover_h`:00
+    instead of midnight. A trip starting 02:00 belongs to the PREVIOUS date; one
+    starting 17:00 keeps its date even if it runs past midnight to 03:32."""
+    return (dt - timedelta(hours=rollover_h)).strftime("%Y-%m-%d")
+
+
+def _crosses_rollover(a: datetime, b: datetime, rollover_h: int) -> bool:
+    """True if a `rollover_h`:00 day boundary falls in the interval (a, b]."""
+    return trip_day_label(a, rollover_h) != trip_day_label(b, rollover_h)
+
+
+def _clip_endpoints(clip: Clip, gps_dirs: "tuple[Path | None, ...]"):
+    """(first_fix, last_fix) each as (lat, lon), or (None, None) if the clip has
+    no GPS. Used only for trip boundary detection, so raw first/last valid fixes
+    are precise enough (parse_gpx_track already strips stale cross-drive data)."""
+    pts = gather_track([clip], gps_dirs)
+    if not pts:
+        return None, None
+    return (pts[0][0], pts[0][1]), (pts[-1][0], pts[-1][1])
+
+
+def group_into_trips(
+    clips: list[Clip],
+    gps_dirs: "tuple[Path | None, ...]",
+    *,
+    return_m: float = DEFAULT_TRIP_RETURN_M,
+    leave_m: float = DEFAULT_TRIP_LEAVE_M,
+    rollover_h: int = DEFAULT_TRIP_DAY_ROLLOVER,
+) -> "tuple[list[list[Clip]], list[bool]]":
+    """Segment chronologically-ordered clips into trips (see the block comment
+    above for the two boundary rules: return-to-anchor, or the 04:00 rollover).
+
+    Returns (trips, moved) where moved[i] is False for a trip that HAD GPS yet
+    never travelled more than `leave_m` from its anchor — a stationary cluster
+    of parking-mode motion-event clips, not a real drive. The caller auto-skips
+    those (a GPS-less trip is left moved=True since we can't tell it didn't go
+    anywhere).
+
+    The anchor is NOT this trip's own first fix (which may be stale buffered GPS
+    or, on a garage start, a point already minutes into the drive). It is where
+    the car was last parked = the last good fix of the PREVIOUS trip, carried
+    forward. You start a trip where you ended the last one, so the return check
+    matches the true origin and doesn't false-fire on a mid-route point the
+    homeward leg happens to re-traverse."""
+    def dist_m(a, b) -> float:
+        return _haversine_km(a[0], a[1], b[0], b[1]) * 1000.0
+
+    trips: list[list[Clip]] = []
+    moved: list[bool] = []
     cur: list[Clip] = []
+    anchor: "tuple[float, float] | None" = None
+    carry: "tuple[float, float] | None" = None   # last good fix = current park spot
+    left_anchor = False
+    had_gps = False
+    max_dist = 0.0
+
+    def begin(c, c_start, c_end):
+        nonlocal cur, anchor, left_anchor, had_gps, max_dist
+        cur = [c]
+        anchor = carry if carry is not None else c_start
+        left_anchor = False
+        had_gps = c_start is not None or c_end is not None
+        max_dist = 0.0
+        observe(c_start, c_end)
+
+    def observe(c_start, c_end):
+        nonlocal left_anchor, max_dist
+        if anchor is None:
+            return
+        for fix in (c_start, c_end):
+            if fix is not None:
+                d = dist_m(anchor, fix)
+                if d > max_dist:
+                    max_dist = d
+                if not left_anchor and d > leave_m:
+                    left_anchor = True
+
+    def close():
+        # moved=False only when we HAD GPS and it proves the car never left.
+        moved.append((not had_gps) or (max_dist > leave_m))
+        trips.append(cur)
+
     for c in clips:
+        c_start, c_end = _clip_endpoints(c, gps_dirs)
+        # carry = latest good fix seen so far; updated AFTER using it as anchor.
+        if not cur:
+            begin(c, c_start, c_end)
+        else:
+            prev = cur[-1]
+            prev_end_dt = prev.dt + timedelta(seconds=prev.duration)
+            # Boundary 2 (04:00 rollover) is decided by the gap BEFORE this clip,
+            # so `c` opens a fresh trip. There is deliberately NO long-gap rule:
+            # a mid-trip stop of any length stays inside the trip (cut as an FF
+            # slide); only a return or the rollover closes a trip.
+            if _crosses_rollover(prev_end_dt, c.dt, rollover_h):
+                close()
+                begin(c, c_start, c_end)
+            else:
+                cur.append(c)
+                if c_start is not None or c_end is not None:
+                    had_gps = True
+                if anchor is None:
+                    anchor = carry if carry is not None else c_start
+                observe(c_start, c_end)
+                # Boundary 1 (return): once we've left, close on the clip whose
+                # end lands back near the anchor. `c` belongs to the closing trip.
+                if (left_anchor and anchor is not None and c_end is not None
+                        and dist_m(anchor, c_end) <= return_m):
+                    # Update carry to the return point before closing so the next
+                    # trip anchors on where we actually parked.
+                    carry = c_end
+                    close()
+                    cur = []
+                    anchor = None
+                    left_anchor = False
+                    had_gps = False
+                    max_dist = 0.0
+        # Carry the last good fix forward (skip when a return already set it).
         if cur:
-            prev_end = cur[-1].dt + timedelta(seconds=cur[-1].duration)
-            if (c.dt - prev_end).total_seconds() > gap_seconds:
-                drives.append(cur)
-                cur = []
-        cur.append(c)
+            if c_end is not None:
+                carry = c_end
+            elif c_start is not None:
+                carry = c_start
+
     if cur:
-        drives.append(cur)
-    return drives
+        close()
+    return trips, moved
 
 
 def has_videotoolbox() -> bool:
@@ -2299,6 +2468,7 @@ def main() -> int:
     cfg = load_config_file(config_path)
     cs = lambda k, d: cfg.get(k, d)
     ci = lambda k, d: int(cfg[k]) if k in cfg and cfg[k] != "" else d
+    cflt = lambda k, d: float(cfg[k]) if k in cfg and cfg[k] != "" else d
     cb = lambda k, d: _cfg_bool(cfg[k]) if k in cfg else d
 
     # Boolean knobs are stored POSITIVELY in config (timestamp=true rather than
@@ -2309,7 +2479,6 @@ def main() -> int:
     default_no_map_sidecars  = not cb("map_sidecars",  True)
     default_no_skip_parking  = not cb("skip_parking",  True)
     default_no_audio         = not cb("audio",         True)
-    default_daily            =     cb("daily",         False)
     default_software         =     cb("software",      False)
     default_keep_inter       =     cb("keep_intermediates", False)
 
@@ -2390,10 +2559,9 @@ def main() -> int:
                     help=f"Dashcam volume root (default: {cs('root', DEFAULT_ROOT)})")
     ap.add_argument("--out",   default=cs("out", DEFAULT_OUT),
                     help=f"Output folder (default: {cs('out', DEFAULT_OUT)})")
-    ap.add_argument("--gap",   type=int, default=ci("gap", DEFAULT_GAP),
-                    help="Seconds between clips to consider a new drive")
-    ap.add_argument("--drives", nargs="+", type=int,
-                    help="Only process specific drive numbers (1-based)")
+    ap.add_argument("--drives", "--trips", nargs="+", type=int, dest="drives",
+                    help="Only process specific trip numbers (1-based). "
+                         "--trips is an alias.")
     ap.add_argument("--software", action="store_true", default=default_software,
                     help="Use libx264 instead of VideoToolbox")
     ap.add_argument("--keep-intermediates", action="store_true", default=default_keep_inter,
@@ -2415,8 +2583,21 @@ def main() -> int:
                     help="Skip the GPS speed overlay even when GPX data is available")
     ap.add_argument("--no-audio", action="store_true", default=default_no_audio,
                     help="Strip audio from the output (useful if passenger talk shouldn't be shared)")
-    ap.add_argument("--daily", action="store_true", default=default_daily,
-                    help="Group clips by calendar date, producing one MP4 per day")
+    ap.add_argument("--trip-return-m", type=float,
+                    default=cflt("trip_return_m", DEFAULT_TRIP_RETURN_M),
+                    help="A trip closes when the car returns within this many "
+                         "metres of where the trip began (after first leaving). "
+                         f"Default {DEFAULT_TRIP_RETURN_M}.")
+    ap.add_argument("--trip-leave-m", type=float,
+                    default=cflt("trip_leave_m", DEFAULT_TRIP_LEAVE_M),
+                    help="How far the car must travel from the anchor before a "
+                         "return can close the trip (stops it closing on the "
+                         f"driveway). Default {DEFAULT_TRIP_LEAVE_M}.")
+    ap.add_argument("--trip-day-rollover", type=int,
+                    default=ci("trip_day_rollover", DEFAULT_TRIP_DAY_ROLLOVER),
+                    help="Hour of day the trip/day label rolls over, instead of "
+                         "midnight. A trip starting before this hour is labelled "
+                         f"the previous date. Default {DEFAULT_TRIP_DAY_ROLLOVER} (04:00).")
     ap.add_argument("--no-map-sidecars", action="store_true", default=default_no_map_sidecars,
                     help="Skip the per-group .html / .gpx / _links.txt map sidecars")
     ap.add_argument("--no-map-widget", action="store_true", default=default_no_map_widget,
@@ -2454,8 +2635,8 @@ def main() -> int:
                          "before GPS catches up; 8s of pad gives a few "
                          "visibly-parked seconds before the rollout for a "
                          "natural 'about to drive' intro. Separate from "
-                         "--parking-exit-pad which controls the daily-mode "
-                         "exit-from-parking slice.")
+                         "--parking-exit-pad which controls the exit-from-parking "
+                         "slice inside a trip.")
     ap.add_argument("--min-clips-per-group", type=int,
                     default=ci("min_clips_per_group", DEFAULT_MIN_CLIPS_PER_GROUP),
                     help="Auto-skip groups with fewer than this many clips "
@@ -2610,22 +2791,26 @@ def main() -> int:
         print(f"Speed:     off (--no-speed)")
     else:
         print(f"Speed:     off")
-    print(f"Grouping:  {'by day (--daily)' if args.daily else 'by drive (gap-based)'}")
+    print(f"Grouping:  by trip (return {args.trip_return_m:.0f}m / "
+          f"rollover {args.trip_day_rollover:02d}:00)")
     print(f"Output:    {out_dir}")
     print(f"Scanning:  {front_dir}")
 
     clips = find_clips(front_dir, rear_dir)
 
-    # Build groups depending on --daily
-    if args.daily:
-        by_date: dict[str, list[Clip]] = {}
-        for c in clips:
-            by_date.setdefault(c.timestamp[:8], []).append(c)
-        groups = [by_date[k] for k in sorted(by_date)]
-        group_kind, group_word = "day", "Day"
-    else:
-        groups = group_into_drives(clips, args.gap)
-        group_kind, group_word = "drive", "Drive"
+    # A "trip" is the publishing unit: leave an anchor, return to it — or run
+    # until a long engine-off gap / the 04:00 rollover. See group_into_trips.
+    # `moved` flags trips that had GPS but never actually went anywhere
+    # (parking-mode motion events clustered at a standstill) so we auto-skip them.
+    groups, trip_moved = group_into_trips(
+        clips, gps_dirs,
+        return_m=args.trip_return_m,
+        leave_m=args.trip_leave_m,
+        rollover_h=args.trip_day_rollover,
+    )
+    group_kind, group_word = "trip", "Trip"
+    # Day label (04:00 rollover) each trip belongs to — the UI groups on this.
+    day_labels = [trip_day_label(g[0].dt, args.trip_day_rollover) for g in groups]
 
     print(f"\nFound {len(clips)} clip pairs grouped into {len(groups)} {group_kind}s:")
     total_secs = 0
@@ -2634,7 +2819,8 @@ def main() -> int:
         end   = g[-1].dt + timedelta(seconds=g[-1].duration)
         secs  = (end - start).total_seconds()
         total_secs += secs
-        print(f"  {group_word} {i:2d}  {start:%Y-%m-%d %H:%M}  -> {end:%H:%M}   "
+        print(f"  {group_word} {i:2d}  day {day_labels[i-1]}  "
+              f"{start:%Y-%m-%d %H:%M} -> {end:%m-%d %H:%M}   "
               f"{len(g):3d} clips  ~{fmt_secs(secs)}")
     print(f"\nTotal: ~{fmt_secs(total_secs)} of footage")
 
@@ -2645,15 +2831,25 @@ def main() -> int:
     if explicit_set is not None:
         wanted = explicit_set
     else:
+        # Auto-skip fragments (too few clips) AND stationary trips (had GPS but
+        # never left the anchor — parking-mode junk). Both are force-encodable
+        # by naming the index via --drives.
         wanted = {i for i, g in enumerate(groups, 1)
-                  if len(g) >= args.min_clips_per_group}
+                  if len(g) >= args.min_clips_per_group and trip_moved[i - 1]}
         skipped_small = [(i, len(g)) for i, g in enumerate(groups, 1)
                          if len(g) < args.min_clips_per_group]
+        skipped_still = [i for i, g in enumerate(groups, 1)
+                         if len(g) >= args.min_clips_per_group and not trip_moved[i - 1]]
         if skipped_small:
             note = ", ".join(f"#{i} ({n} clip{'s' if n != 1 else ''})"
                              for i, n in skipped_small)
             print(f"\nAuto-skipping {len(skipped_small)} fragment {group_kind}(s): "
                   f"{note}\n(force-encode by naming the index via --drives.)")
+        if skipped_still:
+            note = ", ".join(f"#{i}" for i in skipped_still)
+            print(f"\nAuto-skipping {len(skipped_still)} stationary {group_kind}(s) "
+                  f"(GPS shows no real drive): {note}\n"
+                  f"(force-encode by naming the index via --drives.)")
 
     if args.dry_run:
         return 0
@@ -2671,16 +2867,17 @@ def main() -> int:
         # Final filename: bake the chosen output height into the name (when
         # downscaling) so re-rendering at a different height doesn't overwrite
         # the previous file and the format is obvious from the name on disk
-        # (e.g. day_2026-05-11_h540.mp4). Sidecars stay un-tagged because GPS
-        # data is the same regardless of video resolution — one .html/.gpx per
-        # drive/day, even if the user renders multiple sizes.
+        # (e.g. trip_2026-05-11_08-00_01_h540.mp4). Sidecars stay un-tagged
+        # because GPS data is the same regardless of video resolution — one
+        # .html/.gpx per trip, even if the user renders multiple sizes.
+        #
+        # The DAY LABEL (04:00 rollover) leads the name so the publishing UI can
+        # group a day's trips by globbing the prefix; the start time and global
+        # index disambiguate multiple trips on the same day.
         size_tag = f"_h{args.output_height}" if args.output_height else ""
-        if args.daily:
-            label = start.strftime("%Y-%m-%d")
-            sidecar_base = out_dir / f"day_{label}"
-        else:
-            label = start.strftime("%Y-%m-%d_%H-%M")
-            sidecar_base = out_dir / f"drive_{idx:02d}_{label}"
+        day_label = day_labels[idx - 1]
+        label = f"{day_label}_{start:%H-%M}_{idx:02d}"
+        sidecar_base = out_dir / f"trip_{label}"
         final = sidecar_base.with_name(sidecar_base.name + f"{size_tag}.mp4")
 
         print(f"\n[{group_word} {idx}/{len(groups)}] {start:%Y-%m-%d %H:%M} → {end:%H:%M}  "
@@ -2720,8 +2917,7 @@ def main() -> int:
         else:
             group_track = []
         if not args.no_map_sidecars and group_track:
-            title = (f"Drive {idx} — {start:%Y-%m-%d %H:%M}" if not args.daily
-                     else f"Day — {start:%Y-%m-%d}")
+            title = f"Trip {idx} — {day_label} — {start:%H:%M}"
             html_path  = sidecar_base.with_suffix(".html")
             gpx_path   = sidecar_base.with_suffix(".gpx")
             links_path = sidecar_base.with_name(sidecar_base.name + "_links.txt")
@@ -2733,6 +2929,35 @@ def main() -> int:
                   f"{stats['n']} points → {html_path.name}, {gpx_path.name}, {links_path.name}")
         elif not args.no_map_sidecars:
             print(f"  map: (no GPS data for this {group_kind})")
+
+        # Per-trip machine-readable metadata — this is the "day metadata" the
+        # publishing UI reads to group a day's trips together and to know each
+        # trip's shape (round-trip vs one-way relocation) without re-parsing GPS.
+        # Written independently of --no-map-sidecars: it's the UI contract, not
+        # a map artifact. `video` is the PLANNED output filename (this runs
+        # before the encode), so it names the file the UI should expect.
+        first_fix = (group_track[0][0], group_track[0][1]) if group_track else None
+        last_fix  = (group_track[-1][0], group_track[-1][1]) if group_track else None
+        round_trip = (
+            first_fix is not None and last_fix is not None
+            and _haversine_km(first_fix[0], first_fix[1],
+                              last_fix[0], last_fix[1]) * 1000.0 <= args.trip_return_m
+        )
+        meta = {
+            "trip_index": idx,
+            "day": day_label,               # 04:00-rollover day the UI groups on
+            "start": start.strftime("%Y-%m-%d %H:%M:%S"),
+            "end":   end.strftime("%Y-%m-%d %H:%M:%S"),
+            "duration_secs": int(secs),
+            "n_clips": len(group),
+            "video": final.name,
+            "round_trip": round_trip,       # False => one-way relocation
+            "start_fix": first_fix,
+            "end_fix": last_fix,
+            "distance_km": round(_track_stats(group_track)["distance_km"], 2) if group_track else 0.0,
+        }
+        meta_path = sidecar_base.with_name(sidecar_base.name + "_meta.json")
+        meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
         if args.sidecars_only:
             continue
@@ -2754,8 +2979,7 @@ def main() -> int:
         base_panel = None
         group_pixels: list[tuple[int, int]] = []
         if not args.no_map_widget and group_track:
-            panel_title = (f"Drive {idx} — {start:%Y-%m-%d}" if not args.daily
-                           else f"Day — {start:%Y-%m-%d}")
+            panel_title = f"Trip {idx} — {day_label}"
             rendered = render_base_right_panel(
                 group_track,
                 title=panel_title,
@@ -2769,13 +2993,13 @@ def main() -> int:
                 base_panel, group_pixels = rendered
         with_map_widget = base_panel is not None
 
-        # Identify long parking runs we should skip past.
-        # Only meaningful in --daily mode: a drive (gap-mode group) is already
-        # one engine-on session, so inserting "Fast forwarding…" inside it
-        # makes no sense and can leave the MP4 ending on the slide. In drive
-        # mode we skip the detection and let each drive play continuously.
+        # Identify long parking runs we should skip past. A trip spans multiple
+        # engine-on sessions (drive out, park, drive back), so interior parking
+        # is expected and gets a 'Fast forwarding…' slide — the same machinery
+        # the old --daily path used. (A trip whose entire body is one continuous
+        # drive simply yields no parking runs here.)
         parking_runs: list[tuple[int, int, int]] = []
-        if args.daily and not args.no_skip_parking and with_speed:
+        if not args.no_skip_parking and with_speed:
             parking_runs = find_parking_runs(group, gps_dirs, args.parking_min_secs)
 
         # Map clip-index → action.
@@ -2796,7 +3020,7 @@ def main() -> int:
         # waiting at a light right after starting).
         head_skip_count = 0
         head_trim_for_motion_clip = 0
-        if (not args.daily) and with_speed and len(group) >= 1:
+        if with_speed and len(group) >= 1:
             # Examine up to the first 3 clips — enough to find motion that
             # starts late in clip 0 + 30s sustain spilling into clip 2.
             resume = find_drive_resume_in_group(
@@ -2822,11 +3046,29 @@ def main() -> int:
         # main loop can compute trim_seconds = park_sec + entry_pad).
         park_sec_for_entry: dict[int, int] = {}
         for run_start, park_sec, run_end in parking_runs:
-            action_for[run_start] = "entry"
+            # In trip mode head-trim and parking detection both run. Head-trim
+            # already drops the pre-departure clips at the very start of a trip;
+            # don't let a parking run that overlaps that head reclassify them
+            # (which would resurrect footage head-trim meant to cut). Also
+            # protect the motion/departure clip itself (index head_skip_count)
+            # when head-trim acted, so a run that mis-classifies its parked head
+            # can't overwrite the head-trim with a parking "entry".
+            head_trim_acted = head_skip_count > 0 or head_trim_for_motion_clip > 0
+            if action_for.get(run_start) == "head_skip":
+                continue
+            if head_trim_acted and run_start == head_skip_count:
+                continue
+            next_idx = run_end + 1
+            trailing = next_idx >= len(group)
+            # A trailing run = the trip ends parked (typical for a one-way
+            # relocation: arrive, engine stays on). Keep the arrival slice, but
+            # emit NO 'Fast forwarding…' after it — there's nothing to skip to,
+            # and a dangling FF slide as the final frames looks broken.
+            action_for[run_start] = "entry_end" if trailing else "entry"
             park_sec_for_entry[run_start] = park_sec
             for k in range(run_start + 1, run_end + 1):
-                action_for[k] = "skip"
-            next_idx = run_end + 1
+                if action_for.get(k) != "head_skip":
+                    action_for[k] = "skip"
             if next_idx < len(group) and next_idx not in action_for:
                 action_for[next_idx] = "exit"
                 # Wall-clock seconds elapsed between the entry's last frame
@@ -2877,11 +3119,10 @@ def main() -> int:
             # Inter-clip gap detection: insert a 'Fast forwarding…' slide when
             # the wall-clock distance from the previous emitted clip exceeds
             # the threshold. Parking-run exits ALREADY have their own FF
-            # inserted by the entry side, so skip in that case. Only applies
-            # to --daily mode — drives are by definition gap-separated, so a
-            # within-drive FF would mean the drive grouping is wrong.
-            if (args.daily and prev_emitted_clip is not None
-                    and action != "exit"):
+            # inserted by the entry side, so skip in that case. A trip contains
+            # engine-off gaps of any length (all interior stops stay in the
+            # trip), so this fires whenever a within-trip gap is long enough.
+            if (prev_emitted_clip is not None and action != "exit"):
                 prev_end = prev_emitted_clip.dt + timedelta(seconds=prev_emitted_clip.duration)
                 gap_secs = (clip.dt - prev_end).total_seconds()
                 if gap_secs > args.inter_clip_gap_secs:
@@ -2915,12 +3156,12 @@ def main() -> int:
             # head so we land closer to the actual drive moment.
             trim_start = 0
             trim_seconds: int | None = None
-            if action == "entry":
-                # Entry slice now anchors on within-clip park onset (when GPS
-                # speed first sustains below threshold) + entry_pad. So the
-                # FF slide kicks in entry_pad seconds AFTER the car actually
-                # stopped, rather than entry_pad seconds into a clip that
-                # might just happen to be classified as parked.
+            if action in ("entry", "entry_end"):
+                # Entry slice anchors on within-clip park onset (when GPS speed
+                # first sustains below threshold) + entry_pad, so the slice ends
+                # entry_pad seconds AFTER the car actually stopped. "entry_end"
+                # is a trailing park that closes the trip: same arrival slice,
+                # but the render loop emits no FF transition after it.
                 park_sec = park_sec_for_entry.get(ci0, 0)
                 trim_seconds = park_sec + entry_pad
             elif action == "exit":
@@ -2933,10 +3174,11 @@ def main() -> int:
                 else:
                     trim_start = max(0, drive_sec - exit_pad)
                 trim_seconds = None     # run to end of clip
-            elif (not args.daily) and ci0 == head_skip_count and with_speed:
-                # Drive mode + the first NON-SKIPPED clip = the motion clip.
-                # head_trim_for_motion_clip was computed in the pre-pass
-                # above. Use it directly as the trim_start.
+            elif ci0 == head_skip_count and with_speed:
+                # The first NON-SKIPPED clip of the trip = the departure/motion
+                # clip. head_trim_for_motion_clip was computed in the pre-pass
+                # above. Use it directly as the trim_start so the trip opens
+                # just before the wheels start turning.
                 trim_start = head_trim_for_motion_clip
 
             # Per-slice intermediate filename. Suffix the action so re-runs

@@ -24,15 +24,39 @@
 
 
 # ============================================================================
-# GROUPING
+# TRIP GROUPING
 # ============================================================================
+#
+# The publishing unit is a "trip": everything from leaving an anchor until one
+# of two boundaries fires first —
+#   1. RETURN   the car comes back within trip_return_m of where the trip began
+#               (after first leaving by trip_leave_m). A -> B, hang out ANY
+#               length of time, B -> A = one trip, with the stop at B cut out.
+#               Duration is irrelevant: 10 minutes or 20 hours.
+#   2. ROLLOVER the wall clock crosses trip_day_rollover:00 between two clips.
+#               The day boundary is 04:00, not midnight, so an evening drive
+#               ending 03:32 stays whole. Independent of the import folder. This
+#               also bounds a one-way relocation (drive to a base, sleep, drive
+#               back days later = two trips) — a 04:00 boundary falls between.
+#
+# EVERY interior stop (fuel, lunch, a 4-hour hangout, a hike) stays inside the
+# trip regardless of length — it becomes a 'Fast forwarding...' slide. There is
+# deliberately no engine-off-duration split.
+#
+# Each trip is written as trip_<day>_<HH-MM>_<idx> with a _meta.json sidecar
+# carrying its day label, so a publishing UI can group a day's trips together.
 
-# false (default): each gap-separated drive becomes its own .mp4
-# true:            all clips on the same calendar date go into one .mp4
-#daily = false
+# Return-to-anchor distance in metres. Back within this of where the trip
+# started closes the trip. Default 100.
+#trip_return_m = 100
 
-# In drive-mode, clips farther than this many seconds apart start a new drive.
-#gap = 90
+# How far (metres) the car must travel from the anchor before a return can
+# close the trip — stops it closing on the driveway. Default 150.
+#trip_leave_m = 150
+
+# Hour of day the trip/day label rolls over instead of midnight. A trip
+# starting before this hour is labelled the previous date. Default 4 (04:00).
+#trip_day_rollover = 4
 
 
 # ============================================================================
