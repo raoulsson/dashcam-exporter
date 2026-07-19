@@ -539,34 +539,29 @@ def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
 # ---------------------------------------------------------------------------
 # Trip grouping — the publishing unit
 # ---------------------------------------------------------------------------
-# A "trip" is not a single engine-on session (that's a gap-based drive). It is
-# everything from leaving an anchor until one of these boundaries fires,
-# whichever comes FIRST:
+# A "trip" is not a single engine-on session (that's a gap-based drive). A trip
+# boundary is a PARK at the anchor — the car actually coming to rest where it
+# started — NOT a mere radius crossing. The anchor is where the car last parked
+# (carried forward; a configured `home` is an extra always-valid park target).
+# A trip is:
 #
-#   1. RETURN   — the car comes back within `return_m` of where the trip began,
-#                 AFTER first travelling at least `leave_m` away (so it doesn't
-#                 close on the driveway). This is the round-trip case: drive A →
-#                 B, hang out ANY length of time, drive B → A = ONE trip, with
-#                 the stop at B cut out. Duration is irrelevant — 10 minutes or
-#                 20 hours, as long as you get back before the next rollover.
-#   2. HOME     — if a `home` (lat, lon) is configured, parking within
-#                 `home_radius_m` of it is a HARD boundary independent of the
-#                 anchor: arriving home always ends a trip, and the next
-#                 departure from home is a new trip. This is the ground-truth
-#                 version of RETURN — it still fires when the carried anchor is
-#                 wrong, e.g. loop-recording overwrote the home departure so a
-#                 trip's footage starts already out on the highway.
-#   3. ROLLOVER — the wall clock crosses `rollover_h`:00 between two clips. The
-#                 day boundary is 04:00, not midnight, so an evening drive that
-#                 ends 03:32 stays whole while a genuinely new morning starts a
-#                 new trip. Independent of the import folder's name/date. This
-#                 also bounds a ONE-WAY relocation: drive to a holiday base,
-#                 sleep, drive back days later = two trips, because a 04:00
-#                 boundary falls between the arrival and the return.
+#     DEPART (start driving away from the anchor)
+#       → drive — any interior stop (fuel, lunch, a 4-hour hangout at B, a hike)
+#                 stays in the trip as a 'Fast forwarding…' slide, no matter how
+#                 long, because B is not the anchor. So A → B → hang out → A is
+#                 ONE trip with the stop at B cut out.
+#       → ARRIVE + PARK (return to the anchor/home and come to a stop)
 #
-# Every engine-off stop inside a trip (fuel, lunch, a 4-hour hangout, a hike) —
-# no matter how long — stays inside the trip and becomes a 'Fast forwarding…'
-# slide at render time, exactly as the old --daily path handled mid-day parking.
+#   * Departure and arrival are found by VIDEO ego-motion (drive-away = flow
+#     rises; park = flow falls to baseline and stays). That's why boundaries
+#     land on the real pull-away / pull-in, not 10-15s early (radius entry while
+#     still rolling) and not split by near-home maneuvering (which crosses the
+#     radius without parking). Between trips the car sits IDLE at the anchor —
+#     those clips belong to no trip.
+#   * ROLLOVER (crossing `rollover_h`:00, default 04:00 not midnight) still
+#     force-closes a trip, bounding a ONE-WAY relocation (drive to a holiday
+#     base, sleep, drive back days later = two trips).
+#   * Without OpenCV/numpy it degrades to the old radius-entry boundary.
 DEFAULT_TRIP_RETURN_M     = 100     # back within this of anchor => trip closes
 DEFAULT_TRIP_LEAVE_M      = 150     # must get this far out before a return counts
 DEFAULT_TRIP_DAY_ROLLOVER = 4       # trips/days roll over at 04:00, not midnight
@@ -606,131 +601,133 @@ def group_into_trips(
     home: "tuple[float, float] | None" = None,
     home_radius_m: float = DEFAULT_HOME_RADIUS_M,
     min_trip_m: float = DEFAULT_TRIP_MIN_M,
+    use_video: bool = True,
 ) -> "tuple[list[list[Clip]], list[bool]]":
-    """Segment chronologically-ordered clips into trips. A trip closes at
-    whichever fires first:
+    """Segment chronologically-ordered clips into trips.
 
-      * RETURN   — the car comes back within `return_m` of the trip's anchor.
-      * HOME     — if `home` (lat, lon) is given, the car parks within
-                   `home_radius_m` of it. This is a HARD boundary independent of
-                   the anchor: arriving home always ends a trip and the next
-                   departure from home is a new trip. Robust where the carried
-                   anchor is wrong (loop-recording ate the home departure, so a
-                   trip starts already out on the highway).
-      * ROLLOVER — the wall clock crosses `rollover_h`:00 between two clips.
+    A trip boundary is a PARK at the anchor, not a mere radius crossing. The
+    anchor is where the car was last parked (carried forward; `home` is an extra
+    always-valid park target). Between trips the car sits IDLE at the anchor —
+    those clips belong to no trip. A trip is:
 
-    Returns (trips, moved) where moved[i] is False for a trip whose NOISE-PRUNED
-    track never reaches `min_trip_m` from its anchor — near-home puttering or
-    parking-mode motion-event clips (a phantom GPS jump doesn't count), not a
-    real drive. The caller auto-skips those (a GPS-less trip is left moved=True
-    since we can't tell).
+        DEPART (car starts driving away from the anchor)
+          → drive (interior stops elsewhere stay in the trip as FF slides)
+          → ARRIVE+PARK (car returns to the anchor/home and comes to a stop)
 
-    The anchor is NOT this trip's own first fix (which may be stale buffered GPS
-    or, on a garage start, a point already minutes into the drive). It is where
-    the car was last parked = the last good fix of the PREVIOUS trip, carried
-    forward, so the return check matches the true origin and doesn't false-fire
-    on a mid-route point the homeward leg happens to re-traverse."""
+    Departure and arrival are found by VIDEO ego-motion (find_drive_away_by_video
+    / find_park_second_by_video), which is why the boundaries land on the real
+    pull-away and pull-in rather than 10-15s early (radius entry while still
+    rolling) or split by near-home maneuvering. GPS position only gates WHICH
+    clips get the (cheap-ish) video check — those near the anchor. ROLLOVER
+    (crossing `rollover_h`:00) still force-closes a trip, bounding one-way
+    relocations. Without OpenCV/numpy (or use_video=False) it degrades to the
+    old radius-entry behaviour.
+
+    Returns (trips, moved); moved[i] is False for a trip whose NOISE-PRUNED track
+    never reaches `min_trip_m` from its anchor (near-home puttering / parking-mode
+    events / a lone phantom GPS jump) — the caller auto-skips those."""
     def dist_m(a, b) -> float:
         return _haversine_km(a[0], a[1], b[0], b[1]) * 1000.0
 
-    trips: list[list[Clip]] = []
-    moved: list[bool] = []
-    cur: list[Clip] = []
-    anchor: "tuple[float, float] | None" = None
-    carry: "tuple[float, float] | None" = None   # last good fix = current park spot
-    left_anchor = False
-    left_home = False
+    n = len(clips)
+    if n == 0:
+        return [], []
+    eps = [_clip_endpoints(c, gps_dirs) for c in clips]
+    video = use_video and _HAVE_EGO
 
-    def begin(c, c_start, c_end):
-        nonlocal cur, anchor, left_anchor, left_home
-        cur = [c]
-        anchor = carry if carry is not None else c_start
-        left_anchor = False
-        left_home = False
-        observe(c_start, c_end)
+    def min_dist(idx, anchor):
+        if anchor is None:
+            return None
+        ds = [dist_m(anchor, f) for f in eps[idx] if f is not None]
+        return min(ds) if ds else None
 
-    def observe(c_start, c_end):
-        nonlocal left_anchor, left_home
-        for fix in (c_start, c_end):
-            if fix is None:
-                continue
-            if anchor is not None and not left_anchor and dist_m(anchor, fix) > leave_m:
-                left_anchor = True
-            if home is not None and not left_home and dist_m(home, fix) > leave_m:
-                left_home = True
+    def last_fix(idx):
+        s, e = eps[idx]
+        return e if e is not None else s
 
-    def closes_at(c_end) -> bool:
-        # This clip's end returns to the anchor, or (hard boundary) to home.
-        if c_end is None:
+    def rollover_before(idx):
+        if idx <= 0:
             return False
-        if left_anchor and anchor is not None and dist_m(anchor, c_end) <= return_m:
-            return True
-        if left_home and home is not None and dist_m(home, c_end) <= home_radius_m:
-            return True
+        pe = clips[idx - 1].dt + timedelta(seconds=clips[idx - 1].duration)
+        return _crosses_rollover(pe, clips[idx].dt, rollover_h)
+
+    def within_target(idx, anchor):
+        for t, r in ((anchor, return_m), (home, home_radius_m)):
+            if t is None:
+                continue
+            for f in eps[idx]:
+                if f is not None and dist_m(t, f) <= r:
+                    return True
         return False
 
-    def is_moved(clip_list, anc) -> bool:
-        # Is this a real trip (the car actually drove somewhere) vs a near-home
-        # puttering cluster / parking-mode motion events? Judge on the
-        # NOISE-PRUNED track, not raw clip endpoints: a single phantom GPS fix
-        # (a DDPAI stale-buffer jump km away, then back) would otherwise promote
-        # a 200 m near-home hop into a "trip". segment_track drops those short
-        # phantom segments; the trip is real only if the surviving clean track
-        # reaches at least `min_trip_m` from the anchor. (leave_m — the ~150 m
-        # driveway threshold for return detection — is deliberately too small a
-        # bar here; a real trip goes meaningfully further.)
-        pts = gather_track(clip_list, gps_dirs)
+    def parks_here(idx, anchor):
+        # Car parks at the anchor/home within this clip? Requires GPS within the
+        # radius AND (video) a sustained stop. No video -> radius entry counts.
+        if not within_target(idx, anchor):
+            return False
+        if not video:
+            return True
+        return find_park_second_by_video(clips[idx]) is not None
+
+    def departs_here(idx, anchor):
+        # Car starts driving away in this clip (ends the IDLE gap between trips)?
+        if video:
+            return find_drive_away_by_video(clips[idx]) is not None
+        d = min_dist(idx, anchor)
+        return d is None or d > leave_m
+
+    def is_moved(lo, hi, anc):
+        pts = gather_track(clips[lo:hi], gps_dirs)
         if not pts or anc is None:
-            return True                  # no usable GPS -> can't prove it didn't
+            return True
         pruned = [p for seg in segment_track(pts) for p in seg]
         if not pruned:
             return True
         return any(dist_m(anc, (p[0], p[1])) > min_trip_m for p in pruned)
 
-    def close():
-        moved.append(is_moved(cur, anchor))
-        trips.append(cur)
-
-    for c in clips:
-        c_start, c_end = _clip_endpoints(c, gps_dirs)
-        # carry = latest good fix seen so far; updated AFTER using it as anchor.
-        if not cur:
-            begin(c, c_start, c_end)
-        else:
-            prev = cur[-1]
-            prev_end_dt = prev.dt + timedelta(seconds=prev.duration)
-            # ROLLOVER is decided by the gap BEFORE this clip, so `c` opens a
-            # fresh trip. There is deliberately NO long-gap rule: a mid-trip stop
-            # of any length stays inside the trip (cut as an FF slide); only a
-            # return, a home arrival, or the rollover closes a trip.
-            if _crosses_rollover(prev_end_dt, c.dt, rollover_h):
-                close()
-                begin(c, c_start, c_end)
-            else:
-                cur.append(c)
-                if anchor is None:
-                    anchor = carry if carry is not None else c_start
-                observe(c_start, c_end)
-                # Once we've left, close on the clip whose end lands back near
-                # the anchor or home. `c` belongs to the closing trip.
-                if closes_at(c_end):
-                    # Update carry to the return point before closing so the next
-                    # trip anchors on where we actually parked.
-                    carry = c_end
-                    close()
-                    cur = []
-                    anchor = None
-                    left_anchor = False
-                    left_home = False
-        # Carry the last good fix forward (skip when a return already set it).
-        if cur:
-            if c_end is not None:
-                carry = c_end
-            elif c_start is not None:
-                carry = c_start
-
-    if cur:
-        close()
+    trips: list[list[Clip]] = []
+    moved: list[bool] = []
+    carry: "tuple[float, float] | None" = None   # where the car last parked
+    i = 0
+    while i < n:
+        anchor = carry
+        # --- IDLE: skip clips parked at the anchor until the next departure. ---
+        # The first trip (carry is None) starts at clip 0 — the import begins at
+        # a departure — and any leading parked footage is trimmed by the render
+        # head-trim. A rollover during idle doesn't matter: parked is parked.
+        if anchor is not None:
+            while i < n and not departs_here(i, anchor):
+                i += 1
+            if i >= n:
+                break
+        start = i
+        if anchor is None:
+            anchor = eps[start][0] if eps[start][0] is not None else last_fix(start)
+        # --- DRIVING: accumulate until arrival-park at the anchor, or rollover. -
+        left = False
+        end = None
+        j = start
+        while j < n:
+            if j > start and rollover_before(j):
+                break
+            d = min_dist(j, anchor)
+            if not left and d is not None and d > leave_m:
+                left = True
+            if left and parks_here(j, anchor):
+                lf = last_fix(j)
+                if lf is not None:
+                    carry = lf
+                end = j + 1
+                break
+            j += 1
+        if end is None:                  # rollover / end of clips (one-way trip)
+            end = j
+            lf = last_fix(end - 1) if end > start else None
+            if lf is not None:
+                carry = lf
+        moved.append(is_moved(start, end, anchor))
+        trips.append(clips[start:end])
+        i = end
     return trips, moved
 
 
@@ -1230,6 +1227,37 @@ def find_drive_away_in_group_video(clips: "list[Clip]") -> "tuple[int, float] | 
         if bounds[ci] <= onset < bounds[ci + 1]:
             return ci, (onset - bounds[ci]) / EGO_FPS
     return None
+
+
+def _ego_park_onset(med: "list[float]") -> "int | None":
+    """Frame index at which the car comes to a sustained STOP that lasts to the
+    end of the clip (the mirror of _ego_drive_onset): the clip must contain real
+    driving first, then motion drops to the parked baseline and stays there.
+    None if the clip never drove, or is still driving at its end (no arrival)."""
+    n = len(med)
+    sustain = max(1, int(round(EGO_SUSTAIN_SECS * EGO_FPS)))
+    if n < sustain + 1 or max(med) <= EGO_THR_SUSTAIN:
+        return None                       # never really drove -> not an arrival
+    # Last frame that was still moving; the stop begins right after it.
+    k = n - 1
+    while k >= 1 and med[k] < EGO_THR_BASELINE:
+        k -= 1
+    park = k + 1
+    if park >= n or (n - park) < sustain:
+        return None                       # still driving at the end (no park)
+    return park
+
+
+def find_park_second_by_video(clip: Clip) -> float | None:
+    """Video-second within `clip` at which the car parks (drives in, then comes
+    to a sustained stop through the end of the clip). None if it doesn't park
+    here (still moving) or video is unavailable. Used to close a trip at the
+    real arrival, not merely on entering the anchor radius."""
+    frames = _ego_extract_frames(clip)
+    if frames is None or len(frames) < 4:
+        return None
+    onset = _ego_park_onset(_ego_median_flow(frames))
+    return None if onset is None else max(0.0, onset / EGO_FPS)
 
 
 def clip_is_parked(clip: Clip, gps_dirs: tuple[Path | None, ...]) -> bool:
@@ -3076,6 +3104,7 @@ def main() -> int:
         home=home,
         home_radius_m=home_radius_m,
         min_trip_m=args.trip_min_m,
+        use_video=not args.no_video_drive_detect,
     )
     group_kind, group_word = "trip", "Trip"
     # Day label (04:00 rollover) each trip belongs to — the UI groups on this.
