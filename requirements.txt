@@ -1,2 +1,7 @@
 staticmap>=0.5.7
 Pillow>=10.0
+# Optional but recommended: video-based drive-away detection for parking exits.
+# Without these the exporter falls back to GPS-speed detection, which is less
+# reliable when parked amid passing people / cars. See find_drive_away_by_video.
+numpy>=1.24
+opencv-python-headless>=4.8

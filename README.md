@@ -129,8 +129,19 @@ By default the script:
    moving clip — so you land exactly when the wheels start turning, not in
    the middle of more parked footage.
 
-Disable with `--no-skip-parking`, or tune `parking_min_secs` /
-`parking_pad_secs` in `config.txt`.
+For step 4, GPS speed is unreliable: parking-mode clips are event snippets full
+of *other* things moving (passing people and cars), and the stale/jittery GPS
+can't tell that apart from real driving. So when `numpy` + `opencv-python-headless`
+are installed, the exit anchor is found by **video ego-motion** instead: track
+features frame-to-frame and take the median optical-flow magnitude — passing
+objects are a handful of outliers the median ignores, while the car actually
+rolling (even creeping out of a spot below the GPS speed floor) sweeps the whole
+frame. It falls back to GPS automatically when the libraries or a clear signal
+are missing. This is all internal — you just get a clean cut.
+
+If instead you want the parking *movements* kept in the trip, don't skip parking
+at all: `--no-skip-parking`. Tune with `parking_min_secs` / `parking_pad_secs`
+in `config.txt`.
 
 
 ## Install (macOS)

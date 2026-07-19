@@ -79,6 +79,20 @@ surfaced: the parking exit slice can land on still-parked footage when GPS
 velocity is too unreliable for `find_drive_resume_second` (falls back to
 `exit_skip_secs`).
 
+### Parking-exit drive-away = video ego-motion, not GPS
+
+`find_drive_away_by_video` anchors the parking exit slice. GPS speed is useless
+here (parking-mode clips are event snippets full of passing people/cars, and GPS
+is stale/jittery). Instead: sample the front clip at 4 fps (ffmpeg → gray
+640×400 rawvideo), LK optical flow, take the MEDIAN flow magnitude — passing
+objects are outliers the median rejects; the car actually rolling sweeps the
+whole frame (median jumps ~80×). Find the first sustained jump, walk back to the
+baseline departure = drive-away. Needs numpy + opencv (venv); silently falls
+back to GPS `find_drive_resume_second` otherwise. There is intentionally NO knob
+to pick GPS-vs-video (the user only wants a clean cut); the real alternative —
+keep the parking movements — is `--no-skip-parking`. Same technique could later
+replace the GPS head-trim at trip start. Constants: `EGO_*`.
+
 ### Env / venv
 
 Homebrew's `python3` is externally-managed (PEP 668), so Pillow/staticmap (map

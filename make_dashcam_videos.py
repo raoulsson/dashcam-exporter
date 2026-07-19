@@ -1098,6 +1098,83 @@ def find_drive_resume_second(
     return None
 
 
+# --- Video-based drive-away detection (parking exit) -------------------------
+# GPS speed is unreliable for finding the moment a parked car starts driving:
+# parking-mode clips are event snippets (the cam records when a person or car
+# passes), so the footage is full of OTHER things moving while the car sits
+# still, and the stale/jittery GPS can't tell that apart from real driving.
+# Instead, measure EGO-motion from the front video: track many features frame to
+# frame (Lucas-Kanade optical flow) and take the MEDIAN flow magnitude. When the
+# car is parked, most features are on the static scene (median ~0) and a passing
+# car/person is just a handful of outliers the median ignores. When the car
+# actually drives, the WHOLE scene sweeps (features flow outward even driving
+# straight, translate/rotate when maneuvering out of a spot), so the median
+# jumps by ~two orders of magnitude. We find the first sustained jump, then walk
+# back to where the motion first left the parked baseline = the drive-away.
+EGO_FPS            = 4        # frames/sec sampled from the clip for analysis
+EGO_W, EGO_H       = 640, 400  # downscaled analysis resolution (speed)
+EGO_SUSTAIN_SECS   = 1.5     # motion must persist this long to count as driving
+EGO_THR_SUSTAIN    = 1.0     # median flow (px at EGO_W×EGO_H) => "driving"
+EGO_THR_BASELINE   = 0.15    # walk-back stops below this (parked-noise floor)
+EGO_CONTEXT_PAD    = 2       # seconds of "about to move" kept before drive-away
+EGO_MAX_ANALYZE_SECS = 120   # cap analysis (a clip is ≤60s, but be safe)
+
+try:
+    import numpy as _np
+    import cv2 as _cv2
+    _HAVE_EGO = True
+except Exception:
+    _HAVE_EGO = False
+
+
+def find_drive_away_by_video(clip: Clip) -> float | None:
+    """Return the video-second within `clip` at which the car starts driving
+    (ego-motion onset), robust to people/cars passing a parked car; or None if
+    OpenCV/numpy aren't installed, the clip can't be read, or no sustained
+    ego-motion is found (caller then falls back to GPS / a fixed skip)."""
+    if not _HAVE_EGO:
+        return None
+    cmd = ["ffmpeg", "-v", "error", "-i", str(clip.front),
+           "-t", str(EGO_MAX_ANALYZE_SECS),
+           "-vf", f"fps={EGO_FPS},scale={EGO_W}:{EGO_H},format=gray",
+           "-f", "rawvideo", "-pix_fmt", "gray", "-"]
+    try:
+        raw = subprocess.run(cmd, capture_output=True).stdout
+    except Exception:
+        return None
+    fsz = EGO_W * EGO_H
+    n = len(raw) // fsz
+    if n < 4:
+        return None
+    frames = _np.frombuffer(raw[:n * fsz], dtype=_np.uint8).reshape(n, EGO_H, EGO_W)
+    lk = dict(winSize=(21, 21), maxLevel=3,
+              criteria=(_cv2.TERM_CRITERIA_EPS | _cv2.TERM_CRITERIA_COUNT, 20, 0.03))
+    med = _np.zeros(n)
+    prev = frames[0]
+    for i in range(1, n):
+        cur = frames[i]
+        p0 = _cv2.goodFeaturesToTrack(prev, maxCorners=300, qualityLevel=0.01, minDistance=8)
+        if p0 is not None:
+            p1, stt, _err = _cv2.calcOpticalFlowPyrLK(prev, cur, p0, None, **lk)
+            g = stt.ravel() == 1
+            if g.sum() >= 5:
+                d = (p1[g] - p0[g]).reshape(-1, 2)
+                med[i] = float(_np.median(_np.hypot(d[:, 0], d[:, 1])))
+        prev = cur
+    sustain = max(1, int(round(EGO_SUSTAIN_SECS * EGO_FPS)))
+    run_start = None
+    for i in range(1, n - sustain + 1):
+        if all(med[i + j] > EGO_THR_SUSTAIN for j in range(sustain)):
+            run_start = i
+            break
+    if run_start is None:
+        return None
+    onset = run_start
+    while onset > 1 and med[onset - 1] > EGO_THR_BASELINE:
+        onset -= 1
+    return max(0.0, onset / EGO_FPS)
+
+
 def clip_is_parked(clip: Clip, gps_dirs: tuple[Path | None, ...]) -> bool:
     """
     Decide whether a clip is stationary. Three signals all count as "parked":
@@ -3314,14 +3391,28 @@ def main() -> int:
                 park_sec = park_sec_for_entry.get(ci0, 0)
                 trim_seconds = park_sec + entry_pad
             elif action == "exit":
-                drive_sec = find_drive_resume_second(
-                    clip, gps_dirs,
-                    sustain_secs=args.drive_resume_sustain_secs,
-                )
-                if drive_sec is None:
-                    trim_start = min(args.exit_skip_secs, max(0, clip.duration - exit_pad))
+                # Prefer VIDEO ego-motion to anchor the drive-away — GPS speed is
+                # unreliable here (parking-mode snippets are full of passing
+                # people/cars). find_drive_away_by_video pinpoints the wheels
+                # turning; keep a small EGO_CONTEXT_PAD before it. Silently fall
+                # back to GPS drive-resume, then a fixed skip, when video isn't
+                # available (no numpy/opencv) or finds nothing. The user only
+                # cares that the cut is clean, not how it's found; the choice to
+                # KEEP the parking movements instead is --no-skip-parking.
+                vid_sec = find_drive_away_by_video(clip)
+                if vid_sec is not None:
+                    trim_start = max(0, int(vid_sec) - EGO_CONTEXT_PAD)
+                    print(f"        exit: video drive-away at {vid_sec:.1f}s "
+                          f"→ trim from {trim_start}s")
                 else:
-                    trim_start = max(0, drive_sec - exit_pad)
+                    drive_sec = find_drive_resume_second(
+                        clip, gps_dirs,
+                        sustain_secs=args.drive_resume_sustain_secs,
+                    )
+                    if drive_sec is None:
+                        trim_start = min(args.exit_skip_secs, max(0, clip.duration - exit_pad))
+                    else:
+                        trim_start = max(0, drive_sec - exit_pad)
                 trim_seconds = None     # run to end of clip
             elif ci0 == head_skip_count and with_speed:
                 # The first NON-SKIPPED clip of the trip = the departure/motion
