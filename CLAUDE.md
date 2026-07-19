@@ -65,6 +65,20 @@ home radius can be tight if you street-park near home. Always
 `./list-trips-data.sh` (dry-run) before encoding — indices shift if you change
 anything.
 
+### Debug fringe render
+
+`--fringe-secs N` (bare = 5) renders only the transition moments — trip start,
+each pause (N s before the FF slide + the slide + N s after drive-resume) and
+the stop — dropping the driving middles. A 34-clip / 25-min trip becomes a ~5
+-clip / ~23 s render, so parking / FF / drive-resume behaviour can be eyeballed
+fast. Writes a separate `*_fringeNs*.mp4` (never clobbers a real render). Two
+subtleties in the impl: dropped middles still update `prev_emitted_clip` so gap
+detection stays honest, and `gap_pre_pause` (precomputed over the emitted
+sequence) supplies the "before FF" tail for inter-clip gaps. Known open issue it
+surfaced: the parking exit slice can land on still-parked footage when GPS
+velocity is too unreliable for `find_drive_resume_second` (falls back to
+`exit_skip_secs`).
+
 ### Env / venv
 
 Homebrew's `python3` is externally-managed (PEP 668), so Pillow/staticmap (map

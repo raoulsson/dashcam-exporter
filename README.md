@@ -407,6 +407,7 @@ config.txt > built-in default**. Highlights:
 | `--trip-leave-m M`            | How far (m) the car must travel from the anchor before a return can close the trip (default 150). |
 | `--trip-day-rollover H`       | Hour of day the trip/day label rolls over instead of midnight (default 4 = 04:00). |
 | `--trip-min-m M`              | A group is only kept as a trip if its noise-pruned GPS track reaches at least M metres from the anchor; closer clusters (near-home puttering, parking-mode events, phantom fixes) are auto-skipped (default 500). |
+| `--fringe-secs N`            | DEBUG render: emit only the transitions — start, each pause (N s before the FF slide + the slide + N s after the car moves again) and stop — dropping the driving middles. A tiny fast render to check parking / FF behaviour. Writes a separate `*_fringeNs*.mp4`. Bare `--fringe-secs` = 5. Default 0 (off). |
 | `--min-clips-per-group N`     | Auto-skip trips smaller than N clips (default 4). Loop-recording fragments. |
 | `--inter-clip-gap-secs N`     | Insert a "Fast forwarding…" slide whenever consecutive clips are >N s apart (default 60). |
 | `--force`                     | Re-encode trips whose `.mp4` already exists (default: skipped). |

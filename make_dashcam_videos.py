@@ -2705,6 +2705,15 @@ def main() -> int:
                          "reaches at least this many metres from its anchor; "
                          "closer clusters are near-home puttering / parking-mode "
                          f"events and are auto-skipped. Default {DEFAULT_TRIP_MIN_M}.")
+    ap.add_argument("--fringe-secs", type=int, default=0, nargs="?", const=5,
+                    help="DEBUG render: instead of the whole trip, emit only the "
+                         "transitions — the start, each pause (this many seconds "
+                         "before the 'Fast forwarding' slide + the slide + this "
+                         "many seconds after the car moves again) and the stop, "
+                         "with the driving middles dropped. A tiny, fast render "
+                         "to check parking / FF behaviour. Writes a separate "
+                         "*_fringe*.mp4 so it never overwrites a real render. "
+                         "Bare --fringe-secs uses 5. Default 0 (off).")
     ap.add_argument("--no-map-sidecars", action="store_true", default=default_no_map_sidecars,
                     help="Skip the per-group .html / .gpx / _links.txt map sidecars")
     ap.add_argument("--no-map-widget", action="store_true", default=default_no_map_widget,
@@ -2988,13 +2997,19 @@ def main() -> int:
         # group a day's trips by globbing the prefix; the start time and global
         # index disambiguate multiple trips on the same day.
         size_tag = f"_h{args.output_height}" if args.output_height else ""
+        # Debug fringe renders get their own suffix so they never overwrite the
+        # real full-length render of the same trip.
+        fringe_tag = f"_fringe{args.fringe_secs}s" if args.fringe_secs > 0 else ""
         day_label = day_labels[idx - 1]
         label = f"{day_label}_{start:%H-%M}_{idx:02d}"
         sidecar_base = out_dir / f"trip_{label}"
-        final = sidecar_base.with_name(sidecar_base.name + f"{size_tag}.mp4")
+        final = sidecar_base.with_name(sidecar_base.name + f"{fringe_tag}{size_tag}.mp4")
 
         print(f"\n[{group_word} {idx}/{len(groups)}] {start:%Y-%m-%d %H:%M} → {end:%H:%M}  "
               f"({len(group)} clips, ~{fmt_secs(secs)})")
+        if args.fringe_secs > 0:
+            print(f"  FRINGE debug render: start + pauses (±{args.fringe_secs}s) "
+                  f"+ stop only, middles dropped → {final.name}")
         if size_tag:
             # Make the resize visible in the log so it's clear which format
             # this run produced (and which bitrate the encoder ended up using).
@@ -3212,6 +3227,27 @@ def main() -> int:
         entry_pad = args.parking_entry_pad
         exit_pad  = args.parking_exit_pad
 
+        # For fringe/debug mode: the first and last clips that actually get
+        # emitted (skips/head-skips excluded) = the trip's "start" and "stop".
+        _emit_idx = [k for k in range(len(group))
+                     if action_for.get(k) not in ("skip", "head_skip")]
+        first_emit_idx = _emit_idx[0] if _emit_idx else -1
+        last_emit_idx  = _emit_idx[-1] if _emit_idx else -1
+        # Clips whose END precedes a genuine inter-clip gap (a gap-FF pause):
+        # their tail is the "5s before FF". Computed over the emitted sequence
+        # with the same rule the render loop uses, so it doesn't mistake a
+        # dropped middle for a gap.
+        gap_pre_pause: set[int] = set()
+        if args.fringe_secs > 0:
+            _pk = None
+            for k in _emit_idx:
+                if _pk is not None and action_for.get(k) != "exit":
+                    g = (group[k].dt - (group[_pk].dt
+                         + timedelta(seconds=group[_pk].duration))).total_seconds()
+                    if g > args.inter_clip_gap_secs:
+                        gap_pre_pause.add(_pk)
+                _pk = k
+
         intermediates: list[Path] = []
         prev_emitted_clip: Clip | None = None
         # Last known good marker pixel — persisted across clips so parked /
@@ -3293,6 +3329,38 @@ def main() -> int:
                 # above. Use it directly as the trim_start so the trip opens
                 # just before the wheels start turning.
                 trim_start = head_trim_for_motion_clip
+
+            # Fringe/debug mode: keep only the transition moments with `N` secs
+            # of context each, and drop the driving middles. This runs AFTER the
+            # normal trims are computed (start/exit trim_starts, entry slice
+            # length) so it just narrows them to a short window.
+            if args.fringe_secs > 0:
+                N = args.fringe_secs
+                if action in ("entry", "entry_end"):
+                    # last N secs of the entry (pre-FF) slice = the car stopping
+                    full = park_sec_for_entry.get(ci0, 0) + entry_pad
+                    trim_start = max(0, full - N)
+                    trim_seconds = min(N, full)
+                elif action == "exit":
+                    # first N secs after drive-resume (trim_start already set)
+                    trim_seconds = N
+                elif ci0 in gap_pre_pause:
+                    # last N secs before an inter-clip gap-FF = the "before FF" side
+                    trim_start = max(0, clip.duration - N)
+                    trim_seconds = N
+                elif ci0 == first_emit_idx:
+                    # start: first N secs of the departure (trim_start = head-trim)
+                    trim_seconds = N
+                elif ci0 == last_emit_idx:
+                    # stop: last N secs of the final clip
+                    trim_start = max(0, clip.duration - N)
+                    trim_seconds = N
+                else:
+                    # a driving middle — drop it, but keep prev_emitted_clip
+                    # honest so the NEXT clip's gap detection sees the true
+                    # wall-clock gap (not an inflated one from dropped clips).
+                    prev_emitted_clip = clip
+                    continue
 
             # Per-slice intermediate filename. Suffix the action so re-runs
             # can find / cache them correctly. The requested output_height is
