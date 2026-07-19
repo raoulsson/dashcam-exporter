@@ -377,7 +377,7 @@ Then uncomment whatever lines you want to change. Precedence is **CLI flag >
 config.txt > built-in default**. Highlights:
 
 - `root`, `out` — input / output paths
-- `trip_return_m`, `trip_leave_m`, `trip_day_rollover`
+- `trip_return_m`, `trip_leave_m`, `trip_day_rollover`, `trip_min_m`
   — trip grouping (see [How trips are grouped](#how-trips-are-grouped))
 - `audio = false` — strip audio entirely (passenger conversation privacy)
 - `speed_unit = kmh | mph` — unit shown on overlay + stats + HTML + links.txt
@@ -406,6 +406,7 @@ config.txt > built-in default**. Highlights:
 | `--trip-return-m M`           | Back within M metres of the trip's anchor closes the trip (default 100). |
 | `--trip-leave-m M`            | How far (m) the car must travel from the anchor before a return can close the trip (default 150). |
 | `--trip-day-rollover H`       | Hour of day the trip/day label rolls over instead of midnight (default 4 = 04:00). |
+| `--trip-min-m M`              | A group is only kept as a trip if its noise-pruned GPS track reaches at least M metres from the anchor; closer clusters (near-home puttering, parking-mode events, phantom fixes) are auto-skipped (default 500). |
 | `--min-clips-per-group N`     | Auto-skip trips smaller than N clips (default 4). Loop-recording fragments. |
 | `--inter-clip-gap-secs N`     | Insert a "Fast forwarding…" slide whenever consecutive clips are >N s apart (default 60). |
 | `--force`                     | Re-encode trips whose `.mp4` already exists (default: skipped). |

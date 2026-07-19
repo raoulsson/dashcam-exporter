@@ -67,6 +67,12 @@
 # starting before this hour is labelled the previous date. Default 4 (04:00).
 #trip_day_rollover = 4
 
+# Minimum distance (metres) the noise-pruned GPS track must reach from the
+# anchor for a group to count as a real trip. Closer clusters are near-home
+# puttering or parking-mode motion events (and a single phantom GPS fix can't
+# fake it — it's dropped as noise first) and are auto-skipped. Default 500.
+#trip_min_m = 500
+
 
 # ============================================================================
 # OVERLAYS

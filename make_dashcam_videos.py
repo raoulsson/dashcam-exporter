@@ -172,6 +172,12 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # starting before this hour is labelled the previous date. Default 4 (04:00).
 #trip_day_rollover = 4
 
+# Minimum distance (metres) the noise-pruned GPS track must reach from the
+# anchor for a group to count as a real trip. Closer clusters are near-home
+# puttering or parking-mode motion events (and a single phantom GPS fix can't
+# fake it — it's dropped as noise first) and are auto-skipped. Default 500.
+#trip_min_m = 500
+
 
 # ============================================================================
 # OVERLAYS
@@ -559,6 +565,7 @@ DEFAULT_TRIP_RETURN_M     = 100     # back within this of anchor => trip closes
 DEFAULT_TRIP_LEAVE_M      = 150     # must get this far out before a return counts
 DEFAULT_TRIP_DAY_ROLLOVER = 4       # trips/days roll over at 04:00, not midnight
 DEFAULT_HOME_RADIUS_M     = 100     # parking within this of `home` => hard boundary
+DEFAULT_TRIP_MIN_M        = 500     # clean track must reach this far => real trip
 
 
 def trip_day_label(dt: datetime, rollover_h: int = DEFAULT_TRIP_DAY_ROLLOVER) -> str:
@@ -592,6 +599,7 @@ def group_into_trips(
     rollover_h: int = DEFAULT_TRIP_DAY_ROLLOVER,
     home: "tuple[float, float] | None" = None,
     home_radius_m: float = DEFAULT_HOME_RADIUS_M,
+    min_trip_m: float = DEFAULT_TRIP_MIN_M,
 ) -> "tuple[list[list[Clip]], list[bool]]":
     """Segment chronologically-ordered clips into trips. A trip closes at
     whichever fires first:
@@ -605,10 +613,11 @@ def group_into_trips(
                    trip starts already out on the highway).
       * ROLLOVER — the wall clock crosses `rollover_h`:00 between two clips.
 
-    Returns (trips, moved) where moved[i] is False for a trip that HAD GPS yet
-    never travelled more than `leave_m` from its anchor — a stationary cluster
-    of parking-mode motion-event clips, not a real drive. The caller auto-skips
-    those (a GPS-less trip is left moved=True since we can't tell).
+    Returns (trips, moved) where moved[i] is False for a trip whose NOISE-PRUNED
+    track never reaches `min_trip_m` from its anchor — near-home puttering or
+    parking-mode motion-event clips (a phantom GPS jump doesn't count), not a
+    real drive. The caller auto-skips those (a GPS-less trip is left moved=True
+    since we can't tell).
 
     The anchor is NOT this trip's own first fix (which may be stale buffered GPS
     or, on a garage start, a point already minutes into the drive). It is where
@@ -625,30 +634,22 @@ def group_into_trips(
     carry: "tuple[float, float] | None" = None   # last good fix = current park spot
     left_anchor = False
     left_home = False
-    had_gps = False
-    max_dist = 0.0
 
     def begin(c, c_start, c_end):
-        nonlocal cur, anchor, left_anchor, left_home, had_gps, max_dist
+        nonlocal cur, anchor, left_anchor, left_home
         cur = [c]
         anchor = carry if carry is not None else c_start
         left_anchor = False
         left_home = False
-        had_gps = c_start is not None or c_end is not None
-        max_dist = 0.0
         observe(c_start, c_end)
 
     def observe(c_start, c_end):
-        nonlocal left_anchor, left_home, max_dist
+        nonlocal left_anchor, left_home
         for fix in (c_start, c_end):
             if fix is None:
                 continue
-            if anchor is not None:
-                d = dist_m(anchor, fix)
-                if d > max_dist:
-                    max_dist = d
-                if not left_anchor and d > leave_m:
-                    left_anchor = True
+            if anchor is not None and not left_anchor and dist_m(anchor, fix) > leave_m:
+                left_anchor = True
             if home is not None and not left_home and dist_m(home, fix) > leave_m:
                 left_home = True
 
@@ -662,9 +663,26 @@ def group_into_trips(
             return True
         return False
 
+    def is_moved(clip_list, anc) -> bool:
+        # Is this a real trip (the car actually drove somewhere) vs a near-home
+        # puttering cluster / parking-mode motion events? Judge on the
+        # NOISE-PRUNED track, not raw clip endpoints: a single phantom GPS fix
+        # (a DDPAI stale-buffer jump km away, then back) would otherwise promote
+        # a 200 m near-home hop into a "trip". segment_track drops those short
+        # phantom segments; the trip is real only if the surviving clean track
+        # reaches at least `min_trip_m` from the anchor. (leave_m — the ~150 m
+        # driveway threshold for return detection — is deliberately too small a
+        # bar here; a real trip goes meaningfully further.)
+        pts = gather_track(clip_list, gps_dirs)
+        if not pts or anc is None:
+            return True                  # no usable GPS -> can't prove it didn't
+        pruned = [p for seg in segment_track(pts) for p in seg]
+        if not pruned:
+            return True
+        return any(dist_m(anc, (p[0], p[1])) > min_trip_m for p in pruned)
+
     def close():
-        # moved=False only when we HAD GPS and it proves the car never left.
-        moved.append((not had_gps) or (max_dist > leave_m))
+        moved.append(is_moved(cur, anchor))
         trips.append(cur)
 
     for c in clips:
@@ -684,8 +702,6 @@ def group_into_trips(
                 begin(c, c_start, c_end)
             else:
                 cur.append(c)
-                if c_start is not None or c_end is not None:
-                    had_gps = True
                 if anchor is None:
                     anchor = carry if carry is not None else c_start
                 observe(c_start, c_end)
@@ -700,8 +716,6 @@ def group_into_trips(
                     anchor = None
                     left_anchor = False
                     left_home = False
-                    had_gps = False
-                    max_dist = 0.0
         # Carry the last good fix forward (skip when a return already set it).
         if cur:
             if c_end is not None:
@@ -2685,6 +2699,12 @@ def main() -> int:
                     help="Hour of day the trip/day label rolls over, instead of "
                          "midnight. A trip starting before this hour is labelled "
                          f"the previous date. Default {DEFAULT_TRIP_DAY_ROLLOVER} (04:00).")
+    ap.add_argument("--trip-min-m", type=float,
+                    default=cflt("trip_min_m", DEFAULT_TRIP_MIN_M),
+                    help="A trip is only kept if its noise-pruned GPS track "
+                         "reaches at least this many metres from its anchor; "
+                         "closer clusters are near-home puttering / parking-mode "
+                         f"events and are auto-skipped. Default {DEFAULT_TRIP_MIN_M}.")
     ap.add_argument("--no-map-sidecars", action="store_true", default=default_no_map_sidecars,
                     help="Skip the per-group .html / .gpx / _links.txt map sidecars")
     ap.add_argument("--no-map-widget", action="store_true", default=default_no_map_widget,
@@ -2899,6 +2919,7 @@ def main() -> int:
         rollover_h=args.trip_day_rollover,
         home=home,
         home_radius_m=home_radius_m,
+        min_trip_m=args.trip_min_m,
     )
     group_kind, group_word = "trip", "Trip"
     # Day label (04:00 rollover) each trip belongs to — the UI groups on this.

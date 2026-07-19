@@ -46,16 +46,20 @@ machinery the old `--daily` path had (parking-run detection + inter-clip gap
 slides), PLUS the old drive-mode head-trim at the trip's start. Both run now;
 they used to be mutually exclusive via `--daily`. A trip that ends parked uses
 `entry_end` (arrival slice, no trailing FF). `group_into_trips` also returns a
-`moved` flag; trips that had GPS but never left the anchor (parking-mode event
-clips) are auto-skipped as stationary.
+`moved` flag; a group whose NOISE-PRUNED track never reaches `trip_min_m` from
+the anchor (near-home puttering, parking-mode events, or a lone phantom GPS
+jump that got pruned) is auto-skipped as stationary.
 
 "Day" is now only a **label** (the 04:00-rollover date) each trip carries, for a
 future publishing UI to group a day's trips side by side. Not a render mode.
 
 ### Tuning note
 
-Knobs: `trip_return_m`, `trip_leave_m`, `trip_day_rollover` (config/CLI) and
-`SET_HOME_RADIUS_M` (.env). A day where you drive out and never return home
+Knobs: `trip_return_m`, `trip_leave_m`, `trip_day_rollover`, `trip_min_m`
+(config/CLI) and `SET_HOME_RADIUS_M` (.env). `trip_min_m` (default 500) is the
+min pruned-track distance from anchor for a group to count as a real trip —
+raise it to drop more near-home puttering, lower it to keep short trips. A day
+where you drive out and never return home
 before 04:00 (one-way, or messy/incomplete data) stays one trip by design. 100 m
 home radius can be tight if you street-park near home. Always
 `./list-trips-data.sh` (dry-run) before encoding — indices shift if you change
