@@ -99,13 +99,21 @@ the map-widget panel (prints a warning). `.venv/` and `.env` are gitignored.
 ## Data layout (outside the repo)
 
 - Inputs:  `~/rsc-data/Import_Dashcam/<label>/DCIM/{200video/{front,rear},203gps,...}`
-  — one folder per import (folder name is arbitrary; grouping is timestamp-driven,
-  and a single folder can contain several days of clips).
-- Outputs: `~/rsc-data/Dashcam_Videos_working/` — the `--out` target.
+  — one folder per import (folder name is arbitrary, usually the import date;
+  grouping is timestamp-driven and one folder can span several days of clips).
+- Outputs: `~/rsc-data/Output_Dashcam/` — the `--out` target. The exporter writes
+  one subfolder per EXTRACT day (04:00-rollover), e.g. `Output_Dashcam/2026-07-15/`,
+  each with its trips + an `info.txt` naming the source import folder (extract day
+  ≠ import folder name when a card spans days). `.gpx_cache/.intermediates` stay
+  at the `--out` root. (`Dashcam_Videos_working/` was the old scratch out-dir.)
 
-Pass `--root <import-folder>` and `--out <working-dir>`. Do NOT bake these
+Pass `--root <import-folder>` and `--out <output-dir>`. Do NOT bake these
 absolute personal paths into the tracked `config.txt` (shared template) — set
 them per-run, in the wrapper-script OPTS, or a local uncommitted config.
+
+Importing a card: `./import-sd-card.sh [YYYY-MM-DD] [--keep] [--checksum]` copies
+`/Volumes/NO NAME/DCIM` into `Import_Dashcam/<day>/`, verifies, then deletes the
+card's FILES only (keeps the DCIM folder tree). Nothing is deleted until verified.
 
 ## Running
 
@@ -119,10 +127,10 @@ them per-run, in the wrapper-script OPTS, or a local uncommitted config.
 
 ## Output files per trip
 
-`trip_<day>_<HH-MM>_<NN>[_hHHH].mp4` (day label leads so a UI can glob a day;
-NN = global 1-based index; size tag omitted at native 1080), plus un-tagged
-`.html`, `.gpx`, `_links.txt`, and `_meta.json` (day, start/end, round_trip
-bool, fixes, distance) — the machine-readable day metadata.
+Under `out_dir/<extract-day>/`: `trip_<day>_<HH-MM>_<NN>[_hHHH].mp4` (NN = global
+1-based index; size tag omitted at native 1080), plus un-tagged `.html`, `.gpx`,
+`_links.txt`, and `_meta.json` (day, start/end, round_trip bool, fixes,
+distance). Each day folder also holds `info.txt` (source import folder).
 
 ## Gotchas
 

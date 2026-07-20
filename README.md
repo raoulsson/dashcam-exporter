@@ -274,6 +274,7 @@ settings you regularly want** that you DON'T already have in `config.txt`
 
 | Script | What it does |
 |--------|--------------|
+| `./import-sd-card.sh [YYYY-MM-DD]`       | Copy the card's `DCIM` into a dated import folder, verify, then delete the card's files (keeping the folder tree). `--keep` copies without deleting; `--checksum` verifies byte-for-byte. |
 | `./list-trips-data.sh`                  | Dry-run. Lists every trip with its 1-based index, 04:00-day label, start → end, clip count and duration. |
 | `./make-trips-rendered.sh [N N …]`      | Encode. Pass the trip indices you want; with no args, encodes every trip. |
 
@@ -563,21 +564,25 @@ roads.
 
 ## Output layout
 
-After a typical run (files lead with the 04:00-day label so a UI can glob a
-day's trips):
+The exporter writes **one subfolder per extract day** (the 04:00-rollover day a
+trip belongs to — which need not match the import folder's name, since one card
+can span several days). Each day folder holds its trips plus an `info.txt`
+naming the source import folder:
 
 ```
-~/Desktop/Dashcam_Videos/
-├── trip_2026-05-11_12-11_08_h720.mp4
-├── trip_2026-05-11_12-11_08.html
-├── trip_2026-05-11_12-11_08.gpx
-├── trip_2026-05-11_12-11_08_links.txt
-├── trip_2026-05-11_12-11_08_meta.json
-├── trip_2026-05-11_19-40_09_h720.mp4      # a second trip on the same day
-├── trip_2026-05-11_19-40_09.html
-├── …
-├── .gpx_cache/              # harvested tar contents, reused across runs
-└── .intermediates/          # scratch — wiped at the start of every run
+<--out>/                              # e.g. ~/rsc-data/Output_Dashcam/
+├── 2026-05-11/
+│   ├── info.txt                      # "source import folder: …/Import_Dashcam/2026-05-11"
+│   ├── trip_2026-05-11_12-11_08_h720.mp4
+│   ├── trip_2026-05-11_12-11_08.html
+│   ├── trip_2026-05-11_12-11_08.gpx
+│   ├── trip_2026-05-11_12-11_08_links.txt
+│   ├── trip_2026-05-11_12-11_08_meta.json
+│   └── trip_2026-05-11_19-40_09_…    # a second trip on the same day
+├── 2026-07-15/
+│   └── …                             # trips extracted from an import that spanned days
+├── .gpx_cache/                       # harvested tar contents, reused across runs
+└── .intermediates/                   # scratch — wiped at the start of every run
 ```
 
 
