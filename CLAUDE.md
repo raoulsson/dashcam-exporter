@@ -119,7 +119,14 @@ card's FILES only (keeps the DCIM folder tree). Nothing is deleted until verifie
 
 - `./list-trips-data.sh` — dry-run; list trips with index, day label, span, clips.
 - `./make-trips-rendered.sh [N …]` — encode; leading ints select trip indices
-  (via `--drives`, alias `--trips`), rest passes through. Logs to `./logs/`.
+  (via `--drives`, alias `--trips`), rest passes through. Starts FRESH every
+  run: resets the day folders inside `--out` first (keeps the dir itself + the
+  root `.gpx_cache`/`.geocode_cache.json`; a day folder with any hidden file is
+  kept, only its visible output cleared), so no stragglers survive a stopped
+  render. Read-only modes (`--dry-run`, `--sidecars-only`) skip the reset. Logs
+  to `render-<ts>.log` inside `--out`. Because of the reset the wrapper does not
+  resume a partial render — call the python directly (skip-existing + `--force`)
+  to resume.
 - Direct: `python3 make_dashcam_videos.py --root … --out … [--dry-run|--sidecars-only|--force]`.
 - `--write-config PATH` dumps the fully-commented config template. The template
   is the `CONFIG_TEMPLATE` string near the top of the script — keep it in sync

@@ -19,6 +19,14 @@
 # --sidecars-only, --output-height, --trip-return-m …) is passed straight
 # through to make_dashcam_videos.py.
 #
+# FRESH OUTPUT EVERY RUN: before rendering, the day folders inside --out are
+# reset so what's left afterwards is exactly this run's output — no stragglers
+# from a previously interrupted render. The output dir itself and its root-level
+# caches (.gpx_cache, .geocode_cache.json) are kept; a day folder that holds any
+# hidden file is kept too, with only its visible output cleared. The run log is
+# written INTO the output dir (render-<timestamp>.log). Read-only modes
+# (--dry-run, --sidecars-only) skip the reset and never delete anything.
+#
 # Get the indices with `./list-trips-data.sh` first.
 #
 # Edit the OPTS line below to pre-set any flags you regularly use that you
@@ -52,14 +60,61 @@ if [ "${#INDICES[@]}" -gt 0 ]; then
     OPTS+=(--drives "${INDICES[@]}")
 fi
 
-# Tee stdout+stderr into a timestamped log file so every run leaves a
-# paper trail. After the run, copy that log next to each successfully
-# encoded .mp4 (as trip_….log alongside trip_….mp4) so the log lives with
-# the data it describes.
-LOG_DIR="${LOG_DIR:-./logs}"
+# Resolve the output dir from the effective args so we can clean it and log
+# INTO it. --out wins; fall back to the same env default the import script
+# uses. Handles both "--out DIR" and "--out=DIR".
+OUT="${DASHCAM_OUT_ROOT:-$HOME/rsc-data/Output_Dashcam}"
+_prev=""
+for a in ${OPTS[@]+"${OPTS[@]}"} "$@"; do
+    case "$a" in
+        --out=*)  OUT="${a#--out=}" ;;
+        *) [ "$_prev" = "--out" ] && OUT="$a" ;;
+    esac
+    _prev="$a"
+done
+OUT="${OUT/#\~/$HOME}"   # expand a leading ~ (bash won't, inside a var)
+
+# Before a render, reset the DAY FOLDERS inside the output dir. The output dir
+# itself (Output_Dashcam) is KEPT, and its root-level hidden caches
+# (.gpx_cache, .geocode_cache.json) are never even looked at — the glob below
+# is non-dot, so it only ever sees visible day folders like 2026-05-11.
+# For each such day folder:
+#   - no hidden files inside  -> remove the whole folder
+#   - hidden files inside     -> KEEP the folder, delete only its visible
+#                                output (mp4 / html / gpx / txt / log / …)
+# Skipped for read-only modes — a dry-run or sidecars-only pass must delete
+# nothing (a dry-run wiping intermediates once crashed a live render).
+CLEAN=1
+for a in "$@"; do
+    case "$a" in
+        --dry-run|--sidecars-only|--write-config|--write-config=*) CLEAN=0 ;;
+    esac
+done
+if [ "$CLEAN" -eq 1 ] && [ -d "$OUT" ]; then
+    echo ">>> Output dir: $OUT  — resetting day folders (kept: the dir itself + root caches)"
+    shopt -s nullglob
+    for d in "$OUT"/*/; do
+        if find "$d" -mindepth 1 -maxdepth 1 -name '.*' | grep -q .; then
+            find "$d" -mindepth 1 -maxdepth 1 ! -name '.*' -exec rm -rf {} +
+            echo "    cleaned, kept hidden content: ${d#"$OUT"/}"
+        else
+            rm -rf "$d"
+            echo "    removed: ${d#"$OUT"/}"
+        fi
+    done
+    shopt -u nullglob
+elif [ "$CLEAN" -eq 0 ]; then
+    echo ">>> Output dir: $OUT  — read-only mode, NOT cleaning"
+fi
+mkdir -p "$OUT"
+
+# Tee stdout+stderr into a timestamped log file that lives IN the output dir,
+# so the paper trail ships with the render. After the run, copy that log next
+# to each successfully encoded .mp4 too (as trip_….log) so it's beside its data.
+LOG_DIR="${LOG_DIR:-$OUT}"
 mkdir -p "$LOG_DIR"
-LOG_FILE="$LOG_DIR/trips-$(date +%Y%m%d-%H%M%S).log"
-echo "logging to $LOG_FILE"
+LOG_FILE="$LOG_DIR/render-$(date +%Y%m%d-%H%M%S).log"
+echo ">>> logging to $LOG_FILE"
 
 # -u forces unbuffered stdout so per-clip progress shows in the tee output
 # instead of being held in Python's buffer until the run completes.

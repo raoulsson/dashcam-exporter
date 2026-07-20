@@ -319,16 +319,24 @@ want to iterate on `parking_entry_pad` / `parking_exit_pad`.
 
 ## Restartability and logs
 
-- If a trip's final `.mp4` already exists in `--out`, that trip is **skipped**.
-  Delete the `.mp4` or pass `--force` to re-render. So a run interrupted
-  halfway can simply be started again.
+- **`make-trips-rendered.sh` starts fresh every run.** Before rendering it
+  resets the day folders inside `--out`, so what's left afterwards is exactly
+  this run's output — nothing lingers from a render you stopped partway. The
+  output dir itself and its root-level caches (`.gpx_cache`,
+  `.geocode_cache.json`) are kept; a day folder that contains any hidden file
+  is kept too, with only its visible output cleared. Read-only modes
+  (`--dry-run`, `--sidecars-only`) skip the reset and delete nothing. Because
+  of the reset, a wrapper re-run does **not** resume a partial render — it
+  redoes the selected trips. To resume instead (keep completed trips, add the
+  rest), call `make_dashcam_videos.py` directly: an existing `.mp4` is skipped
+  unless you pass `--force`.
 - Sidecars are emitted unconditionally, even when the `.mp4` exists, so a
   palette / unit / segmentation tweak lands via a quick `--sidecars-only` run.
-- `make-trips-rendered.sh` tees stdout+stderr into
-  `./logs/trips-YYYYMMDD-HHMMSS.log` (full history kept). At the end of the
-  run a copy of that log lands next to every `.mp4` the run produced — e.g.
-  `trip_2026-05-11_12-11_08_h1080.log` — so the log lives with the data it
-  describes. Override the location with the `LOG_DIR` environment variable.
+- `make-trips-rendered.sh` tees stdout+stderr into a `render-YYYYMMDD-HHMMSS.log`
+  **inside the output dir**, so the paper trail ships with the render. At the
+  end of the run a copy of that log also lands next to every `.mp4` the run
+  produced — e.g. `trip_2026-05-11_12-11_08_h1080.log` — so it's beside its
+  data. Override the location with the `LOG_DIR` environment variable.
 
 
 ## Loop-recording fragments
