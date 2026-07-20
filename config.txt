@@ -269,8 +269,8 @@
 #inter_clip_gap_secs = 60
 
 # How long the 'Fast forwarding...' slide stays on screen, in seconds.
-# It also reports how much wall-clock time was elided. Default 5.
-#transition_secs = 5
+# It also reports how much wall-clock time was elided. Default 3.
+#transition_secs = 3
 
 # Auto-skip groups that have fewer than this many clips. These are typically
 # loop-recording fragments left over after the SD card rolled around — a

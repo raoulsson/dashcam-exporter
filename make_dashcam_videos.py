@@ -376,8 +376,8 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 #inter_clip_gap_secs = 60
 
 # How long the 'Fast forwarding...' slide stays on screen, in seconds.
-# It also reports how much wall-clock time was elided. Default 5.
-#transition_secs = 5
+# It also reports how much wall-clock time was elided. Default 3.
+#transition_secs = 3
 
 # Auto-skip groups that have fewer than this many clips. These are typically
 # loop-recording fragments left over after the SD card rolled around — a
@@ -453,7 +453,7 @@ DEFAULT_MIN_CLIPS_PER_GROUP = 4
 # from filling up silently when they encode many days over weeks of usage.
 # Set to 0 to disable the TTL eviction.
 DEFAULT_CACHE_MAX_AGE_DAYS  = 20
-TRANSITION_SECS             = 5      # length of the "Fast forwarding..." slide
+TRANSITION_SECS             = 3      # length of the "Fast forwarding..." slide
 TRANSITION_TEXT             = "Fast forwarding..."
 TRANSITION_FONT_SIZE        = 72
 
@@ -1771,11 +1771,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <style>
   html,body{{margin:0;padding:0;height:100%;font-family:-apple-system,sans-serif}}
   #wrap{{display:flex;flex-direction:column;height:100%}}
-  #title{{padding:10px 16px;background:#222;color:#eee;font-size:14px}}
-  #title b{{font-size:16px}}
+  #title{{padding:10px 16px;background:#222;color:#eee;font-size:15px}}
+  #title b{{font-size:17px}}
   #title span{{margin-right:18px;color:#bbb}}
   #map{{flex:1}}
-  .legend{{background:#fff;padding:8px;border-radius:4px;box-shadow:0 0 5px rgba(0,0,0,.3);font-size:12px}}
+  .legend{{background:#fff;padding:8px;border-radius:4px;box-shadow:0 0 5px rgba(0,0,0,.3);font-size:13px}}
   .legend .row{{display:flex;align-items:center;margin:2px 0}}
   .legend .swatch{{width:18px;height:6px;margin-right:6px}}
 </style>
@@ -3433,7 +3433,10 @@ def main() -> int:
         # The DAY LABEL (04:00 rollover) leads the name so the publishing UI can
         # group a day's trips by globbing the prefix; the start time and global
         # index disambiguate multiple trips on the same day.
-        size_tag = f"_h{args.output_height}" if args.output_height else ""
+        # ALWAYS record the resolution in the filename, including a native
+        # render (output_height=0), where the composite is OUT_H tall — the
+        # name should say what you are looking at without probing the file.
+        size_tag = f"_h{args.output_height or OUT_H}"
         # Debug-cuts previews get their own suffix so they never overwrite the
         # real full-length render of the same trip.
         fringe_tag = f"_debugcuts{args.debug_cuts}s" if args.debug_cuts > 0 else ""
@@ -3928,7 +3931,7 @@ def main() -> int:
             # MP4s at the previous size (which is why "tweaking
             # output_height in config does nothing" felt broken before).
             suffix = f"_{action}" if action else ""
-            size_tag = f"_h{args.output_height}" if args.output_height else ""
+            size_tag = f"_h{args.output_height or OUT_H}"
             inter = work_dir / (
                 f"{group_kind}{idx:02d}_clip{ci:03d}"
                 f"_{clip.timestamp}{suffix}{size_tag}.mp4"
