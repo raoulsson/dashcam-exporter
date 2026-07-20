@@ -237,7 +237,7 @@ import folder:
 <--out>/                              # e.g. ~/rsc-data/Output_Dashcam/
 ├── 2026-05-11/
 │   ├── info.txt                      # "source import folder: …/Import_Dashcam/2026-05-11"
-│   ├── trip_2026-05-11_12-11_08_h720.mp4
+│   ├── trip_2026-05-11_12-11_08_h1080.mp4
 │   ├── trip_2026-05-11_12-11_08.html
 │   ├── trip_2026-05-11_12-11_08.gpx
 │   ├── trip_2026-05-11_12-11_08_links.txt
@@ -256,7 +256,7 @@ a publishing UI can glob a whole day's trips by prefix.
 
 | File | What it is |
 |------|------------|
-| `trip_YYYY-MM-DD_HH-MM_NN_h720.mp4` | Final video. Name is `trip_<day>_<start-time>_<global-index>_<size-tag>`, e.g. `trip_2026-05-11_12-11_08_h720.mp4`. Composed at 2402×1080 with map widget (or 1920×1080 without) and downscaled to the chosen height. The `_h720` tag reflects `output_height` (720 default; 540 for phone-sized, 0 for native 1080 → no tag). VT bitrate auto-scales to match, so smaller heights mean proportionally smaller files. Rendering at multiple heights produces side-by-side files instead of overwriting. |
+| `trip_YYYY-MM-DD_HH-MM_NN_h1080.mp4` | Final video. Name is `trip_<day>_<start-time>_<global-index>_<size-tag>`, e.g. `trip_2026-05-11_12-11_08_h1080.mp4`. Composed at 2402×1080 with map widget (or 1920×1080 without) and downscaled to the chosen height. The size tag is always present and reflects `output_height` (1080 default = native; 720 for half the size, 540 for phone-sized). VT bitrate auto-scales to match, so smaller heights mean proportionally smaller files. Rendering at multiple heights produces side-by-side files instead of overwriting. |
 | `trip_….html` | Self-contained Leaflet/OSM interactive map. Un-tagged — one per trip regardless of video size. |
 | `trip_….gpx` | Standards-compliant GPX. Opens in Google Earth, Strava, Maps.me, Komoot. |
 | `trip_…_links.txt` | Google Maps + Apple Maps URLs and trip stats. |
@@ -297,7 +297,7 @@ consistent within a run.
 | `--dry-run` | List trips and their indices; encode nothing. Always do this first. |
 | `--force` | Re-encode a trip whose `.mp4` already exists (otherwise it's skipped). |
 | `--sidecars-only` | Regenerate `.html` / `.gpx` / `_links.txt` / `_meta.json` without touching video. Fast. |
-| `--output-height 540` | Smaller file for phone/messaging. `720` is the default; `0` = native 1080. |
+| `--output-height 540` | Smaller file for phone/messaging. `1080` (native) is the default; `720` roughly halves the size. |
 | `--no-audio` | Strip audio — passenger conversation privacy. |
 | `--drives N [N …]` (alias `--trips`) | Encode only these trip indices. Also bypasses the fragment auto-skip. |
 | `--debug-cuts [SECS]` | The fast "did the cuts land right?" preview — see below. |
@@ -327,7 +327,7 @@ want to iterate on `parking_entry_pad` / `parking_exit_pad`.
 - `make-trips-rendered.sh` tees stdout+stderr into
   `./logs/trips-YYYYMMDD-HHMMSS.log` (full history kept). At the end of the
   run a copy of that log lands next to every `.mp4` the run produced — e.g.
-  `trip_2026-05-11_12-11_08_h720.log` — so the log lives with the data it
+  `trip_2026-05-11_12-11_08_h1080.log` — so the log lives with the data it
   describes. Override the location with the `LOG_DIR` environment variable.
 
 
@@ -465,7 +465,7 @@ dominates the frame. Effective height is `source_height − top − bottom`.
 
 | Config key | CLI | Default | What it does |
 |------------|-----|---------|--------------|
-| `output_height` | `--output-height N` | `720` | Downscale the finished composite to this height. `0` keeps native 1080. |
+| `output_height` | `--output-height N` | `1080` | Downscale the finished composite to this height. `1080` (or `0`) keeps native 1080 — no downscale filter at all. |
 | `vt_bitrate` | — | `8M` | VideoToolbox target bitrate, tuned for 1080p. |
 | `vt_maxrate` | — | `10M` | VideoToolbox max bitrate. |
 | `software` | `--software` | `false` | Force libx264 even where VideoToolbox is available. |
@@ -481,14 +481,14 @@ self-adjusts.
 
 | Setting | Composite size | Typical file size, 1 h source | Best for |
 |---------|----------------|--------------------------------|----------|
-| `output_height = 0` | 2402 × 1080 | ~3.5 – 4 GB | Archive, big-screen viewing |
-| `output_height = 720` (default) | 1601 × 720 | ~1.5 – 2 GB | Detail-rich sharing — plates, signs |
+| `output_height = 1080` (default) | 2402 × 1080 | ~3.5 – 4 GB | Archive, big-screen viewing |
+| `output_height = 720` | 1601 × 720 | ~1.5 – 2 GB | Detail-rich sharing — plates, signs |
 | `output_height = 540` | 1201 × 540 | ~400 – 500 MB | Phone-sized messaging / streaming |
 
 The pipeline always composes at the native 2402×1080 so overlays stay crisp,
 then scales the finished frame down **once** at the end. The chosen height is
-baked into the filename (`…_h540.mp4`; `output_height = 0` produces the
-un-tagged native name), so rendering the same trip at several heights gives
+baked into the filename (`…_h540.mp4`, `…_h1080.mp4` — the tag is always
+present), so rendering the same trip at several heights gives
 side-by-side files rather than overwrites. Sidecars stay un-tagged — they only
 depend on the GPS track, not the video resolution.
 
@@ -612,7 +612,7 @@ change always takes effect on the next render, no flag needed.**
 | `--drive-resume-sustain-secs N` | Consecutive seconds of GPS motion required to count as "real drive" (default 30). |
 | `--drive-first-clip-pad-secs N` | Head-trim pad at a trip's start (default 8). |
 | `--cache-max-age-days N` | TTL for `.gpx_cache/` entries (default 20; 0 disables). |
-| `--output-height N` | Downscale final composite to this height. **Default 720.** 540 for phone-sized; 0 keeps native 1080. |
+| `--output-height N` | Downscale final composite to this height. **Default 1080 (native).** 720 for roughly half the size, 540 for phone-sized. |
 | `--software` | Force libx264 instead of macOS VideoToolbox. |
 | `--keep-intermediates` | Don't delete per-clip intermediates after concat. |
 | `--dry-run` | List trips and exit without encoding. |

@@ -398,11 +398,12 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # ============================================================================
 
 # Final-output downscale of the composite for web/mobile delivery.
-# 720 (default) is the quality / size sweet spot — detail-rich enough to read
-# plates and signs, ~1.5–2 GB per hour of source. 540 is web/phone-friendly
-# (~400–500 MB per hour). 0 keeps the native 2402x1080 (~3.5–4 GB per hour —
-# archive size). Aspect ratio is preserved; VT bitrate auto-scales.
-#output_height = 720
+# 1080 (default) is native — no downscale at all, the full 2402x1080
+# composite (~3.5–4 GB per hour of source, archive size). 720 is the
+# quality / size sweet spot, still detail-rich enough to read plates and
+# signs (~1.5–2 GB per hour); 540 is web/phone-friendly (~400–500 MB per
+# hour). Aspect ratio is preserved; VT bitrate auto-scales.
+#output_height = 1080
 
 # Encoder selection.
 # software = true forces libx264 even if VideoToolbox (Mac hardware) is available.
@@ -1217,7 +1218,7 @@ EGO_SUSTAIN_SECS   = 1.5     # motion must persist this long to count as driving
 EGO_THR_SUSTAIN    = 1.0     # median flow (px at EGO_W×EGO_H) => "driving"
 EGO_THR_BASELINE   = 0.15    # walk-back stops below this (parked-noise floor)
 EGO_CONTEXT_PAD    = 2       # seconds of "about to move" kept before drive-away
-EGO_END_PAD        = 3       # seconds kept after the car finally comes to rest
+EGO_END_PAD        = 7       # seconds kept after the car finally comes to rest
 EGO_MAX_ANALYZE_SECS = 120   # cap analysis (a clip is ≤60s, but be safe)
 
 try:
@@ -2980,11 +2981,11 @@ def main() -> int:
         MAP_PANEL_POSITION = "right"
 
     # Final-output downscaling (e.g. for web/mobile delivery).
-    # Default 720p — a quality / size sweet spot: still detail-rich enough
-    # for plates and signs, but ~1/2 the bitrate of native 1080p thanks to
-    # the (h/1080)^2 VT-bitrate auto-scale. Set output_height = 0 in
-    # config.txt for native 1080p, or 540 for a smaller phone-friendly file.
-    output_height_cfg = ci("output_height", 720)
+    # Default 1080 = OUT_H, i.e. native: the downscale filter is skipped
+    # entirely and the composite ships at full 2402x1080. Set 720 in
+    # config.txt for ~half the bitrate (the (h/1080)^2 VT auto-scale), or
+    # 540 for a phone-friendly file. 0 is still accepted and means native.
+    output_height_cfg = ci("output_height", 1080)
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(config_path),
@@ -3136,8 +3137,9 @@ def main() -> int:
                          "exit-slice anchoring (default 30).")
     ap.add_argument("--output-height", type=int, default=output_height_cfg,
                     help="Downscale the final composite to this height in px "
-                         "(0 = keep native 1080). Default 720, a quality / "
-                         "size sweet spot. Use 540 for a smaller phone-sized "
+                         "(0 or 1080 = keep native 1080). Default 1080 "
+                         "(native). Use 720 for roughly half the size, or "
+                         "540 for a smaller phone-sized "
                          "file.")
     args = ap.parse_args()
 
