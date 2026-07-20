@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# import-sd-card.sh
+# -----------------
+# Copy the dashcam SD card's whole DCIM tree into a dated import folder, VERIFY
+# the copy, then delete the source FILES from the card — keeping the DCIM folder
+# structure so the dashcam can keep recording into it. Nothing on the card is
+# deleted until the copy has been verified byte-count/– file-for-file, and the
+# verify is skipped entirely with --keep.
+#
+# Usage:
+#   ./import-sd-card.sh                          # /Volumes/NO NAME  ->  ~/rsc-data/Import_Dashcam/<today>
+#   ./import-sd-card.sh 2026-07-20               # name the day folder explicitly
+#   ./import-sd-card.sh --keep                   # copy + verify, but DON'T delete the card
+#   ./import-sd-card.sh --checksum               # rigorous byte-for-byte verify (slow)
+#   ./import-sd-card.sh --src "/Volumes/OTHER" 2026-07-20
+#
+# Notes:
+#   - Only the FILES on the card are removed; the DCIM/... directories stay.
+#   - Re-importing the same day merges into the existing folder (rsync).
+
+set -euo pipefail
+
+SRC="/Volumes/NO NAME"
+DEST_ROOT="${DASHCAM_IMPORT_ROOT:-$HOME/rsc-data/Import_Dashcam}"
+DAY="$(date +%Y-%m-%d)"
+DELETE_SOURCE=1
+CHECKSUM=0
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --keep)     DELETE_SOURCE=0; shift ;;
+        --checksum) CHECKSUM=1; shift ;;
+        --src)      SRC="$2"; shift 2 ;;
+        --help|-h)  sed -n '2,25p' "$0"; exit 0 ;;
+        -*)         echo "unknown option: $1" >&2; exit 2 ;;
+        *)          DAY="$1"; shift ;;   # first bare arg = day-folder name
+    esac
+done
+
+DEST="$DEST_ROOT/$DAY"
+
+[ -d "$SRC/DCIM" ] || { echo "ERROR: no DCIM folder at '$SRC'. Is the card mounted?" >&2; exit 1; }
+
+src_files=$(find "$SRC/DCIM" -type f | wc -l | tr -d ' ')
+src_size=$(du -sh "$SRC/DCIM" 2>/dev/null | cut -f1)
+echo "Source: $SRC/DCIM  ($src_files files, ${src_size:-?})"
+echo "Dest:   $DEST/DCIM"
+[ "$src_files" -gt 0 ] || { echo "Source DCIM has no files — nothing to import."; exit 0; }
+[ -d "$DEST/DCIM" ] && echo "NOTE: $DEST/DCIM already exists — merging into it."
+
+mkdir -p "$DEST"
+echo "Copying..."
+rsync -a --info=progress2 "$SRC/DCIM" "$DEST/"
+
+# --- verify before we delete anything ---------------------------------------
+echo "Verifying${CHECKSUM:+ (checksum)}..."
+verify_opts=(-a --dry-run --itemize-changes)
+[ "$CHECKSUM" -eq 1 ] && verify_opts+=(--checksum)
+pending=$(rsync "${verify_opts[@]}" "$SRC/DCIM" "$DEST/" | grep -c '^>f' || true)
+dest_files=$(find "$DEST/DCIM" -type f | wc -l | tr -d ' ')
+if [ "$pending" -ne 0 ]; then
+    echo "ERROR: verify found $pending file(s) not yet copied. NOT deleting source." >&2
+    exit 1
+fi
+if [ "$dest_files" -lt "$src_files" ]; then
+    echo "ERROR: dest has $dest_files files but source has $src_files. NOT deleting source." >&2
+    exit 1
+fi
+echo "Verified: $dest_files files present in dest (>= $src_files on card)."
+
+# --- clean the card (files only, keep the folder tree) ----------------------
+if [ "$DELETE_SOURCE" -eq 1 ]; then
+    echo "Deleting source FILES (keeping DCIM folder structure)..."
+    find "$SRC/DCIM" -type f -delete
+    left=$(find "$SRC/DCIM" -type f | wc -l | tr -d ' ')
+    echo "Card cleaned — $left files remain, folders kept."
+else
+    echo "--keep: card left untouched."
+fi
+
+echo "Done. Imported $src_files files to $DEST/DCIM"
+echo "Render with: ./make-trips-rendered.sh --root \"$DEST\" --out \"${DASHCAM_OUT_ROOT:-$HOME/rsc-data/Output_Dashcam}\""

@@ -3202,7 +3202,20 @@ def main() -> int:
         fringe_tag = f"_debugcuts{args.debug_cuts}s" if args.debug_cuts > 0 else ""
         day_label = day_labels[idx - 1]
         label = f"{day_label}_{start:%H-%M}_{idx:02d}"
-        sidecar_base = out_dir / f"trip_{label}"
+        # Organise the output into one folder per EXTRACT day (the 04:00-rollover
+        # day the trip belongs to) — which need not match the import folder's
+        # name (a single import can span several days). An info.txt in each day
+        # folder records the source import folder so it can be traced back.
+        day_dir = out_dir / day_label
+        day_dir.mkdir(parents=True, exist_ok=True)
+        info_txt = day_dir / "info.txt"
+        if not info_txt.exists():
+            info_txt.write_text(
+                f"source import folder: {root}\n"
+                f"extract day (trips grouped with a 04:00 rollover): {day_label}\n",
+                encoding="utf-8",
+            )
+        sidecar_base = day_dir / f"trip_{label}"
         final = sidecar_base.with_name(sidecar_base.name + f"{fringe_tag}{size_tag}.mp4")
 
         print(f"\n[{group_word} {idx}/{len(groups)}] {start:%Y-%m-%d %H:%M} → {end:%H:%M}  "
