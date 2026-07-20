@@ -1262,11 +1262,22 @@ def _ego_park_onset(med: "list[float]") -> "int | None":
     sustain = max(1, int(round(EGO_SUSTAIN_SECS * EGO_FPS)))
     if n < sustain + 1 or max(med) <= EGO_THR_SUSTAIN:
         return None                       # never really drove -> not an arrival
-    # Last frame that was still moving; the stop begins right after it.
-    k = n - 1
-    while k >= 1 and med[k] < EGO_THR_BASELINE:
-        k -= 1
-    park = k + 1
+    # Anchor on the end of the last SUSTAINED driving run, not on the last
+    # sample above a low baseline. Once parked, the flow signal still twitches:
+    # a pedestrian crossing in front of the car produced blips of 0.15-0.44 for
+    # ~15s after a full stop, and a single-frame spike of 26.9 appeared at the
+    # very end of another clip (door/headlights). Walking back on the baseline
+    # let any one of those veto the stop, reporting the park up to 15 seconds
+    # late — or, with a trailing spike, not at all. Requiring `sustain`
+    # consecutive frames of real motion ignores both.
+    last_drive_end = None
+    for i in range(n - 1, sustain - 2, -1):
+        if all(med[i - j] > EGO_THR_SUSTAIN for j in range(sustain)):
+            last_drive_end = i
+            break
+    if last_drive_end is None:
+        return None
+    park = last_drive_end + 1
     if park >= n or (n - park) < sustain:
         return None                       # still driving at the end (no park)
     return park
@@ -3285,6 +3296,18 @@ def main() -> int:
     # run will write to. Trip indices shift whenever the grouping changes (more
     # clips, different thresholds), so old trip_* files would otherwise linger
     # next to the new ones as stale duplicates. info.txt and caches are kept.
+    # PUBLISHED trip numbers. `idx` is the internal group index and counts the
+    # fragments/stationary groups that never get rendered, so a day whose only
+    # two real trips are groups 8 and 9 would publish "Trip 8"/"Trip 9". Number
+    # the trips that actually ship 1..N within their own day instead — that's
+    # what ends up in the filename, the panel title and _meta.json.
+    pub_no: dict[int, int] = {}
+    _per_day: dict[str, int] = {}
+    for i in sorted(wanted):
+        d = day_labels[i - 1]
+        _per_day[d] = _per_day.get(d, 0) + 1
+        pub_no[i] = _per_day[d]
+
     if args.clean_output:
         target_days = sorted({day_labels[i - 1] for i in wanted})
         removed = 0
@@ -3322,7 +3345,7 @@ def main() -> int:
         # real full-length render of the same trip.
         fringe_tag = f"_debugcuts{args.debug_cuts}s" if args.debug_cuts > 0 else ""
         day_label = day_labels[idx - 1]
-        label = f"{day_label}_{start:%H-%M}_{idx:02d}"
+        label = f"{day_label}_{start:%H-%M}_{pub_no[idx]:02d}"
         # Organise the output into one folder per EXTRACT day (the 04:00-rollover
         # day the trip belongs to) — which need not match the import folder's
         # name (a single import can span several days). An info.txt in each day
@@ -3339,7 +3362,7 @@ def main() -> int:
         sidecar_base = day_dir / f"trip_{label}"
         final = sidecar_base.with_name(sidecar_base.name + f"{fringe_tag}{size_tag}.mp4")
 
-        print(f"\n[{group_word} {idx}/{len(groups)}] {start:%Y-%m-%d %H:%M} → {end:%H:%M}  "
+        print(f"\n[{group_word} {pub_no[idx]}/{len(wanted)}] {start:%Y-%m-%d %H:%M} → {end:%H:%M}  "
               f"({len(group)} clips, ~{fmt_secs(secs)})")
         if args.debug_cuts > 0:
             print(f"  DEBUG-CUTS preview (not a real render): start + pauses "
@@ -3380,7 +3403,7 @@ def main() -> int:
         else:
             group_track = []
         if not args.no_map_sidecars and group_track:
-            title = f"Trip {idx} — {day_label} — {start:%H:%M}"
+            title = f"Trip {pub_no[idx]} — {day_label} — {start:%H:%M}"
             html_path  = sidecar_base.with_suffix(".html")
             gpx_path   = sidecar_base.with_suffix(".gpx")
             links_path = sidecar_base.with_name(sidecar_base.name + "_links.txt")
@@ -3407,7 +3430,8 @@ def main() -> int:
                               last_fix[0], last_fix[1]) * 1000.0 <= args.trip_return_m
         )
         meta = {
-            "trip_index": idx,
+            "trip_index": pub_no[idx],
+            "group_index": idx,   # internal grouping index, for traceability
             "day": day_label,               # 04:00-rollover day the UI groups on
             "start": start.strftime("%Y-%m-%d %H:%M:%S"),
             "end":   end.strftime("%Y-%m-%d %H:%M:%S"),
@@ -3442,7 +3466,7 @@ def main() -> int:
         base_panel = None
         group_pixels: list[tuple[int, int]] = []
         if not args.no_map_widget and group_track:
-            panel_title = f"Trip {idx} — {day_label}"
+            panel_title = f"Trip {pub_no[idx]} — {day_label}"
             rendered = render_base_right_panel(
                 group_track,
                 title=panel_title,
