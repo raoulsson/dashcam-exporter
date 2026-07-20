@@ -7,15 +7,20 @@
 # deleted until the copy has been verified byte-count/– file-for-file, and the
 # verify is skipped entirely with --keep.
 #
+# The card is NOT erased by default. Import first, render, check the result —
+# then come back with --delete once you're happy. Deleting is still gated on the
+# copy verifying, so --delete can never wipe an incomplete import.
+#
 # Usage:
 #   ./import-sd-card.sh                          # /Volumes/NO NAME  ->  ~/rsc-data/Import_Dashcam/<today>
 #   ./import-sd-card.sh 2026-07-20               # name the day folder explicitly
-#   ./import-sd-card.sh --keep                   # copy + verify, but DON'T delete the card
+#   ./import-sd-card.sh --delete                 # copy + verify, THEN erase the card's files
 #   ./import-sd-card.sh --checksum               # rigorous byte-for-byte verify (slow)
 #   ./import-sd-card.sh --src "/Volumes/OTHER" 2026-07-20
 #
 # Notes:
 #   - Only the FILES on the card are removed; the DCIM/... directories stay.
+#   - DCIM/IPSRecord.txt (the camera's drive/park event log) is copied too.
 #   - Re-importing the same day merges into the existing folder (rsync).
 
 set -euo pipefail
@@ -23,12 +28,13 @@ set -euo pipefail
 SRC="/Volumes/NO NAME"
 DEST_ROOT="${DASHCAM_IMPORT_ROOT:-$HOME/rsc-data/Import_Dashcam}"
 DAY="$(date +%Y-%m-%d)"
-DELETE_SOURCE=1
+DELETE_SOURCE=0          # default: keep the card; erase only with --delete
 CHECKSUM=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --keep)     DELETE_SOURCE=0; shift ;;
+        --delete)   DELETE_SOURCE=1; shift ;;
+        --keep)     DELETE_SOURCE=0; shift ;;   # kept for back-compat (now default)
         --checksum) CHECKSUM=1; shift ;;
         --src)      SRC="$2"; shift 2 ;;
         --help|-h)  sed -n '2,25p' "$0"; exit 0 ;;
@@ -75,7 +81,8 @@ if [ "$DELETE_SOURCE" -eq 1 ]; then
     left=$(find "$SRC/DCIM" -type f | wc -l | tr -d ' ')
     echo "Card cleaned — $left files remain, folders kept."
 else
-    echo "--keep: card left untouched."
+    echo "Card left untouched (default). Once you've rendered and checked the"
+    echo "result, erase it with:  $0 --delete ${DAY}"
 fi
 
 echo "Done. Imported $src_files files to $DEST/DCIM"

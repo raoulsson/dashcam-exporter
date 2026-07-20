@@ -60,6 +60,7 @@ import calendar
 import json
 import os
 import re
+import atexit
 import shutil
 import subprocess
 import sys
@@ -2898,6 +2899,12 @@ def main() -> int:
                          "drive-away instead of the default video ego-motion "
                          "(needs numpy + opencv-python, used automatically when "
                          "installed).")
+    ap.add_argument("--clean-output", action="store_true",
+                    help="Before encoding, delete existing trip_* files from the "
+                         "day folders this run will write to, so a re-group that "
+                         "shifted trip indices doesn't leave the old numbering "
+                         "behind as stale duplicates. Keeps info.txt and the "
+                         "caches. Implies a full re-render of those days.")
     ap.add_argument("--debug-cuts", type=int, default=0, nargs="?", const=5,
                     dest="debug_cuts", metavar="SECS",
                     help="DEBUG PREVIEW, not a normal render: produce a short clip "
@@ -3004,8 +3011,41 @@ def main() -> int:
     # model: intermediates are scratch space for ONE run, finals persist and
     # the user controls regeneration by deleting a final .mp4 (or passing
     # --force, which deletes it for you).
+    encoding_run = not (args.dry_run or args.sidecars_only)
+
+    # Two encoders sharing one --out would delete each other's scratch files
+    # mid-encode (.intermediates is wiped at start). Take a PID lock so the
+    # second one refuses instead of corrupting the first.
+    lock_path = out_dir / ".render.lock"
+    if encoding_run:
+        if lock_path.exists():
+            try:
+                other_pid = int(lock_path.read_text().split()[0])
+            except Exception:
+                other_pid = 0
+            alive = False
+            if other_pid:
+                try:
+                    os.kill(other_pid, 0)
+                    alive = True
+                except OSError:
+                    alive = False
+            if alive:
+                print(f"ERROR: another render (pid {other_pid}) is already writing to\n"
+                      f"       {out_dir}\n"
+                      f"       Wait for it to finish, or use a different --out.",
+                      file=sys.stderr)
+                return 1
+            lock_path.unlink(missing_ok=True)      # stale lock from a killed run
+        lock_path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+        atexit.register(lambda: lock_path.unlink(missing_ok=True))
+
+    # ONLY when we are actually going to encode. --dry-run and --sidecars-only
+    # must be read-only: wiping here would destroy the scratch files of a render
+    # already running against the same --out (which is exactly how a dry-run
+    # once killed a live 283-clip encode at clip 50).
     inter_dir = out_dir / ".intermediates"
-    if inter_dir.is_dir():
+    if encoding_run and inter_dir.is_dir():
         n = sum(1 for _ in inter_dir.rglob("*"))
         if n:
             shutil.rmtree(inter_dir, ignore_errors=True)
@@ -3187,6 +3227,22 @@ def main() -> int:
 
     if args.dry_run:
         return 0
+
+    # --clean-output: wipe the previous numbering out of the day folders this
+    # run will write to. Trip indices shift whenever the grouping changes (more
+    # clips, different thresholds), so old trip_* files would otherwise linger
+    # next to the new ones as stale duplicates. info.txt and caches are kept.
+    if args.clean_output:
+        target_days = sorted({day_labels[i - 1] for i in wanted})
+        removed = 0
+        for d in target_days:
+            dd = out_dir / d
+            if dd.is_dir():
+                for p in sorted(dd.glob("trip_*")):
+                    p.unlink(missing_ok=True)
+                    removed += 1
+        print(f"--clean-output: removed {removed} stale file(s) from "
+              f"{len(target_days)} day folder(s): {', '.join(target_days) or '-'}")
 
     work_dir = out_dir / ".intermediates"
     work_dir.mkdir(exist_ok=True)
