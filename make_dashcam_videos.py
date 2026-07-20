@@ -2606,11 +2606,18 @@ def generate_transition_slide(
     # +2 for the gutter that build_filter_complex adds between video and map.
     width = OUT_W + (MAP_PANEL_SIZE + 2 if with_map_widget else 0)
     height = OUT_H
-    # When the main encode is downscaled, the transition slide must match,
-    # otherwise concat-demuxer will refuse to splice them together.
+    # When the main encode is downscaled, the transition slide must match it
+    # EXACTLY. The clips are scaled by ffmpeg's `scale=-2:H`, which rounds the
+    # derived width to the NEAREST even number. Rounding differently here makes
+    # the slide a couple of pixels narrower than the clips (2402 -> 1600 instead
+    # of 1602 at 720p). concat -c copy then produces an MP4 whose `avcC`
+    # declares one resolution while the slide's frames carry an SPS with
+    # another — software decoders cope, hardware ones (VideoToolbox: QuickTime,
+    # Preview, Safari) blank until the next IDR, which is the black gap around
+    # the slide. So mirror ffmpeg: round-half-up to the nearest multiple of 2.
     if output_height and output_height != OUT_H:
         scale = output_height / OUT_H
-        width = int(round(width * scale)) & ~1   # keep even
+        width = int(round(width * scale / 2)) * 2
         height = output_height
     font_escaped = font_path.replace(":", r"\:")
     if use_vt:
@@ -2622,13 +2629,21 @@ def generate_transition_slide(
                 "-maxrate", vt_m, "-profile:v", "high"]
     else:
         venc = ["-c:v", "libx264", "-preset", X264_PRESET, "-crf", X264_CRF]
-    # Force every frame to be a keyframe (GOP size = 1) and disable B-frames.
-    # Without this, players can show ~1 second of black at the start/end of
-    # the slide while they prime the decoder past the first I-frame — which
-    # on a 3-second slide turns a "Fast forwarding…" message into a blink
-    # that's gone before you've read it. Slide is only 3s so the file-size
-    # hit is negligible.
-    venc += ["-g", "1", "-bf", "0"]
+    # Disable B-frames so there is no frame reordering across the concat splice.
+    #
+    # Do NOT add "-g 1" here. It was once added to fix "black around the slide",
+    # but it is what CAUSES that black: GOP-size-1 makes VideoToolbox emit an
+    # all-intra SPS that differs from the one the regular clips are coded with.
+    # Since concat_clips joins everything with `-c copy`, the resulting MP4 then
+    # contains two distinct SPS variants while its `avcC` declares only the
+    # clips' one. Software decoders (ffmpeg) read the in-band SPS and cope, so
+    # extracted frames look fine — but HARDWARE decoders (VideoToolbox, i.e.
+    # QuickTime/Preview/Safari) configure once from `avcC`, refuse to
+    # reconfigure mid-track, and blank until they resync on a later IDR. That is
+    # the 1-2 seconds of black users see between the slide and the footage.
+    # Verified: dropping -g 1 collapses the file to a single SPS and the gap
+    # disappears. A static black slide also encodes SMALLER with a normal GOP.
+    venc += ["-bf", "0"]
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
         "-f", "lavfi", "-i",
