@@ -149,9 +149,6 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # Each trip is written as trip_<day>_<HH-MM>_<idx> with a _meta.json sidecar
 # carrying its day label, so a publishing UI can group a day's trips together.
 #
-# Each trip is written as trip_<day>_<HH-MM>_<idx> with a _meta.json sidecar
-# carrying its day label, so a publishing UI can group a day's trips together.
-#
 # HOME LOCATION lives in a gitignored .env (SET_HOME_LAT / SET_HOME_LON /
 # SET_HOME_RADIUS_M), NOT here — this file is committed and your home address
 # should not be. Copy .env.example to .env and fill it in.
@@ -234,9 +231,11 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # FRONT CAMERA CROP
 # ============================================================================
 
-# Source clips are 2560x1600. We crop pixels off the top and bottom before
-# scaling to 1080p so the bonnet doesn't dominate. If you mount your dashcam
-# higher or lower, tune these. (Effective height: 1600 - top - bottom)
+# The front camera's resolution is DETECTED from the clips, and the default
+# crop is derived from it: whatever height exceeds the 16:9 output aspect is
+# removed, split top/bottom (2560x1600 -> 80/80; 1920x1080 -> 0/0, i.e. no
+# crop and no vertical stretch). Set these only to override — e.g. to crop
+# more bonnet away. Cropping beyond the 16:9 excess WILL stretch the image.
 #front_crop_top    = 80
 #front_crop_bottom = 80
 
@@ -369,6 +368,10 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # parking-run detector doesn't fire for them. Default 60 (1 minute).
 #inter_clip_gap_secs = 60
 
+# How long the 'Fast forwarding...' slide stays on screen, in seconds.
+# It also reports how much wall-clock time was elided. Default 5.
+#transition_secs = 5
+
 # Auto-skip groups that have fewer than this many clips. These are typically
 # loop-recording fragments left over after the SD card rolled around — a
 # minute or two of footage from a session whose first portion has been
@@ -401,7 +404,10 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # Keep the per-clip intermediate .mp4 files after concat.
 #keep_intermediates = false
 
-# Hardware H.264 (VideoToolbox) bitrates.
+# Hardware H.264 (VideoToolbox) bitrates. These are tuned for 1080p; when
+# output_height is lower, both values are scaled down by (output_height/1080)^2
+# automatically (e.g. 540p → 2M / 2.5M) so smaller frames produce smaller
+# files instead of over-allocating bits. Libx264 uses CRF and self-adjusts.
 #vt_bitrate = 8M
 #vt_maxrate = 10M
 
@@ -440,7 +446,7 @@ DEFAULT_MIN_CLIPS_PER_GROUP = 4
 # from filling up silently when they encode many days over weeks of usage.
 # Set to 0 to disable the TTL eviction.
 DEFAULT_CACHE_MAX_AGE_DAYS  = 20
-TRANSITION_SECS             = 3      # length of the "Fast forwarding..." slide
+TRANSITION_SECS             = 5      # length of the "Fast forwarding..." slide
 TRANSITION_TEXT             = "Fast forwarding..."
 TRANSITION_FONT_SIZE        = 72
 
@@ -1137,6 +1143,7 @@ EGO_SUSTAIN_SECS   = 1.5     # motion must persist this long to count as driving
 EGO_THR_SUSTAIN    = 1.0     # median flow (px at EGO_W×EGO_H) => "driving"
 EGO_THR_BASELINE   = 0.15    # walk-back stops below this (parked-noise floor)
 EGO_CONTEXT_PAD    = 2       # seconds of "about to move" kept before drive-away
+EGO_END_PAD        = 3       # seconds kept after the car finally comes to rest
 EGO_MAX_ANALYZE_SECS = 120   # cap analysis (a clip is ≤60s, but be safe)
 
 try:
@@ -2773,6 +2780,7 @@ def main() -> int:
     global MAP_PANEL_SIZE, MAP_PANEL_POSITION, MAP_PANEL_GUTTER_PX
     global MAP_TRACK_PAD, MAP_ZOOM_BOOST, SEGMENT_MIN_POINTS, CLIP_GPX_WINDOW_SECONDS
     global FRONT_CROP_TOP, FRONT_CROP_BOTTOM, FRONT_W, FRONT_H
+    global TRANSITION_SECS
     global COPYRIGHT_TEXT, COPYRIGHT_FONT_SIZE, COPYRIGHT_POSITION
     global COPYRIGHT_MARGIN_H, COPYRIGHT_MARGIN_V
     global SPEED_MARGIN_V, SPEED_MARGIN_R, SPEED_FONT_SIZE
@@ -2805,6 +2813,7 @@ def main() -> int:
     CLIP_GPX_WINDOW_SECONDS = ci("clip_gpx_window_seconds", CLIP_GPX_WINDOW_SECONDS)
     FRONT_CROP_TOP     = ci("front_crop_top",     FRONT_CROP_TOP)
     FRONT_CROP_BOTTOM  = ci("front_crop_bottom",  FRONT_CROP_BOTTOM)
+    TRANSITION_SECS    = ci("transition_secs",    TRANSITION_SECS)
     COPYRIGHT_TEXT     = cs("watermark_text",     COPYRIGHT_TEXT)
     COPYRIGHT_FONT_SIZE = ci("watermark_font_size", COPYRIGHT_FONT_SIZE)
     COPYRIGHT_POSITION = cs("watermark_position", COPYRIGHT_POSITION).lower()
@@ -3641,6 +3650,21 @@ def main() -> int:
                 # above. Use it directly as the trim_start so the trip opens
                 # just before the wheels start turning.
                 trim_start = head_trim_for_motion_clip
+
+            # END-TRIM: the trip's final clip otherwise plays out to the end of
+            # its minute, leaving up to ~a minute of already-parked footage after
+            # the car has come to rest. Find the park with the same video
+            # ego-motion detector used for drive-away and stop EGO_END_PAD
+            # seconds after it. (A trailing parking RUN is already handled by
+            # `entry_end`; this covers the common case where the trip simply ends
+            # with the car pulling in.)
+            if (action is None and ci0 == last_emit_idx and trim_seconds is None
+                    and not args.no_video_drive_detect):
+                park_sec = find_park_second_by_video(clip)
+                if park_sec is not None and int(park_sec) >= trim_start:
+                    trim_seconds = max(1, int(park_sec) - trim_start + EGO_END_PAD)
+                    print(f"        end-trim: parks at {park_sec:.1f}s → "
+                          f"stop after {trim_seconds}s")
 
             # --debug-cuts preview: keep only the transition moments with `N`
             # secs of context each, and drop the driving middles. This runs AFTER

@@ -43,9 +43,6 @@
 # Each trip is written as trip_<day>_<HH-MM>_<idx> with a _meta.json sidecar
 # carrying its day label, so a publishing UI can group a day's trips together.
 #
-# Each trip is written as trip_<day>_<HH-MM>_<idx> with a _meta.json sidecar
-# carrying its day label, so a publishing UI can group a day's trips together.
-#
 # HOME LOCATION lives in a gitignored .env (SET_HOME_LAT / SET_HOME_LON /
 # SET_HOME_RADIUS_M), NOT here — this file is committed and your home address
 # should not be. Copy .env.example to .env and fill it in.
@@ -128,9 +125,11 @@
 # FRONT CAMERA CROP
 # ============================================================================
 
-# Source clips are 2560x1600. We crop pixels off the top and bottom before
-# scaling to 1080p so the bonnet doesn't dominate. If you mount your dashcam
-# higher or lower, tune these. (Effective height: 1600 - top - bottom)
+# The front camera's resolution is DETECTED from the clips, and the default
+# crop is derived from it: whatever height exceeds the 16:9 output aspect is
+# removed, split top/bottom (2560x1600 -> 80/80; 1920x1080 -> 0/0, i.e. no
+# crop and no vertical stretch). Set these only to override — e.g. to crop
+# more bonnet away. Cropping beyond the 16:9 excess WILL stretch the image.
 #front_crop_top    = 80
 #front_crop_bottom = 80
 
@@ -262,6 +261,10 @@
 # engine-off intervals that AREN'T preceded by parked footage, so the
 # parking-run detector doesn't fire for them. Default 60 (1 minute).
 #inter_clip_gap_secs = 60
+
+# How long the 'Fast forwarding...' slide stays on screen, in seconds.
+# It also reports how much wall-clock time was elided. Default 5.
+#transition_secs = 5
 
 # Auto-skip groups that have fewer than this many clips. These are typically
 # loop-recording fragments left over after the SD card rolled around — a
