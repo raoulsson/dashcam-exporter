@@ -1218,7 +1218,7 @@ EGO_SUSTAIN_SECS   = 1.5     # motion must persist this long to count as driving
 EGO_THR_SUSTAIN    = 1.0     # median flow (px at EGO_W×EGO_H) => "driving"
 EGO_THR_BASELINE   = 0.15    # walk-back stops below this (parked-noise floor)
 EGO_CONTEXT_PAD    = 2       # seconds of "about to move" kept before drive-away
-EGO_END_PAD        = 7       # seconds kept after the car finally comes to rest
+EGO_END_PAD        = 10      # seconds kept after the car finally comes to rest
 EGO_MAX_ANALYZE_SECS = 120   # cap analysis (a clip is ≤60s, but be safe)
 
 try:
