@@ -1272,6 +1272,35 @@ def _ego_park_onset(med: "list[float]") -> "int | None":
     return park
 
 
+def find_park_second_by_gps(
+    clip: Clip, gps_dirs: "tuple[Path | None, ...]",
+    threshold_kmh: float = PARKING_SPEED_THRESHOLD_KMH,
+) -> float | None:
+    """GPS-speed fallback for park detection: the video-second at which speed
+    drops below `threshold_kmh` and STAYS there through the end of the clip.
+
+    Video ego-motion is the primary detector, but it needs trackable features —
+    a night scene can be too dark to yield any, so it reports "still moving"
+    for a car that has plainly stopped. GPS has the opposite bias: it is poor at
+    spotting the START of motion (passing traffic, slow creep below the speed
+    floor) but perfectly good at confirming a sustained standstill. Same shape
+    as _ego_park_onset: the clip must contain real motion first, then settle."""
+    speeds = parse_clip_speeds(clip, gps_dirs)
+    if not speeds:
+        return None
+    n = len(speeds)
+    sustain = max(1, int(round(EGO_SUSTAIN_SECS)))
+    if n < sustain + 1 or max(speeds) <= threshold_kmh:
+        return None                       # never really drove -> not an arrival
+    k = n - 1
+    while k >= 1 and speeds[k] < threshold_kmh:
+        k -= 1
+    park = k + 1
+    if park >= n or (n - park) < sustain:
+        return None                       # still moving at the end (no park)
+    return float(park)
+
+
 def find_park_second_by_video(clip: Clip) -> float | None:
     """Video-second within `clip` at which the car parks (drives in, then comes
     to a sustained stop through the end of the clip). None if it doesn't park
@@ -3673,12 +3702,18 @@ def main() -> int:
             # seconds after it. (A trailing parking RUN is already handled by
             # `entry_end`; this covers the common case where the trip simply ends
             # with the car pulling in.)
-            if (action is None and ci0 == last_emit_idx and trim_seconds is None
-                    and not args.no_video_drive_detect):
-                park_sec = find_park_second_by_video(clip)
+            if action is None and ci0 == last_emit_idx and trim_seconds is None:
+                park_sec = (None if args.no_video_drive_detect
+                            else find_park_second_by_video(clip))
+                how = "video"
+                if park_sec is None:
+                    # Video needs trackable features; a night arrival can be too
+                    # dark to give any. GPS is reliable for a sustained stop.
+                    park_sec = find_park_second_by_gps(clip, gps_dirs)
+                    how = "gps"
                 if park_sec is not None and int(park_sec) >= trim_start:
                     trim_seconds = max(1, int(park_sec) - trim_start + EGO_END_PAD)
-                    print(f"        end-trim: parks at {park_sec:.1f}s → "
+                    print(f"        end-trim ({how}): parks at {park_sec:.1f}s → "
                           f"stop after {trim_seconds}s")
 
             # --debug-cuts preview: keep only the transition moments with `N`
