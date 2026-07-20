@@ -63,6 +63,7 @@ import re
 import atexit
 import shutil
 import subprocess
+import time
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -202,6 +203,12 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 
 # Save .html (Leaflet), .gpx (standard GPX), and _links.txt next to each video.
 #map_sidecars = true
+
+# OPT-IN: look up place names for each trip's start/end (OSM Nominatim) and
+# add start_place/end_place to _meta.json. Off by default because it calls a
+# public, rate-limited service; results are cached in .geocode_cache.json and
+# it fails silently offline. All other metadata is computed locally.
+#geocode = false
 
 # Small watermark on the main video.
 # Leave watermark_text empty to disable. Position one of:
@@ -523,6 +530,73 @@ def probe_video_size(path: Path) -> "tuple[int, int] | None":
         return int(w), int(h)
     except Exception:
         return None
+
+
+_FFMPEG_VERSION: "str | None" = None
+
+
+def ffmpeg_version() -> str:
+    """Short ffmpeg version string (e.g. '7.1'), probed once per run."""
+    global _FFMPEG_VERSION
+    if _FFMPEG_VERSION is None:
+        try:
+            first = subprocess.check_output(
+                ["ffmpeg", "-version"], text=True, stderr=subprocess.STDOUT
+            ).splitlines()[0]
+            # "ffmpeg version 7.1 Copyright (c) ..." -> "7.1"
+            parts = first.split()
+            _FFMPEG_VERSION = parts[2] if len(parts) > 2 else "unknown"
+        except Exception:
+            _FFMPEG_VERSION = "unknown"
+    return _FFMPEG_VERSION
+
+
+def reverse_geocode(lat: float, lon: float, cache_path: Path) -> "str | None":
+    """Best-effort place name for a coordinate via OSM Nominatim. OPT-IN only
+    (--geocode): it calls a public service, so it must never be on the critical
+    path of a render. Results are cached on disk (coordinates rounded to ~11 m)
+    because Nominatim's usage policy asks for caching and max 1 req/sec, and a
+    day of trips would otherwise re-ask for the same driveway repeatedly.
+    Returns None on any failure — no network, rate limit, malformed reply."""
+    key = f"{lat:.4f},{lon:.4f}"
+    cache: dict = {}
+    try:
+        if cache_path.is_file():
+            cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    except Exception:
+        cache = {}
+    if key in cache:
+        return cache[key]
+    try:
+        import urllib.request
+        import urllib.parse
+        qs = urllib.parse.urlencode({
+            "lat": f"{lat:.6f}", "lon": f"{lon:.6f}",
+            "format": "jsonv2", "zoom": "16", "addressdetails": "1",
+        })
+        req = urllib.request.Request(
+            f"https://nominatim.openstreetmap.org/reverse?{qs}",
+            headers={"User-Agent": "dashcam-exporter/1.0 (github.com/raoulsson/dashcam-exporter)"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        a = data.get("address", {}) or {}
+        # Build a short "neighbourhood, city" style label rather than the full
+        # postal address, which is long and mostly noise for a trip label.
+        near = (a.get("neighbourhood") or a.get("suburb") or a.get("village")
+                or a.get("hamlet") or a.get("road"))
+        city = (a.get("city") or a.get("town") or a.get("municipality")
+                or a.get("county"))
+        name = ", ".join(x for x in (near, city) if x) or data.get("display_name")
+    except Exception:
+        return None
+    cache[key] = name
+    try:
+        cache_path.write_text(json.dumps(cache, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    time.sleep(1.0)          # Nominatim asks for <= 1 request/second
+    return name
 
 
 def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
@@ -1903,6 +1977,7 @@ def render_base_right_panel(
     title: str,
     font_path: str,
     include_stats: bool = True,
+    tech_lines: "list[str] | None" = None,
 ) -> tuple[object, list[tuple[int, int]]] | None:
     """
     Render the full 480x1080 right-side panel:
@@ -1982,6 +2057,18 @@ def render_base_right_panel(
 
     # Paste the map at its chosen vertical position
     panel.paste(map_img, (0, map_top))
+
+    # A couple of compact technical lines under the map. Deliberately terse and
+    # dim: the panel is only 480px wide and this is burned into every frame, so
+    # the FULL technical detail lives in _meta.json instead — this is just the
+    # at-a-glance provenance of the file you're watching.
+    if tech_lines:
+        ty = map_top + MAP_PANEL_SIZE + 14
+        for line in tech_lines[:3]:
+            if ty > panel_h - 18:
+                break
+            draw.text((24, ty), line, fill=(120, 120, 120), font=f_small)
+            ty += 20
 
     # Marker pixel coordinates in panel-local space (offset for the map position)
     adjusted = [(px, py + map_top) for (px, py) in map_pixels]
@@ -2963,6 +3050,12 @@ def main() -> int:
                          "drive-away instead of the default video ego-motion "
                          "(needs numpy + opencv-python, used automatically when "
                          "installed).")
+    ap.add_argument("--geocode", action="store_true", default=cb("geocode", False),
+                    help="Look up place names for each trip's start/end via OSM "
+                         "Nominatim and add start_place/end_place to _meta.json. "
+                         "OPT-IN: it calls a public service (rate-limited, cached "
+                         "in .geocode_cache.json) and fails silently offline. "
+                         "Everything else in the metadata is computed locally.")
     ap.add_argument("--clean-output", action="store_true",
                     help="Before encoding, delete existing trip_* files from the "
                          "day folders this run will write to, so a re-group that "
@@ -3429,6 +3522,18 @@ def main() -> int:
             and _haversine_km(first_fix[0], first_fix[1],
                               last_fix[0], last_fix[1]) * 1000.0 <= args.trip_return_m
         )
+        st = _track_stats(group_track) if group_track else None
+        bbox = None
+        if group_track:
+            lats = [p[0] for p in group_track]
+            lons = [p[1] for p in group_track]
+            bbox = {"min_lat": round(min(lats), 6), "min_lon": round(min(lons), 6),
+                    "max_lat": round(max(lats), 6), "max_lon": round(max(lons), 6)}
+
+        def _gmaps(fix):
+            return (f"https://www.google.com/maps/search/?api=1&query={fix[0]:.6f},{fix[1]:.6f}"
+                    if fix else None)
+
         meta = {
             "trip_index": pub_no[idx],
             "group_index": idx,   # internal grouping index, for traceability
@@ -3439,10 +3544,43 @@ def main() -> int:
             "n_clips": len(group),
             "video": final.name,
             "round_trip": round_trip,       # False => one-way relocation
+            "source_import": str(root),
+            # --- where -------------------------------------------------------
             "start_fix": first_fix,
             "end_fix": last_fix,
-            "distance_km": round(_track_stats(group_track)["distance_km"], 2) if group_track else 0.0,
+            "bbox": bbox,
+            "start_map_url": _gmaps(first_fix),
+            "end_map_url": _gmaps(last_fix),
+            # --- how far / how fast ------------------------------------------
+            "distance_km": round(st["distance_km"], 2) if st else 0.0,
+            "moving_min": round(st["moving_min"], 1) if st else 0.0,
+            "duration_min": round(st["duration_min"], 1) if st else 0.0,
+            "max_kmh": round(st["max_kmh"], 1) if st else 0.0,
+            "avg_kmh": round(st["avg_kmh"], 1) if st else 0.0,
+            "gps_points": st["n"] if st else 0,
+            "gps_segments": st["n_segments"] if st else 0,
+            # --- how it was made ---------------------------------------------
+            "technical": {
+                "resolution": f"{FRONT_W}x{FRONT_H} source",
+                "output_height": args.output_height or OUT_H,
+                "encoder": "h264_videotoolbox" if use_vt else "libx264",
+                "ffmpeg": ffmpeg_version(),
+                "exporter": "dashcam-exporter",
+                "trip_boundaries": ("video ego-motion (park-to-park)"
+                                    if (_HAVE_EGO and not args.no_video_drive_detect)
+                                    else "GPS radius (fallback)"),
+                "cut_detection": ("Lucas-Kanade median optical flow"
+                                  if (_HAVE_EGO and not args.no_video_drive_detect)
+                                  else "GPS speed"),
+            },
         }
+        # Opt-in place names. Never on by default: it calls a public geocoder.
+        if args.geocode:
+            gc_cache = out_dir / ".geocode_cache.json"
+            if first_fix:
+                meta["start_place"] = reverse_geocode(*first_fix, gc_cache)
+            if last_fix:
+                meta["end_place"] = reverse_geocode(*last_fix, gc_cache)
         meta_path = sidecar_base.with_name(sidecar_base.name + "_meta.json")
         meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
@@ -3467,11 +3605,22 @@ def main() -> int:
         group_pixels: list[tuple[int, int]] = []
         if not args.no_map_widget and group_track:
             panel_title = f"Trip {pub_no[idx]} — {day_label}"
+            # Compact provenance under the map. Full detail is in _meta.json —
+            # this is only what fits legibly in a 480px column.
+            _out_h = args.output_height or OUT_H
+            _comp_w = int(round((OUT_W + MAP_PANEL_SIZE + 2) * (_out_h / OUT_H) / 2)) * 2
+            tech_lines = [
+                f"{_comp_w}x{_out_h} · {'h264_vt' if use_vt else 'libx264'} · ffmpeg {ffmpeg_version()}",
+                (f"cuts: optical-flow ego-motion"
+                 if (_HAVE_EGO and not args.no_video_drive_detect)
+                 else "cuts: GPS speed"),
+            ]
             rendered = render_base_right_panel(
                 group_track,
                 title=panel_title,
                 font_path=font_path,
                 include_stats=panel_stats_enabled,
+                tech_lines=tech_lines,
             )
             if rendered is None:
                 print("  ! map widget skipped: PIL/Pillow not installed."
