@@ -533,15 +533,22 @@ def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
                 rear_map[m.group(1)] = rear_dir / f
 
     clips: list[Clip] = []
+    n_no_rear = 0
     for ts in sorted(front_map):
         path_f, dur = front_map[ts]
         epoch = calendar.timegm(datetime.strptime(ts, "%Y%m%d%H%M%S").timetuple())
         rear_path: Path | None = rear_map.get(ts)
         if REAR_PIP_ENABLED and rear_dir is not None and rear_path is None:
-            # Rear cam expected but this clip is missing its rear pair.
-            print(f"  ! no rear pair for {ts}, skipping", file=sys.stderr)
-            continue
+            # The rear cam is on for the rest of the card, but THIS clip has no
+            # rear file (rear disconnected, or its file was loop-overwritten).
+            # Keep the clip and render it front-only — dropping it would throw
+            # away real footage (a whole day, on some cards). build_filter_complex
+            # branches on the per-clip `with_rear`, so the PiP is simply omitted.
+            n_no_rear += 1
         clips.append(Clip(ts, epoch, dur, path_f, rear_path))
+    if n_no_rear:
+        print(f"  note: {n_no_rear} clip(s) have no rear pair — rendered "
+              f"front-only (no PiP)")
     return clips
 
 
@@ -2307,7 +2314,12 @@ def build_filter_complex(
         f"[0:v]crop={FRONT_W}:{FRONT_H - FRONT_CROP_TOP - FRONT_CROP_BOTTOM}:0:{FRONT_CROP_TOP},"
         f"scale={OUT_W}:{OUT_H},setsar=1,fps={OUT_FPS}[front];"
     )
-    if REAR_PIP_ENABLED:
+    # NOTE: branch on `with_rear`, NOT the global REAR_PIP_ENABLED. A single
+    # clip can be missing its rear file even when the rear cam is on for the
+    # rest of the trip; that clip has no rear INPUT, so referencing [1:v] here
+    # would grab the map-panel input instead. with_rear is set per clip by the
+    # caller (REAR_PIP_ENABLED and clip.rear is not None).
+    if with_rear:
         # Overlay coords by position. Only positions that don't collide with
         # the speed readout (bottom-right) or timestamp (bottom-left) are
         # offered — bottom-middle plus the three top corners.
@@ -2949,10 +2961,10 @@ def main() -> int:
                          "clips exceeds this many seconds (default 60).")
     ap.add_argument("--exit-skip-secs", type=int,
                     default=ci("exit_skip_secs", DEFAULT_EXIT_SKIP_SECS),
-                    help="Standard seek into the exit clip after a parking "
-                         "gap. Drive-resume detection refines this when GPS "
-                         "clearly shows continuous motion; otherwise this "
-                         "value is used as-is (default 30).")
+                    help="Last-resort seek into the exit clip after a parking "
+                         "gap, used only when BOTH video ego-motion and GPS "
+                         "drive-resume detection fail to find the drive-away. "
+                         f"Default {DEFAULT_EXIT_SKIP_SECS}.")
     ap.add_argument("--drive-resume-sustain-secs", type=int,
                     default=ci("drive_resume_sustain_secs", DRIVE_RESUME_SUSTAIN_SECS),
                     help="Seconds of continuous GPS motion required to "
