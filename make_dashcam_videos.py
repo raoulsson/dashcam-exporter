@@ -3057,12 +3057,14 @@ def main() -> int:
                          "OPT-IN: it calls a public service (rate-limited, cached "
                          "in .geocode_cache.json) and fails silently offline. "
                          "Everything else in the metadata is computed locally.")
-    ap.add_argument("--clean-output", action="store_true",
-                    help="Before encoding, delete existing trip_* files from the "
-                         "day folders this run will write to, so a re-group that "
-                         "shifted trip indices doesn't leave the old numbering "
-                         "behind as stale duplicates. Keeps info.txt and the "
-                         "caches. Implies a full re-render of those days.")
+    ap.add_argument("--no-clean-days", action="store_true",
+                    help="By DEFAULT a full render (no --drives) first clears the "
+                         "day folders it is about to write, so shifted trip "
+                         "indices don't leave stale duplicates behind — but ONLY "
+                         "those days; other imports' day folders in the same "
+                         "--out are never touched. Pass this to skip that reset "
+                         "and keep existing files (e.g. to resume a full render). "
+                         "Hidden entries and the --out-root caches are always kept.")
     ap.add_argument("--debug-cuts", type=int, default=0, nargs="?", const=5,
                     dest="debug_cuts", metavar="SECS",
                     help="DEBUG PREVIEW, not a normal render: produce a short clip "
@@ -3387,10 +3389,6 @@ def main() -> int:
     if args.dry_run:
         return 0
 
-    # --clean-output: wipe the previous numbering out of the day folders this
-    # run will write to. Trip indices shift whenever the grouping changes (more
-    # clips, different thresholds), so old trip_* files would otherwise linger
-    # next to the new ones as stale duplicates. info.txt and caches are kept.
     # PUBLISHED trip numbers. `idx` is the internal group index and counts the
     # fragments/stationary groups that never get rendered, so a day whose only
     # two real trips are groups 8 and 9 would publish "Trip 8"/"Trip 9". Number
@@ -3403,17 +3401,37 @@ def main() -> int:
         _per_day[d] = _per_day.get(d, 0) + 1
         pub_no[i] = _per_day[d]
 
-    if args.clean_output:
+    # FRESH OUTPUT for the days THIS run renders. Before writing, clear each
+    # destination day folder so a re-render (whose trip indices may have shifted
+    # after a re-group) leaves no stale trip_* behind. Critically, ONLY the day
+    # folders this run will write to are touched — `target_days` is derived from
+    # `wanted`, so rendering the 2026-07-19 import clears its 2026-07-15..18 days
+    # and never looks at an unrelated 2026-05-11 from a different import sharing
+    # the same --out. Hidden entries inside a day folder are kept; the folder and
+    # the --out-root caches are never removed.
+    #
+    # Gated to FULL renders (no --drives subset): a subset render is targeted /
+    # resume-like, so wiping sibling trips of the same day would be a footgun.
+    # --no-clean-days opts out entirely (manual resume of a full render).
+    full_render = explicit_set is None
+    if full_render and not args.no_clean_days:
         target_days = sorted({day_labels[i - 1] for i in wanted})
         removed = 0
         for d in target_days:
             dd = out_dir / d
             if dd.is_dir():
-                for p in sorted(dd.glob("trip_*")):
-                    p.unlink(missing_ok=True)
+                for p in dd.iterdir():
+                    if p.name.startswith("."):
+                        continue                       # keep hidden content
+                    if p.is_dir():
+                        shutil.rmtree(p, ignore_errors=True)
+                    else:
+                        p.unlink(missing_ok=True)
                     removed += 1
-        print(f"--clean-output: removed {removed} stale file(s) from "
-              f"{len(target_days)} day folder(s): {', '.join(target_days) or '-'}")
+        if target_days:
+            print(f"fresh output: cleared {removed} file(s) from the "
+                  f"{len(target_days)} day folder(s) this run renders "
+                  f"({', '.join(target_days)}); other day folders in {out_dir} untouched")
 
     work_dir = out_dir / ".intermediates"
     work_dir.mkdir(exist_ok=True)

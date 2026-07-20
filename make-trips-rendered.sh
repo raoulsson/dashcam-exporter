@@ -19,13 +19,14 @@
 # --sidecars-only, --output-height, --trip-return-m …) is passed straight
 # through to make_dashcam_videos.py.
 #
-# FRESH OUTPUT EVERY RUN: before rendering, the day folders inside --out are
-# reset so what's left afterwards is exactly this run's output — no stragglers
-# from a previously interrupted render. The output dir itself and its root-level
-# caches (.gpx_cache, .geocode_cache.json) are kept; a day folder that holds any
-# hidden file is kept too, with only its visible output cleared. The run log is
-# written INTO the output dir (render-<timestamp>.log). Read-only modes
-# (--dry-run, --sidecars-only) skip the reset and never delete anything.
+# FRESH OUTPUT for the days THIS run renders: before writing, each destination
+# day folder is cleared, so what's left afterwards is exactly this run's output
+# with no stragglers from a stopped render. ONLY the day folders this run writes
+# to are touched — rendering one import never disturbs another import's day
+# folders in the same --out. (This reset lives in make_dashcam_videos.py, which
+# knows which days it will write; it's skipped for a --drives subset and for the
+# read-only --sidecars-only mode. Pass --no-clean-days to keep existing files.)
+# The run log is written INTO the output dir (render-<timestamp>.log).
 #
 # Get the indices with `./list-trips-data.sh` first.
 #
@@ -74,38 +75,13 @@ for a in ${OPTS[@]+"${OPTS[@]}"} "$@"; do
 done
 OUT="${OUT/#\~/$HOME}"   # expand a leading ~ (bash won't, inside a var)
 
-# Before a render, reset the DAY FOLDERS inside the output dir. The output dir
-# itself (Output_Dashcam) is KEPT, and its root-level hidden caches
-# (.gpx_cache, .geocode_cache.json) are never even looked at — the glob below
-# is non-dot, so it only ever sees visible day folders like 2026-05-11.
-# For each such day folder:
-#   - no hidden files inside  -> remove the whole folder
-#   - hidden files inside     -> KEEP the folder, delete only its visible
-#                                output (mp4 / html / gpx / txt / log / …)
-# Skipped for read-only modes — a dry-run or sidecars-only pass must delete
-# nothing (a dry-run wiping intermediates once crashed a live render).
-CLEAN=1
-for a in "$@"; do
-    case "$a" in
-        --dry-run|--sidecars-only|--write-config|--write-config=*) CLEAN=0 ;;
-    esac
-done
-if [ "$CLEAN" -eq 1 ] && [ -d "$OUT" ]; then
-    echo ">>> Output dir: $OUT  — resetting day folders (kept: the dir itself + root caches)"
-    shopt -s nullglob
-    for d in "$OUT"/*/; do
-        if find "$d" -mindepth 1 -maxdepth 1 -name '.*' | grep -q .; then
-            find "$d" -mindepth 1 -maxdepth 1 ! -name '.*' -exec rm -rf {} +
-            echo "    cleaned, kept hidden content: ${d#"$OUT"/}"
-        else
-            rm -rf "$d"
-            echo "    removed: ${d#"$OUT"/}"
-        fi
-    done
-    shopt -u nullglob
-elif [ "$CLEAN" -eq 0 ]; then
-    echo ">>> Output dir: $OUT  — read-only mode, NOT cleaning"
-fi
+# NOTE: the fresh-output reset lives in make_dashcam_videos.py, NOT here. It
+# clears ONLY the day folders THIS run actually renders (e.g. rendering the
+# 2026-07-19 import clears its 2026-07-15..18 days and leaves an unrelated
+# 2026-05-11 from another import untouched). Doing it in the wrapper meant
+# blindly wiping every day folder in --out, which once deleted a different
+# import's output — never again. The wrapper only ensures --out exists.
+echo ">>> Output dir: $OUT"
 mkdir -p "$OUT"
 
 # Tee stdout+stderr into a timestamped log file that lives IN the output dir,

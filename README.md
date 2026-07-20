@@ -319,17 +319,20 @@ want to iterate on `parking_entry_pad` / `parking_exit_pad`.
 
 ## Restartability and logs
 
-- **`make-trips-rendered.sh` starts fresh every run.** Before rendering it
-  resets the day folders inside `--out`, so what's left afterwards is exactly
-  this run's output — nothing lingers from a render you stopped partway. The
-  output dir itself and its root-level caches (`.gpx_cache`,
-  `.geocode_cache.json`) are kept; a day folder that contains any hidden file
-  is kept too, with only its visible output cleared. Read-only modes
-  (`--dry-run`, `--sidecars-only`) skip the reset and delete nothing. Because
-  of the reset, a wrapper re-run does **not** resume a partial render — it
-  redoes the selected trips. To resume instead (keep completed trips, add the
-  rest), call `make_dashcam_videos.py` directly: an existing `.mp4` is skipped
-  unless you pass `--force`.
+- **A full render starts fresh — but only for the days it writes.** Before
+  encoding, each destination day folder is cleared, so a re-render (whose trip
+  indices may have shifted after a re-group) leaves no stale `trip_*` behind.
+  Only the day folders **this run renders** are touched: rendering the
+  `2026-07-19` import clears its `2026-07-15..18` days and never disturbs an
+  unrelated `2026-05-11` from another import sharing the same `--out`. Hidden
+  entries inside a day folder, and the `--out`-root caches (`.gpx_cache`,
+  `.geocode_cache.json`), are always kept. The reset is **skipped** for a
+  `--drives` subset (targeted / resume-like) and for `--sidecars-only`; pass
+  `--no-clean-days` to skip it on a full render too. Because a full render
+  resets its days, re-running it redoes those trips rather than resuming — to
+  resume (keep completed trips, add the rest), use `--no-clean-days` or a
+  `--drives` subset, where an existing `.mp4` is skipped unless you pass
+  `--force`.
 - Sidecars are emitted unconditionally, even when the `.mp4` exists, so a
   palette / unit / segmentation tweak lands via a quick `--sidecars-only` run.
 - `make-trips-rendered.sh` tees stdout+stderr into a `render-YYYYMMDD-HHMMSS.log`
