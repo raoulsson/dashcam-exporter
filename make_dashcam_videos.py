@@ -488,6 +488,7 @@ MAP_PANEL_GUTTER_PX = 2
 
 FRONT_RE = re.compile(r"^(\d{14})_(\d+)\.mp4$")
 REAR_RE  = re.compile(r"^(\d{14})_(\d+)_A\.mp4$")
+REAR_PAIR_TOLERANCE_S = 2   # pair front↔rear when their timestamps differ by ≤ this
 GPX_RE   = re.compile(r"^(\d{14})_(\d+)_D\.gpx$")
 
 KNOTS_TO_KMH = 1.852
@@ -608,11 +609,15 @@ def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
             front_map[m.group(1)] = (front_dir / f, int(m.group(2)))
 
     rear_map: dict[str, Path] = {}
+    rear_by_epoch: dict[int, Path] = {}
     if rear_dir is not None and rear_dir.is_dir():
         for f in sorted(os.listdir(rear_dir)):
             m = REAR_RE.match(f)
             if m:
-                rear_map[m.group(1)] = rear_dir / f
+                rts = m.group(1)
+                rear_map[rts] = rear_dir / f
+                rear_by_epoch[calendar.timegm(
+                    datetime.strptime(rts, "%Y%m%d%H%M%S").timetuple())] = rear_dir / f
 
     clips: list[Clip] = []
     n_no_rear = 0
@@ -620,6 +625,15 @@ def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
         path_f, dur = front_map[ts]
         epoch = calendar.timegm(datetime.strptime(ts, "%Y%m%d%H%M%S").timetuple())
         rear_path: Path | None = rear_map.get(ts)
+        if rear_path is None and rear_by_epoch:
+            # DDPAI sometimes writes the rear file 1-2s off the front's second
+            # (e.g. front 18:17:55, rear 18:17:56). Exact-timestamp matching then
+            # reads a real rear clip as "missing", dropping its PiP. Pair with the
+            # nearest rear within REAR_PAIR_TOLERANCE_S before giving up. (Clips
+            # are ~60s apart, so this window can't mis-pair adjacent clips.)
+            _best = min(rear_by_epoch, key=lambda e: abs(e - epoch))
+            if abs(_best - epoch) <= REAR_PAIR_TOLERANCE_S:
+                rear_path = rear_by_epoch[_best]
         if REAR_PIP_ENABLED and rear_dir is not None and rear_path is None:
             # The rear cam is on for the rest of the card, but THIS clip has no
             # rear file (rear disconnected, or its file was loop-overwritten).
