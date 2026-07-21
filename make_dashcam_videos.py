@@ -3401,24 +3401,27 @@ def main() -> int:
         _per_day[d] = _per_day.get(d, 0) + 1
         pub_no[i] = _per_day[d]
 
-    # FRESH OUTPUT for the days THIS run renders. Before writing, clear each
-    # destination day folder so a re-render (whose trip indices may have shifted
-    # after a re-group) leaves no stale trip_* behind. Critically, ONLY the day
-    # folders this run will write to are touched — `target_days` is derived from
-    # `wanted`, so rendering the 2026-07-19 import clears its 2026-07-15..18 days
-    # and never looks at an unrelated 2026-05-11 from a different import sharing
-    # the same --out. Hidden entries inside a day folder are kept; the folder and
-    # the --out-root caches are never removed.
-    #
-    # Gated to FULL renders (no --drives subset): a subset render is targeted /
-    # resume-like, so wiping sibling trips of the same day would be a footgun.
-    # --no-clean-days opts out entirely (manual resume of a full render).
+    # Output is NAMESPACED BY IMPORT: everything from one import lives under
+    # out_dir/<import-name>/<day>/. This makes cross-card clobbering impossible —
+    # two different cards that both contain, say, May 11 footage land in
+    # out_dir/2026-05-11/2026-05-11/ and out_dir/import-3904994/2026-05-11/,
+    # separate subtrees that can never overwrite each other. (DDPAI cards hoard
+    # old event clips, so a single import routinely spans many historical days —
+    # that is exactly how a "06-22" card once reset the day back to April and
+    # wiped a 2026-05-11 rendered from a different, already-deleted card.)
+    import_ns = out_dir / root.name
+
+    # FRESH OUTPUT for the days THIS run renders — but ONLY inside this import's
+    # own namespace. A re-render clears its own stale trip_* (indices shift on a
+    # re-group); every OTHER import is physically in a different folder and is
+    # never touched. Gated to FULL renders (a --drives subset is resume-like);
+    # --no-clean-days opts out. Hidden entries and the out-root caches are kept.
     full_render = explicit_set is None
     if full_render and not args.no_clean_days:
         target_days = sorted({day_labels[i - 1] for i in wanted})
         removed = 0
         for d in target_days:
-            dd = out_dir / d
+            dd = import_ns / d
             if dd.is_dir():
                 for p in dd.iterdir():
                     if p.name.startswith("."):
@@ -3429,9 +3432,9 @@ def main() -> int:
                         p.unlink(missing_ok=True)
                     removed += 1
         if target_days:
-            print(f"fresh output: cleared {removed} file(s) from the "
-                  f"{len(target_days)} day folder(s) this run renders "
-                  f"({', '.join(target_days)}); other day folders in {out_dir} untouched")
+            print(f"fresh output: cleared {removed} file(s) under "
+                  f"{import_ns.name}/ for day(s) {', '.join(target_days)} "
+                  f"(only this import's namespace; other imports untouched)")
 
     work_dir = out_dir / ".intermediates"
     work_dir.mkdir(exist_ok=True)
@@ -3462,11 +3465,11 @@ def main() -> int:
         fringe_tag = f"_debugcuts{args.debug_cuts}s" if args.debug_cuts > 0 else ""
         day_label = day_labels[idx - 1]
         label = f"{day_label}_{start:%H-%M}_{pub_no[idx]:02d}"
-        # Organise the output into one folder per EXTRACT day (the 04:00-rollover
-        # day the trip belongs to) — which need not match the import folder's
-        # name (a single import can span several days). An info.txt in each day
-        # folder records the source import folder so it can be traced back.
-        day_dir = out_dir / day_label
+        # Output is namespaced by import: out_dir/<import-name>/<extract-day>/.
+        # The extract day (04:00-rollover) groups a card's trips; the import name
+        # above it keeps two cards that share a calendar day in separate subtrees
+        # so they can never overwrite each other. info.txt records the source.
+        day_dir = import_ns / day_label
         day_dir.mkdir(parents=True, exist_ok=True)
         info_txt = day_dir / "info.txt"
         if not info_txt.exists():

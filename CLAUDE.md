@@ -101,11 +101,20 @@ the map-widget panel (prints a warning). `.venv/` and `.env` are gitignored.
 - Inputs:  `~/rsc-data/Import_Dashcam/<label>/DCIM/{200video/{front,rear},203gps,...}`
   — one folder per import (folder name is arbitrary, usually the import date;
   grouping is timestamp-driven and one folder can span several days of clips).
-- Outputs: `~/rsc-data/Output_Dashcam/` — the `--out` target. The exporter writes
-  one subfolder per EXTRACT day (04:00-rollover), e.g. `Output_Dashcam/2026-07-15/`,
-  each with its trips + an `info.txt` naming the source import folder (extract day
-  ≠ import folder name when a card spans days). `.gpx_cache/.intermediates` stay
-  at the `--out` root. (`Dashcam_Videos_working/` was the old scratch out-dir.)
+- Outputs: `~/rsc-data/Output_Dashcam/` — the `--out` target. Output is
+  **namespaced by import**: `Output_Dashcam/<import-name>/<extract-day>/`, e.g.
+  `Output_Dashcam/2026-07-19/2026-07-15/`. The import folder (`root.name`) is the
+  top namespace; the extract day (04:00-rollover) groups a card's trips beneath
+  it. This is what makes cross-card clobbering **impossible**: DDPAI cards hoard
+  old event clips, so two different cards routinely contain the same calendar day
+  — but they land in `<cardA>/<day>/` and `<cardB>/<day>/`, separate subtrees. The
+  fresh-output reset only ever clears inside the running import's own namespace,
+  so rendering one card never touches another's output (rendering a "06-22" card
+  once reset the day back to April and wiped a `2026-05-11` from a deleted card —
+  the namespacing prevents exactly that). Each day folder still has its trips +
+  an `info.txt` naming the source import. `.gpx_cache/.intermediates` stay at the
+  `--out` root, shared. The goodnight-drives site walks this with `rglob` and
+  regroups by day for display. (`Dashcam_Videos_working/` was the old scratch dir.)
 
 Pass `--root <import-folder>` and `--out <output-dir>`. Do NOT bake these
 absolute personal paths into the tracked `config.txt` (shared template) — set
