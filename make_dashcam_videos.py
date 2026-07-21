@@ -1879,7 +1879,23 @@ legend.addTo(map);
 """
 
 
-def write_html_map(out_path: Path, points: list[tuple[float, float, float, datetime]], title: str) -> None:
+def segment_by_gap(points, gap_secs):
+    """Split the track ONLY where consecutive fixes are more than gap_secs apart
+    in TIME — i.e. at engine-off stops, where a Fast-Forward is inserted — not at
+    brief GPS dropouts. This is what the map legs colour by, so a signal loss on
+    the highway no longer looks like a stop (unlike segment_track's 30s/200m)."""
+    if not points:
+        return []
+    segs = [[points[0]]]
+    for p in points[1:]:
+        if (p[3] - segs[-1][-1][3]).total_seconds() > gap_secs:
+            segs.append([p])
+        else:
+            segs[-1].append(p)
+    return segs
+
+def write_html_map(out_path: Path, points: list[tuple[float, float, float, datetime]],
+                   title: str, leg_gap_secs: float = 60) -> None:
     if not points:
         return
     stats = _track_stats(points)
@@ -1891,7 +1907,7 @@ def write_html_map(out_path: Path, points: list[tuple[float, float, float, datet
         f"<span>avg {stats['avg_display']:.0f} {sunit}</span>"
         f"<span>{stats['n_segments']} segments / {stats['n']} points</span>"
     )
-    segments = segment_track(points)
+    segments = segment_by_gap(points, leg_gap_secs)   # legs = between engine-off stops (FFs)
     js_segments = [
         [[round(lat, 6), round(lon, 6), round(kmh, 1), dt.strftime("%Y-%m-%d %H:%M:%S UTC")]
          for (lat, lon, kmh, dt) in seg]
@@ -3539,7 +3555,7 @@ def main() -> int:
             html_path  = sidecar_base.with_suffix(".html")
             gpx_path   = sidecar_base.with_suffix(".gpx")
             links_path = sidecar_base.with_name(sidecar_base.name + "_links.txt")
-            write_html_map(html_path, group_track, title)
+            write_html_map(html_path, group_track, title, args.inter_clip_gap_secs)
             write_gpx_export(gpx_path, group_track, title)
             write_links_sidecar(links_path, group_track, title)
             stats = _track_stats(group_track)
