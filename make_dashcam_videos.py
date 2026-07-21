@@ -1688,6 +1688,17 @@ def _haversine_km(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> flo
     return 2 * R * math.asin(math.sqrt(h))
 
 
+def _nearest_track_fix(track: list[tuple[float, float, float, datetime]],
+                       target: datetime) -> tuple[float, float] | None:
+    """Return (lat, lon) of the track fix whose datetime is nearest `target`,
+    or None if the track is empty. Used to place each interior stop (the fix
+    right before a 'Fast forwarding…' slide) in the per-trip meta."""
+    if not track:
+        return None
+    best = min(track, key=lambda p: abs((p[3] - target).total_seconds()))
+    return (best[0], best[1])
+
+
 def segment_track(points: list[tuple[float, float, float, datetime]],
                   min_points: int = SEGMENT_MIN_POINTS,
                   ) -> list[list[tuple[float, float, float, datetime]]]:
@@ -1796,20 +1807,15 @@ L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
     maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
 }}).addTo(map);
 
-var COLORS = ['#6baed6', '#2171b5', '#08519c', '#08306b', '#031432'];
-function speedBucket(kmh) {{
-  if (kmh < 20) return 0;
-  if (kmh < 40) return 1;
-  if (kmh < 60) return 2;
-  if (kmh < 80) return 3;
-  return 4;
-}}
-function drawRun(latlngs, bucket) {{
+// One cycling colour per LEG (each segment = a drive between stops / FFs).
+var COLORS = ['#3b82f6', '#ec4899', '#06b6d4', '#22c55e', '#f59e0b',
+              '#a855f7', '#ef4444', '#14b8a6'];
+function drawRun(latlngs, color) {{
   if (latlngs.length < 2) return;
   // White halo underneath for contrast over arterials and beige residentials
   L.polyline(latlngs, {{color: '#ffffff', weight: 8, opacity: 0.85,
                        lineJoin: 'round', lineCap: 'round'}}).addTo(map);
-  L.polyline(latlngs, {{color: COLORS[bucket], weight: 5, opacity: 1.0,
+  L.polyline(latlngs, {{color: color, weight: 5, opacity: 1.0,
                        lineJoin: 'round', lineCap: 'round'}}).addTo(map);
 }}
 
@@ -1817,22 +1823,13 @@ var bounds = L.latLngBounds([]);
 for (var s = 0; s < segments.length; s++) {{
   var seg = segments[s];
   if (seg.length < 2) continue;
-  // Walk the segment, grouping consecutive points of the same speed bucket
-  // into one continuous polyline.
-  var runPoints = [[seg[0][0], seg[0][1]]];
-  var runBucket = speedBucket(seg[1][2]);
-  for (var i = 1; i < seg.length; i++) {{
-    var pb = speedBucket(seg[i][2]);
-    if (pb === runBucket) {{
-      runPoints.push([seg[i][0], seg[i][1]]);
-    }} else {{
-      drawRun(runPoints, runBucket);
-      runPoints = [[seg[i-1][0], seg[i-1][1]], [seg[i][0], seg[i][1]]];
-      runBucket = pb;
-    }}
+  // Each segment (a drive between stops) is drawn as one solid, cycling colour.
+  var pts = [];
+  for (var i = 0; i < seg.length; i++) {{
+    pts.push([seg[i][0], seg[i][1]]);
     bounds.extend([seg[i][0], seg[i][1]]);
   }}
-  drawRun(runPoints, runBucket);
+  drawRun(pts, COLORS[s % COLORS.length]);
   // Mark the seam between segments with a small grey dot so the gap is obvious
   if (seg.length) {{
     var last = seg[seg.length - 1];
@@ -1857,12 +1854,8 @@ var legend = L.control({{position: 'bottomright'}});
 legend.onAdd = function() {{
   var div = L.DomUtil.create('div', 'legend');
   div.innerHTML =
-    '<div><b>Speed (km/h)</b></div>' +
-    '<div class="row"><div class="swatch" style="background:#6baed6"></div>&lt; 20</div>' +
-    '<div class="row"><div class="swatch" style="background:#2171b5"></div>20–40</div>' +
-    '<div class="row"><div class="swatch" style="background:#08519c"></div>40–60</div>' +
-    '<div class="row"><div class="swatch" style="background:#08306b"></div>60–80</div>' +
-    '<div class="row"><div class="swatch" style="background:#031432"></div>&gt; 80</div>';
+    '<div><b>Route</b></div>' +
+    '<div class="row">each colour = one leg between stops</div>';
   return div;
 }};
 legend.addTo(map);
@@ -3560,6 +3553,11 @@ def main() -> int:
             return (f"https://www.google.com/maps/search/?api=1&query={fix[0]:.6f},{fix[1]:.6f}"
                     if fix else None)
 
+        # Interior stops (one per 'Fast forwarding…' slide). Populated by the
+        # per-clip render loop below and written into the meta AFTER that loop
+        # (see the post-render meta write). Same list object referenced here.
+        stops: list[dict] = []
+
         meta = {
             "trip_index": pub_no[idx],
             "group_index": idx,   # internal grouping index, for traceability
@@ -3585,6 +3583,8 @@ def main() -> int:
             "avg_kmh": round(st["avg_kmh"], 1) if st else 0.0,
             "gps_points": st["n"] if st else 0,
             "gps_segments": st["n_segments"] if st else 0,
+            # --- interior stops (filled in after the render loop) ------------
+            "stops": stops,
             # --- how it was made ---------------------------------------------
             "technical": {
                 "resolution": f"{FRONT_W}x{FRONT_H} source",
@@ -3608,11 +3608,24 @@ def main() -> int:
             if last_fix:
                 meta["end_place"] = reverse_geocode(*last_fix, gc_cache)
         meta_path = sidecar_base.with_name(sidecar_base.name + "_meta.json")
-        meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
         if args.sidecars_only:
+            # Metadata-only pass: no render happens, so `stops` can't be
+            # recomputed here — PRESERVE any a prior render already wrote rather
+            # than clobbering them with an empty list.
+            if meta_path.exists():
+                try:
+                    meta["stops"] = json.loads(meta_path.read_text()).get("stops", [])
+                except Exception:
+                    pass
+            meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
             continue
 
+        # NOTE: for a real render the meta is written AFTER the clip loop, once
+        # `stops` is populated (see below). A skipped-because-already-rendered
+        # trip therefore does NOT rewrite its meta here, which preserves the
+        # `stops` a previous successful render wrote (they can't be recomputed
+        # without re-rendering; re-run with --force to refresh).
         if final.exists():
             if args.force:
                 print(f"  video: {final.name} already exists — re-encoding (--force)")
@@ -3797,6 +3810,11 @@ def main() -> int:
                 _pk = k
 
         intermediates: list[Path] = []
+        # Running position in the OUTPUT video (playable seconds from the
+        # start). Advanced by each emitted clip's played length and by each
+        # 'Fast forwarding…' slide (TRANSITION_SECS). Used to stamp each
+        # interior stop with where its FF slide lands in the final video.
+        video_secs = 0.0
         prev_emitted_clip: Clip | None = None
         # Last known good marker pixel — persisted across clips so parked /
         # scrambled-GPS clips show a frozen dot at the last real location
@@ -3833,7 +3851,17 @@ def main() -> int:
                             output_height=args.output_height,
                             no_audio=args.no_audio,
                         )
+                    # Record the stop: its FF slide lands at the current output
+                    # position; the fix nearest the pre-gap moment gives lat/lon.
+                    _fix = _nearest_track_fix(group_track, prev_end)
+                    if _fix is not None:
+                        stops.append({
+                            "video_secs": round(video_secs, 2),
+                            "lat": _fix[0], "lon": _fix[1],
+                            "park_secs": round(float(gap_secs or 0), 1),
+                        })
                     intermediates.append(gap_trans)
+                    video_secs += TRANSITION_SECS
                     # After a gap-FF, treat this clip as a parking-exit so the
                     # engine-on-but-not-moving head gets trimmed (the same way
                     # parking-detected exits do). Without this, the next clip
@@ -4008,11 +4036,27 @@ def main() -> int:
                 no_audio=args.no_audio, output_height=args.output_height,
             )
             intermediates.append(inter)
+            # Advance the output-position clock by this clip's played length.
+            # Runs for every emitted clip exactly once (skips/head-skips and the
+            # debug-cuts middle-drop all `continue` before reaching here).
+            video_secs += (trim_seconds if trim_seconds is not None
+                           else (clip.duration - trim_start))
 
             # After the entry slice of a parking run, splice in the transition.
             if action == "entry":
                 trans = work_dir / f"{group_kind}{idx:02d}_clip{ci:03d}_transition.mp4"
                 skipped = skipped_secs_for.get(ci0)
+                # Record the stop: the FF slide plays right after this entry
+                # slice (video_secs already includes it). Park onset time =
+                # clip start + park_sec (this entry clip IS the run's start).
+                _stop_dt = clip.dt + timedelta(seconds=park_sec)
+                _fix = _nearest_track_fix(group_track, _stop_dt)
+                if _fix is not None:
+                    stops.append({
+                        "video_secs": round(video_secs, 2),
+                        "lat": _fix[0], "lon": _fix[1],
+                        "park_secs": round(float(skipped or 0), 1),
+                    })
                 if not trans.exists():
                     note = (f", ~{_fmt_skip_duration(skipped).replace(' skipped','')} ahead"
                             if skipped else "")
@@ -4024,6 +4068,7 @@ def main() -> int:
                         no_audio=args.no_audio,
                     )
                 intermediates.append(trans)
+                video_secs += TRANSITION_SECS
 
             # Remember this clip so the next iteration can measure the gap.
             prev_emitted_clip = clip
@@ -4031,6 +4076,11 @@ def main() -> int:
         print(f"  concatenating {len(intermediates)} clips -> {final.name}")
         concat_clips(intermediates, final)
         print(f"  ✓ {final}")
+
+        # Now that the render loop has populated `stops`, write the meta. This
+        # is the meta write for a real render (the pre-render write only happens
+        # in --sidecars-only mode); `stops` reflects the actual output video.
+        meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
         if not args.keep_intermediates:
             for p in intermediates:
