@@ -3528,6 +3528,12 @@ def main() -> int:
                       f"fix{'es' if n_pruned != 1 else ''} from {len(group_track_raw)} raw")
         else:
             group_track = []
+        # GPS <time> is UTC, but a clip's filename time is the camera's LOCAL
+        # clock; they differ by the camera timezone. Compute that offset once
+        # (first fix vs first clip) so a stop's local time can be matched to the
+        # right group_track fix — without it, every stop resolves to the last
+        # fix (the trip's end) because a local time is hours past all UTC fixes.
+        _gps_time_offset = (group_track[0][3] - group[0].dt) if group_track else timedelta(0)
         if not args.no_map_sidecars and group_track:
             title = f"Trip {pub_no[idx]} — {day_label} — {start:%H:%M}"
             html_path  = sidecar_base.with_suffix(".html")
@@ -3867,7 +3873,7 @@ def main() -> int:
                         )
                     # Record the stop: its FF slide lands at the current output
                     # position; the fix nearest the pre-gap moment gives lat/lon.
-                    _fix = _nearest_track_fix(group_track, prev_end)
+                    _fix = _nearest_track_fix(group_track, prev_end + _gps_time_offset)
                     if _fix is not None:
                         stops.append({
                             "video_secs": round(video_secs, 2),
@@ -4064,7 +4070,7 @@ def main() -> int:
                 # slice (video_secs already includes it). Park onset time =
                 # clip start + park_sec (this entry clip IS the run's start).
                 _stop_dt = clip.dt + timedelta(seconds=park_sec)
-                _fix = _nearest_track_fix(group_track, _stop_dt)
+                _fix = _nearest_track_fix(group_track, _stop_dt + _gps_time_offset)
                 if _fix is not None:
                     stops.append({
                         "video_secs": round(video_secs, 2),
