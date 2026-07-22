@@ -74,7 +74,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 DEFAULT_ROOT = "/Volumes/NO NAME"
-DEFAULT_OUT  = "~/Desktop/Dashcam_Videos"
+DEFAULT_OUT  = "~/rsc-data/Output_Dashcam"   # where the site's `videos` symlink points
 DEFAULT_FONT = "/System/Library/Fonts/Supplemental/Courier New Bold.ttf"
 FALLBACK_FONT = "/System/Library/Fonts/Menlo.ttc"
 
@@ -127,7 +127,7 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 #root = /Volumes/NO NAME
 
 # Where the rendered videos and sidecars get written.
-#out = ~/Desktop/Dashcam_Videos
+#out = ~/rsc-data/Output_Dashcam
 
 
 # ============================================================================

@@ -20,7 +20,7 @@
 #root = /Volumes/NO NAME
 
 # Where the rendered videos and sidecars get written.
-#out = ~/Desktop/Dashcam_Videos
+#out = ~/rsc-data/Output_Dashcam
 
 
 # ============================================================================
