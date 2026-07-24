@@ -405,9 +405,11 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # hour). Aspect ratio is preserved; VT bitrate auto-scales.
 #output_height = 1080
 
-# Encoder selection.
-# software = true forces libx264 even if VideoToolbox (Mac hardware) is available.
-#software = false
+# Encoder selection. libx264 (software) is the DEFAULT: ~2-3x smaller files than
+# hardware VideoToolbox at the same quality (far better bits-per-pixel via CRF),
+# and portable. Trade-off: slower to encode. Set false to use Mac hardware (bigger
+# files, much faster). For a further ~2x, also set output_height = 720 above.
+software = true
 
 # Keep the per-clip intermediate .mp4 files after concat.
 #keep_intermediates = false
@@ -2937,7 +2939,7 @@ def main() -> int:
     default_no_map_sidecars  = not cb("map_sidecars",  True)
     default_no_skip_parking  = not cb("skip_parking",  True)
     default_no_audio         = not cb("audio",         True)
-    default_software         =     cb("software",      False)
+    default_software         =     cb("software",      True)   # libx264: smaller files
     default_keep_inter       =     cb("keep_intermediates", False)
 
     # Override the structural module-level constants from config (these are read
