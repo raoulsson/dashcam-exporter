@@ -32,6 +32,7 @@ USAGE
     python3 make_dashcam_videos.py --drives 8          # only trip 8
     python3 make_dashcam_videos.py --dry-run           # list trips without encoding
     python3 make_dashcam_videos.py --sidecars-only     # refresh sidecars without encoding
+    python3 make_dashcam_videos.py --print-groups      # same grouping, as JSON on stdout
     python3 make_dashcam_videos.py --force             # overwrite existing .mp4s
     python3 make_dashcam_videos.py --write-config .    # dump a fully commented config.txt
 
@@ -3040,6 +3041,14 @@ def main() -> int:
                          ".intermediates/ are always wiped at the start of a "
                          "run regardless — they're scratch, not cache.)")
     ap.add_argument("--dry-run", action="store_true", help="List drives and exit without encoding")
+    ap.add_argument("--print-groups", action="store_true",
+                    help="Machine-readable --dry-run: print the trip grouping as "
+                         "JSON on stdout (and nothing else — every human-readable "
+                         "line goes to stderr) and exit without encoding. The JSON "
+                         "lists, per trip, the exact front/rear source files the "
+                         "scanner assigned to it, so a caller can act on a trip's "
+                         "clips (e.g. drop them from the import) without having to "
+                         "re-derive the boundaries from filenames.")
     ap.add_argument("--no-timestamp", action="store_true", default=default_no_timestamp,
                     help="Skip the burned-in date/time overlay")
     ap.add_argument("--no-speed", action="store_true", default=default_no_speed,
@@ -3184,6 +3193,17 @@ def main() -> int:
         print(f"wrote {target.resolve()}")
         return 0
 
+    # --print-groups promises "JSON on stdout and nothing else". The scan prints a
+    # page of progress on its way to the grouping, and chasing every one of those
+    # prints with a file= argument would be a permanent maintenance tax that a
+    # future print would silently break. Move the whole conversational stream to
+    # stderr instead and keep the real stdout aside for the one JSON document —
+    # then stdout is machine-clean by construction, and the scan's chatter is
+    # still there for a human watching the run.
+    _json_stdout = sys.stdout
+    if args.print_groups:
+        sys.stdout = sys.stderr
+
     if cfg:
         print(f"config:    loaded {len(cfg)} setting(s) from {config_path}")
 
@@ -3198,7 +3218,7 @@ def main() -> int:
     # model: intermediates are scratch space for ONE run, finals persist and
     # the user controls regeneration by deleting a final .mp4 (or passing
     # --force, which deletes it for you).
-    encoding_run = not (args.dry_run or args.sidecars_only)
+    encoding_run = not (args.dry_run or args.sidecars_only or args.print_groups)
 
     # Two encoders sharing one --out would delete each other's scratch files
     # mid-encode (.intermediates is wiped at start). Take a PID lock so the
@@ -3412,17 +3432,29 @@ def main() -> int:
                   f"(GPS shows no real drive): {note}\n"
                   f"(force-encode by naming the index via --drives.)")
 
-    if args.dry_run:
-        return 0
-
     # PUBLISHED trip numbers. `idx` is the internal group index and counts the
     # fragments/stationary groups that never get rendered, so a day whose only
     # two real trips are groups 8 and 9 would publish "Trip 8"/"Trip 9". Number
     # the trips that actually ship 1..N within their own day instead — that's
     # what ends up in the filename, the panel title and _meta.json.
+    #
+    # Computed BEFORE the --print-groups / --dry-run exits (it is pure
+    # arithmetic, no side effects) so those two modes can report the same
+    # publish numbers and output paths a real render would produce, from this
+    # one copy of the rule rather than a second one that could drift.
     pub_no: dict[int, int] = {}
     _per_day: dict[str, int] = {}
-    for i in sorted(wanted):
+    # An out-of-range --drives index is silently ignored by the render loop
+    # below (it walks the groups and skips what isn't wanted); without this
+    # bound it would blow up here on day_labels instead. Say so rather than
+    # filtering it away in silence — a typo'd index would otherwise scan the
+    # whole card, render nothing and exit 0, which reads as "nothing to do".
+    _oob = sorted(w for w in wanted if not (1 <= w <= len(groups)))
+    if _oob:
+        print(f"WARNING: ignoring --drives index/indices "
+              f"{', '.join(str(w) for w in _oob)}: only {len(groups)} "
+              f"{group_kind}s were found.", file=sys.stderr)
+    for i in sorted(w for w in wanted if 1 <= w <= len(groups)):
         d = day_labels[i - 1]
         _per_day[d] = _per_day.get(d, 0) + 1
         pub_no[i] = _per_day[d]
@@ -3437,13 +3469,79 @@ def main() -> int:
     # wiped a 2026-05-11 rendered from a different, already-deleted card.)
     import_ns = out_dir / root.name
 
+    if args.print_groups:
+        # Serialise the grouping the scan just produced — `groups` straight out of
+        # group_into_trips(), with `wanted`/`trip_moved` for the skip decision and
+        # `pub_no`/`import_ns` for the output naming. Nothing here re-derives a
+        # boundary; every file listed is a Clip object the grouper itself put in
+        # that trip. That matters because the caller (pipeline.py's drop step)
+        # DELETES the files in this list: inferring a trip's extent from filename
+        # timestamps would eventually cut one clip either side of a real boundary
+        # and destroy original footage.
+        payload = {"root": str(root), "out": str(out_dir), "trips": []}
+        for i, g in enumerate(groups, 1):
+            start = g[0].dt
+            end = g[-1].dt + timedelta(seconds=g[-1].duration)
+            renderable = i in wanted
+            # Say WHY a trip will not be rendered, in the same terms (and from
+            # the same conditions) as the "Auto-skipping …" lines above.
+            if renderable:
+                reason = None
+            elif len(g) < args.min_clips_per_group:
+                reason = (f"fragment: {len(g)} clip(s), fewer than "
+                          f"--min-clips-per-group {args.min_clips_per_group}")
+            elif not trip_moved[i - 1]:
+                reason = "stationary: GPS shows no real drive away from the anchor"
+            else:
+                reason = "not named by --drives"
+            entry = {
+                "index": i,
+                "day": day_labels[i - 1],
+                "start": start.strftime("%Y-%m-%d %H:%M:%S"),
+                "end": end.strftime("%Y-%m-%d %H:%M:%S"),
+                "clips": len(g),
+                "duration_secs": int((end - start).total_seconds()),
+                "renderable": renderable,
+                "reason": reason,
+                # Publish number and output basename, but only for a trip that
+                # would actually be rendered — the others get no output at all.
+                "pub_index": pub_no.get(i),
+                "out_base": (str(import_ns / day_labels[i - 1] /
+                                 f"trip_{day_labels[i - 1]}_{start:%H-%M}_{pub_no[i]:02d}")
+                             if renderable and i in pub_no else None),
+                "front": [str(c.front) for c in g],
+                # A clip can legitimately have no rear file (rear cam absent or
+                # its file loop-overwritten), so this list is often shorter than
+                # `front` and must not be zipped with it positionally.
+                "rear": [str(c.rear) for c in g if c.rear is not None],
+            }
+            payload["trips"].append(entry)
+        json.dump(payload, _json_stdout, indent=1)
+        _json_stdout.write("\n")
+        _json_stdout.flush()
+        return 0
+
+    if args.dry_run:
+        return 0
+
     # FRESH OUTPUT for the days THIS run renders — but ONLY inside this import's
     # own namespace. A re-render clears its own stale trip_* (indices shift on a
     # re-group); every OTHER import is physically in a different folder and is
     # never touched. Gated to FULL renders (a --drives subset is resume-like);
     # --no-clean-days opts out. Hidden entries and the out-root caches are kept.
+    #
+    # ALSO gated to an ENCODING run, which it was not until now — and that was a
+    # data-loss bug, not a nuance. A bare `--sidecars-only` (no --drives, so
+    # full_render is True) walked the day folders and unlinked everything in
+    # them, including finished .mp4 renders it had no intention of replacing:
+    # verified on a fixture, an existing trip_*.mp4 plus its .html and .gpx were
+    # deleted and only the rewritten _meta.json came back. The wrapper's own
+    # comment already claimed the reset was "skipped for the read-only
+    # --sidecars-only mode"; it was not. A metadata refresh must never remove a
+    # render, and pipeline.py's preview step runs exactly that command over an
+    # import that may already be partly rendered.
     full_render = explicit_set is None
-    if full_render and not args.no_clean_days:
+    if full_render and encoding_run and not args.no_clean_days:
         target_days = sorted({day_labels[i - 1] for i in wanted})
         removed = 0
         for d in target_days:
