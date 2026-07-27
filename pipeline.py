@@ -916,7 +916,31 @@ def step_import(ctx):
 
     clips = clip_count(ctx.card)
     size = tree_size(ctx.card / "DCIM")
-    print("  Source: %s  (%s clips, %s)" % (ctx.card, clips, human_bytes(size)))
+    print("  Source: %s  (%s clips, %s)" % (tilde(ctx.card), clips, human_bytes(size)))
+
+    # A card is mounted AND there is still footage from a previous import. The
+    # usual cycle is import -> render -> upload -> delete from local and card, so
+    # this means the last round was not finished. Importing on top of it mixes
+    # two cards in one place: trips get grouped across both, the renders land in
+    # one namespace, and untangling that afterwards means knowing which clip came
+    # from which card — which nothing records.
+    leftovers = import_candidates(ctx)
+    if leftovers:
+        print()
+        print(C.yellow("  The import area is not empty:"))
+        for src in leftovers:
+            print(C.yellow("    %s  %s clips, %s"
+                           % (tilde(src), clip_count(src), human_bytes(tree_size(src / "DCIM")))))
+        print(C.dim("  Importing now adds this card alongside that footage. Trips are"))
+        print(C.dim("  grouped across everything found, so the two cards would be mixed"))
+        print(C.dim("  and there is no record afterwards of which clip came from which."))
+        print(C.dim("  If the previous round is finished (rendered, uploaded, published),"))
+        print(C.dim("  clear it with step 8 first. If it is not, finish it first."))
+        if not confirm("  Import anyway, on top of what is there?", False):
+            return record(ctx, "Import from SD card", SKIPPED, started,
+                          "declined: import area not empty")
+        print()
+
     day = ask("  Day folder name [%s]: " % time.strftime("%Y-%m-%d"), time.strftime("%Y-%m-%d"))
     print(C.dim("  The card is NOT erased by default; import-sd-card.sh only deletes"))
     print(C.dim("  the card's files after the copy verifies file-for-file."))
