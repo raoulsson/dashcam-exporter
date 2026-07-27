@@ -105,7 +105,11 @@ VT_MAXRATE   = "10M"
 
 # Software encoder settings
 X264_PRESET  = "veryfast"
-X264_CRF     = "23"
+# 23 gave ~16 Mbps on real dashcam footage against a 7.1 Mbps library — CRF is
+# constant quality, so busy night scenes cost far more bits than clean daylight
+# (5.5 to 20.8 Mbps across one card). 26 lands near that older size; each +3 is
+# roughly half the bitrate. Raise it back for archival copies.
+X264_CRF     = "26"
 
 # Default config.txt template, dumped by `--write-config PATH`
 CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
@@ -426,7 +430,7 @@ software = true
 
 # Software H.264 (libx264) tuning.
 #x264_preset = veryfast
-#x264_crf    = 23
+#x264_crf    = 26
 """
 
 # Parking detection / "Fast forwarding..." transition defaults

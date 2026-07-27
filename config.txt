@@ -338,7 +338,7 @@ software = true
 
 # Software H.264 (libx264) tuning.
 #x264_preset = veryfast
-# 23 produced ~16 Mbps on this footage against a 7.1 Mbps library — CRF targets
-# constant quality, so busy night scenes cost far more bits than clean daylight.
-# 26 lands near the older size; each +3 is roughly half the bitrate.
-x264_crf    = 26
+# Constant quality, so bitrate follows how hard the footage is: 23 gave 5.5-20.8
+# Mbps across one card. Default 26 sits near a 7.1 Mbps library; each +3 is
+# roughly half the bitrate. Lower for archival, higher for a slow uplink.
+#x264_crf    = 26
