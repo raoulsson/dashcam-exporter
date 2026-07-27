@@ -386,6 +386,11 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
         tail = ""
         if last_raw and room > 12:
             t = last_raw.strip()
+            # The note already carries the counter, so a tail that starts with
+            # "[scan  17/ 239]" spends its width repeating it. Strip the bracket
+            # and show what it identifies — the file being worked on.
+            if note:
+                t = re.sub(r"^\[[^\]]*\]\s*", "", t)
             if len(t) > room:
                 # Keep the START. Both encoders and aws put what identifies the
                 # line at the front ("[ 4/6] 2026… encoding", "Completed 3.0
@@ -467,6 +472,10 @@ RE_AWS_BYTES = re.compile(r"Completed\s+([\d.]+)\s+(\w+)/~?([\d.]+)\s+(\w+)")
 RE_AWS_FILES = re.compile(r"Completed\s+(\d+)\s+file\(s\)\s+with\s+~?(\d+)\s+file\(s\) remaining")
 RE_AWS_UPLOAD = re.compile(r"^upload:\s+(.+?)\s+to\s+s3://")
 # make_dashcam_videos:     "[Trip 2/5] 2026-07-19 12:46 -> 13:20  (87 clips, ~14:02)"
+# The scanner announces each clip as it reads it: "[scan   17/ 239] NAME.mp4".
+# That loop is the long silent stretch of a scan, so it is the only thing that
+# can honestly drive a bar there.
+RE_SCAN = re.compile(r"^\[scan\s+(\d+)/(\d+)\]")
 RE_TRIP = re.compile(r"^\[Trip\s+(\d+)/(\d+)\]")
 #                          "  [ 12/ 87] 2026-07-19 12:46:03  encoding ..."
 RE_CLIP = re.compile(r"^\s*\[\s*(\d+)\s*/\s*(\d+)\s*\]")
@@ -482,6 +491,34 @@ def rsync_parser(line):
     pct = int(m.group(2)) / 100.0
     # rsync computes its own ETA from its own byte totals; prefer it over ours.
     return pct, "rate %s  rsync eta %s" % (m.group(3), m.group(4))
+
+
+def make_scan_parser():
+    """Two phases, reported honestly rather than as one bar.
+
+    Reading the clips is countable ("[scan i/n]") and takes most of the wall
+    clock on a big card. The per-trip work that follows is countable too
+    ("[Trip a/b]"), but it is a different unit — so once trips start arriving we
+    switch to counting those instead of leaving the bar pinned at 100% while the
+    slowest part of the run is still going.
+    """
+    state = {"i": 0, "n": 0, "trips": 0, "trips_total": 0}
+
+    def parse(line):
+        m = RE_SCAN.match(line)
+        if m and not state["trips"]:
+            state["i"], state["n"] = int(m.group(1)), int(m.group(2))
+            return ((state["i"] / state["n"]) if state["n"] else None,
+                    "reading %d/%d" % (state["i"], state["n"]))
+        m = RE_TRIP.match(line)
+        if m:
+            state["trips"] += 1
+            state["trips_total"] = int(m.group(2))
+            return ((state["trips"] - 1) / state["trips_total"] if state["trips_total"] else None,
+                    "trip %d/%d" % (state["trips"], state["trips_total"]))
+        return None
+
+    return parse
 
 
 def make_render_parser():
@@ -1345,7 +1382,7 @@ def step_preview(ctx):
     #    the real trip counter drives the bar; there are no per-clip lines in
     #    this mode, and the parser simply shows no clip counter.
     cmd = ["./make-trips-rendered.sh", "--sidecars-only", "--root", str(root)] + ctx.config_args
-    rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars", parser=make_render_parser(),
+    rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars", parser=make_scan_parser(),
                             keep=lambda l: l.startswith("[Trip "))
     if rc != 0:
         return record(ctx, "Preview all trips", FAILED, started, "sidecars exit %d" % rc)

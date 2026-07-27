@@ -748,7 +748,14 @@ def group_into_trips(
     n = len(clips)
     if n == 0:
         return [], []
-    eps = [_clip_endpoints(c, gps_dirs) for c in clips]
+    # Announce each clip as it is read. This loop is the long silent stretch of a
+    # scan — minutes on a full card — and without a line per clip any progress
+    # display upstream has nothing to show but the directory it started on, which
+    # is indistinguishable from being wedged.
+    eps = []
+    for i, c in enumerate(clips, 1):
+        print(f"[scan {i:4d}/{len(clips)}] {c.front.name}", flush=True)
+        eps.append(_clip_endpoints(c, gps_dirs))
     video = use_video and _HAVE_EGO
 
     def min_dist(idx, anchor):
