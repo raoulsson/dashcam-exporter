@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import argparse
 import calendar
+import hashlib
 import json
 import os
 import re
@@ -2928,6 +2929,70 @@ def _resolve_config_path(argv: list[str]) -> Path:
     return Path(__file__).resolve().parent / "config.txt"
 
 
+def _scan_cache_key(clips, gps_dirs=(), **params):
+    """Identity of a scan: everything the grouping depends on.
+
+    The clip set, every knob that changes how it is grouped, AND the GPS files —
+    because boundaries are derived from them and a .gpx can change while keeping
+    its name (the tar cache re-extracts under the same filenames). Name alone
+    would let a changed track reuse an old grouping, so size and mtime go in too.
+
+    Any difference must miss. A stale grouping is worse than a slow one: the drop
+    step deletes original footage by it.
+    """
+    h = hashlib.sha256()
+    for c in clips:
+        h.update(f"{c.front}|{c.duration}|{c.timestamp}\n".encode())
+    for d in gps_dirs:
+        if not d:
+            continue
+        try:
+            for f in sorted(Path(d).rglob("*.gpx")):
+                st = f.stat()
+                h.update(f"{f}|{st.st_size}|{int(st.st_mtime)}\n".encode())
+        except OSError:
+            h.update(f"{d}|unreadable\n".encode())
+    for k in sorted(params):
+        h.update(f"{k}={params[k]}\n".encode())
+    return h.hexdigest()
+
+
+def _scan_cache_load(path, key, clips):
+    """Rebuild groups from a cache written by this same session, or None."""
+    try:
+        d = json.loads(Path(path).read_text())
+    except Exception:
+        return None
+    if d.get("key") != key:
+        # Anything changed -> the whole cache is suspect, not just this entry.
+        # Leaving it would tempt a later run into a near-miss reuse.
+        try:
+            Path(path).unlink()
+        except OSError:
+            pass
+        return None
+    by_path = {str(c.front): c for c in clips}
+    groups = []
+    for g in d.get("groups", []):
+        try:
+            groups.append([by_path[fp] for fp in g])
+        except KeyError:
+            return None                     # clip set moved under us
+    return groups, d.get("trip_moved", [])
+
+
+def _scan_cache_store(path, key, groups, trip_moved):
+    try:
+        Path(path).write_text(json.dumps({
+            "key": key,
+            "groups": [[str(c.front) for c in g] for g in groups],
+            "trip_moved": list(trip_moved),
+        }))
+    except Exception:
+        pass                                # a cache that cannot be written is
+                                            # not a reason to fail the run
+
+
 class _LogTee:
     """Write to the terminal verbatim, and to a log file line-by-line.
 
@@ -3099,6 +3164,10 @@ def main() -> int:
                          ".intermediates/ are always wiped at the start of a "
                          "run regardless — they're scratch, not cache.)")
     ap.add_argument("--dry-run", action="store_true", help="List drives and exit without encoding")
+    ap.add_argument("--scan-cache", metavar="PATH",
+                    help="Reuse trip boundaries from PATH when the clip set and "
+                         "grouping options are unchanged, else compute and write them. "
+                         "Caller owns the file; delete it to force a recompute.")
     ap.add_argument("--log-file", metavar="PATH",
                     help="Also append output to PATH. Keeps stdout a real terminal so\n"
                          "per-clip progress can redraw in place, while the file still\n"
@@ -3276,7 +3345,7 @@ def main() -> int:
         sys.stdout = sys.stderr
 
     if cfg:
-        print(f"config:    loaded {len(cfg)} setting(s) from {config_path}")
+        print(f"config:      loaded {len(cfg)} setting(s) from {config_path}")
 
     root = Path(args.root).expanduser()
     out_dir = Path(args.out).expanduser()
@@ -3366,7 +3435,7 @@ def main() -> int:
     _sz = probe_video_size(_first_front) if _first_front else None
     if _sz:
         FRONT_W, FRONT_H = _sz
-        print(f"Source:    front {FRONT_W}x{FRONT_H}")
+        print(f"Source:      front {FRONT_W}x{FRONT_H}")
     _aspect_crop = max(0, FRONT_H - round(FRONT_W * OUT_H / OUT_W)) // 2
     FRONT_CROP_TOP    = ci("front_crop_top",    _aspect_crop)
     FRONT_CROP_BOTTOM = ci("front_crop_bottom", _aspect_crop)
@@ -3418,7 +3487,7 @@ def main() -> int:
         tar_cache_dir = out_dir / ".gpx_cache"
         n_arch, n_new = harvest_tarred_gpx(tar_dir, tar_cache_dir)
         if n_arch:
-            print(f"Tarred GPS: extracted {n_new} new .gpx files from {n_arch} archives "
+            print(f"Tarred GPS:  extracted {n_new} new .gpx files from {n_arch} archives "
                   f"into {tar_cache_dir}")
 
     gps_dirs = (gps_dir, tar_cache_dir)
@@ -3426,23 +3495,25 @@ def main() -> int:
     n_gpx_loose = sum(1 for f in os.listdir(gps_dir) if GPX_RE.match(f)) if gps_dir else 0
     n_gpx_tar   = sum(1 for f in os.listdir(tar_cache_dir) if f.endswith(".gpx")) if tar_cache_dir else 0
 
-    print(f"Encoder:   {encoder_name}")
-    print(f"Timestamp: {'on (' + font_path + ')' if with_timestamp else 'off'}")
+    print(f"Encoder:     {encoder_name}")
+    print(f"Timestamp:   {'on (' + font_path + ')' if with_timestamp else 'off'}")
     if with_speed:
-        print(f"Speed:     on ({n_gpx_loose} loose .gpx + {n_gpx_tar} from tar archives)")
+        print(f"Speed:       on ({n_gpx_loose} loose .gpx + {n_gpx_tar} from tar archives)")
     elif gps_dir is None and tar_dir is None:
-        print(f"Speed:     off (no DCIM/203gps folder)")
+        print(f"Speed:       off (no DCIM/203gps folder)")
     elif args.no_speed:
-        print(f"Speed:     off (--no-speed)")
+        print(f"Speed:       off (--no-speed)")
     else:
-        print(f"Speed:     off")
+        print(f"Speed:       off")
     # Don't print the actual home coordinates (they'd land in logs) — just note
     # that a home boundary is active, sourced from .env.
-    home_note = f" / home r{home_radius_m:.0f}m (from .env)" if home is not None else ""
-    print(f"Grouping:  by trip (return {args.trip_return_m:.0f}m / "
-          f"rollover {args.trip_day_rollover:02d}:00{home_note})")
-    print(f"Output:    {out_dir}")
-    print(f"Scanning:  {front_dir}")
+    # Same shape as "return 100m": both are radii in metres, so both read the
+    # same way. The stray "r" made two identical concepts look like two things.
+    home_note = f" / home {home_radius_m:.0f}m (from .env)" if home is not None else ""
+    print(f"Grouping:    return {args.trip_return_m:.0f}m / "
+          f"rollover {args.trip_day_rollover:02d}:00{home_note}")
+    print(f"Output:      {out_dir}")
+    print(f"Scanning:    {front_dir}")
 
     clips = find_clips(front_dir, rear_dir)
 
@@ -3450,8 +3521,7 @@ def main() -> int:
     # until a long engine-off gap / the 04:00 rollover. See group_into_trips.
     # `moved` flags trips that had GPS but never actually went anywhere
     # (parking-mode motion events clustered at a standstill) so we auto-skip them.
-    groups, trip_moved = group_into_trips(
-        clips, gps_dirs,
+    _gparams = dict(
         return_m=args.trip_return_m,
         leave_m=args.trip_leave_m,
         rollover_h=args.trip_day_rollover,
@@ -3460,6 +3530,19 @@ def main() -> int:
         min_trip_m=args.trip_min_m,
         use_video=not args.no_video_drive_detect,
     )
+    # Finding drive-away/park by ego-motion is the slowest part of a scan and it
+    # produces the same answer every time for the same clips. --scan-cache lets
+    # one session compute it once and reuse it across steps; the caller owns the
+    # file and deletes it on exit, so a restart always recomputes.
+    _ck = _scan_cache_key(clips, gps_dirs=gps_dirs, **_gparams) if args.scan_cache else None
+    _hit = _scan_cache_load(args.scan_cache, _ck, clips) if _ck else None
+    if _hit:
+        groups, trip_moved = _hit
+        print(f"Grouping:    reusing this session's boundaries ({len(groups)} trips)")
+    else:
+        groups, trip_moved = group_into_trips(clips, gps_dirs, **_gparams)
+        if _ck:
+            _scan_cache_store(args.scan_cache, _ck, groups, trip_moved)
     group_kind, group_word = "trip", "Trip"
     # Day label (04:00 rollover) each trip belongs to — the UI groups on this.
     day_labels = [trip_day_label(g[0].dt, args.trip_day_rollover) for g in groups]
@@ -3473,8 +3556,13 @@ def main() -> int:
         total_secs += secs
         print(f"  {group_word} {i:2d}  day {day_labels[i-1]}  "
               f"{start:%Y-%m-%d %H:%M} -> {end:%m-%d %H:%M}   "
-              f"{len(g):3d} clips  ~{fmt_secs(secs)}")
-    print(f"\nTotal: ~{fmt_secs(total_secs)} of footage")
+              f"{len(g):3d} clips  ~{fmt_secs(secs)} span")
+    print(f"\nTotal: ~{fmt_secs(total_secs)} of wall-clock span "
+          f"(start to end per trip)")
+    print("Parking inside a trip is cut and replaced with a Fast-forwarding "
+          "slide,\nso the encoded result is shorter — often far shorter. "
+          "Preview (step 3)\nwrites the real moving time per trip into "
+          "each _meta.json.")
 
     # When --drives is given, ONLY those groups run (and the min-clips filter
     # is bypassed for them — user explicitly asked). Otherwise, every group

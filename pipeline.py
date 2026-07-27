@@ -194,6 +194,13 @@ class Ctx:
         # A non-default --config must reach the renderer too, or this CLI would
         # compute its paths from one config while the wrappers read another.
         self.config_args = ["--config", str(self.config_path)] if args.config else []
+        # Trip boundaries are the slowest part of a scan and identical for the
+        # same clips, but several steps need them. Cache them for THIS process
+        # only: named after the pid, deleted on exit, so a restart recomputes.
+        # A cache that outlived the session could hand a later run a grouping
+        # for a card that has since changed — and the drop step deletes by it.
+        self.scan_cache = Path(tempfile.gettempdir()) / ("dashcam-scan-%d.json" % os.getpid())
+        self.scan_args = ["--scan-cache", str(self.scan_cache)]
 
         # Session state carried between steps.
         self.selected_import = None     # the folder passed as --root to the renderer
@@ -429,6 +436,13 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
                 got = parser(stripped)
                 if got is not None:
                     frac, note = got
+                    # A parser can ask for the tail to be dropped by ending its
+                    # note with \0. The child prints nothing during a silent
+                    # phase, so the last line it DID print would otherwise sit
+                    # there looking like the file being worked on right now.
+                    if note.endswith("\0"):
+                        note = note[:-1]
+                        last_raw = ""
                     # Keep the last real counter seen. The note at the END of a
                     # run is often a phase description ("finding drive
                     # boundaries"), which is the wrong thing to close on — the
@@ -539,7 +553,11 @@ def make_scan_parser():
                 # Keep the n/n in the note: it is what the completion line
                 # closes on, and dropping it here leaves that line reporting
                 # the second-to-last clip.
-                return None, "%d/%d read, finding drive boundaries" % (state["n"], state["n"])
+                return (None,
+                        # trailing \0: clear the tail. Nothing prints during the
+                        # ego-motion pass, so the last clip read would freeze on
+                        # screen for minutes as if it were being processed.
+                        "%d/%d read, finding drive boundaries\0" % (state["n"], state["n"]))
             return ((state["i"] / state["n"]) if state["n"] else None,
                     "reading %d/%d" % (state["i"], state["n"]))
         m = RE_TRIP.match(line)
@@ -966,7 +984,7 @@ def step_list(ctx):
     # but it arrives after 239 "[scan i/n]" lines, and dumping those scrolls the
     # table away before it can be read. So consume the scan lines into the
     # progress display (which is what they exist for) and keep only the table.
-    rc, lines = run_stream(["./list-trips-data.sh", "--root", str(root)] + ctx.config_args,
+    rc, lines = run_stream(["./list-trips-data.sh", "--root", str(root)] + ctx.config_args + ctx.scan_args,
                            ctx.exporter, "Scan", parser=make_scan_parser(),
                            keep=lambda l: not l.startswith("[scan ") and l.strip() != "")
     if rc != 0:
@@ -1061,7 +1079,7 @@ def load_groups(ctx, root, refresh=False):
     try:
         rc, _lines = run_stream(
             [renderer_python(ctx), "-u", "make_dashcam_videos.py", "--print-groups",
-             "--root", str(root)] + ctx.config_args,
+             "--root", str(root)] + ctx.config_args + ctx.scan_args,
             ctx.exporter, "Grouping", stdout_file=tmp)
         if rc != 0:
             return None
@@ -1423,13 +1441,16 @@ def step_preview(ctx):
     print(C.dim("    3. %s/index.html — a contact sheet to open locally" % previews_dir))
     print(C.dim("  Reviewing is entirely offline; deploying stays a separate choice."))
 
-    if not confirm("  Run the preview pass on %s?" % root, True):
-        return record(ctx, "Preview all trips", SKIPPED, started, "declined")
+    # No second confirmation here: the menu already asked "Go?", and the source
+    # directory is resolved and printed just above. Asking again puts a question
+    # on screen whose answer is already on screen — two prompts for one decision,
+    # which is how you teach someone to stop reading them.
 
     # 1. Sidecars. The renderer prints its usual "[Trip a/b]" headers here, so
     #    the real trip counter drives the bar; there are no per-clip lines in
     #    this mode, and the parser simply shows no clip counter.
-    cmd = ["./make-trips-rendered.sh", "--sidecars-only", "--root", str(root)] + ctx.config_args
+    cmd = (["./make-trips-rendered.sh", "--sidecars-only", "--root", str(root)]
+           + ctx.config_args + ctx.scan_args)
     rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars", parser=make_scan_parser(),
                             keep=lambda l: l.startswith("[Trip "))
     if rc != 0:
@@ -2132,7 +2153,7 @@ def _noop_import(ctx):
         n = clip_count(ctx.import_root)
         # Terse on purpose: this sits under the menu on every draw, so a long
         # sentence there costs a line of a narrow screen every time.
-        return "sink already has %s clips — use 3 or 5" % n
+        return "sink already has %s clips — select 3 or 5" % n
     return None
 
 
@@ -2396,6 +2417,12 @@ def main(argv=None):
         print(C.yellow("  Interrupted."))
     finally:
         show_cursor()
+        # The boundary cache is this session's alone; leaving it behind would let
+        # a later run reuse a grouping for a card that may have changed since.
+        try:
+            ctx.scan_cache.unlink()
+        except OSError:
+            pass
         print_summary(ctx)
 
     if any(r.status == FAILED for r in ctx.results):
