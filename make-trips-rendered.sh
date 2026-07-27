@@ -26,7 +26,8 @@
 # folders in the same --out. (This reset lives in make_dashcam_videos.py, which
 # knows which days it will write; it's skipped for a --drives subset and for the
 # read-only --sidecars-only mode. Pass --no-clean-days to keep existing files.)
-# The run log is written INTO the output dir (render-<timestamp>.log).
+# The run log is written to <out>/logs/render-<timestamp>.log, and a copy is
+# dropped beside each encoded .mp4 as trip_....log.
 #
 # Get the indices with `./list-trips-data.sh` first.
 #
@@ -84,10 +85,10 @@ OUT="${OUT/#\~/$HOME}"   # expand a leading ~ (bash won't, inside a var)
 echo ">>> Output dir: $OUT"
 mkdir -p "$OUT"
 
-# Tee stdout+stderr into a timestamped log file that lives IN the output dir,
-# so the paper trail ships with the render. After the run, copy that log next
-# to each successfully encoded .mp4 too (as trip_….log) so it's beside its data.
-LOG_DIR="${LOG_DIR:-$OUT}"
+# Logs go in their own folder rather than beside the renders: one run log per
+# render adds up fast, and mixed in with the trip folders they bury the output
+# you are actually looking for.
+LOG_DIR="${LOG_DIR:-$OUT/logs}"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/render-$(date +%Y%m%d-%H%M%S).log"
 echo ">>> logging to $LOG_FILE"
