@@ -356,8 +356,11 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
     last_raw = ""
     frac = None
     note = ""
+    counts = ""
     spin = 0
     done = False
+    rc = None          # the finally block reads this; an abort can reach it
+                       # before proc.wait() ever assigns it
 
     def render():
         """One line, redrawn in place: progress, the n/m counters, then as much
@@ -426,6 +429,13 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
                 got = parser(stripped)
                 if got is not None:
                     frac, note = got
+                    # Keep the last real counter seen. The note at the END of a
+                    # run is often a phase description ("finding drive
+                    # boundaries"), which is the wrong thing to close on — the
+                    # count is what says how much was done.
+                    mc = re.search(r"\d+\s*/\s*\d+", note or "")
+                    if mc:
+                        counts = mc.group(0).replace(" ", "")
             spin += 1
             render()
         rc = proc.wait()
@@ -446,6 +456,17 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
         live.close()
         raise Aborted()
     finally:
+        # A finished step should leave a line behind saying so. live.close()
+        # erases the live area, so without this the progress simply vanishes and
+        # the screen gives no evidence the work happened or how much of it.
+        if rc == 0 and live.enabled:
+            el = human_secs(time.time() - started)
+            bar = "#" * 24
+            tail_bits = " ".join(x for x in (counts,) if x)
+            live.draw([C.green("%s [%s] 100%% %s  %s  completed"
+                               % (label, bar, el, tail_bits)).rstrip()])
+            print()          # commit that line; the next erase starts below it
+            live.height = 0
         live.close()
         if out_fh:
             out_fh.close()
@@ -515,7 +536,10 @@ def make_scan_parser():
                 # 100% there says "finished" during the slowest part of the
                 # step. Hand back to the elapsed spinner instead — no number is
                 # better than a wrong one.
-                return None, "read %d clips, finding drive boundaries" % state["n"]
+                # Keep the n/n in the note: it is what the completion line
+                # closes on, and dropping it here leaves that line reporting
+                # the second-to-last clip.
+                return None, "%d/%d read, finding drive boundaries" % (state["n"], state["n"])
             return ((state["i"] / state["n"]) if state["n"] else None,
                     "reading %d/%d" % (state["i"], state["n"]))
         m = RE_TRIP.match(line)
