@@ -26,7 +26,7 @@
 # folders in the same --out. (This reset lives in make_dashcam_videos.py, which
 # knows which days it will write; it's skipped for a --drives subset and for the
 # read-only --sidecars-only mode. Pass --no-clean-days to keep existing files.)
-# The run log is written to <out>/logs/render-<timestamp>.log, and a copy is
+# The run log is written to <out>/logs/run-<timestamp>.log, and a copy is
 # dropped beside each encoded .mp4 as trip_....log.
 #
 # Get the indices with `./list-trips-data.sh` first.
@@ -90,7 +90,7 @@ mkdir -p "$OUT"
 # you are actually looking for.
 LOG_DIR="${LOG_DIR:-$OUT/logs}"
 mkdir -p "$LOG_DIR"
-LOG_FILE="$LOG_DIR/render-$(date +%Y%m%d-%H%M%S).log"
+LOG_FILE="$LOG_DIR/run-$(date +%Y%m%d-%H%M%S).log"
 echo ">>> logging to $LOG_FILE"
 
 # -u forces unbuffered stdout so per-clip progress appears as it happens instead
