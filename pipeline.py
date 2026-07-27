@@ -766,13 +766,13 @@ def print_status(ctx):
         except Exception:
             local_trips = "?"
         age = human_age(time.time() - manifest.stat().st_mtime)
-        print("  Manifest     %s  %s" % (C.bold("%s trips" % local_trips),
+        print("  Prepared     %s  %s" % (C.bold("%s trips" % local_trips),
                                          # "just now" already reads as a time;
                                          # appending "ago" gives "just now ago"
-                                         C.dim("trips.json, %s" % age if age == "just now"
-                                               else "trips.json, %s ago" % age)))
+                                         C.dim("updated %s" % age if age == "just now"
+                                               else "updated %s ago" % age)))
     else:
-        print("  Manifest     %s  %s" % (C.yellow("not built"), C.dim(tilde(manifest))))
+        print("  Prepared     %s  %s" % (C.yellow("none yet"), C.dim(tilde(manifest))))
 
     live = live_trip_count(ctx)
     if live is None:
@@ -1493,12 +1493,12 @@ def step_preview(ctx):
     # 4. Keep trips.json current. The site is not deployed here — this only means
     #    a later deploy is not carrying a stale manifest.
     if ctx.site.is_dir():
-        rc, _lines = run_stream(["python3", "build_manifest.py"], ctx.site, "Manifest",
+        rc, _lines = run_stream(["python3", "build_manifest.py"], ctx.site, "Indexing",
                                 keep=lambda l: l.startswith("wrote trips.json"))
         if rc != 0:
             return record(ctx, "Preview all trips", FAILED, started, "build_manifest exit %d" % rc)
     else:
-        print(C.yellow("  goodnight-drives not at %s — skipped the manifest rebuild." % ctx.site))
+        print(C.yellow("  goodnight-drives not at %s — the site index was not updated." % ctx.site))
 
     print()
     print(C.green("  previews are in %s" % previews_dir))
@@ -1703,7 +1703,7 @@ def step_drop_trip(ctx):
                     p.unlink()
                 except OSError as e:
                     print(C.red("  could not delete %s: %s" % (p, e)))
-            print(C.dim("  Removed. Re-run the manifest step so trips.json drops them."))
+            print(C.dim("  Removed. The next Preview or Render drops them from the site index."))
 
     if errors:
         return record(ctx, "Drop trip from import", FAILED, started,
@@ -1752,30 +1752,22 @@ def step_render(ctx):
     if rc != 0:
         return record(ctx, "Render trips", FAILED, started,
                       "exit %d (%d new mp4 before the failure)" % (rc, len(new)))
-    return record(ctx, "Render trips", RAN, started,
-                  "%d new mp4, %s" % (len(new), human_bytes(sum(p.stat().st_size for p in new))))
+    detail = "%d new mp4, %s" % (len(new), human_bytes(sum(p.stat().st_size for p in new)))
 
-
-def step_manifest(ctx):
-    """Regenerate public_html/trips.json + thumbs from the render output."""
-    started = time.time()
-    if not ctx.site.is_dir():
-        print(C.red("  goodnight-drives not found at %s" % ctx.site))
-        return record(ctx, "Build manifest", FAILED, started, "site repo missing")
-
-    n_meta = len(list(ctx.out_dir.rglob("trip_*_meta.json"))) if ctx.out_dir.is_dir() else 0
-    print(C.dim("  %d rendered trip(s) to scan. Thumbnails are extracted with ffmpeg" % n_meta))
-    print(C.dim("  and place names are reverse-geocoded (rate-limited to 1/s), so this"))
-    print(C.dim("  is slow on a first build and near-instant on a rebuild."))
-    # build_manifest.py uses relative paths (public_html/, admin.json,
-    # .geocode_cache.json), so it MUST run with the site repo as cwd.
-    # No parseable per-trip progress: spinner, not a fake percentage.
-    rc, lines = run_stream(["python3", "build_manifest.py"], ctx.site, "Manifest",
-                           keep=lambda l: l.startswith("wrote trips.json"))
-    if rc != 0:
-        return record(ctx, "Build manifest", FAILED, started, "exit %d" % rc)
-    detail = next((l for l in lines if l.startswith("wrote trips.json")), "")
-    return record(ctx, "Build manifest", RAN, started, detail or "trips.json written")
+    # Rebuild the manifest here rather than leaving it to a separate step. A
+    # render that does not update trips.json is a half-done job: the new clips
+    # exist on disk but carry no duration, previews or poster until this runs,
+    # and the next thing anyone does is upload and deploy. Preview does the same
+    # for the same reason. (This is why there is no Manifest entry in the menu —
+    # it was a step you could forget, in a sequence where forgetting it looks
+    # exactly like success.)
+    if new and ctx.site.is_dir():
+        rc2, _l = run_stream(["python3", "build_manifest.py"], ctx.site, "Indexing",
+                             keep=lambda l: l.startswith("wrote trips.json"))
+        if rc2 != 0:
+            return record(ctx, "Render trips", FAILED, started,
+                          detail + ", but build_manifest failed (exit %d)" % rc2)
+    return record(ctx, "Render trips", RAN, started, detail)
 
 
 def s3_objects(bucket="your-media-bucket"):
@@ -1899,7 +1891,7 @@ def step_deploy(ctx):
         return record(ctx, "Deploy site", FAILED, started, "site repo missing")
 
     print(C.dim("  deploy-site.sh pulls the live curation + trips.json first (the live"))
-    print(C.dim("  site is the merge base), rebuilds the manifest, then rsyncs public_html/."))
+    print(C.dim("  site is the merge base), re-indexes, then rsyncs public_html/."))
     print(C.yellow("  SIGNED_VIDEOS=1 is set for this run."))
     print(C.dim("  Since 2026-07-26 the bucket is PRIVATE. Deploying without SIGNED_VIDEOS=1"))
     print(C.dim("  writes a config.js pointing the page at raw S3 URLs, which now 403 —"))
@@ -2102,10 +2094,9 @@ STEPS = [
     (3, "Preview all trips (sidecars + stills, no encoding)", step_preview, True),
     (4, "Drop trip from import (DESTRUCTIVE)", step_drop_trip, False),
     (5, "Render trips", step_render, True),
-    (6, "Build manifest", step_manifest, True),
-    (7, "Upload videos to S3", step_upload, True),
-    (8, "Deploy site (SIGNED_VIDEOS=1)", step_deploy, True),
-    (9, "Delete import source (DESTRUCTIVE)", step_delete_import, False),
+    (6, "Upload videos to S3", step_upload, True),
+    (7, "Deploy site (SIGNED_VIDEOS=1)", step_deploy, True),
+    (8, "Delete import source (DESTRUCTIVE)", step_delete_import, False),
 ]
 
 
@@ -2133,7 +2124,7 @@ def solo_steps():
 # names in the menu cost eleven lines every time round the loop.
 SHORT = {
     1: "Import", 2: "List trips", 3: "Preview", 4: "Drop trip", 5: "Render",
-    6: "Manifest", 7: "Upload", 8: "Deploy", 9: "Del source",
+    6: "Upload", 7: "Deploy", 8: "Del source",
 }
 # Steps that write nothing and send nothing. Necessary but not sufficient for
 # skipping the "Go?" — see fast_enough(): a confirmation that guards nothing is
@@ -2186,10 +2177,9 @@ DESC = {
     3: "Sidecars, a still per trip and a local contact sheet. No encoding, no deploy.",
     4: "Delete a trip's source clips from the import so it is never rendered or uploaded.",
     5: "Encode the chosen trips. The slow step: hours for a full card.",
-    6: "Rebuild trips.json from the renders, carrying forward everything already published.",
-    7: "Sync the mp4s to the Zurich bucket. Slow on a home uplink; resumes if interrupted.",
-    8: "Push the site to EC2 with SIGNED_VIDEOS=1, so clips load as signed CloudFront URLs.",
-    9: "Erase the whole import source. Only after everything is rendered and published.",
+    6: "Sync the mp4s to the Zurich bucket. Slow on a home uplink; resumes if interrupted.",
+    7: "Push the site to EC2 with SIGNED_VIDEOS=1, so clips load as signed CloudFront URLs.",
+    8: "Erase the whole import source. Only after everything is rendered and published.",
 }
 
 
