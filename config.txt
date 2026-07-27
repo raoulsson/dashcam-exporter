@@ -20,7 +20,7 @@
 # Default is /Volumes/NO NAME — put the card in and it just works. Renamed your
 # card? Set it here. Working from a copy instead of the card? Point it at the copy.
 #root = /Volumes/NO NAME
-root = ~/dashcam-data/import_sink
+root = ~/dashcam-data/import
 
 # Where the rendered videos and sidecars get written. Default ~/dashcam-data/output,
 # created on first run (parents included). Only set this to render somewhere else.
@@ -338,4 +338,7 @@ software = true
 
 # Software H.264 (libx264) tuning.
 #x264_preset = veryfast
-#x264_crf    = 23
+# 23 produced ~16 Mbps on this footage against a 7.1 Mbps library — CRF targets
+# constant quality, so busy night scenes cost far more bits than clean daylight.
+# 26 lands near the older size; each +3 is roughly half the bitrate.
+x264_crf    = 26

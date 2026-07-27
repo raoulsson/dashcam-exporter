@@ -1812,6 +1812,50 @@ def step_render(ctx):
 
     before = set(rendered_mp4s(ctx.out_dir))
 
+    # Idempotence: a render replaces its output rather than adding to whatever
+    # survived. Partial state is the failure mode worth designing out — a run
+    # interrupted halfway, or files deleted by hand, leaves a namespace that
+    # LOOKS rendered while missing pieces, and nothing downstream can tell the
+    # difference: the manifest indexes what it finds, the upload syncs what
+    # exists, and the site shows the result.
+    #
+    # Rendering everything clears the whole import namespace. Rendering a subset
+    # clears only those trips' files, because wiping the namespace would delete
+    # renders the run is not going to recreate.
+    ns = ctx.out_dir / root.name
+    if idx.strip():
+        picked = {int(n) for n in idx.split() if n.isdigit()}
+        bases = [g.get("out_base") for g in groups if g.get("index") in picked]
+        doomed = [f for b in bases if b
+                  for f in Path(b).parent.glob(Path(b).name + "*")]
+        what = "%d trip(s)" % len(bases)
+    else:
+        doomed = [f for f in ns.rglob("*") if f.is_file()] if ns.is_dir() else []
+        what = "everything under %s" % tilde(ns)
+    if doomed:
+        size = sum(f.stat().st_size for f in doomed if f.exists())
+        print()
+        print(C.yellow("  Replacing existing output: %s" % what))
+        print(C.yellow("  %d file(s), %s — deleted first so the result is exactly this run"
+                       % (len(doomed), human_bytes(size))))
+        print(C.dim("  The source clips are still in the import, so this is re-creatable."))
+        if not confirm("  Delete and re-render?", True):
+            return record(ctx, "Render trips", SKIPPED, started, "declined the clean")
+        for f in doomed:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        # drop the day folders left empty, so the tree matches what exists
+        if ns.is_dir():
+            for d in sorted(ns.rglob("*"), reverse=True):
+                if d.is_dir() and not any(d.iterdir()):
+                    try:
+                        d.rmdir()
+                    except OSError:
+                        pass
+        before = set(rendered_mp4s(ctx.out_dir))
+
     cmd = ["./make-trips-rendered.sh"]
     cmd += idx.split()                       # bare integers become --drives
     cmd += ["--root", str(root), "--output-height", str(height)] + ctx.config_args
