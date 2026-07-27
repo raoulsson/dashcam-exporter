@@ -20,7 +20,6 @@
 # Default is /Volumes/NO NAME — put the card in and it just works. Renamed your
 # card? Set it here. Working from a copy instead of the card? Point it at the copy.
 #root = /Volumes/NO NAME
-root = ~/dashcam-data/import
 
 # Where the rendered videos and sidecars get written. Default ~/dashcam-data/output,
 # created on first run (parents included). Only set this to render somewhere else.
