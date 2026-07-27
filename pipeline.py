@@ -78,6 +78,14 @@ def human_secs(s):
     return "%d:%02d" % (s // 60, s % 60)
 
 
+def tilde(p):
+    """~/dashcam-data/... instead of /Users/<you>/dashcam-data/... — on a narrow
+    terminal the home prefix is a third of the line and says nothing."""
+    s = str(p)
+    home = str(Path.home())
+    return "~" + s[len(home):] if s.startswith(home) else s
+
+
 def human_age(seconds):
     """Coarse age for the status screen. human_secs would render a week-old
     manifest as '168:00:00', which reads as a duration, not an age."""
@@ -639,9 +647,9 @@ def print_status(ctx):
         n = clip_count(ctx.card)
         print("  SD card      %s  %s" % (
             C.green("mounted"),
-            C.dim("%s  (%s clips)" % (ctx.card, n if n is not None else "?"))))
+            C.dim("%s  (%s clips)" % (tilde(ctx.card), n if n is not None else "?"))))
     else:
-        print("  SD card      %s  %s" % (C.dim("not mounted"), C.dim(str(ctx.card))))
+        print("  SD card      %s  %s" % (C.dim("not mounted"), C.dim(tilde(ctx.card))))
 
     # Import sink
     cands = import_candidates(ctx)
@@ -649,17 +657,17 @@ def print_status(ctx):
         for p in cands:
             n = clip_count(p)
             print("  Import       %s  %s" % (
-                C.bold(str(p)),
+                C.bold(tilde(p)),
                 C.dim("%s clips, %s" % (n if n is not None else "?", human_bytes(tree_size(p))))))
     else:
-        print("  Import       %s  %s" % (C.dim("empty"), C.dim(str(ctx.import_root))))
+        print("  Import       %s  %s" % (C.dim("empty"), C.dim(tilde(ctx.import_root))))
 
     # Renders
     mp4s = rendered_mp4s(ctx.out_dir)
     size = sum(p.stat().st_size for p in mp4s) if mp4s else 0
     print("  Rendered     %s  %s" % (
         C.bold("%d mp4" % len(mp4s)) if mp4s else C.yellow("none"),
-        C.dim("%s in %s" % (human_bytes(size), ctx.out_dir))))
+        C.dim("%s in %s" % (human_bytes(size), tilde(ctx.out_dir)))))
 
     # Manifest / live site
     manifest = ctx.site / "public_html" / "trips.json"
@@ -675,27 +683,40 @@ def print_status(ctx):
                                          C.dim("trips.json, %s" % age if age == "just now"
                                                else "trips.json, %s ago" % age)))
     else:
-        print("  Manifest     %s  %s" % (C.yellow("not built"), C.dim(str(manifest))))
+        print("  Manifest     %s  %s" % (C.yellow("not built"), C.dim(tilde(manifest))))
 
     live = live_trip_count(ctx)
     if live is None:
         print("  Live site    %s" % C.dim("unknown (offline or unreachable)"))
     else:
-        print("  Live site    %s  %s" % (C.bold("%d trips" % live), C.dim(LIVE_TRIPS_URL)))
+        print("  Live site    %s" % C.bold("%d trips" % live))
 
-    # Disk
-    for label, path in (("output", ctx.out_dir), ("import", ctx.import_root)):
-        try:
-            u = shutil.disk_usage(str(path if path.exists() else path.parent))
-            print("  Disk (%s) %s free of %s" % (
-                label.ljust(6), C.bold(human_bytes(u.free)), human_bytes(u.total)))
-        except OSError:
-            pass
-
-    print("  Repos        %s" % C.dim("%s  |  %s" % (ctx.exporter, ctx.site)))
+    print("  Repos        %s" % C.dim("%s | %s" % (tilde(ctx.exporter), tilde(ctx.site))))
     if not ctx.site.is_dir():
         print("  " + C.red("goodnight-drives repo not found — steps 6-8 will not run."))
     print(rule())
+
+    # Disk goes below the rule, as a footnote rather than a status row.
+    # It used to print twice, once per directory, which read as two disks with
+    # suspiciously identical numbers — import and output are normally the same
+    # volume. Collapse when they are, and only say anything loud when the free
+    # space is actually worth worrying about next to what is waiting to render.
+    try:
+        seen = {}
+        for path in (ctx.out_dir, ctx.import_root):
+            p = path if path.exists() else path.parent
+            u = shutil.disk_usage(str(p))
+            seen.setdefault((u.total, u.free), []).append(p)
+        parts = []
+        for (total, free), paths in seen.items():
+            where = "" if len(seen) == 1 else " (%s)" % paths[0]
+            parts.append("%s free of %s%s" % (human_bytes(free), human_bytes(total), where))
+        line = "  disk: " + "   ".join(parts)
+        # 15 GB is roughly a full card's renders; below that, say so plainly.
+        low = any(free < 15 * 1024 ** 3 for (total, free) in seen)
+        print(C.red(line + "  — low") if low else C.dim(line))
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------
