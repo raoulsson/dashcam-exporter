@@ -930,9 +930,13 @@ def step_list(ctx):
 
     print(C.dim("  Scanning %s (read-only, no encoding). This walks the video for" % root))
     print(C.dim("  drive-away/park detection, so it takes a while on a full card."))
-    # passthrough: the trip table IS the result, so print it verbatim and keep it.
+    # Not passthrough. The trip table IS the result and must be printed verbatim,
+    # but it arrives after 239 "[scan i/n]" lines, and dumping those scrolls the
+    # table away before it can be read. So consume the scan lines into the
+    # progress display (which is what they exist for) and keep only the table.
     rc, lines = run_stream(["./list-trips-data.sh", "--root", str(root)] + ctx.config_args,
-                           ctx.exporter, "Scan", passthrough=True)
+                           ctx.exporter, "Scan", parser=make_scan_parser(),
+                           keep=lambda l: not l.startswith("[scan ") and l.strip() != "")
     if rc != 0:
         return record(ctx, "List trips", FAILED, started, "exit %d" % rc)
     ctx.last_scan = parse_scan(root, lines)

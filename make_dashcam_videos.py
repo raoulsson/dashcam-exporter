@@ -2928,6 +2928,48 @@ def _resolve_config_path(argv: list[str]) -> Path:
     return Path(__file__).resolve().parent / "config.txt"
 
 
+class _LogTee:
+    """Write to the terminal verbatim, and to a log file line-by-line.
+
+    The wrapper used to pipe everything through `tee`, which meant stdout was
+    never a terminal — so per-clip progress could not redraw one line with \r,
+    because doing that would also have written \r into the log and collapsed it
+    into a single unreadable line. Owning the log here separates the two: the
+    terminal keeps the carriage returns, and the file gets the newline the
+    carriage return was standing in for.
+    """
+
+    def __init__(self, stream, path):
+        self._s = stream
+        self._f = open(path, "a", buffering=1, encoding="utf-8", errors="replace")
+        self._pending = ""
+
+    def write(self, s):
+        self._s.write(s)
+        # \r means "redraw this line"; in a file that is a completed line.
+        for ch in s:
+            if ch in "\r\n":
+                if self._pending.strip():
+                    self._f.write(self._pending.rstrip() + "\n")
+                self._pending = ""
+            else:
+                self._pending += ch
+        return len(s)
+
+    def flush(self):
+        self._s.flush()
+        self._f.flush()
+
+    def isatty(self):
+        # The terminal is still the terminal; the log is a side effect.
+        return self._s.isatty()
+
+    def close(self):
+        if self._pending.strip():
+            self._f.write(self._pending.rstrip() + "\n")
+        self._f.close()
+
+
 def main() -> int:
     # --- Personal settings via .env (never the tracked config) ---------------
     # Home coordinates identify where you live, so they live in a gitignored
@@ -3057,6 +3099,10 @@ def main() -> int:
                          ".intermediates/ are always wiped at the start of a "
                          "run regardless — they're scratch, not cache.)")
     ap.add_argument("--dry-run", action="store_true", help="List drives and exit without encoding")
+    ap.add_argument("--log-file", metavar="PATH",
+                    help="Also append output to PATH. Keeps stdout a real terminal so\n"
+                         "per-clip progress can redraw in place, while the file still\n"
+                         "gets one line per event (replaces piping through tee).")
     ap.add_argument("--print-groups", action="store_true",
                     help="Machine-readable --dry-run: print the trip grouping as "
                          "JSON on stdout (and nothing else — every human-readable "
@@ -3195,6 +3241,15 @@ def main() -> int:
                          "540 for a smaller phone-sized "
                          "file.")
     args = ap.parse_args()
+
+    # Install the log tee before anything prints, so the file is a complete
+    # record of the run rather than whatever happened after setup.
+    if getattr(args, "log_file", None):
+        _tee = _LogTee(sys.stdout, args.log_file)
+        # stderr goes through the same tee, reproducing what `2>&1 | tee` did:
+        # errors belong in the log, and an OS-level 2>&1 would bypass this
+        # object entirely and never reach the file.
+        sys.stdout = sys.stderr = _tee
 
     # Handle --write-config and exit
     if args.write_config:

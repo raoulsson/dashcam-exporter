@@ -92,10 +92,17 @@ mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/render-$(date +%Y%m%d-%H%M%S).log"
 echo ">>> logging to $LOG_FILE"
 
-# -u forces unbuffered stdout so per-clip progress shows in the tee output
-# instead of being held in Python's buffer until the run completes.
-"$PY" -u make_dashcam_videos.py ${OPTS[@]+"${OPTS[@]}"} "$@" 2>&1 | tee "$LOG_FILE"
-RC="${PIPESTATUS[0]}"
+# -u forces unbuffered stdout so per-clip progress appears as it happens instead
+# of being held in Python's buffer until the run completes.
+#
+# NOT piped through tee any more. A pipe means stdout is not a terminal, so the
+# per-clip scan line cannot redraw itself in place — and emitting the carriage
+# return anyway would have written it into the log too, collapsing the whole run
+# into one unreadable line. --log-file moves the logging inside the renderer,
+# which can tell the two apart: carriage returns to the terminal, one line per
+# event to the file. stderr is folded in there as well, as 2>&1 used to do.
+"$PY" -u make_dashcam_videos.py --log-file "$LOG_FILE" ${OPTS[@]+"${OPTS[@]}"} "$@"
+RC="$?"
 
 # Parse "  ✓ /full/path/to/foo.mp4" lines from the log and drop a copy of
 # the log next to each one as foo.log.
