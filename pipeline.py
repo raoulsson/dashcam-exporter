@@ -2301,9 +2301,11 @@ def main(argv=None):
         else:
             while True:
                 print_menu(ctx)
-                # Hard left with a caret: everything else on screen is indented
-                # two spaces, so the one line that wants typing should not be.
-                sel = ask("> Steps to run: ")
+                # Hard left, with a blank line above it: everything else on
+                # screen is indented two spaces, so the one line that wants
+                # typing should stand apart from the block above it.
+                print()
+                sel = ask("Select> ")
                 if sel.lower() in ("q", "quit", "exit"):
                     break
                 if sel.lower() in ("s", "status", "0"):
