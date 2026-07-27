@@ -47,14 +47,26 @@ root = ~/dashcam-data/import_sink
 # Each trip is written as trip_<day>_<HH-MM>_<idx> with a _meta.json sidecar
 # carrying its day label, so a publishing UI can group a day's trips together.
 #
-# HOME COORDINATES live in a gitignored .env (SET_HOME_LAT / SET_HOME_LON),
-# NOT here — this file is committed and your home address should not be. Copy
-# .env.example to .env and fill it in.
+# YOUR HOME. Set these two to where you park and you are done — a trip closes
+# when the car comes back within home_radius_m of this point. Leave them unset
+# and the exporter simply has no home anchor: trips still work, they just close
+# on returning to wherever each one started.
 #
-# The home RADIUS is not private, just a tuning knob like trip_return_m, so it
-# belongs here. Metres from the home coordinates that still count as "at home",
-# for closing a trip. Default 50. (SET_HOME_RADIUS_M in .env still works and is
-# used when this is unset, so an older setup keeps behaving as it did.)
+# Zurich is here as a working example. Replace it with your own coordinates
+# (right-click a spot in Google Maps -> the first entry is "lat, lon").
+#home_lat = 47.3769
+#home_lon = 8.5417
+#
+# PRIVACY, only if you care: this file is committed. If you plan to push your
+# fork and would rather not publish where you live, put the same two values in
+# a gitignored .env instead —
+#     SET_HOME_LAT=47.3769
+#     SET_HOME_LON=8.5417
+# — and they override whatever is here. Nothing else is needed; .env always
+# wins for the coordinates, precisely so a public file can hold an example.
+#
+# The RADIUS is not private, just a tuning knob like trip_return_m, so it stays
+# here. Metres from home that still count as "at home". Default 50.
 #home_radius_m = 50
 
 # Return-to-anchor distance in metres. Back within this of where the trip

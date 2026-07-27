@@ -3043,9 +3043,8 @@ def main() -> int:
     script_dir = Path(__file__).resolve().parent
     for env_path in (script_dir / ".env", Path.cwd() / ".env"):
         load_dotenv(env_path)
-    home_lat = _env_float("SET_HOME_LAT")
-    home_lon = _env_float("SET_HOME_LON")
-    home = (home_lat, home_lon) if home_lat is not None and home_lon is not None else None
+    env_home_lat = _env_float("SET_HOME_LAT")
+    env_home_lon = _env_float("SET_HOME_LON")
     # The RADIUS is not private — it is a tuning knob like trip_return_m, and it
     # belongs in config.txt with the others. Only the coordinates identify where
     # you live. Read below, once config is loaded; SET_HOME_RADIUS_M still works
@@ -3064,6 +3063,17 @@ def main() -> int:
                          _env_float("SET_HOME_RADIUS_M") or DEFAULT_HOME_RADIUS_M)
     home_radius_src = ("config.txt" if "home_radius_m" in cfg
                        else (".env" if _env_float("SET_HOME_RADIUS_M") else "default"))
+
+    # Home COORDINATES resolve the other way round: .env WINS over config.txt.
+    # config.txt is committed to a public repo, so whatever sits in it is an
+    # example, not a home — the real position belongs in the gitignored .env and
+    # must never be overridden by the file everyone can read. (The radius goes
+    # the usual way because it discloses nothing.)
+    home_lat = env_home_lat if env_home_lat is not None else cflt("home_lat", None)
+    home_lon = env_home_lon if env_home_lon is not None else cflt("home_lon", None)
+    home = (home_lat, home_lon) if home_lat is not None and home_lon is not None else None
+    home_src = (".env" if env_home_lat is not None and env_home_lon is not None
+                else ("config.txt example" if home is not None else "unset"))
 
     # Boolean knobs are stored POSITIVELY in config (timestamp=true rather than
     # no_timestamp=false) — easier to read. Translate to the existing --no-* CLI.
@@ -3519,7 +3529,7 @@ def main() -> int:
     # Same shape as "return 100m": both are radii in metres, so both read the
     # same way. The stray "r" made two identical concepts look like two things.
     # Coordinates come from .env (private); the radius from config.txt (not).
-    home_note = (f" / home {home_radius_m:.0f}m ({home_radius_src}, coords from .env)"
+    home_note = (f" / home {home_radius_m:.0f}m ({home_radius_src}, coords {home_src})"
                  if home is not None else "")
     print(f"Grouping:    return {args.trip_return_m:.0f}m / "
           f"rollover {args.trip_day_rollover:02d}:00{home_note}")

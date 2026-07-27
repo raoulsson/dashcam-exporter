@@ -2135,16 +2135,32 @@ SHORT = {
     1: "Import", 2: "List trips", 3: "Preview", 4: "Drop trip", 5: "Render",
     6: "Manifest", 7: "Upload", 8: "Deploy", 9: "Del source",
 }
-# Steps that write nothing, send nothing AND finish in seconds run straight from
-# the menu with no "Go?" — a confirmation that guards nothing is noise, and worse
-# it is practice at saying yes without reading.
-#
-# Deliberately empty. The obvious candidate was 2 (List trips): it changes
-# nothing, so it looks free. But the scan runs under .venv, which has opencv, so
-# boundaries come from video ego-motion over every clip — minutes on a full card,
-# not the two seconds the same command takes under a python without opencv. Both
-# halves of the test have to hold, and this one fails the second.
-READ_ONLY = set()
+# Steps that write nothing and send nothing. Necessary but not sufficient for
+# skipping the "Go?" — see fast_enough(): a confirmation that guards nothing is
+# noise, but one that guards a two-minute wait is worth keeping.
+READ_ONLY = {2}
+
+
+def fast_enough(ctx, n):
+    """Will this step finish in a moment?
+
+    Only List trips is interesting. Its cost is the ego-motion pass, which the
+    scan cache removes entirely — 146 seconds becomes 1. So it is worth
+    confirming on a cold cache and pure friction on a warm one, and the honest
+    answer changes run to run rather than being a property of the step.
+
+    The cache file existing is a proxy: it might still miss on its key (a new
+    import, a changed .gpx) and take the long path anyway. That costs a wait
+    nobody agreed to, which is mild — the reverse mistake, nagging for
+    permission before every one-second read, is the one that trains you to stop
+    reading prompts.
+    """
+    if n != 2:
+        return False
+    try:
+        return ctx.scan_cache.is_file()
+    except Exception:
+        return False
 
 
 def _noop_import(ctx):
@@ -2410,7 +2426,7 @@ def main(argv=None):
                 # Only ask before something that writes, sends or takes a while.
                 # Confirming a read-only scan just trains you to hit enter, which
                 # is exactly the habit you do not want by the time step 9 asks.
-                if not all(n in READ_ONLY for n in picked):
+                if not all(n in READ_ONLY and fast_enough(ctx, n) for n in picked):
                     if not confirm("  Go?", True):
                         continue
                 run_steps(ctx, picked)
