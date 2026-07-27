@@ -402,7 +402,14 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
             # "[scan  17/ 239]" spends its width repeating it. Strip the bracket
             # and show what it identifies — the file being worked on.
             if note:
+                # Drop whatever the note already says. Two shapes do this:
+                # "[scan  17/ 239] NAME" and aws's "Completed 6.0 MiB/13.0 GiB
+                # (457.4 KiB/s) with 6 file(s) remaining" — in both, the head of
+                # the line is the counter we have already extracted, and the
+                # useful remainder (the filename, or the rate and files left)
+                # was being pushed off the right edge by it.
                 t = re.sub(r"^\[[^\]]*\]\s*", "", t)
+                t = re.sub(r"^Completed\s+[\d.]+\s*\w+\s*/\s*~?[\d.]+\s*\w+\s*", "", t)
             if len(t) > room:
                 # Keep the START. Both encoders and aws put what identifies the
                 # line at the front ("[ 4/6] 2026… encoding", "Completed 3.0
@@ -1756,17 +1763,39 @@ def step_render(ctx):
     groups = (payload or {}).get("trips") or []
     if groups:
         print()
+        tot_span = tot_move = 0.0
+        have_move = False
         for g in groups:
             mark = "  " if g.get("renderable", True) else C.dim(" -")
-            span = human_secs(g.get("duration_secs") or 0)
-            line = "%s%2d) %s  %s -> %s  %3d clips  %s" % (
+            secs = g.get("duration_secs") or 0
+            span = human_secs(secs)
+            # The encoded length is not the span: parking is cut out. The real
+            # figure lives in the sidecar _meta.json, so it is only known once
+            # Preview has run — show it when it is there and say nothing when it
+            # is not, rather than estimating.
+            meta = trip_meta(g) or {}
+            move_min = meta.get("moving_min")
+            if g.get("renderable", True):
+                tot_span += secs
+                if move_min is not None:
+                    tot_move += float(move_min) * 60.0
+                    have_move = True
+            movecol = ("  -> %s video" % human_secs(float(move_min) * 60.0)
+                       if move_min is not None else "")
+            line = "%s%2d) %s  %s -> %s  %3d clips  %s%s" % (
                 mark, g["index"], g.get("day", ""),
                 str(g.get("start", ""))[11:16], str(g.get("end", ""))[11:16],
-                g.get("clips", 0), span)
+                g.get("clips", 0), span, C.bold(movecol))
             if not g.get("renderable", True):
                 line += C.dim("  auto-skipped: %s" % (g.get("reason") or "fragment"))
             print(line)
-        print(C.dim("  span is start->end; parking inside a trip is cut, so the encode is shorter"))
+        if have_move:
+            print("      total %s span  ->  %s of video to encode"
+                  % (human_secs(tot_span), C.bold(human_secs(tot_move))))
+            print(C.dim("      parking inside a trip is cut, which is the whole difference"))
+        else:
+            print(C.dim("  span is start->end. The encode is shorter — parking is cut — but by"))
+            print(C.dim("  how much is only known after Preview (3) writes the sidecars."))
         print()
     elif ctx.last_scan and ctx.last_scan.root == root:
         print("  Last scan: %d trips, %d renderable%s" % (
@@ -1899,8 +1928,10 @@ def step_upload(ctx):
         return record(ctx, "Upload videos to S3", SKIPPED, started, "no renders")
     total = sum(p.stat().st_size for p in local)
     print("  %d local mp4 (%s) -> s3://your-media-bucket" % (len(local), human_bytes(total)))
-    if not confirm("  Upload to S3 (writes outside this machine)?", False):
-        return record(ctx, "Upload videos to S3", SKIPPED, started, "declined")
+    # No second confirmation: the menu already asked "Go?", and the line above
+    # states the size and the destination. Two prompts for one decision is how
+    # you teach someone to stop reading them — which costs most at the steps that
+    # genuinely need an answer.
 
     # Pass the source explicitly. Left to itself the script syncs whatever
     # public_html/videos resolves to, which is not necessarily the tree we just
@@ -1941,8 +1972,8 @@ def step_deploy(ctx):
     print(C.dim("  writes a config.js pointing the page at raw S3 URLs, which now 403 —"))
     print(C.dim("  the site comes up and no video plays. There is no reason to deploy"))
     print(C.dim("  without it while the bucket is private, so this CLI always sets it."))
-    if not confirm("  Deploy to raoulsson.com (writes outside this machine)?", False):
-        return record(ctx, "Deploy site", SKIPPED, started, "declined")
+    # As with Upload: the menu asked, and the target is printed above. One
+    # decision, one prompt.
 
     rc, _lines = run_stream(["./deploy/deploy-site.sh"], ctx.site, "Deploy",
                             env_extra={"SIGNED_VIDEOS": "1"},
