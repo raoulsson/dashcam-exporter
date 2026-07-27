@@ -753,9 +753,18 @@ def group_into_trips(
     # display upstream has nothing to show but the directory it started on, which
     # is indistinguishable from being wedged.
     eps = []
+    _tty = sys.stdout.isatty()
     for i, c in enumerate(clips, 1):
-        print(f"[scan {i:4d}/{len(clips)}] {c.front.name}", flush=True)
+        # On a terminal, redraw one line: 239 clips scrolling past is noise that
+        # buries whatever was printed before the scan started. When piped (the
+        # pipeline CLI, a log file) emit real lines instead — a consumer needs
+        # them separable, and a log wants the history.
+        line = f"[scan {i:4d}/{len(clips)}] {c.front.name}"
+        print(line + ("\r" if _tty else "\n"), end="", flush=True)
         eps.append(_clip_endpoints(c, gps_dirs))
+    if _tty and clips:
+        # leave the line clean so the next print does not land on a stale tail
+        print(" " * 78 + "\r", end="", flush=True)
     video = use_video and _HAVE_EGO
 
     def min_dist(idx, anchor):
