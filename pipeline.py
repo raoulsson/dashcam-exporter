@@ -323,19 +323,39 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
     done = False
 
     def render():
+        """One line, redrawn in place: progress, the n/m counters, then as much
+        of the child's current output as still fits. Two lines meant the counter
+        and the log it belongs to were never quite in the same glance; this way
+        the whole state of the step is a single row that just keeps moving.
+        The full stream is still buffered, so a failure dumps its real tail.
+        """
         elapsed = time.time() - started
         if frac is not None:
-            width = max(10, min(40, term_width() - 45))
+            # narrower bar than before — the space now goes to the log tail,
+            # which is the part that tells you it is still alive
+            width = max(8, min(24, term_width() - 60))
             filled = int(round(width * min(frac, 1.0)))
             bar = "#" * filled + "." * (width - filled)
             eta = (elapsed * (1 - frac) / frac) if frac > 0.02 else None
-            head = "%s [%s] %3d%%  %s elapsed  %s eta" % (
+            head = "%s [%s] %3d%% %s/%s" % (
                 label, bar, int(frac * 100), human_secs(elapsed), human_secs(eta))
         else:
-            head = "%s %s  %s elapsed" % (label, SPIN[spin % len(SPIN)], human_secs(elapsed))
+            head = "%s %s %s" % (label, SPIN[spin % len(SPIN)], human_secs(elapsed))
         if note:
             head += "  " + note
-        live.draw([C.cyan(head), C.dim("  " + last_raw)])
+
+        # give whatever is left of the terminal to the child's latest line
+        room = term_width() - len(head) - 4
+        tail = ""
+        if last_raw and room > 12:
+            t = last_raw.strip()
+            if len(t) > room:
+                # Keep the START. Both encoders and aws put what identifies the
+                # line at the front ("[ 4/6] 2026… encoding", "Completed 3.0
+                # MiB/20.0 MiB"); the ends are filenames and units that repeat.
+                t = t[:room - 1] + "…"
+            tail = "  " + C.dim(t)
+        live.draw([C.cyan(head) + tail])
 
     try:
         while not done:
@@ -451,7 +471,13 @@ def make_render_parser():
             return None
         within = (state["clip"] / state["clips"]) if state["clips"] else 0.0
         frac = (max(state["trips_seen"] - 1, 0) + within) / total
-        return min(frac, 1.0), "trip %d/%d" % (state["trips_seen"], total)
+        # Show the clip counter too. A trip takes minutes and its number barely
+        # moves; the clip counter ticks every few seconds, and it is the thing
+        # that tells you the encode is alive rather than wedged.
+        note = "trip %d/%d" % (state["trips_seen"], total)
+        if state["clips"]:
+            note += " clip %d/%d" % (state["clip"], state["clips"])
+        return min(frac, 1.0), note
 
     return parse
 
