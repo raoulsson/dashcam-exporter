@@ -3046,7 +3046,10 @@ def main() -> int:
     home_lat = _env_float("SET_HOME_LAT")
     home_lon = _env_float("SET_HOME_LON")
     home = (home_lat, home_lon) if home_lat is not None and home_lon is not None else None
-    home_radius_m = _env_float("SET_HOME_RADIUS_M") or DEFAULT_HOME_RADIUS_M
+    # The RADIUS is not private — it is a tuning knob like trip_return_m, and it
+    # belongs in config.txt with the others. Only the coordinates identify where
+    # you live. Read below, once config is loaded; SET_HOME_RADIUS_M still works
+    # as a fallback so an existing .env keeps behaving as it did.
 
     # --- Config file loading (CLI > config.txt > built-in defaults) ----------
     config_path = _resolve_config_path(sys.argv[1:])
@@ -3055,6 +3058,12 @@ def main() -> int:
     ci = lambda k, d: int(cfg[k]) if k in cfg and cfg[k] != "" else d
     cflt = lambda k, d: float(cfg[k]) if k in cfg and cfg[k] != "" else d
     cb = lambda k, d: _cfg_bool(cfg[k]) if k in cfg else d
+
+    # home_radius_m: config.txt first, then the legacy .env key, then the default.
+    home_radius_m = cflt("home_radius_m",
+                         _env_float("SET_HOME_RADIUS_M") or DEFAULT_HOME_RADIUS_M)
+    home_radius_src = ("config.txt" if "home_radius_m" in cfg
+                       else (".env" if _env_float("SET_HOME_RADIUS_M") else "default"))
 
     # Boolean knobs are stored POSITIVELY in config (timestamp=true rather than
     # no_timestamp=false) — easier to read. Translate to the existing --no-* CLI.
@@ -3509,7 +3518,9 @@ def main() -> int:
     # that a home boundary is active, sourced from .env.
     # Same shape as "return 100m": both are radii in metres, so both read the
     # same way. The stray "r" made two identical concepts look like two things.
-    home_note = f" / home {home_radius_m:.0f}m (from .env)" if home is not None else ""
+    # Coordinates come from .env (private); the radius from config.txt (not).
+    home_note = (f" / home {home_radius_m:.0f}m ({home_radius_src}, coords from .env)"
+                 if home is not None else "")
     print(f"Grouping:    return {args.trip_return_m:.0f}m / "
           f"rollover {args.trip_day_rollover:02d}:00{home_note}")
     print(f"Output:      {out_dir}")
@@ -3538,7 +3549,7 @@ def main() -> int:
     _hit = _scan_cache_load(args.scan_cache, _ck, clips) if _ck else None
     if _hit:
         groups, trip_moved = _hit
-        print(f"Grouping:    reusing this session's boundaries ({len(groups)} trips)")
+        print(f"Grouping:    reusing cached boundaries ({len(groups)} trips)")
     else:
         groups, trip_moved = group_into_trips(clips, gps_dirs, **_gparams)
         if _ck:

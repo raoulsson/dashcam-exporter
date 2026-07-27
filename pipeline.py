@@ -194,12 +194,14 @@ class Ctx:
         # A non-default --config must reach the renderer too, or this CLI would
         # compute its paths from one config while the wrappers read another.
         self.config_args = ["--config", str(self.config_path)] if args.config else []
-        # Trip boundaries are the slowest part of a scan and identical for the
-        # same clips, but several steps need them. Cache them for THIS process
-        # only: named after the pid, deleted on exit, so a restart recomputes.
-        # A cache that outlived the session could hand a later run a grouping
-        # for a card that has since changed — and the drop step deletes by it.
-        self.scan_cache = Path(tempfile.gettempdir()) / ("dashcam-scan-%d.json" % os.getpid())
+        # Trip boundaries are the slowest part of a scan (about two and a half
+        # minutes on a full card) and identical for the same inputs, so the cache
+        # persists across runs. It is safe to do that because the key covers
+        # everything the grouping is derived from — every clip, every .gpx by
+        # size and mtime, every grouping option — so it cannot outlive its data:
+        # change any of them and it misses and recomputes. Living beside the
+        # renders rather than in /tmp keeps it with the card it describes.
+        self.scan_cache = self.out_dir / ".scan_cache.json"
         self.scan_args = ["--scan-cache", str(self.scan_cache)]
 
         # Session state carried between steps.
@@ -2417,12 +2419,6 @@ def main(argv=None):
         print(C.yellow("  Interrupted."))
     finally:
         show_cursor()
-        # The boundary cache is this session's alone; leaving it behind would let
-        # a later run reuse a grouping for a card that may have changed since.
-        try:
-            ctx.scan_cache.unlink()
-        except OSError:
-            pass
         print_summary(ctx)
 
     if any(r.status == FAILED for r in ctx.results):

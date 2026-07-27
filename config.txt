@@ -47,9 +47,15 @@ root = ~/dashcam-data/import_sink
 # Each trip is written as trip_<day>_<HH-MM>_<idx> with a _meta.json sidecar
 # carrying its day label, so a publishing UI can group a day's trips together.
 #
-# HOME LOCATION lives in a gitignored .env (SET_HOME_LAT / SET_HOME_LON /
-# SET_HOME_RADIUS_M), NOT here — this file is committed and your home address
-# should not be. Copy .env.example to .env and fill it in.
+# HOME COORDINATES live in a gitignored .env (SET_HOME_LAT / SET_HOME_LON),
+# NOT here — this file is committed and your home address should not be. Copy
+# .env.example to .env and fill it in.
+#
+# The home RADIUS is not private, just a tuning knob like trip_return_m, so it
+# belongs here. Metres from the home coordinates that still count as "at home",
+# for closing a trip. Default 50. (SET_HOME_RADIUS_M in .env still works and is
+# used when this is unset, so an older setup keeps behaving as it did.)
+#home_radius_m = 50
 
 # Return-to-anchor distance in metres. Back within this of where the trip
 # started closes the trip. Default 100.
