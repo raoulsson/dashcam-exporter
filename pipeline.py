@@ -899,17 +899,19 @@ def step_import(ctx):
         # step he wants — saying "is the card mounted?" there sends him looking
         # for a fault that does not exist. Check the second location and answer
         # the question he actually has: is there footage here to work on?
-        if (ctx.import_root / "DCIM").is_dir():
-            n = clip_count(ctx.import_root)
-            sz = human_bytes(tree_size(ctx.import_root / "DCIM"))
+        cands = import_candidates(ctx)
+        if cands:
+            src = cands[0]
+            n = clip_count(src)
+            sz = human_bytes(tree_size(src / "DCIM"))
             print(C.green("  Nothing to import — %s already holds %s clips (%s)."
-                          % (ctx.import_root, n, sz)))
+                          % (tilde(src), n, sz)))
             print(C.dim("  That is the configured root from config.txt. Go to Preview (3) "
                         "or Render (5)."))
             return record(ctx, "Import from SD card", SKIPPED, started,
                           "import already present, %s clips" % n)
-        print(C.yellow("  No card at %s and no DCIM at %s — is the card mounted?"
-                       % (ctx.card, ctx.import_root)))
+        print(C.yellow("  No card at %s and no footage under %s — is the card mounted?"
+                       % (tilde(ctx.card), tilde(ctx.render_root))))
         return record(ctx, "Import from SD card", SKIPPED, started, "no card, no import")
 
     clips = clip_count(ctx.card)
@@ -2178,14 +2180,22 @@ def fast_enough(ctx, n):
 
 
 def _noop_import(ctx):
-    """Import has nothing to do when there is no card but the sink is full."""
+    """Import has nothing to do when there is no card but footage is already in.
+
+    Resolve through import_candidates(), the same way every step does, rather
+    than looking only at import_root. import_root is a fixed default; the folder
+    actually in use comes from config.txt's `root`, so checking only the former
+    meant renaming the import directory silently re-enabled this step and
+    offered to import from a card that is not there.
+    """
     if (ctx.card / "DCIM").is_dir():
         return None
-    if (ctx.import_root / "DCIM").is_dir():
-        n = clip_count(ctx.import_root)
+    cands = import_candidates(ctx)
+    if cands:
+        n = clip_count(cands[0])
         # Terse on purpose: this sits under the menu on every draw, so a long
         # sentence there costs a line of a narrow screen every time.
-        return "sink already has %s clips — select 3 or 5" % n
+        return "already have %s clips — select 3 or 5" % n
     return None
 
 

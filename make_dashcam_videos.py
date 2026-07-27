@@ -2942,14 +2942,24 @@ def _scan_cache_key(clips, gps_dirs=(), **params):
     """
     h = hashlib.sha256()
     for c in clips:
-        h.update(f"{c.front}|{c.duration}|{c.timestamp}\n".encode())
+        # Identify a clip by its name, duration, timestamp and size — NOT its
+        # absolute path. Renaming the import directory moves every file without
+        # changing a single frame, and keying on the full path made that look
+        # like a completely new card and threw away a cache that was still
+        # perfectly valid. Size is in because two cards can reuse filenames.
+        try:
+            size = c.front.stat().st_size
+        except OSError:
+            size = -1
+        h.update(f"{c.front.name}|{c.duration}|{c.timestamp}|{size}\n".encode())
     for d in gps_dirs:
         if not d:
             continue
         try:
             for f in sorted(Path(d).rglob("*.gpx")):
                 st = f.stat()
-                h.update(f"{f}|{st.st_size}|{int(st.st_mtime)}\n".encode())
+                # name, not path, for the same reason as the clips above
+                h.update(f"{f.name}|{st.st_size}|{int(st.st_mtime)}\n".encode())
         except OSError:
             h.update(f"{d}|unreadable\n".encode())
     for k in sorted(params):
@@ -2971,13 +2981,15 @@ def _scan_cache_load(path, key, clips):
         except OSError:
             pass
         return None
-    by_path = {str(c.front): c for c in clips}
+    # Match on basename: the cache may have been written before the import
+    # directory was renamed, and the clips are the same clips.
+    by_name = {Path(c.front).name: c for c in clips}
     groups = []
     for g in d.get("groups", []):
         try:
-            groups.append([by_path[fp] for fp in g])
+            groups.append([by_name[Path(fp).name] for fp in g])
         except KeyError:
-            return None                     # clip set moved under us
+            return None                     # clip set really did change
     return groups, d.get("trip_moved", [])
 
 
