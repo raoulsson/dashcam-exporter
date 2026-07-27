@@ -922,9 +922,17 @@ def require_ego_motion(ctx):
     print("  all be built on the wrong grouping.")
     print()
     print("  Interpreter checked: %s" % py)
+    # Print the interpreter he demonstrably has — the one running this — rather
+    # than a bare "python3". On a machine where python3 is not on PATH, or is a
+    # different build from the one that works, a hardcoded name sends him to fix
+    # the wrong thing. sys.executable is by definition present and runnable.
+    ver = "%d.%d.%d" % sys.version_info[:3]
     print(C.bold("  Install with:"))
     print("    cd %s" % ctx.exporter)
-    print("    python3 -m venv .venv && .venv/bin/pip install -r requirements.txt")
+    print("    %s -m venv .venv && .venv/bin/pip install -r requirements.txt"
+          % sys.executable)
+    print(C.dim("    (that is the python %s running this script — swap it if you "
+                "prefer another)" % ver))
     print()
     return False
 
