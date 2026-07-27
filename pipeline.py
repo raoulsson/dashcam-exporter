@@ -508,6 +508,14 @@ def make_scan_parser():
         m = RE_SCAN.match(line)
         if m and not state["trips"]:
             state["i"], state["n"] = int(m.group(1)), int(m.group(2))
+            if state["n"] and state["i"] >= state["n"]:
+                # Reading is done, but the run is not: what follows is the
+                # ego-motion pass that finds each drive-away and park, and it
+                # prints nothing until the table appears. Leaving the bar at
+                # 100% there says "finished" during the slowest part of the
+                # step. Hand back to the elapsed spinner instead — no number is
+                # better than a wrong one.
+                return None, "read %d clips, finding drive boundaries" % state["n"]
             return ((state["i"] / state["n"]) if state["n"] else None,
                     "reading %d/%d" % (state["i"], state["n"]))
         m = RE_TRIP.match(line)
