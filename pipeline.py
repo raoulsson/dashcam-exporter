@@ -896,6 +896,39 @@ def renderer_python(ctx):
     return str(venv) if os.access(str(venv), os.X_OK) else "python3"
 
 
+def require_ego_motion(ctx):
+    """Refuse to start without numpy + opencv.
+
+    Without them the renderer does not fail — it quietly groups trips by GPS
+    radius instead of video ego-motion, and the two disagree. On this card the
+    fallback found 9 trips over 15h12m where ego-motion finds 6 over 10h48m,
+    inventing a 3-second trip and folding 4.5 hours of parked recording into a
+    'drive'. Everything downstream inherits that: the previews you judge from,
+    the render, and the mapping the drop step deletes by.
+
+    A silently worse answer is the failure mode worth refusing outright.
+    """
+    py = renderer_python(ctx)
+    r = subprocess.run([py, "-c", "import cv2, numpy"],
+                       capture_output=True, cwd=str(ctx.exporter))
+    if r.returncode == 0:
+        return True
+    print()
+    print(C.red("  Ego-motion detection is not available — refusing to start."))
+    print()
+    print("  Trip boundaries would fall back to a GPS radius, which groups this")
+    print("  card differently: it merges parked hours into drives and invents")
+    print("  trips that are not there. Previews, renders and the drop step would")
+    print("  all be built on the wrong grouping.")
+    print()
+    print("  Interpreter checked: %s" % py)
+    print(C.bold("  Install with:"))
+    print("    cd %s" % ctx.exporter)
+    print("    python3 -m venv .venv && .venv/bin/pip install -r requirements.txt")
+    print()
+    return False
+
+
 def load_groups(ctx, root, refresh=False):
     """Run --print-groups against `root` and return its parsed JSON, or None.
 
@@ -2132,6 +2165,10 @@ def main(argv=None):
 
     print()
     print(C.bold("  dashcam pipeline") + C.dim("   card -> render -> S3 -> site"))
+    # Checked before the status screen: there is nothing useful to show if the
+    # numbers behind it would come from the wrong grouping.
+    if not require_ego_motion(ctx):
+        return 3
     print_status(ctx)
 
     exit_code = 0
