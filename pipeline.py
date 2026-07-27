@@ -1722,12 +1722,30 @@ def step_render(ctx):
     if root is None:
         return record(ctx, "Render trips", SKIPPED, started, "no import folder")
 
-    if ctx.last_scan and ctx.last_scan.root == root:
+    # Show the trips here rather than making him remember them from step 2 or go
+    # back for them. The grouping comes from --print-groups (cached, so this is
+    # instant once the boundaries are known) — the same source the drop step
+    # deletes by, so what is listed is exactly what would be rendered.
+    payload = load_groups(ctx, root)
+    groups = (payload or {}).get("trips") or []
+    if groups:
+        print()
+        for g in groups:
+            mark = "  " if g.get("renderable", True) else C.dim(" -")
+            span = human_secs(g.get("duration_secs") or 0)
+            line = "%s%2d) %s  %s -> %s  %3d clips  %s" % (
+                mark, g["index"], g.get("day", ""),
+                str(g.get("start", ""))[11:16], str(g.get("end", ""))[11:16],
+                g.get("clips", 0), span)
+            if not g.get("renderable", True):
+                line += C.dim("  auto-skipped: %s" % (g.get("reason") or "fragment"))
+            print(line)
+        print(C.dim("  span is start->end; parking inside a trip is cut, so the encode is shorter"))
+        print()
+    elif ctx.last_scan and ctx.last_scan.root == root:
         print("  Last scan: %d trips, %d renderable%s" % (
             ctx.last_scan.total, ctx.last_scan.renderable,
             (", auto-skipped %s" % sorted(ctx.last_scan.skipped)) if ctx.last_scan.skipped else ""))
-    else:
-        print(C.dim("  No scan of this folder in this session — run step 2 for the indices."))
 
     idx = ask("  Trip indices to render (space separated, blank = all renderable): ")
     height = ask("  Output height [%d]: " % ctx.output_height, str(ctx.output_height))
