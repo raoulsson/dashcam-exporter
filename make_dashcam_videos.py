@@ -3196,9 +3196,10 @@ def main() -> int:
                          "run regardless — they're scratch, not cache.)")
     ap.add_argument("--dry-run", action="store_true", help="List drives and exit without encoding")
     ap.add_argument("--scan-cache", metavar="PATH",
-                    help="Reuse trip boundaries from PATH when the clip set and "
-                         "grouping options are unchanged, else compute and write them. "
-                         "Caller owns the file; delete it to force a recompute.")
+                    help="Where to cache trip boundaries. Defaults to "
+                         "<out>/.scan_cache.json; reused when the clips, their GPX and "
+                         "the grouping options are all unchanged, recomputed otherwise. "
+                         "Pass an empty string to force a fresh scan.")
     ap.add_argument("--log-file", metavar="PATH",
                     help="Also append output to PATH. Keeps stdout a real terminal so\n"
                          "per-clip progress can redraw in place, while the file still\n"
@@ -3381,6 +3382,16 @@ def main() -> int:
     root = Path(args.root).expanduser()
     out_dir = Path(args.out).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Default the boundary cache to <out>/.scan_cache.json rather than making
+    # every caller pass it. The ego-motion pass costs minutes and produces the
+    # same answer for the same inputs, so paying it again is never what anyone
+    # wants — and only the CLI was passing the flag, so a render started from
+    # the wrapper or by hand rescanned the whole card. The key already refuses
+    # to hit when anything it depends on changed, so defaulting it on is safe.
+    # Pass --scan-cache "" to force a fresh scan.
+    if args.scan_cache is None:
+        args.scan_cache = str(out_dir / ".scan_cache.json")
 
     # Always wipe per-clip intermediates at the start of a run. Reusing them
     # across runs is dangerous — config changes (head-trim pad, output_height,
