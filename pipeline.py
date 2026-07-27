@@ -2037,6 +2037,25 @@ SHORT = {
 # not the two seconds the same command takes under a python without opencv. Both
 # halves of the test have to hold, and this one fails the second.
 READ_ONLY = set()
+
+
+def _noop_import(ctx):
+    """Import has nothing to do when there is no card but the sink is full."""
+    if (ctx.card / "DCIM").is_dir():
+        return None
+    if (ctx.import_root / "DCIM").is_dir():
+        n = clip_count(ctx.import_root)
+        # Terse on purpose: this sits under the menu on every draw, so a long
+        # sentence there costs a line of a narrow screen every time.
+        return "sink already has %s clips — use 3 or 5" % n
+    return None
+
+
+# A step can declare that, right now, it would do nothing. Asking "Go?" for a
+# step that is about to no-op is a confirmation guarding nothing, and worse it is
+# practice at pressing enter — the habit you least want by the time step 9 asks.
+# Answer the question at selection time instead, and do not run it at all.
+NOOP_CHECK = {1: _noop_import}
 DESC = {
     1: "Copy the card's DCIM tree into the import sink, verify, then optionally erase the card.",
     2: "Scan the import and print the trip table. Reads nothing else, changes nothing.",
@@ -2050,10 +2069,34 @@ DESC = {
 }
 
 
-def print_menu(ctx):
+def unavailable_steps(ctx):
+    """{step: reason} for steps that would do nothing right now.
+
+    Recomputed on every menu draw, which means every time round the loop and
+    every time status is refreshed. Mount the card and press 0 and Import comes
+    back — a disabled step that stayed disabled after the world changed would be
+    worse than not disabling it at all.
+    """
+    if ctx is None:
+        return {}
+    out = {}
+    for n, check in NOOP_CHECK.items():
+        try:
+            r = check(ctx)
+        except Exception:
+            r = None
+        if r:
+            out[n] = r
+    return out
+
+
+def print_menu(ctx, blocked=None):
     """Compact grid. Columns are chosen to fit the terminal, so a narrow window
-    gets fewer columns rather than a wrapped mess."""
+    gets fewer columns rather than a wrapped mess. Steps that would currently do
+    nothing are shown greyed out with the reason underneath, rather than letting
+    you pick them and find out afterwards."""
     print()
+    blocked = unavailable_steps(ctx) if blocked is None else blocked
     w = term_width()
     cell = max(len(s) for s in SHORT.values()) + 6      # "! 9) Del source" + gap
     cols = max(1, min(4, w // cell))
@@ -2066,12 +2109,22 @@ def print_menu(ctx):
             if i >= len(ordered):
                 continue
             num, _name, _fn, in_all = ordered[i]
-            mark = " " if in_all else C.red("!")
             label = SHORT[num]
-            txt = "%s %d) %s" % (mark, num, C.bold(label) if in_all else C.red(label))
+            if num in blocked:
+                mark = " "
+                body = C.dim(label)          # greyed: selecting it does nothing
+            elif in_all:
+                mark = " "
+                body = C.bold(label)
+            else:
+                mark = C.red("!")
+                body = C.red(label)
+            txt = "%s %d) %s" % (mark, num, body)
             pad = cell - (len(label) + 5)
             line += txt + " " * max(1, pad)
         print("  " + line.rstrip())
+    for num in sorted(blocked):
+        print(C.dim("   %d) %s" % (num, blocked[num])))
     solo = ",".join(str(n) for n in solo_steps())
     rng = _compact_ranges([n for n, _, _, a in STEPS if a])
     # Two short lines beat one that wraps: a wrapped hint reads as broken output.
@@ -2227,6 +2280,16 @@ def main(argv=None):
                                                      ", ".join(str(n) for n in named),
                                                      "s" if len(named) == 1 else "")))
                     continue
+                # A greyed step is not runnable right now. Say why and drop it,
+                # rather than confirming and then reporting a no-op.
+                blocked = unavailable_steps(ctx)
+                hit = [n for n in picked if n in blocked]
+                if hit:
+                    for n in hit:
+                        print(C.yellow("  %d) %s" % (n, blocked[n])))
+                    picked = [n for n in picked if n not in blocked]
+                    if not picked:
+                        continue
                 # The description now lives here rather than in the grid — this
                 # is the moment it is wanted, and there is room for a sentence.
                 for n in picked:
