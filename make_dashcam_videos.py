@@ -3766,6 +3766,11 @@ def main() -> int:
     work_dir = out_dir / ".intermediates"
     work_dir.mkdir(exist_ok=True)
 
+    # Sequence number of this render, 1..len(wanted). pub_no below is the
+    # per-DAY publish index, which resets each day — printing that as
+    # "[Trip a/b]" made the second trip of a run announce itself as 1/6 while
+    # every progress display counted it as 2/6.
+    _seq = 0
     for idx, group in enumerate(groups, 1):
         if idx not in wanted:
             continue
@@ -3808,7 +3813,8 @@ def main() -> int:
         sidecar_base = day_dir / f"trip_{label}"
         final = sidecar_base.with_name(sidecar_base.name + f"{fringe_tag}{size_tag}.mp4")
 
-        print(f"\n[{group_word} {pub_no[idx]}/{len(wanted)}] {start:%Y-%m-%d %H:%M} → {end:%H:%M}  "
+        _seq += 1
+        print(f"\n[{group_word} {_seq}/{len(wanted)}] {start:%Y-%m-%d %H:%M} → {end:%H:%M}  "
               f"({len(group)} clips, ~{fmt_secs(secs)})")
         if args.debug_cuts > 0:
             print(f"  DEBUG-CUTS preview (not a real render): start + pauses "
