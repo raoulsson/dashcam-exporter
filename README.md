@@ -222,6 +222,7 @@ python3 make_dashcam_videos.py                            # encode everything
 python3 make_dashcam_videos.py --drives 8                 # --trips 8 is an alias
 python3 make_dashcam_videos.py --root ~/backup --out ~/Movies/Dashcam
 python3 make_dashcam_videos.py --sidecars-only            # refresh sidecars only
+python3 make_dashcam_videos.py --print-groups             # the grouping as JSON, for tooling
 python3 make_dashcam_videos.py --output-height 540        # phone-sized file
 ```
 
@@ -295,6 +296,7 @@ consistent within a run.
 | Flag | Why you'd use it |
 |------|------------------|
 | `--dry-run` | List trips and their indices; encode nothing. Always do this first. |
+| `--print-groups` | The same grouping as `--dry-run`, but as JSON on stdout (everything human-readable goes to stderr), including the exact front/rear source files in each trip. For tooling that must act on a trip's clips — `pipeline.py`'s drop step deletes by it. |
 | `--force` | Re-encode a trip whose `.mp4` already exists (otherwise it's skipped). |
 | `--sidecars-only` | Regenerate `.html` / `.gpx` / `_links.txt` / `_meta.json` without touching video. Fast. |
 | `--output-height 540` | Smaller file for phone/messaging. `1080` (native) is the default; `720` roughly halves the size. |
@@ -627,6 +629,7 @@ change always takes effect on the next render, no flag needed.**
 | `--software` | Force libx264 instead of macOS VideoToolbox. |
 | `--keep-intermediates` | Don't delete per-clip intermediates after concat. |
 | `--dry-run` | List trips and exit without encoding. |
+| `--print-groups` | Machine-readable `--dry-run`: the grouping as JSON on stdout (human output moves to stderr), with each trip's index, day, span, clip count, renderable flag + skip reason, output basename and its source files. |
 
 
 ---

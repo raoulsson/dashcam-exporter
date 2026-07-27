@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """pipeline.py — the whole dashcam publishing pipeline, in one interactive CLI.
 
-Card -> import -> render -> manifest -> S3 -> website -> (optionally) erase the
-import source. Each of those already has a script; the point of this file is
-that nobody should have to remember which script, in which repo, with which
-flag. Run it, look at the status screen, pick the steps.
+Card -> import -> preview -> render -> manifest -> S3 -> website -> (optionally)
+erase the import source. Each of those already has a script; the point of this
+file is that nobody should have to remember which script, in which repo, with
+which flag. Run it, look at the status screen, pick the steps.
+
+The preview and drop steps in the middle are the cheap decision point: sidecars
+and one still per trip cost minutes, while encoding costs hours and uploading
+costs days on a 250 KB/s line. Deciding what to keep afterwards means paying for
+footage that was never wanted.
 
     python3 pipeline.py
 
@@ -21,6 +26,7 @@ Two repos are involved and this file lives in the first:
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import queue
@@ -29,6 +35,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
@@ -183,6 +190,11 @@ class Ctx:
         # Session state carried between steps.
         self.selected_import = None     # the folder passed as --root to the renderer
         self.last_scan = None           # ScanResult from the most recent list-trips
+        # (root, payload) from the most recent --print-groups. The scan behind it
+        # is expensive, and both the preview sheet and the drop step need the same
+        # answer, so it is cached per import folder — and invalidated the moment
+        # anything changes what is on disk.
+        self.last_groups = None
         self.results = []               # StepResult log for the final summary
 
 
@@ -281,7 +293,7 @@ def _reader(stream, q):
 
 
 def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
-               env_extra=None, tail_lines=40):
+               env_extra=None, tail_lines=40, stdout_file=None):
     """Run a command, stream its output, return (rc, all_lines).
 
     parser(line) -> (fraction, note) or None. fraction is 0..1 for a real
@@ -292,25 +304,42 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
     keep(line) -> bool marks lines worth leaving permanently on screen.
     passthrough=True prints everything verbatim and draws no bar — used for
     the trip listing, where the table IS the output.
+
+    stdout_file redirects the child's STDOUT to that path and streams its
+    STDERR instead. That is for --print-groups, whose stdout is a JSON document
+    the caller parses: merging it into the progress stream (what every other
+    step wants) would corrupt the very thing we ran the command for.
     """
     env = dict(os.environ)
     if env_extra:
         env.update(env_extra)
 
-    proc = subprocess.Popen(
-        cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        env=env,
-        # Own process group: Ctrl-C reaches us first and we decide how the child
-        # dies, instead of the terminal SIGINT-ing both and racing us to it.
-        # Side effect worth knowing: a new session has no controlling terminal,
-        # so anything that insists on prompting at /dev/tty (an ssh host-key
-        # confirmation on a first-ever deploy, a passphrase-protected key) fails
-        # loudly instead of hanging. Loud is the right failure mode here; accept
-        # the host key once by hand and the deploy step works from then on.
-        start_new_session=True,
-    )
+    out_fh = open(stdout_file, "wb") if stdout_file else None
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=str(cwd),
+            stdout=(out_fh if out_fh else subprocess.PIPE),
+            stderr=(subprocess.PIPE if out_fh else subprocess.STDOUT),
+            env=env,
+            # Own process group: Ctrl-C reaches us first and we decide how the
+            # child dies, instead of the terminal SIGINT-ing both and racing us
+            # to it. Side effect worth knowing: a new session has no controlling
+            # terminal, so anything that insists on prompting at /dev/tty (an ssh
+            # host-key confirmation on a first-ever deploy, a passphrase-protected
+            # key) fails loudly instead of hanging. Loud is the right failure mode
+            # here; accept the host key once by hand and the deploy step works
+            # from then on.
+            start_new_session=True,
+        )
+    except BaseException:
+        # A command that cannot even start (a missing interpreter, say) must not
+        # leave the redirect file handle open behind it.
+        if out_fh:
+            out_fh.close()
+        raise
     q = queue.Queue()
-    t = threading.Thread(target=_reader, args=(proc.stdout, q), daemon=True)
+    t = threading.Thread(target=_reader,
+                         args=(proc.stderr if out_fh else proc.stdout, q), daemon=True)
     t.start()
 
     live = Live(enabled=C.enabled and not passthrough)
@@ -405,6 +434,8 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
         raise Aborted()
     finally:
         live.close()
+        if out_fh:
+            out_fh.close()
 
     if rc != 0:
         print(C.red("  FAILED: %s (exit %d)" % (" ".join(cmd), rc)))
@@ -663,7 +694,7 @@ def print_status(ctx):
 
     print("  Repos        %s" % C.dim("%s  |  %s" % (ctx.exporter, ctx.site)))
     if not ctx.site.is_dir():
-        print("  " + C.red("goodnight-drives repo not found — steps 4-6 will not run."))
+        print("  " + C.red("goodnight-drives repo not found — steps 6-8 will not run."))
     print(rule())
 
 
@@ -774,6 +805,7 @@ def step_import(ctx):
     # The delete guard leans on that scan, so leaving it in place would let it
     # approve erasing footage nothing has ever looked at.
     ctx.last_scan = None
+    ctx.last_groups = None
     return record(ctx, "Import from SD card", RAN, started,
                   "%s clips, %s -> %s" % (clips, human_bytes(size), dest))
 
@@ -821,6 +853,681 @@ def step_list(ctx):
     ctx.last_scan = parse_scan(root, lines)
     return record(ctx, "List trips", RAN, started,
                   "%d trips found, %d renderable" % (ctx.last_scan.total, ctx.last_scan.renderable))
+
+
+# ---------------------------------------------------------------------------
+# The trip -> source clip mapping.
+#
+# Everything below that names a file of original footage — the preview contact
+# sheet, and the drop step that DELETES — reads this one mapping, straight from
+# the scanner's own grouping (make_dashcam_videos --print-groups, which
+# serialises what group_into_trips returned). Nothing here reconstructs a trip
+# boundary from filename timestamps: the boundaries come from video ego-motion
+# and GPS, a filename cannot express them, and being one clip wrong at a
+# boundary means deleting footage that belonged to a trip he wanted.
+# ---------------------------------------------------------------------------
+
+def renderer_python(ctx):
+    """The interpreter the wrapper scripts use for the renderer.
+
+    list-trips-data.sh and make-trips-rendered.sh both prefer .venv/bin/python
+    when it exists, and that is not cosmetic: the venv has numpy + opencv, so
+    trip boundaries are found by video ego-motion there and degrade to the
+    GPS-radius fallback under a bare python3. The two can group the same card
+    differently. Since the drop step deletes by this mapping, it has to be the
+    mapping the renders were made from.
+    """
+    venv = ctx.exporter / ".venv" / "bin" / "python"
+    return str(venv) if os.access(str(venv), os.X_OK) else "python3"
+
+
+def load_groups(ctx, root, refresh=False):
+    """Run --print-groups against `root` and return its parsed JSON, or None.
+
+    Cached per session per import folder: the scan decodes video to find the
+    pull-away and park moments, so it costs the same minutes as step 2.
+    """
+    if not refresh and ctx.last_groups and ctx.last_groups[0] == root:
+        print(C.dim("  Using the trip grouping already scanned in this session."))
+        return ctx.last_groups[1]
+
+    print(C.dim("  Scanning %s for the authoritative trip grouping." % root))
+    print(C.dim("  This is the same work as step 2 (it walks the video), so it takes"))
+    print(C.dim("  a while; the result is reused for the rest of this session."))
+    fd, tmp = tempfile.mkstemp(prefix="dashcam-groups-", suffix=".json")
+    os.close(fd)
+    try:
+        rc, _lines = run_stream(
+            [renderer_python(ctx), "-u", "make_dashcam_videos.py", "--print-groups",
+             "--root", str(root)] + ctx.config_args,
+            ctx.exporter, "Grouping", stdout_file=tmp)
+        if rc != 0:
+            return None
+        try:
+            with open(tmp, "r") as fh:
+                payload = json.load(fh)
+        except ValueError as e:
+            print(C.red("  --print-groups did not return usable JSON: %s" % e))
+            return None
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    ctx.last_groups = (root, payload)
+    return payload
+
+
+def trip_files(trip):
+    """Every source file the scanner put in this trip: front clips, then rear.
+
+    A clip can have no rear file, so the rear list is often shorter than the
+    front one — they are two lists, not two columns.
+    """
+    return ([Path(p) for p in trip.get("front", [])] +
+            [Path(p) for p in trip.get("rear", [])])
+
+
+def trip_bytes(trip):
+    total = 0
+    for p in trip_files(trip):
+        try:
+            total += p.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def trip_meta(trip):
+    """The trip's _meta.json (written by a render OR by --sidecars-only), or None."""
+    base = trip.get("out_base")
+    if not base:
+        return None
+    p = Path(base + "_meta.json")
+    if not p.is_file():
+        return None
+    try:
+        return json.loads(p.read_text())
+    except Exception:
+        return None
+
+
+def _overlaps(a_start, a_end, b_start, b_end):
+    """Half-open interval overlap on '%Y-%m-%d %H:%M:%S' strings.
+
+    That format is fixed-width and zero-padded, so lexicographic order IS
+    chronological order and no date parsing is needed.
+    """
+    return a_start < b_end and b_start < a_end
+
+
+def trip_renders(ctx, payload, trip):
+    """Rendered mp4s whose footage is this trip's, as (same_import, other_import).
+
+    Two questions with two different answers. 'Is a render of THIS import built
+    on these clips?' decides whether dropping them is allowed at all — that is
+    the delete-import operation, which has its own guards. 'Does a render of
+    this footage exist ANYWHERE?' decides whether these clips are the last copy.
+
+    Both are answered from recorded metadata: each rendered trip's _meta.json
+    carries source_import plus its start/end, and the mp4 must actually be on
+    disk (a --sidecars-only preview writes the meta without any video, and that
+    is precisely the state this whole flow is designed to review). A mp4 with
+    no meta beside it is matched by name against the trip's own out_base, which
+    is where this trip's render would land.
+    """
+    same, other = [], []
+    if not ctx.out_dir.is_dir():
+        return same, other
+    # Compare resolved paths: the same folder reached through a symlink or a
+    # relative --root spells differently in source_import, and a mismatch here
+    # would quietly downgrade a refusal into a permission.
+    root = Path(payload.get("root", "")).expanduser().resolve()
+    for meta_path in ctx.out_dir.rglob("trip_*_meta.json"):
+        try:
+            m = json.loads(meta_path.read_text())
+        except Exception:
+            continue
+        mp4 = meta_path.parent / m.get("video", "")
+        if not mp4.is_file():
+            continue
+        if not _overlaps(trip["start"], trip["end"],
+                         m.get("start", ""), m.get("end", "")):
+            continue
+        src = m.get("source_import")
+        if not src:
+            # An overlapping render whose origin was never recorded (an older
+            # meta). Count it as this import's: refusing on the unknown is the
+            # cheap mistake, permitting on it is the expensive one.
+            same.append(mp4)
+        elif Path(src).expanduser().resolve() == root:
+            same.append(mp4)
+        else:
+            other.append(mp4)
+    base = trip.get("out_base")
+    if base:
+        day_dir = Path(base).parent
+        if day_dir.is_dir():
+            for mp4 in sorted(day_dir.glob(Path(base).name + "*.mp4")):
+                if mp4 not in same:
+                    same.append(mp4)
+    return same, other
+
+
+# ---------------------------------------------------------------------------
+# Preview pass: sidecars + one still per trip + a local contact sheet
+# ---------------------------------------------------------------------------
+
+PREVIEW_DIRNAME = "previews"
+PREVIEW_STILL_W = 1600      # same intent as build_manifest.make_poster's POSTER_W
+PREVIEW_STILL_T = 1.0       # seconds into the clip; see extract_still
+
+
+def extract_still(src, dst, seconds=PREVIEW_STILL_T, width=PREVIEW_STILL_W):
+    """One frame from a source clip, written as a jpg. True on success.
+
+    Same recipe as build_manifest.make_poster, for the same reasons: a beat in,
+    so a fade-from-black or still-auto-exposing first frame is not what he
+    judges the trip by, and scale='min(W,iw)' so a clip narrower than W is
+    never upscaled into invented detail. `-ss` before `-i` plus -frames:v 1
+    means ffmpeg seeks and decodes one frame — it does not read the clip.
+    """
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    for t in (seconds, 0):
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-ss", str(t), "-i", str(src),
+               "-frames:v", "1", "-vf", "scale='min(%d\\,iw)':-2" % width,
+               "-q:v", "5", str(dst)]
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=120)
+        except (OSError, subprocess.TimeoutExpired):
+            break
+        if r.returncode == 0 and dst.is_file() and dst.stat().st_size > 0:
+            return True
+        # A clip shorter than the seek point yields no frame; retry at 0 before
+        # giving up, rather than reporting a trip as unpreviewable.
+    # Do not leave a truncated or empty jpg behind: the contact sheet would show
+    # a broken image instead of saying plainly that there is no still.
+    try:
+        if dst.is_file() and dst.stat().st_size == 0:
+            dst.unlink()
+    except OSError:
+        pass
+    return False
+
+
+PREVIEW_CSS = """
+:root{--bg0:#060C16;--bg1:#0a1422;--card:#0b1524;--line:#1b2a3e;
+      --ink:#e8eef6;--dim:#9fb2c9;--faint:#6b7f99;--orange:#E08A3C;
+      --red:#e5564a;--cyan:#35C3D6;
+      --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;padding:28px 20px 60px;background:var(--bg0);color:var(--ink);
+     font-family:var(--font);font-size:15px;line-height:1.5}
+header{max-width:1180px;margin:0 auto 26px}
+h1{margin:0 0 6px;font-size:22px;letter-spacing:.04em}
+h1 span{color:var(--orange);text-transform:uppercase;letter-spacing:.16em;font-size:15px}
+header p{margin:6px 0;color:var(--dim);font-size:14px;max-width:78ch}
+header code{color:var(--ink);background:#0e1a2b;padding:1px 5px;border-radius:4px;
+            font-size:13px}
+main{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+      overflow:hidden;display:grid;grid-template-columns:minmax(0,420px) minmax(0,1fr)}
+@media (max-width:860px){.card{grid-template-columns:1fr}}
+.shot{background:#000;display:block}
+.shot img{display:block;width:100%;height:auto}
+.shot .none{padding:48px 16px;text-align:center;color:var(--faint);font-size:13px}
+.body{padding:16px 18px}
+.title{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.title b{font-size:17px}
+.title .day{color:var(--dim);font-size:14px}
+.flags{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+.flag{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);
+      color:var(--dim)}
+.flag.warn{color:var(--orange);border-color:#4a3520}
+.flag.bad{color:var(--red);border-color:#4a2320}
+.flag.ok{color:var(--cyan);border-color:#1d3a44}
+dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));
+   gap:10px 16px;margin:0 0 14px}
+dt{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+dd{margin:2px 0 0;font-size:15px}
+dd small{color:var(--faint);font-size:12px;display:block;line-height:1.35}
+.links a{color:var(--cyan);text-decoration:none;font-size:13px;margin-right:14px}
+.links a:hover{text-decoration:underline}
+.links .off{color:var(--faint);font-size:13px;margin-right:14px}
+details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+summary{cursor:pointer;color:var(--dim);font-size:13px}
+details ul{list-style:none;margin:10px 0 0;padding:0;
+           display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:2px 14px}
+details li{font-size:12px;color:var(--dim);font-family:ui-monospace,Menlo,monospace}
+details li span{color:var(--faint)}
+details pre{margin:10px 0 0;padding:10px;background:#08111d;border-radius:6px;
+            overflow-x:auto;font-size:11.5px;color:var(--faint);
+            font-family:ui-monospace,Menlo,monospace}
+footer{max-width:1180px;margin:34px auto 0;color:var(--faint);font-size:12.5px}
+"""
+
+
+def _clip_list_html(label, paths, previews_dir):
+    if not paths:
+        return ""
+    total = 0
+    items = []
+    for p in paths:
+        try:
+            n = p.stat().st_size
+        except OSError:
+            n = 0
+        total += n
+        items.append("<li title=\"%s\">%s <span>%s</span></li>" % (
+            html.escape(str(p)), html.escape(p.name), human_bytes(n)))
+    return (
+        "<details><summary>%s source clips: %d file(s), %s</summary>"
+        "<ul>%s</ul>"
+        "<details><summary>full paths (copy/paste)</summary><pre>%s</pre></details>"
+        "</details>" % (
+            html.escape(label), len(paths), human_bytes(total), "".join(items),
+            html.escape("\n".join(str(p) for p in paths))))
+
+
+def write_contact_sheet(ctx, root, payload, previews_dir, stills):
+    """One self-contained page, openable from file://, one card per trip.
+
+    No external CSS, fonts, scripts or images and only relative hrefs, because
+    the entire point of this pass is reviewing BEFORE anything is published.
+    """
+    trips = payload.get("trips", [])
+    cards = []
+    for t in trips:
+        idx = t["index"]
+        meta = trip_meta(t)
+        still = stills.get(idx)
+        if still is not None:
+            rel = html.escape(os.path.relpath(str(still), str(previews_dir)))
+            shot = ('<a class="shot" href="%s"><img src="%s" alt="Trip %d first frame"></a>'
+                    % (rel, rel, idx))
+        else:
+            shot = '<div class="shot"><div class="none">no still<br>(ffmpeg could not read the first clip)</div></div>'
+
+        span_secs = t.get("duration_secs") or 0
+        moving = meta.get("moving_min") if meta else None
+        gps_points = meta.get("gps_points") if meta else None
+
+        flags = []
+        if not t.get("renderable"):
+            flags.append('<span class="flag bad">auto-skipped: %s</span>'
+                         % html.escape(t.get("reason") or "not renderable"))
+        if meta is None:
+            # An auto-skipped trip is never rendered, so --sidecars-only writes
+            # nothing for it: no map, no stats. Say that, rather than leaving him
+            # wondering why a card is empty.
+            flags.append('<span class="flag warn">%s</span>' % (
+                "no map or stats — auto-skipped trips get no sidecars"
+                if not t.get("renderable") else "no sidecar metadata yet"))
+        elif not gps_points:
+            flags.append('<span class="flag warn">no GPS — renders without a map, '
+                         'stats are all zero</span>')
+        if t.get("renderable") and meta is not None and gps_points:
+            flags.append('<span class="flag ok">ready to render</span>')
+
+        def num(v, unit, digits=1):
+            if v is None:
+                return "&mdash;"
+            return "%.*f %s" % (digits, v, html.escape(unit))
+
+        rows = [
+            ("span", "%s &rarr; %s" % (html.escape(t["start"][11:16]),
+                                       html.escape(t["end"][11:16])),
+             "%s wall clock, parking included" % human_secs(span_secs)),
+            ("moving", (human_secs(moving * 60) if moving else "&mdash;"),
+             "what actually gets rendered"),
+            ("distance", num(meta.get("distance_km") if meta else None, "km", 1), ""),
+            ("speed", ("max %s / avg %s" % (num(meta.get("max_kmh"), "", 0),
+                                            num(meta.get("avg_kmh"), "", 0))).strip()
+             if meta else "&mdash;", "km/h" if meta else ""),
+            ("clips", "%d" % t.get("clips", 0), "%s of source" % human_bytes(trip_bytes(t))),
+            ("gps points", ("%d" % gps_points) if gps_points
+             else ("0" if meta else "&mdash;"), ""),
+        ]
+        dl = "".join("<dt>%s</dt><dd>%s%s</dd>" % (
+            html.escape(k), v, ("<small>%s</small>" % s) if s else "")
+            for k, v, s in rows)
+
+        links = []
+        base = t.get("out_base")
+        for label, suffix in (("map (.html)", ".html"), ("track (.gpx)", ".gpx")):
+            p = Path(base + suffix) if base else None
+            if p is not None and p.is_file():
+                links.append('<a href="%s">%s</a>' % (
+                    html.escape(os.path.relpath(str(p), str(previews_dir))),
+                    html.escape(label)))
+            else:
+                links.append('<span class="off">%s: none</span>' % html.escape(label))
+
+        cards.append(
+            '<section class="card">%s<div class="body">'
+            '<div class="title"><b>Trip %d</b><span class="day">%s &middot; %s</span></div>'
+            '<div class="flags">%s</div><dl>%s</dl><div class="links">%s</div>%s%s'
+            '</div></section>' % (
+                shot, idx, html.escape(t["day"]), html.escape(t["start"][11:16]),
+                "".join(flags) or '<span class="flag">&nbsp;</span>', dl,
+                "".join(links),
+                _clip_list_html("front", [Path(p) for p in t.get("front", [])], previews_dir),
+                _clip_list_html("rear", [Path(p) for p in t.get("rear", [])], previews_dir)))
+
+    total_bytes = sum(trip_bytes(t) for t in trips)
+    doc = (
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>Trip previews — %s</title><style>%s</style></head><body>"
+        "<header><h1><span>preview</span> %d trip(s) in %s</h1>"
+        "<p>Stills are a single frame from each trip's first front clip — no video "
+        "has been encoded and nothing has been published. The maps and numbers come "
+        "from the sidecars written by <code>--sidecars-only</code>.</p>"
+        "<p><b>Span</b> is wall clock from the first clip to the last and includes "
+        "parking; <b>moving</b> is what the render actually keeps, and it is the one "
+        "that predicts encode time and upload size. All times are the camera's local "
+        "clock, as on the site.</p>"
+        "<p>%s of source footage in total. Drop the trips you do not want from the "
+        "import with the pipeline's drop step — the clips listed on a card are exactly "
+        "the files that step deletes.</p></header>"
+        "<main>%s</main>"
+        "<footer>Generated by pipeline.py from make_dashcam_videos.py "
+        "--print-groups. Self-contained: no network, no scripts.</footer>"
+        "</body></html>" % (
+            html.escape(root.name), PREVIEW_CSS, len(trips), html.escape(str(root)),
+            human_bytes(total_bytes), "".join(cards)))
+
+    index = previews_dir / "index.html"
+    index.write_text(doc, encoding="utf-8")
+    return index
+
+
+def step_preview(ctx):
+    """Sidecars + one still per trip + a local contact sheet. No encoding.
+
+    The cheap pass that makes pruning possible: encoding is hours and uploading
+    is days, so the decision about which trips to keep has to be makeable before
+    either. Nothing here writes video and nothing here publishes.
+    """
+    started = time.time()
+    root = pick_import(ctx, "the preview pass")
+    if root is None:
+        return record(ctx, "Preview all trips", SKIPPED, started, "no import folder")
+
+    previews_dir = ctx.out_dir / PREVIEW_DIRNAME
+    print(C.dim("  Three cheap things, no encoding:"))
+    print(C.dim("    1. --sidecars-only: each trip's .html map, .gpx and _meta.json"))
+    print(C.dim("    2. one still per trip, a frame from its first front clip"))
+    print(C.dim("    3. %s/index.html — a contact sheet to open locally" % previews_dir))
+    print(C.dim("  Reviewing is entirely offline; deploying stays a separate choice."))
+
+    if not confirm("  Run the preview pass on %s?" % root, True):
+        return record(ctx, "Preview all trips", SKIPPED, started, "declined")
+
+    # 1. Sidecars. The renderer prints its usual "[Trip a/b]" headers here, so
+    #    the real trip counter drives the bar; there are no per-clip lines in
+    #    this mode, and the parser simply shows no clip counter.
+    cmd = ["./make-trips-rendered.sh", "--sidecars-only", "--root", str(root)] + ctx.config_args
+    rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars", parser=make_render_parser(),
+                            keep=lambda l: l.startswith("[Trip "))
+    if rc != 0:
+        return record(ctx, "Preview all trips", FAILED, started, "sidecars exit %d" % rc)
+
+    # 2. The grouping — which is also the trip -> source clip mapping the stills
+    #    and the contact sheet's clip lists are built from.
+    payload = load_groups(ctx, root)
+    if payload is None:
+        return record(ctx, "Preview all trips", FAILED, started, "--print-groups failed")
+    trips = payload.get("trips", [])
+    if not trips:
+        print(C.yellow("  The scan found no trips in %s." % root))
+        return record(ctx, "Preview all trips", SKIPPED, started, "no trips")
+
+    # 3. Stills. Every trip gets one, including the auto-skipped fragments — he
+    #    is deciding what to keep, and a trip he cannot see is one he cannot judge.
+    previews_dir.mkdir(parents=True, exist_ok=True)
+    stills, failed = {}, []
+    for i, t in enumerate(trips, 1):
+        front = t.get("front") or []
+        name = "trip_%02d_%s_%s.jpg" % (t["index"], t["day"], t["start"][11:16].replace(":", "-"))
+        dst = previews_dir / name
+        print("  still %d/%d  %s" % (i, len(trips), name))
+        if not front:
+            failed.append(t["index"])
+            continue
+        if extract_still(Path(front[0]), dst):
+            stills[t["index"]] = dst
+        else:
+            failed.append(t["index"])
+    if failed:
+        print(C.yellow("  No still for trip(s) %s — ffmpeg could not read the first clip."
+                       % ", ".join(str(i) for i in failed)))
+
+    index = write_contact_sheet(ctx, root, payload, previews_dir, stills)
+
+    # 4. Keep trips.json current. The site is not deployed here — this only means
+    #    a later deploy is not carrying a stale manifest.
+    if ctx.site.is_dir():
+        rc, _lines = run_stream(["python3", "build_manifest.py"], ctx.site, "Manifest",
+                                keep=lambda l: l.startswith("wrote trips.json"))
+        if rc != 0:
+            return record(ctx, "Preview all trips", FAILED, started, "build_manifest exit %d" % rc)
+    else:
+        print(C.yellow("  goodnight-drives not at %s — skipped the manifest rebuild." % ctx.site))
+
+    print()
+    print(C.green("  previews are in %s" % previews_dir))
+    print("  %d trip(s), %d still(s). Open the contact sheet with:" % (len(trips), len(stills)))
+    print("    open %s" % index)
+    print(C.dim("  Nothing was encoded and nothing was published. On the website these"))
+    print(C.dim("  trips would say the video is not available — that is expected: the"))
+    print(C.dim("  sidecars carry the map, the stats and the places, but no video exists"))
+    print(C.dim("  yet. Render (and only then upload) the ones you decide to keep."))
+    return record(ctx, "Preview all trips", RAN, started,
+                  "%d trip(s), %d still(s) in %s" % (len(trips), len(stills), previews_dir))
+
+
+# ---------------------------------------------------------------------------
+# Drop a trip from the import — DESTRUCTIVE
+# ---------------------------------------------------------------------------
+
+def step_drop_trip(ctx):
+    """Delete one trip's original clips from the import. Unrecoverable.
+
+    The counterpart to the preview pass: he looks at the contact sheet, decides
+    a trip is not worth hours of encoding and days of uploading, and removes its
+    source clips so nothing downstream ever touches them.
+
+    This is deliberately NOT the delete-import step. That one erases an import
+    whose every trip is already rendered, on S3 and live — footage that exists
+    elsewhere. This one erases footage that in the normal case exists NOWHERE
+    else, so its job is to make that unmistakable and then get out of the way.
+    """
+    started = time.time()
+    root = pick_import(ctx, "dropping a trip")
+    if root is None:
+        return record(ctx, "Drop trip from import", SKIPPED, started, "no import folder")
+
+    payload = load_groups(ctx, root)
+    if payload is None:
+        return record(ctx, "Drop trip from import", FAILED, started, "--print-groups failed")
+    trips = payload.get("trips", [])
+    if not trips:
+        print(C.yellow("  No trips in %s — nothing to drop." % root))
+        return record(ctx, "Drop trip from import", SKIPPED, started, "no trips")
+
+    print()
+    print(rule("trips in %s" % root.name))
+    by_index = {}
+    for t in trips:
+        by_index[t["index"]] = t
+        note = "" if t.get("renderable") else C.yellow("  [%s]" % (t.get("reason") or "skipped"))
+        print("  %2d) %s  %s -> %s  %3d clips  %8s  %9s%s" % (
+            t["index"], t["day"], t["start"][11:16], t["end"][11:16], t.get("clips", 0),
+            human_secs(t.get("duration_secs")), human_bytes(trip_bytes(t)), note))
+    print(rule())
+    print(C.dim("  The stills and maps for these are in %s" % (ctx.out_dir / PREVIEW_DIRNAME)))
+
+    sel = ask("  Trip indices to DROP (space separated, blank = cancel): ")
+    if not sel.strip():
+        return record(ctx, "Drop trip from import", SKIPPED, started, "cancelled")
+    picked = []
+    for part in re.split(r"[,\s]+", sel.strip()):
+        if not part.isdigit() or int(part) not in by_index:
+            print(C.red("  %r is not one of the listed trip indices." % part))
+            return record(ctx, "Drop trip from import", SKIPPED, started, "bad selection")
+        if int(part) not in picked:
+            picked.append(int(part))
+
+    # --- guard: never drop the source of something already rendered from THIS
+    # import. That is the delete-import operation, which has its own three
+    # guards (rendered / on S3 / live on the site) precisely because it is a
+    # different and more dangerous thing than discarding footage nobody kept.
+    blocked = []
+    for i in picked:
+        same, _other = trip_renders(ctx, payload, by_index[i])
+        if same:
+            blocked.append((i, same))
+    if blocked:
+        print()
+        for i, mp4s in blocked:
+            print(C.red("  Trip %d is already rendered from this import:" % i))
+            for p in mp4s[:5]:
+                print(C.red("      %s" % p))
+        print(C.red("  Refusing. Dropping the source of an existing render is the"))
+        print(C.red("  delete-import operation — use that step, which first proves the"))
+        print(C.red("  renders are on S3 and live on the site."))
+        return record(ctx, "Drop trip from import", SKIPPED, started,
+                      "refused: trip(s) %s already rendered" % ", ".join(str(i) for i, _ in blocked))
+
+    # --- what will actually be deleted, file by file.
+    files, total = [], 0
+    for i in picked:
+        files.extend(trip_files(by_index[i]))
+    for p in files:
+        try:
+            total += p.stat().st_size
+        except OSError:
+            pass
+
+    print()
+    print(rule("drop from import"))
+    for i in picked:
+        t = by_index[i]
+        print("  Trip %d  %s  %s -> %s  %d clips  %s" % (
+            i, t["day"], t["start"][11:16], t["end"][11:16], t.get("clips", 0),
+            human_bytes(trip_bytes(t))))
+    print()
+    print("  %d file(s) will be deleted:" % len(files))
+    for p in files:
+        print(C.dim("    %s" % p))
+    print("  Total: %s" % C.bold(human_bytes(total)))
+    print(C.dim("  (The .gpx files in DCIM/203gps are left alone — they are tiny and"))
+    print(C.dim("   harmless without their clips.)"))
+
+    # --- the "only copy" warning. A trip with no render anywhere and nothing on
+    # S3 exists solely as these files, and this deletes them.
+    objs = None
+    consulted_s3 = False        # NOT the same as objs is None: a failed listing
+                                # also returns None, and an empty bucket returns
+                                # {}. Saying "not consulted" when the listing
+                                # actually failed is a lie in a delete prompt.
+    only_copy, elsewhere = [], []
+    for i in picked:
+        t = by_index[i]
+        _same, other = trip_renders(ctx, payload, t)
+        on_s3 = False
+        base = t.get("out_base")
+        if base and not other:
+            if not consulted_s3:
+                objs = s3_objects()
+                consulted_s3 = True
+            if objs:
+                key_part = Path(base).name
+                on_s3 = any(key_part in k for k in objs)
+        if other or on_s3:
+            elsewhere.append(i)
+        else:
+            only_copy.append(i)
+    if elsewhere:
+        print(C.dim("  Trip(s) %s also exist as a render elsewhere or on S3." %
+                    ", ".join(str(i) for i in elsewhere)))
+    if only_copy:
+        print()
+        print(C.red("  " + "!" * (term_width() - 4)))
+        print(C.red("  Trip(s) %s are NOT rendered anywhere and NOT on S3." %
+                    ", ".join(str(i) for i in only_copy)))
+        print(C.red("  These files are the ONLY copy of that footage. Deleting them"))
+        print(C.red("  ends it — there is nothing to restore from, here or online."))
+        if not consulted_s3:
+            print(C.red("  (The S3 bucket was not consulted: those trips have no render"))
+            print(C.red("   name to look for, so no object could exist for them.)"))
+        elif objs is None:
+            print(C.red("  (The bucket listing FAILED, so 'not on S3' is unverified —"))
+            print(C.red("   an unknown is not evidence of a copy.)"))
+        print(C.red("  " + "!" * (term_width() - 4)))
+
+    answer = ask("  Type DROP to delete these %d file(s), anything else to cancel: " % len(files))
+    if answer != "DROP":
+        print("  Cancelled.")
+        return record(ctx, "Drop trip from import", SKIPPED, started, "cancelled at the prompt")
+
+    deleted, freed, errors = 0, 0, []
+    for p in files:
+        try:
+            n = p.stat().st_size
+        except OSError:
+            n = 0
+        try:
+            p.unlink()
+            deleted += 1
+            freed += n
+        except OSError as e:
+            errors.append("%s: %s" % (p, e))
+    for e in errors[:10]:
+        print(C.red("  could not delete %s" % e))
+
+    # Any cached view of this import is now wrong: the grouping is computed from
+    # the clips that just stopped existing, and the delete guard leans on the
+    # scan. Both have to be re-taken before anything trusts them again.
+    ctx.last_groups = None
+    ctx.last_scan = None
+
+    # Offer to clear the preview sidecars of the trips that are now gone. They
+    # are not source footage — they are a preview of something that no longer
+    # exists, and left in place build_manifest keeps publishing a trip whose
+    # video can never be rendered. Only ever offered for a trip with NO mp4,
+    # which the guard above has already established.
+    orphans = []
+    for i in picked:
+        base = by_index[i].get("out_base")
+        if not base:
+            continue
+        for suffix in (".html", ".gpx", "_links.txt", "_meta.json"):
+            p = Path(base + suffix)
+            if p.is_file():
+                orphans.append(p)
+    if orphans:
+        print()
+        print("  %d preview sidecar(s) now describe a trip that no longer exists:" % len(orphans))
+        for p in orphans:
+            print(C.dim("    %s" % p))
+        if confirm("  Remove them too (they are derived data, not footage)?", False):
+            for p in orphans:
+                try:
+                    p.unlink()
+                except OSError as e:
+                    print(C.red("  could not delete %s: %s" % (p, e)))
+            print(C.dim("  Removed. Re-run the manifest step so trips.json drops them."))
+
+    if errors:
+        return record(ctx, "Drop trip from import", FAILED, started,
+                      "%d of %d file(s) deleted, %d error(s)" % (deleted, len(files), len(errors)))
+    print(C.green("  Dropped trip(s) %s: %d file(s), %s freed." % (
+        ", ".join(str(i) for i in picked), deleted, human_bytes(freed))))
+    return record(ctx, "Drop trip from import", RAN, started,
+                  "trip(s) %s, %d file(s), %s freed" % (
+                      ", ".join(str(i) for i in picked), deleted, human_bytes(freed)))
 
 
 def step_render(ctx):
@@ -1191,23 +1898,49 @@ def step_delete_import(ctx):
     if ctx.selected_import == root:
         ctx.selected_import = None
     ctx.last_scan = None
+    ctx.last_groups = None
     print(C.green("  Deleted %s (%s)" % (target, human_bytes(size))))
     return record(ctx, "Delete import source", RAN, started,
                   "%d file(s), %s freed" % (files, human_bytes(size)))
 
 
-# The pipeline, in order. `in_all` is False for the destructive step: "all" and
-# any range skip it, and a selection that names it alongside anything else is
-# refused outright — it is only ever reachable as a selection of one.
+# The pipeline, in order. `in_all` is False for the destructive steps: "all" and
+# any range skip them, and a selection that names one alongside anything else is
+# refused outright — they are only ever reachable as a selection of one.
+#
+# 2-4 are the deciding phase: list what is on the card, look at it, throw away
+# what is not worth keeping. All of it happens before step 5, because encoding is
+# hours and uploading is days — pruning after either is paying for footage twice.
 STEPS = [
     (1, "Import from SD card", step_import, True),
     (2, "List trips (dry-run scan)", step_list, True),
-    (3, "Render trips", step_render, True),
-    (4, "Build manifest", step_manifest, True),
-    (5, "Upload videos to S3", step_upload, True),
-    (6, "Deploy site (SIGNED_VIDEOS=1)", step_deploy, True),
-    (7, "Delete import source (DESTRUCTIVE)", step_delete_import, False),
+    (3, "Preview all trips (sidecars + stills, no encoding)", step_preview, True),
+    (4, "Drop trip from import (DESTRUCTIVE)", step_drop_trip, False),
+    (5, "Render trips", step_render, True),
+    (6, "Build manifest", step_manifest, True),
+    (7, "Upload videos to S3", step_upload, True),
+    (8, "Deploy site (SIGNED_VIDEOS=1)", step_deploy, True),
+    (9, "Delete import source (DESTRUCTIVE)", step_delete_import, False),
 ]
+
+
+def _compact_ranges(nums):
+    """[1,2,3,5,6,7,8] -> '1-3,5-8'. The menu's 'all' hint has to be derived
+    from STEPS, not written out by hand: the two drifted apart the moment a step
+    was inserted, and a wrong hint here teaches the wrong selection."""
+    out, i = [], 0
+    while i < len(nums):
+        j = i
+        while j + 1 < len(nums) and nums[j + 1] == nums[j] + 1:
+            j += 1
+        out.append(str(nums[i]) if j == i else "%d-%d" % (nums[i], nums[j]))
+        i = j + 1
+    return ",".join(out)
+
+
+def solo_steps():
+    """Step numbers that may only ever run alone (the destructive ones)."""
+    return [n for n, _, _, in_all in STEPS if not in_all]
 
 
 def print_menu(ctx):
@@ -1217,18 +1950,24 @@ def print_menu(ctx):
         mark = " " if in_all else C.red("!")
         print("  %s %d) %s" % (mark, num, C.bold(name) if in_all else C.red(name)))
     print(rule())
-    print(C.dim("  all = 1-6   |   ranges: 3-6   |   list: 1,3,5   |   s = status   |   q = quit"))
-    print(C.dim("  7 is excluded from 'all' and ranges, and is refused in any batch —"))
-    print(C.dim("  it runs only as a selection of one."))
+    batch = [n for n, _, _, in_all in STEPS if in_all]
+    solo = solo_steps()
+    print(C.dim("  all = %s   |   ranges: %d-%d   |   list: 1,3   |   s = status   |   q = quit"
+                % (_compact_ranges(batch), batch[0], batch[-1])))
+    print(C.dim("  %s excluded from 'all' and ranges, and refused in any batch —"
+                % (" and ".join(str(n) for n in solo))))
+    print(C.dim("  each runs only as a selection of one."))
 
 
 def parse_selection(s):
     """'all' | '3' | '3-6' | '1,3,5' -> [step numbers]. Returns None if unparseable.
 
-    A step marked in_all=False (the delete) can only ever be run ALONE. Ranges
-    skip it, 'all' skips it, and a list that mentions it alongside anything else
-    is rejected outright rather than quietly reordered — '7 6' would otherwise
-    have erased the footage before the deploy that proves it was published.
+    A step marked in_all=False (the drop, the delete) can only ever be run
+    ALONE. Ranges skip it, 'all' skips it, and a list that mentions it alongside
+    anything else is rejected outright rather than quietly reordered — '9 8'
+    would otherwise have erased the footage before the deploy that proves it was
+    published, and '4 5' would have dropped a trip and then rendered from a
+    grouping that no longer exists.
     """
     s = s.strip().lower()
     if s in ("a", "all"):
@@ -1313,7 +2052,7 @@ def main(argv=None):
                                         "(default: sibling of this repo, or $GOODNIGHT_DRIVES_DIR)")
     ap.add_argument("--config", help="path to config.txt (default: this repo's)")
     ap.add_argument("--card", help="SD card mount point (default: %s)" % DEFAULT_CARD)
-    ap.add_argument("--steps", help="run these steps and exit, e.g. '4-6' or 'all'. "
+    ap.add_argument("--steps", help="run these steps and exit, e.g. '5-8' or 'all'. "
                                     "Still prompts for confirmations.")
     ap.add_argument("--offline", action="store_true",
                     help="skip the live-site lookups in the status screen")
@@ -1349,9 +2088,12 @@ def main(argv=None):
                 picked = parse_selection(sel)
                 if not picked:
                     print(C.red("  Did not understand %r." % sel))
-                    if any(str(n) in re.split(r"[,\s-]+", sel)
-                           for n, _, _, in_all in STEPS if not in_all):
-                        print(C.red("  Step 7 destroys footage — it runs alone, never in a batch."))
+                    named = [n for n in solo_steps() if str(n) in re.split(r"[,\s-]+", sel)]
+                    if named:
+                        print(C.red("  Step%s %s destroy%s footage — each runs alone, never "
+                                    "in a batch." % ("" if len(named) == 1 else "s",
+                                                     ", ".join(str(n) for n in named),
+                                                     "s" if len(named) == 1 else "")))
                     continue
                 print("  Will run: %s" % ", ".join(
                     "%d %s" % (n, dict((x[0], x[1]) for x in STEPS)[n]) for n in picked))
@@ -1413,4 +2155,27 @@ if __name__ == "__main__":
 # * The sink can hold several imports side by side (<sink>/<day>/DCIM). Deleting
 #   the sink itself would take the ones nothing has verified, so when siblings
 #   exist the delete narrows to this import's own DCIM tree.
+#
+# * Which source clips belong to a trip is NOT knowable from filenames. The
+#   boundaries come from video ego-motion (the real pull-away and park) with GPS
+#   only gating which clips get checked, so two adjacent clips a minute apart can
+#   sit either side of a boundary for reasons no timestamp shows. That is why the
+#   drop step reads make_dashcam_videos --print-groups instead of inferring: the
+#   scanner serialises the very grouping it would render, and one clip of error
+#   at a boundary is destroyed original footage.
+#
+# * --print-groups writes JSON on stdout and everything human-readable on stderr,
+#   so run_stream grew a stdout_file argument: the child's stdout goes to a file
+#   and its stderr is what gets streamed and turned into progress. Merging the
+#   two (what every other step wants) would corrupt the JSON.
+#
+# * The grouping scan is expensive, so it is cached per import folder in
+#   ctx.last_groups — and cleared by anything that changes the clips on disk (an
+#   import merges new files in, a drop removes some, a delete removes all).
+#
+# * The preview contact sheet lives in <out>/previews/ and deploy-site.sh excludes
+#   that directory. It sits inside the tree the `videos` symlink points at (it has
+#   to, for its relative links to the .html/.gpx sidecars to resolve from file://),
+#   and without the exclude a deploy would publish stills of footage he may be
+#   about to drop.
 # ---------------------------------------------------------------------------
