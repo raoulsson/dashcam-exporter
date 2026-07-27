@@ -760,11 +760,23 @@ def print_status(ctx):
 # Prompts
 # ---------------------------------------------------------------------------
 
+def _readline_safe(s):
+    """Mark ANSI sequences as zero-width for readline.
+
+    input() goes through readline, which counts the prompt to know where the
+    typed text starts. Raw escape codes are counted as printable, so a bolded
+    prompt makes it believe the cursor is further right than it is — the typing
+    lands in the wrong column and editing the line smears it. \\001 .. \\002
+    brackets tell readline "this part occupies no space".
+    """
+    return re.sub(r"(\x1b\[[0-9;]*m)", "\001\\1\002", s)
+
+
 def ask(prompt, default=""):
     # Ctrl-C at a prompt has to mean the same thing as Ctrl-C during a child
     # process: abort the step and let it be recorded, not slip out at exit 0.
     try:
-        s = input(C.bold(prompt)).strip()
+        s = input(_readline_safe(C.bold(prompt))).strip()
     except (EOFError, KeyboardInterrupt):
         print()
         raise Aborted()
