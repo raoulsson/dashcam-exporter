@@ -772,8 +772,23 @@ def step_import(ctx):
     """Copy the card's DCIM tree into a dated import folder (import-sd-card.sh)."""
     started = time.time()
     if not (ctx.card / "DCIM").is_dir():
-        print(C.yellow("  No DCIM on %s — is the card mounted?" % ctx.card))
-        return record(ctx, "Import from SD card", SKIPPED, started, "card not mounted")
+        # No card is not automatically a problem. The configured root may
+        # already hold a copied card, in which case importing is simply not the
+        # step he wants — saying "is the card mounted?" there sends him looking
+        # for a fault that does not exist. Check the second location and answer
+        # the question he actually has: is there footage here to work on?
+        if (ctx.import_root / "DCIM").is_dir():
+            n = clip_count(ctx.import_root)
+            sz = human_bytes(tree_size(ctx.import_root / "DCIM"))
+            print(C.green("  Nothing to import — %s already holds %s clips (%s)."
+                          % (ctx.import_root, n, sz)))
+            print(C.dim("  That is the configured root from config.txt. Go to Preview (3) "
+                        "or Render (5)."))
+            return record(ctx, "Import from SD card", SKIPPED, started,
+                          "import already present, %s clips" % n)
+        print(C.yellow("  No card at %s and no DCIM at %s — is the card mounted?"
+                       % (ctx.card, ctx.import_root)))
+        return record(ctx, "Import from SD card", SKIPPED, started, "no card, no import")
 
     clips = clip_count(ctx.card)
     size = tree_size(ctx.card / "DCIM")
@@ -1943,20 +1958,67 @@ def solo_steps():
     return [n for n, _, _, in_all in STEPS if not in_all]
 
 
+# Short label for the grid; the full sentence is printed when the step is picked,
+# where there is room for it and where it is actually wanted. Keeping the long
+# names in the menu cost eleven lines every time round the loop.
+SHORT = {
+    1: "Import", 2: "List trips", 3: "Preview", 4: "Drop trip", 5: "Render",
+    6: "Manifest", 7: "Upload", 8: "Deploy", 9: "Del source",
+}
+# Steps that write nothing, send nothing AND finish in seconds run straight from
+# the menu with no "Go?" — a confirmation that guards nothing is noise, and worse
+# it is practice at saying yes without reading.
+#
+# Deliberately empty. The obvious candidate was 2 (List trips): it changes
+# nothing, so it looks free. But the scan runs under .venv, which has opencv, so
+# boundaries come from video ego-motion over every clip — minutes on a full card,
+# not the two seconds the same command takes under a python without opencv. Both
+# halves of the test have to hold, and this one fails the second.
+READ_ONLY = set()
+DESC = {
+    1: "Copy the card's DCIM tree into the import sink, verify, then optionally erase the card.",
+    2: "Scan the import and print the trip table. Reads nothing else, changes nothing.",
+    3: "Sidecars, a still per trip and a local contact sheet. No encoding, no deploy.",
+    4: "Delete a trip's source clips from the import so it is never rendered or uploaded.",
+    5: "Encode the chosen trips. The slow step: hours for a full card.",
+    6: "Rebuild trips.json from the renders, carrying forward everything already published.",
+    7: "Sync the mp4s to the Zurich bucket. Slow on a home uplink; resumes if interrupted.",
+    8: "Push the site to EC2 with SIGNED_VIDEOS=1, so clips load as signed CloudFront URLs.",
+    9: "Erase the whole import source. Only after everything is rendered and published.",
+}
+
+
 def print_menu(ctx):
+    """Compact grid. Columns are chosen to fit the terminal, so a narrow window
+    gets fewer columns rather than a wrapped mess."""
     print()
-    print(rule("steps"))
-    for num, name, _fn, in_all in STEPS:
-        mark = " " if in_all else C.red("!")
-        print("  %s %d) %s" % (mark, num, C.bold(name) if in_all else C.red(name)))
-    print(rule())
-    batch = [n for n, _, _, in_all in STEPS if in_all]
-    solo = solo_steps()
-    print(C.dim("  all = %s   |   ranges: %d-%d   |   list: 1,3   |   s = status   |   q = quit"
-                % (_compact_ranges(batch), batch[0], batch[-1])))
-    print(C.dim("  %s excluded from 'all' and ranges, and refused in any batch —"
-                % (" and ".join(str(n) for n in solo))))
-    print(C.dim("  each runs only as a selection of one."))
+    w = term_width()
+    cell = max(len(s) for s in SHORT.values()) + 6      # "! 9) Del source" + gap
+    cols = max(1, min(4, w // cell))
+    rows = (len(STEPS) + cols - 1) // cols
+    ordered = sorted(STEPS, key=lambda s: s[0])
+    for r in range(rows):
+        line = ""
+        for c in range(cols):
+            i = r + c * rows                            # fill down, then across
+            if i >= len(ordered):
+                continue
+            num, _name, _fn, in_all = ordered[i]
+            mark = " " if in_all else C.red("!")
+            label = SHORT[num]
+            txt = "%s %d) %s" % (mark, num, C.bold(label) if in_all else C.red(label))
+            pad = cell - (len(label) + 5)
+            line += txt + " " * max(1, pad)
+        print("  " + line.rstrip())
+    solo = ",".join(str(n) for n in solo_steps())
+    rng = _compact_ranges([n for n, _, _, a in STEPS if a])
+    # Two short lines beat one that wraps: a wrapped hint reads as broken output.
+    if w < 78:
+        print(C.dim("   0 status   all=%s   q quit" % rng))
+        print(C.dim("   %s destructive, alone only" % solo))
+    else:
+        print(C.dim("   0) status    all = %s    q = quit    (%s destructive, alone only)"
+                    % (rng, solo)))
 
 
 def parse_selection(s):
@@ -2022,7 +2084,11 @@ def run_steps(ctx, numbers):
     for i, n in enumerate(numbers):
         name, fn = by_num[n]
         print()
-        print(rule("step %d: %s" % (n, name)))
+        # Short banner, not a full-width dash fill. On a narrow terminal the rule
+        # was ~100 characters of noise announcing a step whose actual outcome
+        # then arrived as a quiet line underneath. The outcome is the message.
+        print()
+        print(C.bold("== %d) %s" % (n, SHORT.get(n, name))))
         try:
             ok = fn(ctx)
         except Aborted:
@@ -2082,7 +2148,7 @@ def main(argv=None):
                 sel = ask("  Steps to run: ")
                 if sel.lower() in ("q", "quit", "exit"):
                     break
-                if sel.lower() in ("s", "status"):
+                if sel.lower() in ("s", "status", "0"):
                     print_status(ctx)
                     continue
                 picked = parse_selection(sel)
@@ -2095,12 +2161,18 @@ def main(argv=None):
                                                      ", ".join(str(n) for n in named),
                                                      "s" if len(named) == 1 else "")))
                     continue
-                print("  Will run: %s" % ", ".join(
-                    "%d %s" % (n, dict((x[0], x[1]) for x in STEPS)[n]) for n in picked))
-                if not confirm("  Go?", True):
-                    continue
+                # The description now lives here rather than in the grid — this
+                # is the moment it is wanted, and there is room for a sentence.
+                for n in picked:
+                    print("  %s %s" % (C.bold("%d)" % n), SHORT[n]))
+                    print(C.dim("     " + DESC[n]))
+                # Only ask before something that writes, sends or takes a while.
+                # Confirming a read-only scan just trains you to hit enter, which
+                # is exactly the habit you do not want by the time step 9 asks.
+                if not all(n in READ_ONLY for n in picked):
+                    if not confirm("  Go?", True):
+                        continue
                 run_steps(ctx, picked)
-                print_status(ctx)
     except (KeyboardInterrupt, Aborted):
         print()
         print(C.yellow("  Interrupted."))
