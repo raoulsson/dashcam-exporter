@@ -2209,7 +2209,9 @@ def print_menu(ctx, blocked=None):
     gets fewer columns rather than a wrapped mess. Steps that would currently do
     nothing are shown greyed out with the reason underneath, rather than letting
     you pick them and find out afterwards."""
-    print()
+    # A rule, not a blank line: the menu is a block and should be fenced like the
+    # status block above it, so the eye lands on it instead of drifting.
+    print(rule())
     blocked = unavailable_steps(ctx) if blocked is None else blocked
     w = term_width()
     cell = max(len(s) for s in SHORT.values()) + 6      # "! 9) Del source" + gap
