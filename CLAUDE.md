@@ -136,7 +136,7 @@ card's FILES only (keeps the DCIM folder tree). Nothing is deleted until verifie
   `.gpx_cache`/`.geocode_cache.json` are always kept. The reset lives in
   `make_dashcam_videos.py` (it knows which days it'll write), is skipped for a
   `--drives` subset and `--sidecars-only`, and is disabled by `--no-clean-days`.
-  Logs to `render-<ts>.log` inside `--out`. The reset was moved out of the
+  Logs to `run-<ts>.log` inside `--out/logs/`. The reset was moved out of the
   wrapper after a blanket day-folder wipe there once deleted a different import's
   output.
 - Direct: `python3 make_dashcam_videos.py --root … --out … [--dry-run|--sidecars-only|--force]`.

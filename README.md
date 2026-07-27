@@ -337,8 +337,11 @@ want to iterate on `parking_entry_pad` / `parking_exit_pad`.
   `--force`.
 - Sidecars are emitted unconditionally, even when the `.mp4` exists, so a
   palette / unit / segmentation tweak lands via a quick `--sidecars-only` run.
-- `make-trips-rendered.sh` tees stdout+stderr into a `render-YYYYMMDD-HHMMSS.log`
-  **inside the output dir**, so the paper trail ships with the render. At the
+- `make-trips-rendered.sh` writes stdout+stderr to a `run-YYYYMMDD-HHMMSS.log`
+  in **`<out>/logs/`**, so the paper trail ships with the render. The renderer
+  writes it itself (`--log-file`) rather than the wrapper piping through `tee`:
+  a pipe would stop stdout being a terminal, and the per-clip progress line
+  redraws in place on a terminal while the log keeps one line per event. At the
   end of the run a copy of that log also lands next to every `.mp4` the run
   produced — e.g. `trip_2026-05-11_12-11_08_h1080.log` — so it's beside its
   data. Override the location with the `LOG_DIR` environment variable.
