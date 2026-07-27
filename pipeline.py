@@ -2144,17 +2144,22 @@ SHORT = {
     1: "Import", 2: "List trips", 3: "Preview", 4: "Drop trip", 5: "Render",
     6: "Upload", 7: "Deploy", 8: "Del source",
 }
-# Steps that write nothing and send nothing. Necessary but not sufficient for
-# skipping the "Go?" — see fast_enough(): a confirmation that guards nothing is
-# noise, but one that guards a two-minute wait is worth keeping.
-READ_ONLY = {2}
+# Steps safe to start without a "Go?". Not "read-only" — Preview writes sidecars,
+# stills and the contact sheet. The test is that nothing leaves this machine and
+# nothing is destroyed: everything they produce is derived data that the next run
+# regenerates. Upload, Deploy, Drop and Delete are excluded because they publish
+# or destroy; Render because it costs hours.
+#
+# Necessary but not sufficient — see fast_enough(). A confirmation guarding
+# nothing is noise, but one guarding a two-minute wait earns its place.
+NO_CONFIRM = {2, 3}
 
 
 def fast_enough(ctx, n):
     """Will this step finish in a moment?
 
-    Only List trips is interesting. Its cost is the ego-motion pass, which the
-    scan cache removes entirely — 146 seconds becomes 1. So it is worth
+    Both List trips and Preview are dominated by the ego-motion pass, which the
+    scan cache removes entirely — 146 seconds becomes 1. So they are worth
     confirming on a cold cache and pure friction on a warm one, and the honest
     answer changes run to run rather than being a property of the step.
 
@@ -2164,7 +2169,7 @@ def fast_enough(ctx, n):
     permission before every one-second read, is the one that trains you to stop
     reading prompts.
     """
-    if n != 2:
+    if n not in NO_CONFIRM:
         return False
     try:
         return ctx.scan_cache.is_file()
@@ -2436,7 +2441,7 @@ def main(argv=None):
                 # Only ask before something that writes, sends or takes a while.
                 # Confirming a read-only scan just trains you to hit enter, which
                 # is exactly the habit you do not want by the time step 9 asks.
-                if not all(n in READ_ONLY and fast_enough(ctx, n) for n in picked):
+                if not all(n in NO_CONFIRM and fast_enough(ctx, n) for n in picked):
                     if not confirm("  Go?", True):
                         continue
                 run_steps(ctx, picked)
