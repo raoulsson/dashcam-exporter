@@ -159,14 +159,14 @@ Three steps, in order.
 ### 1. Import the card
 
 ```sh
-./import-sd-card.sh                  # -> ~/rsc-data/Import_Dashcam/<today>
+./import-sd-card.sh                  # -> ~/dashcam-data/import_sink/<today>
 ./import-sd-card.sh 2026-07-20       # name the day folder explicitly
 ./import-sd-card.sh --keep           # copy + verify, but DON'T delete the card
 ./import-sd-card.sh --checksum       # rigorous byte-for-byte verify (slow)
 ./import-sd-card.sh --src "/Volumes/OTHER" 2026-07-20
 ```
 
-It rsyncs the card's whole `DCIM` tree into `Import_Dashcam/<day>/`, **verifies
+It rsyncs the card's whole `DCIM` tree into `import_sink/<day>/`, **verifies
 the copy**, and only then deletes the card's **files** — keeping the `DCIM/…`
 folder tree in place so the dashcam can keep recording into it. Nothing on the
 card is deleted until the copy has been verified. Re-importing the same day
@@ -176,8 +176,8 @@ merges into the existing folder. Override the import root with the
 ### 2. See what's on it (dry run)
 
 ```sh
-./list-trips-data.sh --root ~/rsc-data/Import_Dashcam/2026-05-11 \
-                     --out  ~/rsc-data/Output_Dashcam
+./list-trips-data.sh --root ~/dashcam-data/import_sink/2026-05-11 \
+                     --out  ~/dashcam-data/output
 ```
 
 Lists every trip with its 1-based index, 04:00-day label, start → end, clip
@@ -193,8 +193,8 @@ Trip  8  day 2026-05-11  2026-05-11 12:11 -> 05-11 19:07   104 clips  ~1h45m
 ### 3. Render
 
 ```sh
-./make-trips-rendered.sh --root ~/rsc-data/Import_Dashcam/2026-05-11 \
-                         --out  ~/rsc-data/Output_Dashcam        # all trips
+./make-trips-rendered.sh --root ~/dashcam-data/import_sink/2026-05-11 \
+                         --out  ~/dashcam-data/output        # all trips
 ./make-trips-rendered.sh 8 --root … --out …                      # only trip 8
 ./make-trips-rendered.sh 1 2 --root … --out …                    # trips 1 and 2
 ```
@@ -234,9 +234,9 @@ days). Each day folder holds its trips plus an `info.txt` naming the source
 import folder:
 
 ```
-<--out>/                              # e.g. ~/rsc-data/Output_Dashcam/
+<--out>/                              # e.g. ~/dashcam-data/output/
 ├── 2026-05-11/
-│   ├── info.txt                      # "source import folder: …/Import_Dashcam/2026-05-11"
+│   ├── info.txt                      # "source import folder: …/import_sink/2026-05-11"
 │   ├── trip_2026-05-11_12-11_08_h1080.mp4
 │   ├── trip_2026-05-11_12-11_08.html
 │   ├── trip_2026-05-11_12-11_08.gpx

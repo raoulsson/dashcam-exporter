@@ -45,8 +45,8 @@ PY="python3"
 
 OPTS=()
 # Examples — uncomment + adapt:
-# OPTS+=(--root "$HOME/rsc-data/Import_Dashcam/2026-05-11")
-# OPTS+=(--out  "$HOME/rsc-data/Dashcam_Videos_working")
+# OPTS+=(--root "$HOME/dashcam-data/import_sink")   # a copied card, not the card itself
+# OPTS+=(--out  "$HOME/dashcam-data/output_test")   # render somewhere scratch
 # OPTS+=(--output-height 720)            # smaller / web-sized file
 
 # Leading integers feed --drives; everything from the first non-integer
@@ -64,7 +64,7 @@ fi
 # Resolve the output dir from the effective args so we can clean it and log
 # INTO it. --out wins; fall back to the same env default the import script
 # uses. Handles both "--out DIR" and "--out=DIR".
-OUT="${DASHCAM_OUT_ROOT:-$HOME/rsc-data/Output_Dashcam}"
+OUT="${DASHCAM_OUT_ROOT:-$HOME/dashcam-data/output}"
 _prev=""
 for a in ${OPTS[@]+"${OPTS[@]}"} "$@"; do
     case "$a" in

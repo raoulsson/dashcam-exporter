@@ -17,10 +17,14 @@
 # DCIM/200video/{front,rear} and (optionally) DCIM/203gps inside this folder.
 # When the SD card is in the car, point this at a local backup directory
 # you've copied the DCIM tree into.
+# Default is /Volumes/NO NAME — put the card in and it just works. Renamed your
+# card? Set it here. Working from a copy instead of the card? Point it at the copy.
 #root = /Volumes/NO NAME
+root = ~/dashcam-data/import_sink
 
-# Where the rendered videos and sidecars get written.
-#out = ~/rsc-data/Output_Dashcam
+# Where the rendered videos and sidecars get written. Default ~/dashcam-data/output,
+# created on first run (parents included). Only set this to render somewhere else.
+#out = ~/dashcam-data/output
 
 
 # ============================================================================

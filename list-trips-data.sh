@@ -25,8 +25,8 @@ PY="python3"
 
 OPTS=()
 # Examples — uncomment + adapt:
-# OPTS+=(--root "$HOME/rsc-data/Import_Dashcam/2026-05-11")
-# OPTS+=(--out  "$HOME/rsc-data/Dashcam_Videos_working")
+# OPTS+=(--root "$HOME/dashcam-data/import_sink")   # a copied card, not the card itself
+# OPTS+=(--out  "$HOME/dashcam-data/output_test")   # render somewhere scratch
 # OPTS+=(--trip-return-m 120)
 
 "$PY" make_dashcam_videos.py --dry-run ${OPTS[@]+"${OPTS[@]}"} "$@"

@@ -98,12 +98,12 @@ the map-widget panel (prints a warning). `.venv/` and `.env` are gitignored.
 
 ## Data layout (outside the repo)
 
-- Inputs:  `~/rsc-data/Import_Dashcam/<label>/DCIM/{200video/{front,rear},203gps,...}`
+- Inputs:  `~/dashcam-data/import_sink/<label>/DCIM/{200video/{front,rear},203gps,...}`
   — one folder per import (folder name is arbitrary, usually the import date;
   grouping is timestamp-driven and one folder can span several days of clips).
-- Outputs: `~/rsc-data/Output_Dashcam/` — the `--out` target. Output is
-  **namespaced by import**: `Output_Dashcam/<import-name>/<extract-day>/`, e.g.
-  `Output_Dashcam/2026-07-19/2026-07-15/`. The import folder (`root.name`) is the
+- Outputs: `~/dashcam-data/output/` — the `--out` target. Output is
+  **namespaced by import**: `output/<import-name>/<extract-day>/`, e.g.
+  `output/2026-07-19/2026-07-15/`. The import folder (`root.name`) is the
   top namespace; the extract day (04:00-rollover) groups a card's trips beneath
   it. This is what makes cross-card clobbering **impossible**: DDPAI cards hoard
   old event clips, so two different cards routinely contain the same calendar day
@@ -121,7 +121,7 @@ absolute personal paths into the tracked `config.txt` (shared template) — set
 them per-run, in the wrapper-script OPTS, or a local uncommitted config.
 
 Importing a card: `./import-sd-card.sh [YYYY-MM-DD] [--keep] [--checksum]` copies
-`/Volumes/NO NAME/DCIM` into `Import_Dashcam/<day>/`, verifies, then deletes the
+`/Volumes/NO NAME/DCIM` into `import_sink/<day>/`, verifies, then deletes the
 card's FILES only (keeps the DCIM folder tree). Nothing is deleted until verified.
 
 ## Running
