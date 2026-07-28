@@ -19,15 +19,21 @@ entry points the READMEs document, streams their output, and turns what it can
 parse into a progress bar. Where real progress cannot be derived it shows an
 elapsed-time spinner rather than inventing a percentage.
 
-Two repos are involved and this file lives in the first:
-    dashcam-exporter/    import + render          (this repo)
-    goodnight-drives/    manifest + S3 + deploy   (sibling; --site-repo to override)
+This repo does import, render and a local site on its own. Publishing — a bucket
+and a deployed website — lives in a second repo and is entirely optional: set
+`site_repo`, `s3_bucket` and `live_trips_url` in config.txt and the Upload and
+Deploy steps light up; leave them unset (what a fresh clone gets) and they stay
+greyed out with the key that would enable them printed underneath. Nothing here
+contacts a network host that has not been named in the config.
 """
 from __future__ import annotations
 
 import argparse
+import base64
+from datetime import datetime
 import html
 import json
+import math
 import os
 import queue
 import re
@@ -38,6 +44,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -49,7 +56,9 @@ from pathlib import Path
 DEFAULT_CARD = "/Volumes/NO NAME"                 # make_dashcam_videos.DEFAULT_ROOT
 DEFAULT_OUT = "~/dashcam-data/output"             # make_dashcam_videos.DEFAULT_OUT
 DEFAULT_IMPORT_ROOT = "~/dashcam-data/import_sink"  # import-sd-card.sh DEST_ROOT
-LIVE_TRIPS_URL = "https://example.com/your-site/trips.json"
+# There is deliberately no default for the site repo, the bucket or the live
+# manifest URL. A default would mean a clone reaching for someone else's
+# checkout on disk and someone else's host on the network, on every launch.
 
 EXPORTER_DIR = Path(__file__).resolve().parent
 
@@ -173,10 +182,31 @@ class Ctx:
         self.config_path = Path(args.config).expanduser() if args.config else self.exporter / "config.txt"
         self.cfg = load_config(self.config_path)
 
-        # The site repo is the exporter's sibling by convention; an env var or a
-        # flag wins, because "sibling" is a convention and not a guarantee.
-        site = args.site_repo or os.environ.get("GOODNIGHT_DRIVES_DIR")
-        self.site = Path(site).expanduser().resolve() if site else (self.exporter.parent / "goodnight-drives")
+        # --- the optional, personal half. All three are unset by default.
+        #
+        # The site repo holds the publishing scripts (build_manifest.py,
+        # deploy/upload-videos-s3.sh, deploy/deploy-site.sh). Unset means this
+        # CLI is import -> render -> local site and nothing else; the steps that
+        # need it are greyed out rather than removed, so the numbering is the
+        # same for everyone and the greyed line says which key turns them on.
+        # A flag or an env var wins over the file: both exist to point one run
+        # somewhere other than the configured place.
+        site = (args.site_repo or os.environ.get("GOODNIGHT_DRIVES_DIR")
+                or self.cfg_opt("site_repo"))
+        self.site = Path(site).expanduser().resolve() if site else None
+
+        # The bucket the Upload step verifies against once the sync has run.
+        # aws s3 sync exits 0 even when objects fail, so this name is what makes
+        # "uploaded" provable; without it Upload cannot be trusted and stays off.
+        # The region is only needed when the credentials' default is a different
+        # one — an eu-central-2 bucket listed with a us-east-1 default fails.
+        self.s3_bucket = self.cfg_opt("s3_bucket")
+        self.s3_region = self.cfg_opt("s3_region")
+
+        # The deployed site's manifest, read for one line of the status screen.
+        # Unset means no request is made at all — not a request that fails. A
+        # clone must not phone a host its owner has never heard of.
+        self.live_trips_url = self.cfg_opt("live_trips_url")
 
         # `root` in config.txt is what make_dashcam_videos reads from. It points
         # at the import sink now, not the card, so renders survive an ejected card.
@@ -213,6 +243,40 @@ class Ctx:
         # anything changes what is on disk.
         self.last_groups = None
         self.results = []               # StepResult log for the final summary
+        # Colouring the route by speed is on by default because it says something
+        # the shape alone does not — where you were held up and where you were
+        # moving. Someone who wants the shape plain can say so.
+        self.speed_colour = (self.cfg.get("speed_colour", "true").strip().lower()
+                             not in ("false", "no", "0", "off"))
+
+    def cfg_opt(self, key):
+        """A configured value, or None when the setting is absent.
+
+        Empty counts as absent: `s3_bucket =` with nothing after it is someone
+        clearing the setting, and the alternative — an empty string that still
+        gets used — produces `s3://` and a listing of the whole account.
+        """
+        v = (self.cfg.get(key) or "").strip()
+        return v or None
+
+    @property
+    def site_ready(self):
+        """Configured AND actually on disk. Two different failures, and the menu
+        distinguishes them: 'needs site_repo in config.txt' is a setup step,
+        'site_repo not found' is a wrong path."""
+        return self.site is not None and self.site.is_dir()
+
+    def site_script(self, *parts):
+        """Path to a script inside the site repo, or None if it is not there.
+
+        The site repo is whatever the user pointed at, so its scripts are a
+        claim rather than a guarantee — checking is what lets the menu say which
+        one is missing instead of failing halfway through a step.
+        """
+        if not self.site_ready:
+            return None
+        p = self.site.joinpath(*parts)
+        return p if p.is_file() else None
 
 
 # ---------------------------------------------------------------------------
@@ -714,10 +778,17 @@ def rendered_mp4s(out_dir):
 
 
 def live_trip_count(ctx):
-    if ctx.offline:
+    """Trips the deployed site is currently serving, or None.
+
+    Returns None WITHOUT touching the network when live_trips_url is unset —
+    that is the whole point of the setting. This runs on every launch, so a
+    hardcoded URL here would mean every clone of this repo pinging one person's
+    host every time anyone opened the menu.
+    """
+    if ctx.offline or not ctx.live_trips_url:
         return None
     try:
-        with urllib.request.urlopen(LIVE_TRIPS_URL, timeout=6) as r:
+        with urllib.request.urlopen(ctx.live_trips_url, timeout=6) as r:
             data = json.load(r)
         # Count the days array, not the top-level trip_count. That field is
         # denormalised and can go stale if anything edits trips.json without
@@ -756,7 +827,11 @@ def print_status(ctx):
                 C.bold(tilde(p)),
                 C.dim("%s clips, %s" % (n if n is not None else "?", human_bytes(tree_size(p))))))
     else:
-        print("  Import       %s  %s" % (C.dim("empty"), C.dim(tilde(ctx.import_root))))
+        # Name the folder the config actually points at — import_root is only a
+        # fallback, and showing it sends you to create the wrong directory.
+        print("  Import       %s  %s" % (C.dim("empty"),
+                                         C.dim(tilde(ctx.render_root if ctx.render_root
+                                                     else ctx.import_root))))
 
     # Renders
     mp4s = rendered_mp4s(ctx.out_dir)
@@ -765,31 +840,49 @@ def print_status(ctx):
         C.bold("%d mp4" % len(mp4s)) if mp4s else C.yellow("none"),
         C.dim("%s in %s" % (human_bytes(size), tilde(ctx.out_dir)))))
 
-    # Manifest / live site
-    manifest = ctx.site / "public_html" / "trips.json"
-    if manifest.is_file():
-        try:
-            local_trips = json.loads(manifest.read_text()).get("trip_count", "?")
-        except Exception:
-            local_trips = "?"
-        age = human_age(time.time() - manifest.stat().st_mtime)
-        print("  Prepared     %s  %s" % (C.bold("%s trips" % local_trips),
-                                         # "just now" already reads as a time;
-                                         # appending "ago" gives "just now ago"
-                                         C.dim("updated %s" % age if age == "just now"
-                                               else "updated %s ago" % age)))
+    # Local site — always meaningful, because Site needs nothing but this machine.
+    # The page lives in the newest final_* folder once one exists.
+    finals = sorted(ctx.out_dir.glob(FINAL_PREFIX + "*")) if ctx.out_dir.is_dir() else []
+    site_index = (finals[-1] / RESULT_FILE) if finals else (ctx.out_dir / RESULT_FILE)
+    if site_index.is_file():
+        age = human_age(time.time() - site_index.stat().st_mtime)
+        print("  Local site   %s  %s" % (
+            C.bold(tilde(site_index)),
+            C.dim("built %s" % age if age == "just now" else "built %s ago" % age)))
     else:
-        print("  Prepared     %s  %s" % (C.yellow("none yet"), C.dim(tilde(manifest))))
+        print("  Local site   %s  %s" % (C.yellow("not built"), C.dim(tilde(site_index))))
 
-    live = live_trip_count(ctx)
-    if live is None:
-        print("  Live site    %s" % C.dim("unknown (offline or unreachable)"))
+    # Everything below is the publishing half, and each row appears only when
+    # the thing behind it is configured. A "Live site: unknown" row on a machine
+    # that has no live site is not status, it is a permanent question mark — and
+    # a row naming a repo the reader has never heard of is worse.
+    if ctx.site is not None:
+        manifest = ctx.site / "public_html" / "trips.json"
+        if manifest.is_file():
+            try:
+                local_trips = json.loads(manifest.read_text()).get("trip_count", "?")
+            except Exception:
+                local_trips = "?"
+            age = human_age(time.time() - manifest.stat().st_mtime)
+            print("  Prepared     %s  %s" % (C.bold("%s trips" % local_trips),
+                                             # "just now" already reads as a time;
+                                             # appending "ago" gives "just now ago"
+                                             C.dim("updated %s" % age if age == "just now"
+                                                   else "updated %s ago" % age)))
+        else:
+            print("  Prepared     %s  %s" % (C.yellow("none yet"), C.dim(tilde(manifest))))
+
+    if ctx.live_trips_url:
+        live = live_trip_count(ctx)
+        if live is None:
+            print("  Live site    %s" % C.dim("unknown (offline or unreachable)"))
+        else:
+            print("  Live site    %s" % C.bold("%s trips" % live))
+
+    if ctx.site is not None:
+        print("  Repos        %s" % C.dim("%s | %s" % (tilde(ctx.exporter), tilde(ctx.site))))
     else:
-        print("  Live site    %s" % C.bold("%d trips" % live))
-
-    print("  Repos        %s" % C.dim("%s | %s" % (tilde(ctx.exporter), tilde(ctx.site))))
-    if not ctx.site.is_dir():
-        print("  " + C.red("goodnight-drives repo not found — steps 6-8 will not run."))
+        print("  Repo         %s" % C.dim(tilde(ctx.exporter)))
     print(rule())
 
     # Disk goes below the rule, as a footnote rather than a status row.
@@ -921,6 +1014,119 @@ def record(ctx, name, status, started, detail=""):
 # Steps
 # ---------------------------------------------------------------------------
 
+STAMP_RE = re.compile(r"(\d{14})")
+
+
+def last_imported_stamp(ctx):
+    """The newest source clip this machine has already taken in, or None.
+
+    Read from what survives deleting the import: every rendered trip's _meta.json
+    records the wall clock it ended, and the boundary cache records the source
+    filenames it grouped. Both outlive the footage, which is the point — the
+    question "have I already copied this card" has to be answerable after the
+    card's local copy is long gone.
+
+    Returns the DDPAI stamp form (YYYYMMDDHHMMSS) because that is what the clip
+    filenames carry, so the comparison is a string compare on the name itself.
+    """
+    best = ""
+    cache = ctx.out_dir / ".scan_cache.json"
+    if cache.is_file():
+        try:
+            d = json.loads(cache.read_text())
+            for g in d.get("groups", []):
+                for f in g:
+                    m = STAMP_RE.search(Path(f).name)
+                    if m and m.group(1) > best:
+                        best = m.group(1)
+        except Exception:
+            pass
+    if ctx.out_dir.is_dir():
+        for meta in ctx.out_dir.rglob("*_meta.json"):
+            try:
+                end = str(json.loads(meta.read_text()).get("end") or "")
+            except Exception:
+                continue
+            digits = re.sub(r"\D", "", end)[:14]
+            if len(digits) == 14 and digits > best:
+                best = digits
+    return best or None
+
+
+def card_split(card, after):
+    """(new, already) counts of front clips on the card against a stamp."""
+    front = card / "DCIM" / "200video" / "front"
+    if not front.is_dir():
+        return 0, 0
+    new = old = 0
+    for f in front.glob("*.mp4"):
+        m = STAMP_RE.search(f.name)
+        if m and after and m.group(1) <= after:
+            old += 1
+        else:
+            new += 1
+    return new, old
+
+
+def import_is_expendable(ctx, root):
+    """(ok, reason) — is everything from `root` rendered, and published if this
+    install publishes? The delete step's proof, factored out so clearing the
+    working dir before a copy cannot become a softer version of the same act."""
+    ns = ctx.out_dir / root.name
+    mp4s = rendered_mp4s(ns) if ns.is_dir() else []
+    if not mp4s:
+        return False, "nothing from it was rendered"
+    payload = load_groups(ctx, root)
+    gs = (payload or {}).get("trips") or []
+    want = sum(1 for g in gs if g.get("renderable", True)) if gs else None
+    if want is not None and len(mp4s) < want:
+        return False, "%d of %d trip(s) rendered" % (len(mp4s), want)
+    if ctx.cfg_opt("s3_bucket"):
+        remote = s3_objects(ctx.cfg_opt("s3_bucket"))
+        if remote is None:
+            return False, "could not list the bucket to confirm the uploads"
+        missing = [p.name for p in mp4s
+                   if not any(k.endswith(p.name) and v == p.stat().st_size
+                              for k, v in remote.items())]
+        if missing:
+            return False, "%d render(s) not on S3" % len(missing)
+    return True, ""
+
+
+def purge_published_renders(ctx, root):
+    """Delete a published import's renders, keeping only the _meta.json.
+
+    Once a trip is on S3 and on the site, its mp4 on this machine is a third
+    copy taking gigabytes. The metadata is the state worth keeping: it answers
+    "have I already imported this card" and it is what carries a trip forward
+    into the next manifest build. Here that trade is 24 KB against 8.3 GB.
+
+    Everything else in the folder — the map, the gpx, the links, the log copy —
+    is regenerable from footage that is itself gone, so keeping it would leave
+    exactly the files you cannot later reason about.
+    """
+    ns = ctx.out_dir / root.name
+    if not ns.is_dir():
+        return 0, 0
+    freed = n = 0
+    for f in sorted(ns.rglob("*")):
+        if not f.is_file() or f.name.endswith("_meta.json"):
+            continue
+        try:
+            freed += f.stat().st_size
+            f.unlink()
+            n += 1
+        except OSError:
+            pass
+    for d in sorted(ns.rglob("*"), reverse=True):
+        if d.is_dir():
+            try:
+                d.rmdir()
+            except OSError:
+                pass
+    return n, freed
+
+
 def step_import(ctx):
     """Copy the card's DCIM tree into a dated import folder (import-sd-card.sh)."""
     started = time.time()
@@ -965,18 +1171,61 @@ def step_import(ctx):
         print(C.dim("  Importing now adds this card alongside that footage. Trips are"))
         print(C.dim("  grouped across everything found, so the two cards would be mixed"))
         print(C.dim("  and there is no record afterwards of which clip came from which."))
-        print(C.dim("  If the previous round is finished (rendered, uploaded, published),"))
-        print(C.dim("  clear it with step 8 first. If it is not, finish it first."))
-        if not confirm("  Import anyway, on top of what is there?", False):
+        print(C.dim("  If the previous round is finished (rendered, and published if you"))
+        print(C.dim("  publish), clear it with %d) %s first. If it is not, finish it first."
+                    % (step_num(step_delete_import), SHORT[step_num(step_delete_import)])))
+        print(C.dim("  Or clear it first, so this copy starts from an empty working dir."))
+        if confirm("  Clear the old import before copying?", False):
+            # Same proof the delete step demands. Clearing here is the same act,
+            # just earlier in the cycle, so it cannot be the lax version of it:
+            # footage that was never rendered or never published is not rubbish
+            # to sweep before a copy.
+            ok, why = import_is_expendable(ctx, leftovers[0])
+            if not ok:
+                print(C.red("  Not clearing: %s" % why))
+                print(C.dim("  Finish the previous round, or use the delete step which "
+                            "explains what is missing."))
+                return record(ctx, "Import from SD card", SKIPPED, started,
+                              "declined: previous import not finished")
+            for src in leftovers:
+                shutil.rmtree(str(src), ignore_errors=True)
+                n, freed = purge_published_renders(ctx, src)
+                if n:
+                    print(C.dim("  Removed %d published render file(s), %s — the "
+                                "_meta.json stay as state." % (n, human_bytes(freed))))
+            print(C.green("  Cleared. The working dir is empty."))
+        elif not confirm("  Import anyway, on top of what is there?", False):
             return record(ctx, "Import from SD card", SKIPPED, started,
                           "declined: import area not empty")
         print()
+
+    # Delta copy is the default. A card left in the car accumulates: this one
+    # holds 1039 front clips of which 427 were already taken in last time, and
+    # copying those again costs tens of GB and the minutes you want back to put
+    # the card away. The high-water mark survives deleting the local import,
+    # because it is read from the renders and the boundary cache, not the
+    # footage.
+    after = last_imported_stamp(ctx)
+    if after:
+        n_new, n_old = card_split(ctx.card, after)
+        print()
+        print("  Already imported through %s" % C.bold(after))
+        print("  On the card: %s new, %s already here" % (
+            C.bold("%d clip(s)" % n_new), C.dim("%d" % n_old)))
+        if not n_new:
+            print(C.green("  Nothing new on this card — it is already all imported."))
+            return record(ctx, "Import from SD card", SKIPPED, started, "no new clips")
+        delta = confirm("  Copy only the %d new clip(s)?" % n_new, True)
+    else:
+        delta = False
+        print(C.dim("  Nothing imported before, so this copies the whole card."))
 
     day = ask("  Day folder name [%s]: " % time.strftime("%Y-%m-%d"), time.strftime("%Y-%m-%d"))
     print(C.dim("  The card is NOT erased by default; import-sd-card.sh only deletes"))
     print(C.dim("  the card's files after the copy verifies file-for-file."))
     erase = confirm("  Erase the card's files after a verified copy?", False)
 
+    env = {"AFTER_STAMP": after} if (after and delta) else None
     cmd = ["./import-sd-card.sh"]
     if erase:
         cmd.append("--delete")
@@ -988,7 +1237,9 @@ def step_import(ctx):
         return record(ctx, "Import from SD card", SKIPPED, started, "declined")
 
     rc, lines = run_stream(cmd, ctx.exporter, "Import", parser=rsync_parser,
-                           keep=lambda l: l.startswith(("Verified:", "Card cleaned", "Done.")))
+                           env_extra=env,
+                           keep=lambda l: l.startswith(("Verified:", "Card cleaned", "Done.",
+                                                        ">>> only clips newer", ">>> ")))
     if rc != 0:
         return record(ctx, "Import from SD card", FAILED, started, "exit %d" % rc)
 
@@ -1124,14 +1375,15 @@ def load_groups(ctx, root, refresh=False):
     """Run --print-groups against `root` and return its parsed JSON, or None.
 
     Cached per session per import folder: the scan decodes video to find the
-    pull-away and park moments, so it costs the same minutes as step 2.
+    pull-away and park moments, so it costs the same minutes as List trips.
     """
     if not refresh and ctx.last_groups and ctx.last_groups[0] == root:
         print(C.dim("  Using the trip grouping already scanned in this session."))
         return ctx.last_groups[1]
 
     print(C.dim("  Scanning %s for the authoritative trip grouping." % root))
-    print(C.dim("  This is the same work as step 2 (it walks the video), so it takes"))
+    print(C.dim("  This is the same work as %d) %s (it walks the video), so it takes"
+                % (step_num(step_list), SHORT[step_num(step_list)])))
     print(C.dim("  a while; the result is reused for the rest of this session."))
     fd, tmp = tempfile.mkstemp(prefix="dashcam-groups-", suffix=".json")
     os.close(fd)
@@ -1547,15 +1799,18 @@ def step_preview(ctx):
 
     index = write_contact_sheet(ctx, root, payload, previews_dir, stills)
 
-    # 4. Keep trips.json current. The site is not deployed here — this only means
-    #    a later deploy is not carrying a stale manifest.
-    if ctx.site.is_dir():
+    # 4. Keep trips.json current, if there is a site repo to keep it current in.
+    #    The site is not deployed here — this only means a later deploy is not
+    #    carrying a stale manifest. With no site_repo there is no manifest and
+    #    nothing to say about it.
+    if ctx.site_script("build_manifest.py"):
         rc, _lines = run_stream(["python3", "build_manifest.py"], ctx.site, "Indexing",
                                 keep=lambda l: l.startswith("wrote trips.json"))
         if rc != 0:
             return record(ctx, "Preview all trips", FAILED, started, "build_manifest exit %d" % rc)
-    else:
-        print(C.yellow("  goodnight-drives not at %s — the site index was not updated." % ctx.site))
+    elif ctx.site is not None:
+        print(C.yellow("  No build_manifest.py under %s — the site index was not updated."
+                       % tilde(ctx.site)))
 
     print()
     print(C.green("  previews are in %s" % previews_dir))
@@ -1779,7 +2034,7 @@ def step_render(ctx):
     if root is None:
         return record(ctx, "Render trips", SKIPPED, started, "no import folder")
 
-    # Show the trips here rather than making him remember them from step 2 or go
+    # Show the trips here rather than making him remember them from the listing or go
     # back for them. The grouping comes from --print-groups (cached, so this is
     # instant once the boundaries are known) — the same source the drop step
     # deletes by, so what is listed is exactly what would be rendered.
@@ -1941,7 +2196,7 @@ def step_render(ctx):
     # for the same reason. (This is why there is no Manifest entry in the menu —
     # it was a step you could forget, in a sequence where forgetting it looks
     # exactly like success.)
-    if new and ctx.site.is_dir():
+    if new and ctx.site_script("build_manifest.py"):
         rc2, _l = run_stream(["python3", "build_manifest.py"], ctx.site, "Indexing",
                              keep=lambda l: l.startswith("wrote trips.json"))
         if rc2 != 0:
@@ -1950,11 +2205,628 @@ def step_render(ctx):
     return record(ctx, "Render trips", RAN, started, detail)
 
 
-def s3_objects(bucket="your-media-bucket"):
-    """{key: size} for every .mp4 in the bucket, or None if the listing failed."""
+# ---------------------------------------------------------------------------
+# Site: a browsable static site built from what the render already produced
+# ---------------------------------------------------------------------------
+#
+# Nothing here computes anything new. Every number, map and track already exists
+# on disk as a sidecar next to the mp4; this pass only arranges them into pages.
+# That is deliberate: the site has to be buildable by someone who has no S3
+# account, no second repo and no manifest — so it reads the output tree and
+# nothing else. It never calls build_manifest, never lists a bucket, never opens
+# admin.json. If those things are absent the site is still complete.
+#
+# Videos are referenced in place, not copied: a full card is tens of gigabytes
+# and duplicating it to make site/ self-contained would cost more disk than the
+# footage is worth. The consequence is that site/ is portable only together with
+# the render tree above it — copy <out> wholesale and the relative paths hold.
+
+SITE_STILL_DIRNAME = "still"
+SITE_STILL_W = 1600         # same cap as the preview sheet; never upscales
+SITE_STILL_T = 2.0          # seconds in — see extract_still for why not frame 0
+
+RE_TRIP_VIDEO = re.compile(r"^(?P<label>.+)_h\d+\.mp4$")
+RE_DAY = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+
+def _trip_part(name):
+    """A rendered file name -> (trip label, which kind of file), or None.
+
+    The renderer names every artefact of a trip trip_<label>.<something>, so the
+    label is the join key and this is the only place that knows how to recover
+    it. The video is matched by pattern rather than by a literal _h1080 because
+    output_height is a config setting: a tree rendered at 720 must not silently
+    become a site with no videos in it.
+    """
+    if not name.startswith("trip_"):
+        return None
+    stem = name[len("trip_"):]
+    for suffix, kind in (("_meta.json", "meta"), ("_links.txt", "links"),
+                         (".gpx", "gpx"), (".html", "map")):
+        if stem.endswith(suffix):
+            return stem[:-len(suffix)], kind
+    m = RE_TRIP_VIDEO.match(stem)
+    if m:
+        return m.group("label"), "video"
+    return None
+
+
+def _slug(label):
+    """Label -> a file name safe on any host. Labels are already tame, but they
+    come from the day and clock of a recording and this is what the URLs are
+    made of, so it is not a place to trust an assumption."""
+    return re.sub(r"[^A-Za-z0-9._-]", "-", label)
+
+
+def _rel_url(target, base_dir):
+    """Relative URL from a generated page to a file on disk.
+
+    Quoted, because these end up in href/src: a space or a '#' in a directory
+    name would otherwise truncate the link, and the failure looks like a missing
+    file rather than a bad URL. Forward slashes always — a URL is not a path.
+    """
+    rel = os.path.relpath(str(target), str(base_dir))
+    return urllib.parse.quote(Path(rel).as_posix())
+
+
+def collect_site_trips(out_dir, site_dir):
+    """Every trip in the render tree, newest day first, newest trip first.
+
+    Grouped by directory as well as by label so that two imports that happen to
+    contain a same-named trip cannot merge into one. A trip is anything with at
+    least one artefact — a trip whose mp4 was never rendered still has a map and
+    stats worth showing, and a trip whose meta.json is missing still has a video.
+    """
+    found = {}
+    site_dir = site_dir.resolve() if site_dir.exists() else site_dir
+    for dirpath, dirnames, filenames in os.walk(str(out_dir)):
+        d = Path(dirpath)
+        # Dot directories hold the renderer's per-clip scratch encodes; the site
+        # directory holds our own output. Neither is input.
+        dirnames[:] = sorted(x for x in dirnames if not x.startswith("."))
+        if d == site_dir or site_dir in d.parents:
+            dirnames[:] = []
+            continue
+        for name in sorted(filenames):
+            part = _trip_part(name)
+            if part is None:
+                continue
+            label, kind = part
+            t = found.setdefault((str(d), label), {
+                "label": label, "dir": d, "meta": {},
+                "video": None, "map": None, "gpx": None, "links": None,
+                "still": None,
+            })
+            t[kind if kind != "meta" else "meta_path"] = d / name
+
+    trips = []
+    for t in found.values():
+        mp = t.pop("meta_path", None)
+        if mp is not None:
+            try:
+                t["meta"] = json.loads(mp.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                # A half-written meta.json must not take the whole site down; the
+                # trip still has a video and a map worth linking.
+                t["meta"] = {}
+        meta = t["meta"]
+        m = RE_DAY.search(t["label"])
+        t["day"] = meta.get("day") or (m.group(1) if m else t["dir"].name)
+        t["start"] = meta.get("start") or ""
+        t["import"] = t["dir"].parent.name
+        trips.append(t)
+
+    # Newest first, all the way down: the day you just drove is the one you want
+    # at the top, and the same rule inside a day beats explaining two orders.
+    trips.sort(key=lambda t: (t["day"], t["start"], t["label"]), reverse=True)
+
+    # Page names come from the label; only if two directories produced the same
+    # label does the import folder have to appear, and then only for those two.
+    counts = {}
+    for t in trips:
+        counts[_slug(t["label"])] = counts.get(_slug(t["label"]), 0) + 1
+    for t in trips:
+        s = _slug(t["label"])
+        t["slug"] = s if counts[s] == 1 else "%s-%s" % (_slug(t["import"]), s)
+        t["page"] = "trip-%s.html" % t["slug"]
+    return trips
+
+
+def _jpeg_size(path):
+    """(width, height) of a jpeg, or None. Twenty lines of stdlib instead of a
+    dependency: the pages only need it so the browser can reserve the right box
+    for an image it has not fetched yet, and being wrong is a layout jump, not a
+    wrong number. Walks the segment headers to the frame header (SOF) and reads
+    the two 16-bit fields out of it."""
     try:
-        p = subprocess.run(["aws", "s3", "ls", "s3://%s/" % bucket, "--recursive"],
-                           capture_output=True, text=True, timeout=180)
+        with open(path, "rb") as fh:
+            if fh.read(2) != b"\xff\xd8":
+                return None
+            while True:
+                b = fh.read(1)
+                if not b:
+                    return None
+                if b != b"\xff":
+                    continue
+                marker = fh.read(1)
+                while marker == b"\xff":        # fill bytes are legal padding
+                    marker = fh.read(1)
+                if not marker:
+                    return None
+                m = marker[0]
+                if m in (0xD8, 0x01) or 0xD0 <= m <= 0xD7:
+                    continue                    # no payload on these
+                head = fh.read(2)
+                if len(head) < 2:
+                    return None
+                length = (head[0] << 8) + head[1]
+                # Every SOF marker but DHT/DAC/DNL carries size at the same offset.
+                if m in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                         0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                    data = fh.read(7)
+                    if len(data) < 5:
+                        return None
+                    return ((data[3] << 8) + data[4], (data[1] << 8) + data[2])
+                fh.seek(length - 2, os.SEEK_CUR)
+    except OSError:
+        return None
+
+
+def parse_links_file(path):
+    """trip_*_links.txt -> [(label, url)].
+
+    The file is written for a human to read, so the label of a link is the line
+    above it. Anything that does not parse is dropped rather than guessed at —
+    the map and the .gpx are linked separately and do not depend on this.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    out, label, seen = [], "", set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("http"):
+            if line not in seen:
+                seen.add(line)
+                out.append((label or "map link", line))
+        elif line.endswith(":"):
+            label = line[:-1].strip()
+    return out
+
+
+# ---------------------------------------------------------------------------
+# The result page: one self-contained file in the output dir.
+#
+# A drive's most characteristic artifact is not a video frame — every dashcam
+# frame looks like every other dashcam frame — it is the track. The shape of
+# where you went is unique to that drive, so it is what identifies a trip here,
+# drawn from the .gpx and coloured by the speed the renderer already records per
+# point. The colours are its own legend (<20 / 20-40 / 40-60 / 60-80 / >80 km/h),
+# not an invented palette, so the glyph reads the same way as the map burned into
+# the video.
+#
+# Everything is inline — stills as data URIs, no fonts, no scripts, no network —
+# because the file's whole job is to be openable and sendable on its own.
+# ---------------------------------------------------------------------------
+
+SPEED_BANDS = [(20, "#4FC3F7"), (40, "#7DD3A0"), (60, "#E8C547"), (80, "#E8874A"), (10**9, "#E05252")]
+
+
+def _band(kmh):
+    for ceiling, colour in SPEED_BANDS:
+        if kmh < ceiling:
+            return colour
+    return SPEED_BANDS[-1][1]
+
+
+def gpx_track(path):
+    """[(lat, lon, km/h)] from a .gpx the renderer wrote. Speed is per point in
+    m/s under <extensions>; absent points fall back to 0 rather than guessing."""
+    try:
+        raw = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    pts = []
+    for m in re.finditer(r'<trkpt lat="([-\d.]+)" lon="([-\d.]+)"(.*?)</trkpt>', raw, re.S):
+        lat, lon, rest = float(m.group(1)), float(m.group(2)), m.group(3)
+        sp = re.search(r"<speed>([-\d.]+)</speed>", rest)
+        pts.append((lat, lon, (float(sp.group(1)) * 3.6) if sp else 0.0))
+    return pts
+
+
+def route_glyph(pts, w=560, h=280, pad=14, speed_colour=True):
+    """The track as an SVG, speed-coloured, aspect-correct.
+
+    Longitude degrees shrink with latitude, so scaling lat and lon by the same
+    factor would stretch every route east-west. cos(lat) corrects it; without
+    that a city loop comes out looking like a motorway sprint.
+    """
+    if len(pts) < 2:
+        return ""
+    lats = [p[0] for p in pts]
+    lons = [p[1] for p in pts]
+    la0, la1, lo0, lo1 = min(lats), max(lats), min(lons), max(lons)
+    kx = math.cos(math.radians((la0 + la1) / 2.0)) or 1e-6
+    spanx = max((lo1 - lo0) * kx, 1e-9)
+    spany = max(la1 - la0, 1e-9)
+    s = min((w - 2 * pad) / spanx, (h - 2 * pad) / spany)
+    ox = (w - spanx * s) / 2.0
+    oy = (h - spany * s) / 2.0
+
+    def xy(p):
+        return (ox + (p[1] - lo0) * kx * s, h - (oy + (p[0] - la0) * s))
+
+    # One colour draws the route as a shape; speed colouring makes it a reading of
+    # the drive. Off is a legitimate preference, so it is a setting.
+    plain = "#7DD3A0"
+    segs = []
+    run, colour = [xy(pts[0])], (_band(pts[0][2]) if speed_colour else plain)
+    for p in pts[1:]:
+        c = _band(p[2]) if speed_colour else plain
+        run.append(xy(p))
+        if c != colour:
+            segs.append((colour, run))
+            run, colour = [run[-1]], c
+    segs.append((colour, run))
+
+    out = ['<svg class="glyph" viewBox="0 0 %d %d" role="img" aria-label="route">' % (w, h)]
+    for colour, run in segs:
+        if len(run) < 2:
+            continue
+        d = " ".join("%s%.1f %.1f" % ("M" if i == 0 else "L", x, y) for i, (x, y) in enumerate(run))
+        out.append('<path d="%s" fill="none" stroke="%s" stroke-width="2.4" '
+                   'stroke-linecap="round" stroke-linejoin="round"/>' % (d, colour))
+    sx, sy = xy(pts[0]); ex, ey = xy(pts[-1])
+    out.append('<circle cx="%.1f" cy="%.1f" r="4.5" class="ptA"/>' % (sx, sy))
+    out.append('<circle cx="%.1f" cy="%.1f" r="4.5" class="ptB"/>' % (ex, ey))
+    out.append("</svg>")
+    return "".join(out)
+
+
+def still_data_uri(mp4, seconds=2, width=760):
+    """A frame as a data: URI. Deliberately smaller than the poster stills — this
+    one is inlined into a file meant to be sent around, and full-width frames
+    would make it tens of MB."""
+    if not mp4 or not Path(mp4).is_file():
+        return ""
+    tmp = Path(tempfile.gettempdir()) / ("dcsite-%d.jpg" % os.getpid())
+    for ss in (seconds, 0):
+        r = subprocess.run(["ffmpeg", "-y", "-ss", str(ss), "-i", str(mp4), "-frames:v", "1",
+                            "-vf", "scale='min(%d\\,iw)':-2" % width, "-q:v", "6",
+                            str(tmp), "-loglevel", "error"], capture_output=True)
+        if r.returncode == 0 and tmp.is_file() and tmp.stat().st_size:
+            b = base64.b64encode(tmp.read_bytes()).decode("ascii")
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            return "data:image/jpeg;base64," + b
+    return ""
+
+RESULT_CSS = """
+:root{
+  --ink:#0F131A; --panel:#161B24; --edge:rgba(255,255,255,.09);
+  --fg:#E7EBF1; --dim:#8B96A6; --faint:#5C6675;
+  --s1:#4FC3F7; --s2:#7DD3A0; --s3:#E8C547; --s4:#E8874A; --s5:#E05252;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--fg);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;line-height:1.5}
+.wrap{max-width:1040px;margin:0 auto;padding:44px 20px 80px}
+
+/* masthead: the aggregate is telemetry, so it is set as telemetry */
+h1{font-size:26px;font-weight:650;letter-spacing:-.02em;margin:0}
+.sub{color:var(--dim);font-size:14px;margin:6px 0 0}
+.totals{display:flex;flex-wrap:wrap;gap:26px;margin:26px 0 8px;
+  padding:18px 0;border-top:1px solid var(--edge);border-bottom:1px solid var(--edge)}
+.tot .n{font-family:var(--mono);font-size:22px;letter-spacing:-.02em}
+.tot .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--faint);margin-top:3px}
+
+/* a trip: the frame on the left, its shape and its numbers on the right */
+.trip{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:22px;
+  padding:26px 0;border-bottom:1px solid var(--edge);align-items:start}
+.shot{width:100%;display:block;border-radius:3px;background:#000}
+.noshot{aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;
+  border:1px dashed var(--edge);border-radius:3px;color:var(--faint);
+  font-family:var(--mono);font-size:12px}
+.when{font-family:var(--mono);font-size:12.5px;color:var(--dim);letter-spacing:.02em}
+.title{font-size:17px;font-weight:600;margin:2px 0 12px;letter-spacing:-.01em}
+.rt{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--s2);border:1px solid var(--s2);border-radius:2px;padding:1px 6px;margin-left:8px;
+  vertical-align:2px}
+.glyph{width:100%;height:auto;display:block;background:rgba(255,255,255,.02);
+  border:1px solid var(--edge);border-radius:3px}
+.ptA{fill:var(--s2)} .ptB{fill:var(--s5)}
+.nogps{font-family:var(--mono);font-size:12px;color:var(--faint);
+  border:1px dashed var(--edge);border-radius:3px;padding:22px;text-align:center}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 10px;margin-top:14px}
+.cell .n{font-family:var(--mono);font-size:15px}
+.cell .k{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--faint);margin-top:2px}
+.links{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+.links a{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;color:var(--fg);
+  text-decoration:none;border:1px solid var(--edge);border-radius:2px;padding:5px 10px}
+.links a:hover{border-color:var(--dim)}
+.links a:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.key{display:flex;gap:14px;flex-wrap:wrap;margin:30px 0 0;color:var(--faint);
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase}
+.key i{display:inline-block;width:16px;height:2px;vertical-align:3px;margin-right:5px}
+foot,.foot{display:block;margin-top:34px;color:var(--faint);font-size:12.5px}
+@media (max-width:720px){.trip{grid-template-columns:1fr}.grid{grid-template-columns:repeat(2,1fr)}}
+@media (prefers-reduced-motion:no-preference){.trip{animation:in .5s both}
+  @keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}}
+"""
+
+RESULT_FILE = "dashcam_import_data_site.html"
+FINAL_PREFIX = "final_"
+
+
+def final_dir_for(out_dir, days):
+    """<out>/final_<newest day in this batch>.
+
+    Dated so successive imports accumulate side by side instead of merging into
+    one heap. Named after the newest TRIP, not the render date: rebuilding the
+    page tomorrow must land in the same folder as today, and a render-date name
+    would quietly start a second one holding the same drives.
+    """
+    tag = max(days) if days else time.strftime("%Y-%m-%d")
+    return out_dir / (FINAL_PREFIX + tag)
+
+
+def gather_into_final(ctx, out_dir):
+    """Move the rendered trips under <out>/final/ so the result is one folder.
+
+    The point is a directory the user can drag anywhere: the page, the videos,
+    the maps and the tracks together, with every link inside it still resolving.
+
+    NOT done when a site_repo is configured. That setup's trips.json records each
+    trip by a uid containing its import folder name, so moving the tree renames
+    every published trip out from under the manifest — the same way renaming the
+    import folder orphaned six of them yesterday. A configured install keeps its
+    layout and just gets the page.
+    """
+    # Which days are in the tree right now — that names the folder.
+    days = set()
+    for child in sorted(out_dir.iterdir()):
+        if child.is_dir() and not child.name.startswith(".") \
+                and not child.name.startswith(FINAL_PREFIX) \
+                and child.name not in ("logs", "previews"):
+            days.update(d.name for d in child.iterdir()
+                        if d.is_dir() and re.match(r"^\d{4}-\d{2}-\d{2}$", d.name))
+    final = final_dir_for(out_dir, days)
+    if ctx.site_ready:
+        return final if final.is_dir() else None
+    moved = 0
+    final.mkdir(parents=True, exist_ok=True)
+    for child in sorted(out_dir.iterdir()):
+        if child == final or child.name.startswith(".") or child.is_file():
+            continue
+        if child.name in ("logs", "previews") or child.name.startswith(FINAL_PREFIX):
+            continue
+        for day in sorted(child.iterdir()):
+            if not day.is_dir():
+                continue
+            dest = final / day.name
+            if dest.exists():
+                for f in sorted(day.iterdir()):
+                    target = dest / f.name
+                    if not target.exists():
+                        shutil.move(str(f), str(target))
+                        moved += 1
+            else:
+                shutil.move(str(day), str(dest))
+                moved += 1
+        try:
+            child.rmdir()          # only succeeds once it is genuinely empty
+        except OSError:
+            pass
+    return final if moved or any(final.iterdir()) else None
+
+
+def _f(v):
+    """A number from meta, or 0.0 — meta may be missing or half-written."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _trip_title(meta, t):
+    """A name a person would use, never the filename.
+
+    route_label is the good case ("Muntinlupa to Tagaytay") — the renderer sets
+    it when the track passes somewhere it can name. Failing that, the trip's
+    number on its day, which is how you would refer to it out loud. The internal
+    label (2026-07-24_16-16_02) identifies a file, not a drive, and putting it in
+    the title told the reader about our storage rather than their afternoon.
+    """
+    lbl = (meta.get("route_label") or "").strip()
+    if lbl:
+        return lbl
+    # Drive N, per day. Several days each having a "Drive 1" is fine — the date
+    # is on the line above, and this is a placeholder for a name a person gives
+    # it later, not an attempt to invent one.
+    # trip_index restarts each day, so it produced five drives all called
+    # "Drive 1". Weekday and time of day is how you would refer to one of these
+    # out loud — "Friday afternoon" — and it comes from the data rather than a
+    # counter. The exact timestamp is on the line above, so this can be loose.
+    n = meta.get("trip_index")
+    return "Drive %d" % n if n else "Drive"
+
+
+def _cell(n, k):
+    return '<div class="cell"><div class="n">%s</div><div class="k">%s</div></div>' % (n, k)
+
+
+def build_result_page(ctx, out_dir=None):
+    """Write RESULT_FILE into the output dir. Returns a summary dict.
+
+    One file, no folder: it exists to be opened, and to be sent to someone who
+    will open it once. A folder of assets is the wrong shape for that.
+    """
+    out_dir = Path(out_dir or ctx.out_dir)
+    # Gather first, so the trips are found where the page will link to them.
+    final = gather_into_final(ctx, out_dir)
+    base = final if final else out_dir
+    # The second argument is the directory to EXCLUDE from the walk — it exists
+    # so a folder-shaped site does not index itself. There is no such folder
+    # any more, and passing base here would exclude the entire tree.
+    trips = collect_site_trips(base, base / "__no_such_dir__")
+    page = base / RESULT_FILE
+    made = {"trips": len(trips), "path": page, "no_video": 0, "no_gps": 0}
+    if not trips:
+        return made
+
+    n_dist = n_move = n_secs = 0.0
+    top = 0.0
+    rows = []
+    for t in trips:
+        meta = t.get("meta") or {}
+        mp4 = t.get("video")
+        gpx = t.get("gpx")
+        pts = gpx_track(gpx) if gpx else []
+        if not mp4:
+            made["no_video"] += 1
+        if not pts:
+            made["no_gps"] += 1
+
+        dist = _f(meta.get("distance_km"))
+        move = _f(meta.get("moving_min"))
+        mx = _f(meta.get("max_kmh"))
+        av = _f(meta.get("avg_kmh"))
+        n_dist += dist or 0
+        n_move += move or 0
+        top = max(top, mx or 0)
+        n_secs += _f(meta.get("duration_secs")) or 0
+
+        shot = still_data_uri(mp4) if mp4 else ""
+        # A player, not a link. "play video" navigated away from the page to a
+        # bare mp4 — which is not playing it, it is leaving. The embedded still
+        # becomes the poster, so the card looks identical until you press play.
+        # preload="none" because six 1-2 GB videos would otherwise all start
+        # fetching the moment the page opens.
+        if mp4:
+            left = ('<video class="shot" controls preload="none"%s src="%s"></video>'
+                    % ((' poster="%s"' % shot) if shot else "", _rel_url(mp4, base)))
+        else:
+            left = '<div class="noshot">no video for this trip</div>'
+        art = route_glyph(pts, speed_colour=ctx.speed_colour) if pts else '<div class="nogps">no GPS recorded for this trip</div>'
+
+        rt = '<span class="rt">round trip</span>' if meta.get("round_trip") else ""
+        start = str(meta.get("start") or "")
+        day = (meta.get("day") or start[:10] or "")
+        clock = start[11:16] if len(start) >= 16 else ""
+
+        links = []
+        if t.get("map"):
+            links.append('<a href="%s">map</a>' % _rel_url(t["map"], base))
+        if gpx:
+            links.append('<a href="%s">gpx</a>' % _rel_url(gpx, base))
+
+        rows.append(
+            '<section class="trip">'
+            '<div>%s</div>'
+            '<div>'
+            '<div class="when">%s%s</div>'
+            '<div class="title">%s%s</div>'
+            '%s'
+            '<div class="grid">%s%s%s%s</div>'
+            '<div class="links">%s</div>'
+            '</div></section>' % (
+                left,
+                html.escape(day), (" &middot; " + html.escape(clock)) if clock else "",
+                html.escape(_trip_title(meta, t)), rt,
+                art,
+                _cell("%.1f km" % dist if dist else "&mdash;", "distance"),
+                _cell(human_secs(move * 60) if move else "&mdash;", "moving"),
+                _cell("%.0f km/h" % mx if mx else "&mdash;", "max"),
+                _cell("%.0f km/h" % av if av else "&mdash;", "avg"),
+                "".join(links) or '<span class="k">nothing to link yet</span>',
+            ))
+
+    head = (
+        '<div class="wrap">'
+        '<h1>%d drive%s</h1>'
+        '<p class="sub">Rendered on this machine. Nothing was uploaded anywhere; '
+        'the videos sit beside this file.</p>'
+        '<div class="totals">%s%s%s%s</div>' % (
+            len(trips), "" if len(trips) == 1 else "s",
+            '<div class="tot">%s</div>' % _cell("%.0f km" % n_dist, "distance"),
+            '<div class="tot">%s</div>' % _cell(human_secs(n_move * 60), "moving"),
+            '<div class="tot">%s</div>' % _cell(human_secs(n_secs), "span"),
+            '<div class="tot">%s</div>' % _cell("%.0f km/h" % top, "top speed"),
+        ))
+
+    key = ('<div class="key">'
+           '<span><i style="background:var(--s1)"></i>under 20</span>'
+           '<span><i style="background:var(--s2)"></i>20&ndash;40</span>'
+           '<span><i style="background:var(--s3)"></i>40&ndash;60</span>'
+           '<span><i style="background:var(--s4)"></i>60&ndash;80</span>'
+           '<span><i style="background:var(--s5)"></i>over 80 km/h</span>'
+           '</div>')
+
+    foot = ('<p class="foot">Each shape is that drive\'s GPS track, coloured by speed. '
+            'Made with dashcam-exporter.</p></div>')
+
+    doc = ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            "<title>Drives</title><style>%s</style></head><body>%s%s%s%s</body></html>"
+            % (RESULT_CSS, head, "".join(rows), key, foot))
+    page.write_text(doc, encoding="utf-8")
+    made["bytes"] = page.stat().st_size
+    return made
+
+
+def step_site(ctx):
+    """Write the one-file result page into the output dir."""
+    started = time.time()
+    print(C.dim("  Writes %s into %s." % (RESULT_FILE, tilde(ctx.out_dir))))
+    print(C.dim("  One self-contained file: every still is embedded and every route is"))
+    print(C.dim("  drawn from its .gpx, so it opens with no network and can be sent as"))
+    print(C.dim("  it is. The videos are linked where they already sit, not copied."))
+
+    if not ctx.out_dir.is_dir():
+        print(C.yellow("  Nothing rendered yet: %s does not exist." % tilde(ctx.out_dir)))
+        return record(ctx, "Build site", SKIPPED, started, "no output tree")
+
+    info = build_result_page(ctx, ctx.out_dir)
+    if not info["trips"]:
+        print(C.yellow("  No trips found under %s — render some first." % tilde(ctx.out_dir)))
+        return record(ctx, "Build site", SKIPPED, started, "no trips")
+
+    if info["no_video"]:
+        print(C.dim("  %d trip(s) have no video yet; the page says so." % info["no_video"]))
+    if info["no_gps"]:
+        print(C.dim("  %d trip(s) have no GPS, so they show no route." % info["no_gps"]))
+
+    print()
+    print(C.green("  %s" % info["path"]))
+    print("  %d drive(s), %s. Open it with:" % (info["trips"], human_bytes(info.get("bytes", 0))))
+    print("    open %s" % info["path"])
+    return record(ctx, "Build site", RAN, started,
+                  "%d trip(s), %s" % (info["trips"], human_bytes(info.get("bytes", 0))))
+
+def s3_objects(ctx):
+    """{key: size} for every .mp4 in the configured bucket, or None.
+
+    None means "could not find out" — no bucket configured, aws missing, no
+    credentials, network down. Every caller treats that as unproven rather than
+    as an empty bucket, which is why there is no default bucket name here: a
+    wrong-but-plausible one would answer the question with someone else's data.
+    """
+    if not ctx.s3_bucket:
+        return None
+    cmd = ["aws", "s3", "ls", "s3://%s/" % ctx.s3_bucket, "--recursive"]
+    if ctx.s3_region:
+        cmd += ["--region", ctx.s3_region]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if p.returncode != 0:
@@ -1972,7 +2844,13 @@ def s3_objects(bucket="your-media-bucket"):
 
 def deleted_ids(ctx):
     """Trip ids the admin flagged mode=delete — upload-videos-s3.sh skips these,
-    so they must not count as 'missing from S3' when we verify the sync."""
+    so they must not count as 'missing from S3' when we verify the sync.
+
+    No site repo means no curation file and so no exclusions: everything local
+    is expected on S3.
+    """
+    if ctx.site is None:
+        return set()
     p = ctx.site / "admin.json"
     if not p.is_file():
         return set()
@@ -1992,10 +2870,12 @@ def verify_s3(ctx, quiet=False):
     """
     local = rendered_mp4s(ctx.out_dir)
     skip = deleted_ids(ctx)
-    objs = s3_objects()
+    objs = s3_objects(ctx)
     if objs is None:
         if not quiet:
-            print(C.red("  Could not list the bucket (aws missing, no credentials, or network)."))
+            print(C.red("  Could not list %s (no s3_bucket configured, aws missing, "
+                        "no credentials, or network)."
+                        % ("s3://%s" % ctx.s3_bucket if ctx.s3_bucket else "the bucket")))
         return None, [], []
     missing, mismatched = [], []
     for p in local:
@@ -2011,10 +2891,15 @@ def verify_s3(ctx, quiet=False):
 
 
 def step_upload(ctx):
-    """Sync the rendered mp4s to the private S3 bucket, then verify."""
+    """Sync the rendered mp4s to the configured S3 bucket, then verify."""
     started = time.time()
-    if not ctx.site.is_dir():
-        return record(ctx, "Upload videos to S3", FAILED, started, "site repo missing")
+    # The menu greys this step out when the config is absent, so reaching here
+    # without it means something bypassed the menu (--steps). Say the same thing
+    # the greyed line says rather than crashing on a None.
+    reason = upload_blocked(ctx)
+    if reason:
+        print(C.red("  %s" % reason))
+        return record(ctx, "Upload videos to S3", SKIPPED, started, reason)
     if not shutil.which("aws"):
         print(C.red("  awscli not found. brew install awscli && aws configure"))
         return record(ctx, "Upload videos to S3", FAILED, started, "awscli missing")
@@ -2034,7 +2919,12 @@ def step_upload(ctx):
         print(C.yellow("  No rendered mp4s under %s — nothing to upload." % ctx.out_dir))
         return record(ctx, "Upload videos to S3", SKIPPED, started, "no renders")
     total = sum(p.stat().st_size for p in local)
-    print("  %d local mp4 (%s) -> s3://your-media-bucket" % (len(local), human_bytes(total)))
+    print("  %d local mp4 (%s) -> s3://%s%s" % (
+        len(local), human_bytes(total), ctx.s3_bucket,
+        " (%s)" % ctx.s3_region if ctx.s3_region else ""))
+    print(C.dim("  The script decides the destination; s3_bucket is what this CLI"))
+    print(C.dim("  verifies against afterwards. If they name different buckets the"))
+    print(C.dim("  verification fails, which is the intended way to find that out."))
     # No second confirmation: the menu already asked "Go?", and the line above
     # states the size and the destination. Two prompts for one decision is how
     # you teach someone to stop reading them — which costs most at the steps that
@@ -2067,18 +2957,20 @@ def step_upload(ctx):
 
 
 def step_deploy(ctx):
-    """Push the site to EC2. SIGNED_VIDEOS=1 is not optional — see below."""
+    """Run the site repo's deploy script. SIGNED_VIDEOS=1 is not optional — see below."""
     started = time.time()
-    if not ctx.site.is_dir():
-        return record(ctx, "Deploy site", FAILED, started, "site repo missing")
+    reason = deploy_blocked(ctx)
+    if reason:
+        print(C.red("  %s" % reason))
+        return record(ctx, "Deploy site", SKIPPED, started, reason)
 
     print(C.dim("  deploy-site.sh pulls the live curation + trips.json first (the live"))
     print(C.dim("  site is the merge base), re-indexes, then rsyncs public_html/."))
     print(C.yellow("  SIGNED_VIDEOS=1 is set for this run."))
-    print(C.dim("  Since 2026-07-26 the bucket is PRIVATE. Deploying without SIGNED_VIDEOS=1"))
-    print(C.dim("  writes a config.js pointing the page at raw S3 URLs, which now 403 —"))
-    print(C.dim("  the site comes up and no video plays. There is no reason to deploy"))
-    print(C.dim("  without it while the bucket is private, so this CLI always sets it."))
+    print(C.dim("  It is set unconditionally because the alternative is a silent failure:"))
+    print(C.dim("  against a private bucket, deploying without it writes a config.js"))
+    print(C.dim("  pointing the page at raw S3 URLs, which 403 — the site comes up and no"))
+    print(C.dim("  video plays. A deploy script that ignores the variable is unaffected."))
     # As with Upload: the menu asked, and the target is printed above. One
     # decision, one prompt.
 
@@ -2107,6 +2999,8 @@ def is_complete_summary(ctx):
     pin the guard shut forever after the first deletion. We re-count from its
     table instead, skipping the flagged trips.
     """
+    if not ctx.site_script("deploy", "is-complete.py"):
+        return None, None, ["no deploy/is-complete.py to run"]
     try:
         p = subprocess.run(["python3", "deploy/is-complete.py", str(ctx.out_dir)],
                            cwd=str(ctx.site), capture_output=True, text=True, timeout=900)
@@ -2144,12 +3038,18 @@ def is_complete_summary(ctx):
 def step_delete_import(ctx):
     """Erase the original footage of one import. Unrecoverable — heavily gated.
 
-    Three independent things must hold before the prompt even appears:
+    Up to three independent things must hold before the prompt even appears:
       1. every renderable trip in that import has a rendered mp4 locally,
       2. every rendered mp4 is on S3 with a matching size,
       3. is-complete.py agrees every trip is fully published (S3 + live site).
     Then the word DELETE has to be typed. A y/n here is too easy to fat-finger
     for an action that destroys tens of GB of irreplaceable source footage.
+
+    Guards 2 and 3 need a bucket and a site repo. Where those are not
+    configured the proof does not exist, and the one thing this must not do is
+    quietly count an unasked question as a pass — nothing was checked, so the
+    renders under <out> are the only copy of that footage in the world. That is
+    stated in place of the missing guards, and the DELETE prompt still stands.
     """
     started = time.time()
     root = pick_import(ctx, "deletion")
@@ -2184,12 +3084,26 @@ def step_delete_import(ctx):
         files, C.bold(human_bytes(size))))
     print()
 
+    # Which proofs are even possible here depends on what is configured, so the
+    # count comes first and the guards number themselves against it. Writing
+    # "[1/3]" when only one check can run would claim two that never happened.
+    can_s3 = bool(ctx.s3_bucket)
+    can_site = bool(ctx.site_script("deploy", "is-complete.py"))
+    n_guards = 1 + int(can_s3) + int(can_site)
+    guard = 0
+
+    def guard_label(text):
+        """'  [2/3] present on S3 ......... ' — padded so the verdicts line up
+        whatever the guard count is."""
+        return "  [%d/%d] %s " % (guard, n_guards, (text + " ").ljust(30, "."))
+
     # --- guard 1: everything renderable in this import has actually been rendered.
     # Renders are namespaced by import folder name (out_dir/<import name>/<day>/),
     # so this compares like with like and ignores other imports' output.
     ns = ctx.out_dir / root.name
     ns_mp4s = rendered_mp4s(ns)
-    print("  [1/3] rendered locally ... ", end="")
+    guard += 1
+    print(guard_label("rendered locally"), end="")
     sys.stdout.flush()
     if not ns_mp4s:
         print(C.red("no"))
@@ -2200,7 +3114,7 @@ def step_delete_import(ctx):
     # the clips and their GPX, so it cannot describe a different card. Demanding
     # a scan "in this session" was a stand-in for "we know what is on the card";
     # since the cache persists, the session is no longer what decides that, and
-    # refusing on it sent you to re-run step 2 purely to satisfy bookkeeping.
+    # refusing on it sent you to re-run the listing purely to satisfy bookkeeping.
     expect = None
     if ctx.last_scan and ctx.last_scan.root == root:
         expect, src = ctx.last_scan.renderable, "this session's scan"
@@ -2212,7 +3126,8 @@ def step_delete_import(ctx):
             src = "the cached grouping"
     if expect is None:
         print(C.yellow("%d mp4, but the trip grouping could not be read" % len(ns_mp4s)))
-        print(C.yellow("        Cannot prove every trip was rendered. Run step 2 first."))
+        print(C.yellow("        Cannot prove every trip was rendered. Run %d) %s first."
+                       % (step_num(step_list), SHORT[step_num(step_list)])))
         return record(ctx, "Delete import source", SKIPPED, started, "refused: no grouping to compare against")
     if len(ns_mp4s) < expect:
         print(C.red("no"))
@@ -2223,41 +3138,60 @@ def step_delete_import(ctx):
     print(C.green("yes (%d mp4 for %d renderable trip(s), per %s)" % (len(ns_mp4s), expect, src)))
 
     # --- guard 2: those mp4s are on S3, byte-size matched.
-    print("  [2/3] present on S3 ..... ", end="")
-    sys.stdout.flush()
-    ok, missing, mismatched = verify_s3(ctx, quiet=True)
-    if ok is None:
-        print(C.red("unknown"))
-        print(C.red("        Could not list the bucket. Refusing to delete on an unknown."))
-        return record(ctx, "Delete import source", SKIPPED, started, "refused: S3 unverifiable")
-    if not ok:
-        print(C.red("no"))
-        for k in (missing + mismatched)[:10]:
-            print(C.red("        %s" % k))
-        return record(ctx, "Delete import source", SKIPPED, started,
-                      "refused: %d missing / %d mismatched on S3" % (len(missing), len(mismatched)))
-    print(C.green("yes"))
+    if can_s3:
+        guard += 1
+        print(guard_label("present on s3://%s" % ctx.s3_bucket), end="")
+        sys.stdout.flush()
+        ok, missing, mismatched = verify_s3(ctx, quiet=True)
+        if ok is None:
+            print(C.red("unknown"))
+            print(C.red("        Could not list the bucket. Refusing to delete on an unknown."))
+            return record(ctx, "Delete import source", SKIPPED, started, "refused: S3 unverifiable")
+        if not ok:
+            print(C.red("no"))
+            for k in (missing + mismatched)[:10]:
+                print(C.red("        %s" % k))
+            return record(ctx, "Delete import source", SKIPPED, started,
+                          "refused: %d missing / %d mismatched on S3" % (len(missing), len(mismatched)))
+        print(C.green("yes"))
 
     # --- guard 3: the site actually serves them.
-    print("  [3/3] published on the site (is-complete.py) ... ", end="")
-    sys.stdout.flush()
-    safe, total, out_lines = is_complete_summary(ctx)
-    if safe is None:
-        print(C.red("unknown"))
-        for l in out_lines[-15:]:
-            print(C.dim("        " + l))
-        return record(ctx, "Delete import source", SKIPPED, started, "refused: is-complete.py inconclusive")
-    if total == 0 or safe < total:
-        print(C.red("no (%s/%s)" % (safe, total)))
-        for l in out_lines:
-            print(C.dim("        " + l))
-        return record(ctx, "Delete import source", SKIPPED, started,
-                      "refused: %s/%s trips fully published" % (safe, total))
-    print(C.green("yes (%d/%d)" % (safe, total)))
+    if can_site:
+        guard += 1
+        print(guard_label("published on the site (is-complete.py)"), end="")
+        sys.stdout.flush()
+        safe, total, out_lines = is_complete_summary(ctx)
+        if safe is None:
+            print(C.red("unknown"))
+            for l in out_lines[-15:]:
+                print(C.dim("        " + l))
+            return record(ctx, "Delete import source", SKIPPED, started, "refused: is-complete.py inconclusive")
+        if total == 0 or safe < total:
+            print(C.red("no (%s/%s)" % (safe, total)))
+            for l in out_lines:
+                print(C.dim("        " + l))
+            return record(ctx, "Delete import source", SKIPPED, started,
+                          "refused: %s/%s trips fully published" % (safe, total))
+        print(C.green("yes (%d/%d)" % (safe, total)))
 
     print()
     print(C.red("  Deleting %s removes %s of original footage permanently." % (target, human_bytes(size))))
-    print(C.dim("  The renders and their S3 copies stay; the raw clips do not come back."))
+    if can_s3 and can_site:
+        print(C.dim("  The renders and their S3 copies stay; the raw clips do not come back."))
+    else:
+        # The unconfigured case. Not a warning about missing setup — a statement
+        # of what survives this, which is strictly less than it would be with a
+        # bucket and a site behind it. The check that could not run is named, so
+        # it is obvious this passed unexamined rather than passed.
+        print(C.red("  Publication was NOT verified — it could not be:"))
+        if not can_s3:
+            print(C.red("    no s3_bucket in config.txt, so no copy off this machine was checked"))
+        if not can_site:
+            print(C.red("    no site_repo in config.txt, so no published copy was checked"))
+        print(C.red("  The renders under %s are therefore the only" % tilde(ctx.out_dir)))
+        print(C.red("  copy of this footage that exists. Lose that disk and the drive is gone."))
+        print(C.dim("  Back the renders up elsewhere first, or leave the import where it is —"))
+        print(C.dim("  keeping it costs disk, not data."))
     answer = ask("  Type DELETE to erase it, anything else to cancel: ")
     if answer != "DELETE":
         print("  Cancelled.")
@@ -2273,6 +3207,22 @@ def step_delete_import(ctx):
     ctx.last_scan = None
     ctx.last_groups = None
     print(C.green("  Deleted %s (%s)" % (target, human_bytes(size))))
+
+    # The renders go too. Every guard above just proved these are on S3 and on
+    # the site, so the copy on this machine is the third one and by far the
+    # largest. Keeping it means keeping files you will later have to reason
+    # about; the _meta.json stay because they ARE the state — the high-water mark
+    # that answers "have I imported this card" and the record the next manifest
+    # build carries forward. 24 KB kept against gigabytes released.
+    n, freed = purge_published_renders(ctx, root)
+    if n:
+        size += freed
+        files += n
+        print(C.green("  Removed %d published render file(s) (%s); the _meta.json remain."
+                      % (n, human_bytes(freed))))
+
+    if ctx.selected_import == root:
+        ctx.selected_import = None
     return record(ctx, "Delete import source", RAN, started,
                   "%d file(s), %s freed" % (files, human_bytes(size)))
 
@@ -2290,10 +3240,34 @@ STEPS = [
     (3, "Preview all trips (sidecars + stills, no encoding)", step_preview, True),
     (4, "Drop trip from import (DESTRUCTIVE)", step_drop_trip, False),
     (5, "Render trips", step_render, True),
-    (6, "Upload videos to S3", step_upload, True),
-    (7, "Deploy site (SIGNED_VIDEOS=1)", step_deploy, True),
-    (8, "Delete import source (DESTRUCTIVE)", step_delete_import, False),
+    (6, "Build local site", step_site, True),
+    (7, "Upload videos to S3", step_upload, True),
+    (8, "Deploy site (SIGNED_VIDEOS=1)", step_deploy, True),
+    (9, "Delete import source (DESTRUCTIVE)", step_delete_import, False),
 ]
+# Site sits at 6 rather than at the end because that is where it belongs in the
+# sequence: it is the last step that needs nothing but this machine. Everything
+# from 7 on reaches for a second repo, a bucket and a server.
+#
+# This table does NOT change with the configuration. When the publishing half is
+# unconfigured its steps are greyed out with the key that would enable them
+# (see NOOP_CHECK below), not removed — so every number means the same thing on
+# every machine, and someone who has never set any of it up can see that the
+# publishing half exists and what turns it on. A menu that renumbers itself
+# would make every sentence anyone writes about "step 5" true only locally.
+
+
+def step_num(fn):
+    """The number a step function currently sits at.
+
+    Prose that names a step reads it from here. The numbers are fixed, but they
+    are fixed in one place; a sentence with a literal number in it is a second
+    place, and second places go stale silently.
+    """
+    for n, _name, f, _in_all in STEPS:
+        if f is fn:
+            return n
+    return 0
 
 
 def _compact_ranges(nums):
@@ -2320,17 +3294,18 @@ def solo_steps():
 # names in the menu cost eleven lines every time round the loop.
 SHORT = {
     1: "Import", 2: "List trips", 3: "Preview", 4: "Drop trip", 5: "Render",
-    6: "Upload", 7: "Deploy", 8: "Del source",
+    6: "Site", 7: "Upload", 8: "Deploy", 9: "Del source",
 }
 # Steps safe to start without a "Go?". Not "read-only" — Preview writes sidecars,
-# stills and the contact sheet. The test is that nothing leaves this machine and
-# nothing is destroyed: everything they produce is derived data that the next run
-# regenerates. Upload, Deploy, Drop and Delete are excluded because they publish
-# or destroy; Render because it costs hours.
+# stills and the contact sheet, and Site writes a folder of pages. The test is
+# that nothing leaves this machine and nothing is destroyed: everything they
+# produce is derived data that the next run regenerates. Upload, Deploy, Drop and
+# Delete are excluded because they publish or destroy; Render because it costs
+# hours.
 #
 # Necessary but not sufficient — see fast_enough(). A confirmation guarding
 # nothing is noise, but one guarding a two-minute wait earns its place.
-NO_CONFIRM = {2, 3}
+NO_CONFIRM = {step_num(step_list), step_num(step_preview), step_num(step_site)}
 
 # Steps that ask their own questions once they have something to show. The menu's
 # "Go?" comes BEFORE any of that, so for these it asks you to commit to a
@@ -2340,7 +3315,8 @@ NO_CONFIRM = {2, 3}
 #
 # Upload and Deploy are deliberately NOT here: their inner prompt was removed, so
 # the menu is their only gate before something leaves this machine.
-SELF_CONFIRMS = {1, 4, 5, 8}
+SELF_CONFIRMS = {step_num(step_import), step_num(step_drop_trip),
+                 step_num(step_render), step_num(step_delete_import)}
 
 
 def fast_enough(ctx, n):
@@ -2359,6 +3335,18 @@ def fast_enough(ctx, n):
     """
     if n not in NO_CONFIRM:
         return False
+    if n == step_num(step_site):
+        # Site is instant on a rebuild and costs one ffmpeg seek per trip on the
+        # first one — seconds either way, but "seconds each for forty trips" is
+        # long enough to be worth agreeing to once. The site directory existing
+        # is the same kind of proxy as the scan cache below: it says the stills
+        # are probably already there.
+        try:
+            return any((d / RESULT_FILE).is_file()
+                       for d in ctx.out_dir.glob(FINAL_PREFIX + "*")) \
+                or (ctx.out_dir / RESULT_FILE).is_file()
+        except Exception:
+            return False
     try:
         return ctx.scan_cache.is_file()
     except Exception:
@@ -2381,24 +3369,68 @@ def _noop_import(ctx):
         n = clip_count(cands[0])
         # Terse on purpose: this sits under the menu on every draw, so a long
         # sentence there costs a line of a narrow screen every time.
-        return "already have %s clips — select 3 or 5" % n
+        return "already have %s clips — select %d or %d" % (
+            n, step_num(step_preview), step_num(step_render))
     return None
 
 
-# A step can declare that, right now, it would do nothing. Asking "Go?" for a
-# step that is about to no-op is a confirmation guarding nothing, and worse it is
-# practice at pressing enter — the habit you least want by the time step 9 asks.
-# Answer the question at selection time instead, and do not run it at all.
-NOOP_CHECK = {1: _noop_import}
+def deploy_blocked(ctx):
+    """Why Deploy cannot run, or None.
+
+    The reason names the config key, because this line is where someone who
+    cloned the repo finds out that publishing exists at all. "not configured"
+    would tell them nothing they can act on.
+    """
+    if ctx.site is None:
+        return "needs site_repo in config.txt"
+    if not ctx.site.is_dir():
+        return "site_repo not found: %s" % tilde(ctx.site)
+    if not ctx.site_script("deploy", "deploy-site.sh"):
+        return "no deploy/deploy-site.sh in %s" % tilde(ctx.site)
+    return None
+
+
+def upload_blocked(ctx):
+    """Why Upload cannot run, or None.
+
+    The bucket is named first when both are missing: it is the setting that
+    distinguishes this step from Deploy, and the site repo is asked for on the
+    line below anyway. Without the bucket the sync could still run, but its
+    result could not be verified — and `aws s3 sync` exits 0 on failed objects,
+    so an unverifiable upload is one this CLI has no business reporting on.
+    """
+    if not ctx.s3_bucket:
+        return "needs s3_bucket in config.txt"
+    if ctx.site is None:
+        return "needs site_repo in config.txt"
+    if not ctx.site.is_dir():
+        return "site_repo not found: %s" % tilde(ctx.site)
+    if not ctx.site_script("deploy", "upload-videos-s3.sh"):
+        return "no deploy/upload-videos-s3.sh in %s" % tilde(ctx.site)
+    return None
+
+
+# A step can declare that, right now, it would do nothing — either because there
+# is nothing to do (Import with the sink already full) or because the config it
+# needs is absent (Upload, Deploy). Asking "Go?" for such a step is a
+# confirmation guarding nothing, and worse it is practice at pressing enter —
+# the habit you least want by the time the delete step asks. Answer at selection
+# time instead, greyed in the menu with the reason underneath, and do not run it.
+NOOP_CHECK = {
+    step_num(step_import): _noop_import,
+    step_num(step_upload): upload_blocked,
+    step_num(step_deploy): deploy_blocked,
+}
 DESC = {
     1: "Copy the card's DCIM tree into the import sink, verify, then optionally erase the card.",
     2: "Scan the import and print the trip table. Reads nothing else, changes nothing.",
     3: "Sidecars, a still per trip and a local contact sheet. No encoding, no deploy.",
     4: "Delete a trip's source clips from the import so it is never rendered or uploaded.",
     5: "Encode the chosen trips. The slow step: hours for a full card.",
-    6: "Sync the mp4s to the Zurich bucket. Slow on a home uplink; resumes if interrupted.",
-    7: "Push the site to EC2 with SIGNED_VIDEOS=1, so clips load as signed CloudFront URLs.",
-    8: "Erase the whole import source. Only after everything is rendered and published.",
+    6: "Build <out>/site: a browsable local site from the renders. Nothing leaves this machine.",
+    7: "Sync the mp4s to the configured bucket, then verify. Slow on a home uplink; resumes.",
+    8: "Run the site repo's deploy script with SIGNED_VIDEOS=1, so clips load as signed URLs.",
+    9: "Erase the whole import source. Only after everything is rendered and published.",
 }
 
 
@@ -2565,14 +3597,17 @@ def main(argv=None):
         description="Interactive driver for the dashcam publishing pipeline.",
         epilog="Runs the same scripts the READMEs document; it adds status, "
                "step selection, progress and a summary.")
-    ap.add_argument("--site-repo", help="path to the goodnight-drives repo "
-                                        "(default: sibling of this repo, or $GOODNIGHT_DRIVES_DIR)")
+    ap.add_argument("--site-repo", help="path to the publishing repo (build_manifest.py, "
+                                        "deploy/*.sh). Overrides site_repo in config.txt "
+                                        "and $GOODNIGHT_DRIVES_DIR; unset means no "
+                                        "Upload/Deploy.")
     ap.add_argument("--config", help="path to config.txt (default: this repo's)")
     ap.add_argument("--card", help="SD card mount point (default: %s)" % DEFAULT_CARD)
     ap.add_argument("--steps", help="run these steps and exit, e.g. '5-8' or 'all'. "
                                     "Still prompts for confirmations.")
     ap.add_argument("--offline", action="store_true",
-                    help="skip the live-site lookups in the status screen")
+                    help="skip the live-site lookup in the status screen (already "
+                         "skipped when live_trips_url is unset)")
     ap.add_argument("--no-color", action="store_true", help="plain output, no ANSI")
     args = ap.parse_args(argv)
 
@@ -2582,7 +3617,13 @@ def main(argv=None):
     ctx = Ctx(args)
 
     print()
-    print(C.bold("  dashcam pipeline") + C.dim("   card -> render -> S3 -> site"))
+    # The subtitle states what this installation actually does, which is not the
+    # same on every machine: with nothing configured the chain really does stop
+    # at a local site, and saying "-> S3 -> site" there would be a promise the
+    # greyed-out menu below then breaks.
+    chain = "card -> render -> S3 -> site" if (ctx.s3_bucket and ctx.site) else (
+        "card -> render -> site" if ctx.site else "card -> render -> local site")
+    print(C.bold("  dashcam pipeline") + C.dim("   " + chain))
     # Checked before the status screen: there is nothing useful to show if the
     # numbers behind it would come from the wrong grouping.
     if not require_ego_motion(ctx):
@@ -2638,7 +3679,7 @@ def main(argv=None):
                     print(C.dim("     " + DESC[n]))
                 # Only ask before something that writes, sends or takes a while.
                 # Confirming a read-only scan just trains you to hit enter, which
-                # is exactly the habit you do not want by the time step 9 asks.
+                # is exactly the habit you do not want by the time the delete step asks.
                 skip = all((n in NO_CONFIRM and fast_enough(ctx, n)) or n in SELF_CONFIRMS
                            for n in picked)
                 if not skip:
