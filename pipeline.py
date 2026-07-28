@@ -1089,6 +1089,40 @@ def import_is_expendable(ctx, root):
     return True, ""
 
 
+def purge_published_renders(ctx, root):
+    """Delete a published import's renders, keeping only the _meta.json.
+
+    Once a trip is on S3 and on the site, its mp4 on this machine is a third
+    copy taking gigabytes. The metadata is the state worth keeping: it answers
+    "have I already imported this card" and it is what carries a trip forward
+    into the next manifest build. Here that trade is 24 KB against 8.3 GB.
+
+    Everything else in the folder — the map, the gpx, the links, the log copy —
+    is regenerable from footage that is itself gone, so keeping it would leave
+    exactly the files you cannot later reason about.
+    """
+    ns = ctx.out_dir / root.name
+    if not ns.is_dir():
+        return 0, 0
+    freed = n = 0
+    for f in sorted(ns.rglob("*")):
+        if not f.is_file() or f.name.endswith("_meta.json"):
+            continue
+        try:
+            freed += f.stat().st_size
+            f.unlink()
+            n += 1
+        except OSError:
+            pass
+    for d in sorted(ns.rglob("*"), reverse=True):
+        if d.is_dir():
+            try:
+                d.rmdir()
+            except OSError:
+                pass
+    return n, freed
+
+
 def step_import(ctx):
     """Copy the card's DCIM tree into a dated import folder (import-sd-card.sh)."""
     started = time.time()
@@ -1151,6 +1185,10 @@ def step_import(ctx):
                               "declined: previous import not finished")
             for src in leftovers:
                 shutil.rmtree(str(src), ignore_errors=True)
+                n, freed = purge_published_renders(ctx, src)
+                if n:
+                    print(C.dim("  Removed %d published render file(s), %s — the "
+                                "_meta.json stay as state." % (n, human_bytes(freed))))
             print(C.green("  Cleared. The working dir is empty."))
         elif not confirm("  Import anyway, on top of what is there?", False):
             return record(ctx, "Import from SD card", SKIPPED, started,
@@ -3165,6 +3203,22 @@ def step_delete_import(ctx):
     ctx.last_scan = None
     ctx.last_groups = None
     print(C.green("  Deleted %s (%s)" % (target, human_bytes(size))))
+
+    # The renders go too. Every guard above just proved these are on S3 and on
+    # the site, so the copy on this machine is the third one and by far the
+    # largest. Keeping it means keeping files you will later have to reason
+    # about; the _meta.json stay because they ARE the state — the high-water mark
+    # that answers "have I imported this card" and the record the next manifest
+    # build carries forward. 24 KB kept against gigabytes released.
+    n, freed = purge_published_renders(ctx, root)
+    if n:
+        size += freed
+        files += n
+        print(C.green("  Removed %d published render file(s) (%s); the _meta.json remain."
+                      % (n, human_bytes(freed))))
+
+    if ctx.selected_import == root:
+        ctx.selected_import = None
     return record(ctx, "Delete import source", RAN, started,
                   "%d file(s), %s freed" % (files, human_bytes(size)))
 
