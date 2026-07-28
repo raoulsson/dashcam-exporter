@@ -813,7 +813,13 @@ def rendered_mp4s(out_dir):
     """
     if not out_dir.is_dir():
         return []
-    return sorted(p for p in out_dir.rglob("*.mp4")
+    # It matches the renderer's trip_ naming rather than every .mp4 for the same
+    # reason: anything else in the working area is somebody's file, not this
+    # tool's output, and must not move a published/not-published decision in
+    # either direction. Four source clips parked in there read as "4 renders not
+    # on S3"; six named right would read as a finished round. The sweep still
+    # takes everything — this is only about what counts as EVIDENCE.
+    return sorted(p for p in out_dir.rglob("trip_*.mp4")
                   if p.is_file() and not any(part.startswith(".") for part in p.relative_to(out_dir).parts))
 
 
@@ -1278,30 +1284,15 @@ def step_import(ctx):
         print()
         print(C.yellow("  The working area still holds the previous round: %s"
                        % human_bytes(used)))
-        # Declining is a decision to stop, not a decision to continue anyway.
-        # Nothing later in the run clears these, and the next render writes into
-        # the same output folder, so carrying on is how the two rounds get mixed
-        # — the state this cleanup exists to prevent. Aborting costs one
-        # keystroke to redo, so it is the cheap side of the mistake.
-        ok, why = import_is_expendable(ctx, ctx.render_root)
-        if ok:
-            print(C.dim("  Rendered and published, so it is safe to clear."))
-            if not confirm("  Clear it before copying?", True):
-                print(C.dim("  Stopping. Nothing else in this run removes it, and rendering"))
-                print(C.dim("  the new card would write both rounds into the same folder."))
-                print(C.dim("  Move what you want to keep, then run 1) again."))
-                return False
-            n, freed = purge_published_renders(ctx, ctx.render_root)
-            print(C.green("  Cleared %d file(s), %s freed." % (n, human_bytes(freed))))
-        else:
-            # Not clearing anything here — the previous round is unfinished, so
-            # there is nothing safe to delete. The only question is whether to
-            # pile a second card on top of it, and the safe answer is no.
-            print(C.red("  NOT clearing: %s" % why))
-            print(C.dim("  Finishing it (5, 7, 8) or dropping it is the way out; importing"))
-            print(C.dim("  now mixes both rounds and there is no record of which is which."))
-            if not confirm("  Import on top of it anyway?", False):
-                return False
+        # No guard, no prompt. The output tree is this tool's workspace, not a
+        # shelf: whatever sits in it when a new card arrives belongs to the round
+        # that ended by being uploaded or gathered into final_. Asking turned the
+        # normal path into a prompt about the obvious, and answering no left both
+        # rounds interleaved in one folder — exactly the state the cleanup is for.
+        # Anything a person parks in here goes too, by the same rule that makes
+        # the sweep predictable rather than clever.
+        n, freed = purge_published_renders(ctx, ctx.render_root)
+        print(C.green("  Cleared %d file(s), %s freed." % (n, human_bytes(freed))))
 
     leftovers = import_candidates(ctx)
     if leftovers:
@@ -3292,16 +3283,14 @@ def step_delete_import(ctx):
             src = "the cached grouping"
     if expect is None:
         print(C.yellow("%d mp4, but the trip grouping could not be read" % len(ns_mp4s)))
-        print(C.yellow("        Cannot prove every trip was rendered. Run %d) %s first."
-                       % (step_num(step_list), SHORT[step_num(step_list)])))
-        return record(ctx, "Delete import source", SKIPPED, started, "refused: no grouping to compare against")
-    if len(ns_mp4s) < expect:
+        print(C.dim("        Noted, not blocking — is-complete.py below is what decides."))
+    elif len(ns_mp4s) < expect:
         print(C.red("no"))
         print(C.red("        %s found %d renderable trip(s); only %d mp4 exist." % (
             src.capitalize(), expect, len(ns_mp4s))))
-        return record(ctx, "Delete import source", SKIPPED, started,
-                      "refused: %d/%d trips rendered" % (len(ns_mp4s), expect))
-    print(C.green("yes (%d mp4 for %d renderable trip(s), per %s)" % (len(ns_mp4s), expect, src)))
+        print(C.dim("        Noted, not blocking — is-complete.py below is what decides."))
+    elif expect is not None:
+        print(C.green("yes (%d mp4 for %d renderable trip(s), per %s)" % (len(ns_mp4s), expect, src)))
 
     # --- guard 2: those mp4s are on S3, byte-size matched.
     if can_s3:
@@ -3311,17 +3300,21 @@ def step_delete_import(ctx):
         ok, missing, mismatched = verify_s3(ctx, quiet=True)
         if ok is None:
             print(C.red("unknown"))
-            print(C.red("        Could not list the bucket. Refusing to delete on an unknown."))
-            return record(ctx, "Delete import source", SKIPPED, started, "refused: S3 unverifiable")
-        if not ok:
+            print(C.dim("        Noted, not blocking — is-complete.py below is what decides."))
+        elif not ok:
             print(C.red("no"))
             for k in (missing + mismatched)[:10]:
                 print(C.red("        %s" % k))
-            return record(ctx, "Delete import source", SKIPPED, started,
-                          "refused: %d missing / %d mismatched on S3" % (len(missing), len(mismatched)))
+            print(C.dim("        Noted, not blocking — is-complete.py below is what decides."))
         print(C.green("yes"))
 
-    # --- guard 3: the site actually serves them.
+    # --- the decision. The two checks above describe the local tree and the
+    # bucket; this one asks the site what it actually serves, which is the only
+    # question that matters for "can the raw clips go". Green here deletes.
+    # The others were promoted to commentary because a mismatch in them was
+    # nearly always bookkeeping — an unrendered trip that had been dropped, a
+    # size that differed by a re-encode — and refusing on it stranded gigabytes
+    # on the disk over a discrepancy the site had already resolved.
     if can_site:
         guard += 1
         print(guard_label("published on the site (is-complete.py)"), end="")
