@@ -1849,23 +1849,31 @@ def step_render(ctx):
     # Rendering everything clears the whole import namespace. Rendering a subset
     # clears only those trips' files, because wiping the namespace would delete
     # renders the run is not going to recreate.
+    # ONLY the mp4s. A render replaces the video it produces — it does not own
+    # the .html map, the .gpx, the _meta.json or the _links.txt sitting beside
+    # them. Those come from the sidecar pass, they are what the contact sheet and
+    # the site read, and deleting them to re-make a video throws away work the
+    # render was not asked to touch. (An interrupted render would have taken them
+    # with it and left nothing.)
     ns = ctx.out_dir / root.name
+    def _videos(paths):
+        return [f for f in paths if f.is_file() and f.suffix == ".mp4"]
     if idx.strip():
         picked = {int(n) for n in idx.split() if n.isdigit()}
         bases = [g.get("out_base") for g in groups if g.get("index") in picked]
-        doomed = [f for b in bases if b
-                  for f in Path(b).parent.glob(Path(b).name + "*")]
-        what = "%d trip(s)" % len(bases)
+        doomed = _videos([f for b in bases if b
+                          for f in Path(b).parent.glob(Path(b).name + "*")])
+        what = "the mp4(s) of %d trip(s)" % len(bases)
     else:
-        doomed = [f for f in ns.rglob("*") if f.is_file()] if ns.is_dir() else []
-        what = "everything under %s" % tilde(ns)
+        doomed = _videos(ns.rglob("*")) if ns.is_dir() else []
+        what = "every mp4 under %s" % tilde(ns)
     if doomed:
         size = sum(f.stat().st_size for f in doomed if f.exists())
         print()
         print(C.yellow("  Replacing existing output: %s" % what))
         print(C.yellow("  %d file(s), %s — deleted first so the result is exactly this run"
                        % (len(doomed), human_bytes(size))))
-        print(C.dim("  The source clips are still in the import, so this is re-creatable."))
+        print(C.dim("  Maps, GPX and metadata beside them are left alone; only video goes."))
         if not confirm("  Delete and re-render?", True):
             return record(ctx, "Render trips", SKIPPED, started, "declined the clean")
         for f in doomed:
