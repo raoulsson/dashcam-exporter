@@ -1376,8 +1376,17 @@ def step_import(ctx):
     # the combination outright; asking here would just be a prompt whose yes
     # ends in a failed run.
     if delta and after:
-        print(C.dim("  Copying only the new clips, so the card is kept: erasing it now"))
-        print(C.dim("  would also take the earlier clips this run deliberately skipped."))
+        # The reason is not that the skipped clips are precious — they are
+        # already imported, and once rendered and uploaded the card is the copy
+        # that matters least. It is that --delete only ever fires after a verify,
+        # and this run verifies the files it copied. The other 427 were verified
+        # by a run that finished days ago, a fact recorded in a ledger the shell
+        # script cannot read. Erasing them here would be a delete on somebody
+        # else's evidence.
+        print(C.dim("  Card kept. Erasing it would also remove the %d clip(s) this run" % n_old))
+        print(C.dim("  skipped, and this run checked nothing about those — they were"))
+        print(C.dim("  verified by the earlier import, not by this one. Erase the card"))
+        print(C.dim("  yourself once these have rendered and uploaded."))
         erase = False
     else:
         print(C.dim("  The card is NOT erased by default; import-sd-card.sh only deletes"))
