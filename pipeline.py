@@ -250,7 +250,10 @@ class Ctx:
         # an external disk or a Dropbox folder and the result arrives there
         # directly instead of being moved by hand afterwards.
         fr = self.cfg_opt("final_dir")
-        self.final_root = Path(fr).expanduser() if fr else self.out_dir
+        # Beside the output dir, not inside it: the output dir is the working
+        # area that gets emptied, and a finished folder is the one thing that
+        # must survive that.
+        self.final_root = Path(fr).expanduser() if fr else self.out_dir.parent
         self.speed_colour = (self.cfg.get("speed_colour", "true").strip().lower()
                              not in ("false", "no", "0", "off"))
 
@@ -1020,6 +1023,39 @@ def record(ctx, name, status, started, detail=""):
 # Steps
 # ---------------------------------------------------------------------------
 
+LEDGER_FILE = ".imported.json"
+
+
+def read_ledger(ctx):
+    try:
+        return json.loads((ctx.out_dir / LEDGER_FILE).read_text())
+    except Exception:
+        return {}
+
+
+def write_ledger(ctx, stamp, note=""):
+    """The one thing that must outlive a cleanup.
+
+    Everything else in the output tree is either published elsewhere or
+    regenerable, but "what have I already imported" cannot be recovered from
+    anything once the renders and their _meta.json are gone. Two lines of JSON at
+    the root, deliberately outside the folders the cleanup empties.
+    """
+    if not stamp:
+        return
+    d = read_ledger(ctx)
+    if stamp <= (d.get("through") or ""):
+        return
+    d["through"] = stamp
+    d.setdefault("history", []).append(
+        {"through": stamp, "at": time.strftime("%Y-%m-%d %H:%M"), "note": note})
+    d["history"] = d["history"][-20:]
+    try:
+        (ctx.out_dir / LEDGER_FILE).write_text(json.dumps(d, indent=1))
+    except OSError:
+        pass
+
+
 STAMP_RE = re.compile(r"(\d{14})")
 
 
@@ -1035,7 +1071,7 @@ def last_imported_stamp(ctx):
     Returns the DDPAI stamp form (YYYYMMDDHHMMSS) because that is what the clip
     filenames carry, so the comparison is a string compare on the name itself.
     """
-    best = ""
+    best = read_ledger(ctx).get("through") or ""
     cache = ctx.out_dir / ".scan_cache.json"
     if cache.is_file():
         try:
@@ -1100,38 +1136,62 @@ def import_is_expendable(ctx, root):
 
 
 def purge_published_renders(ctx, root):
-    """Delete a published import's renders, keeping only the _meta.json.
+    """Empty the working area. Everything goes except a short keep-list.
 
-    Once a trip is on S3 and on the site, its mp4 on this machine is a third
-    copy taking gigabytes. The metadata is the state worth keeping: it answers
-    "have I already imported this card" and it is what carries a trip forward
-    into the next manifest build. Here that trade is 24 KB against 8.3 GB.
+    Once the trips are on S3 and on the site, every file here is a third copy or
+    a cache of something that no longer exists: the renders, their sidecars,
+    previews/ from the review pass, the extracted GPX cache, the boundary cache
+    that names clips already deleted. Keeping any of it leaves exactly the files
+    that are impossible to make a decision about later.
 
-    Everything else in the folder — the map, the gpx, the links, the log copy —
-    is regenerable from footage that is itself gone, so keeping it would leave
-    exactly the files you cannot later reason about.
+    Kept: logs/ (the history of what was done), the import directory itself so
+    the next copy has somewhere to land, and the ledger. Any final_* folder is
+    unaffected because it lives beside this tree, not in it.
+
+    The ledger is written BEFORE anything is removed. It is the only fact here
+    that cannot be recovered from somewhere else — how far the imports have
+    reached — and a crash midway must not lose it.
     """
-    ns = ctx.out_dir / root.name
-    if not ns.is_dir():
+    write_ledger(ctx, last_imported_stamp(ctx), "cleanup after publish")
+
+    out = ctx.out_dir
+    if not out.is_dir():
         return 0, 0
+    keep_names = {"logs", LEDGER_FILE, root.name}
     freed = n = 0
-    for f in sorted(ns.rglob("*")):
-        if not f.is_file() or f.name.endswith("_meta.json"):
+    for child in sorted(out.iterdir()):
+        if child.name in keep_names or child.name.startswith(FINAL_PREFIX):
+            # the import dir stays, but empties
+            if child.name == root.name and child.is_dir():
+                for f in sorted(child.rglob("*")):
+                    if f.is_file():
+                        try:
+                            freed += f.stat().st_size
+                            f.unlink()
+                            n += 1
+                        except OSError:
+                            pass
+                for d in sorted(child.rglob("*"), reverse=True):
+                    if d.is_dir():
+                        try:
+                            d.rmdir()
+                        except OSError:
+                            pass
             continue
         try:
-            freed += f.stat().st_size
-            f.unlink()
-            n += 1
+            if child.is_dir():
+                for f in child.rglob("*"):
+                    if f.is_file():
+                        freed += f.stat().st_size
+                        n += 1
+                shutil.rmtree(str(child), ignore_errors=True)
+            else:
+                freed += child.stat().st_size
+                child.unlink()
+                n += 1
         except OSError:
             pass
-    for d in sorted(ns.rglob("*"), reverse=True):
-        if d.is_dir():
-            try:
-                d.rmdir()
-            except OSError:
-                pass
     return n, freed
-
 
 def step_import(ctx):
     """Copy the card's DCIM tree into a dated import folder (import-sd-card.sh)."""
