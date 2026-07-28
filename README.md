@@ -582,7 +582,8 @@ fixed spot — 100 m can be a touch tight.
 | Config key | CLI | Default | What it does |
 |------------|-----|---------|--------------|
 | `cache_max_age_days` | `--cache-max-age-days N` | `20` | Files in `.gpx_cache/` older than this are deleted at the start of each run. `0` disables. |
-| `root` | `--root PATH` | `/Volumes/NO NAME` | SD card or local backup root; expects `DCIM/200video/{front,rear}` and optionally `DCIM/203gps` inside. |
+| `import_dir` | `--import-dir PATH` (`--root`) | `~/dashcam-data/import` | The workspace holding the footage to render; expects `DCIM/200video/{front,rear}` and optionally `DCIM/203gps` inside it or inside a dated folder within it. Point it at `/Volumes/NO NAME` to render off the card directly. Formerly `root`, still accepted. |
+| `card` | — | `/Volumes/NO NAME` | Where the card mounts. Read only by the import step; nothing renders from it. |
 | `out` | `--out PATH` | `~/Desktop/Dashcam_Videos` | Where videos and sidecars are written. |
 | — | `--config PATH` | `./config.txt` | Use a config file at a non-default location. |
 | — | `--write-config PATH` | — | Dump the fully-commented template and exit. Pass a directory (e.g. `.`) to write `config.txt` inside it. |

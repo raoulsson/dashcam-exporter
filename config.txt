@@ -13,14 +13,23 @@
 # INPUT / OUTPUT
 # ============================================================================
 
-# Where the dashcam SD card (or a local copy of it) lives. The script expects
-# DCIM/200video/{front,rear} and (optionally) DCIM/203gps inside this folder.
-# When the SD card is in the car, point this at a local backup directory
-# you've copied the DCIM tree into.
-# Default is /Volumes/NO NAME — put the card in and it just works. Renamed your
-# card? Set it here. Working from a copy instead of the card? Point it at the copy.
-#root = /Volumes/NO NAME
-root = ~/dashcam-data/import
+# The WORKSPACE: where the footage you are working on lives. Imports land here
+# as <import_dir>/<YYYY-MM-DD>/DCIM/..., and rendering, previewing and dropping
+# all read from it. It must contain (or contain a day folder containing)
+# DCIM/200video/{front,rear} and optionally DCIM/203gps.
+#
+# The card is NOT this. It is `card`, further down, and it is only read by the
+# import step. Keeping them apart is what lets the card go back in the car while
+# a render runs for hours off the copy — and it removes a real ambiguity: when
+# one setting meant both, "where does this render from" had two answers, and an
+# install that had configured neither read from a mount that might not be there.
+#
+# Rendering straight off the card is still possible: point this at the card. It
+# is the exception, not the arrangement the tool assumes.
+#
+# Was called `root`, which is still read so existing configs keep working.
+# import_dir wins if both are set.
+import_dir = ~/dashcam-data/import
 
 # Where the rendered videos and sidecars get written. Unset, it is derived from
 # `root` above — <parent of root>/output — so a second checkout that sets its own
@@ -460,7 +469,8 @@ software = true
 # ---------------------------------------------------------------------------
 
 # Where the card mounts. The DDPAI mounts as NO NAME unless you renamed it.
-# Used by the CLI's status screen and passed to import-sd-card.sh as --src.
+# Read ONLY by the import step (status screen, and passed to import-sd-card.sh
+# as --src). Nothing renders from here — that is import_dir at the top.
 #card = /Volumes/NO NAME
 
 # Skip the live-site lookup in the status screen. It is already skipped when

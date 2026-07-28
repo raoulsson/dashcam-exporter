@@ -253,29 +253,31 @@ class Ctx:
         # clone must not phone a host its owner has never heard of.
         self.live_trips_url = self.cfg_opt("live_trips_url")
 
-        # `root` in config.txt is what make_dashcam_videos reads from. It points
-        # at the import sink now, not the card, so renders survive an ejected card.
-        self.render_root = Path(self.cfg.get("root", FALLBACK_CARD)).expanduser()
-        # `out` defaults NEXT TO the configured root, not to the global default.
-        # A second checkout that sets `root` and leaves `out` alone otherwise
+        # The workspace holding the footage to work on. `root` is the old name
+        # and still read, because configs carrying it exist; import_dir wins.
+        # Its fallback is the workspace, NOT the card — the card is `card`, and
+        # a root that defaulted to a mount point is what made "where does this
+        # render from" have two plausible answers.
+        self.render_root = Path(self.cfg.get("import_dir")
+                                or self.cfg.get("root")
+                                or FALLBACK_IMPORT_ROOT).expanduser()
+        # `out` defaults NEXT TO the workspace, not to a global constant.
+        # A second checkout that sets import_dir and leaves `out` alone otherwise
         # inherits ~/dashcam-data/output — the first checkout's live working area
         # — and step 1 sweeps that without asking. A clone set up to be
         # independent has to actually be independent, and the setting the person
         # did supply is the best evidence of where their data lives.
         if self.cfg.get("out"):
             self.out_dir = Path(self.cfg["out"]).expanduser()
-        elif self.cfg.get("root"):
-            self.out_dir = Path(self.cfg["root"]).expanduser().parent / "output"
         else:
-            self.out_dir = Path(FALLBACK_OUT).expanduser()
+            self.out_dir = self.render_root.parent / "output"
         # Where import-sd-card.sh drops the card. It follows config's `root`,
         # because that is what every render, scan and delete is pointed at — when
         # the two diverged (renaming `root` while the script kept its own
         # default) the copy landed in a folder no later step ever looked in, and
         # nothing said so. DASHCAM_IMPORT_ROOT still wins for a one-off.
         self.import_root = Path(os.environ.get("DASHCAM_IMPORT_ROOT")
-                                or self.cfg.get("root")
-                                or FALLBACK_IMPORT_ROOT).expanduser()
+                                or self.render_root).expanduser()
         self.card = Path(self.cfg.get("card", FALLBACK_CARD)).expanduser()
 
         try:

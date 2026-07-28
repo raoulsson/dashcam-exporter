@@ -75,7 +75,14 @@ from pathlib import Path
 # Configuration defaults
 # ---------------------------------------------------------------------------
 
-DEFAULT_ROOT = "/Volumes/NO NAME"
+# The footage to render. It defaults to the WORKSPACE, not to the card: the
+# normal path is import the card, then render from the copy, so that the card
+# goes back in the car while the encode runs for hours. Rendering straight off
+# the card is still possible — point import_dir at /Volumes/NO NAME — but it is
+# the exception, and a default that assumed it meant an unconfigured install
+# read from a mount that may not be there. The card's own mount point is the
+# separate `card` setting, used for importing.
+DEFAULT_IMPORT_DIR = "~/dashcam-data/import"
 DEFAULT_OUT  = "~/dashcam-data/output"       # where the site's `videos` symlink points
                                              # (created on first run, parents included)
 DEFAULT_FONT = "/System/Library/Fonts/Supplemental/Courier New Bold.ttf"
@@ -127,11 +134,13 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # INPUT / OUTPUT
 # ============================================================================
 
-# Where the dashcam SD card (or a local copy of it) lives. The script expects
-# DCIM/200video/{front,rear} and (optionally) DCIM/203gps inside this folder.
-# When the SD card is in the car, point this at a local backup directory
-# you've copied the DCIM tree into.
-#root = /Volumes/NO NAME
+# The workspace: the footage to render. Expects DCIM/200video/{front,rear} and
+# optionally DCIM/203gps inside it, or inside a <YYYY-MM-DD> folder within it.
+# It defaults to the import workspace rather than the card, because the normal
+# path is to copy the card and render from the copy — that is what lets the card
+# go back in the car while the encode runs. Point it at /Volumes/NO NAME to
+# render off the card directly. Formerly `root`, which is still read.
+#import_dir = ~/dashcam-data/import
 
 # Where the rendered videos and sidecars get written.
 #out = ~/dashcam-data/output
@@ -3243,8 +3252,13 @@ def main() -> int:
                     help=f"Path to config.txt (default: {config_path})")
     ap.add_argument("--write-config", metavar="PATH",
                     help="Write a fully-commented config.txt template to PATH and exit.")
-    ap.add_argument("--root",  default=cs("root", DEFAULT_ROOT),
-                    help=f"Dashcam volume root (default: {cs('root', DEFAULT_ROOT)})")
+    # `root` is the old name for import_dir and still works: it is in configs
+    # that already exist, and silently ignoring it would send a render at the
+    # wrong tree. import_dir wins when both are set.
+    _import_dir = cs("import_dir", cs("root", DEFAULT_IMPORT_DIR))
+    ap.add_argument("--root", "--import-dir", dest="root", default=_import_dir,
+                    help=f"Footage to render, normally the import workspace "
+                         f"(default: {_import_dir})")
     ap.add_argument("--out",   default=cs("out", DEFAULT_OUT),
                     help=f"Output folder (default: {cs('out', DEFAULT_OUT)})")
     ap.add_argument("--drives", "--trips", nargs="+", type=int, dest="drives",
