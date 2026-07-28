@@ -2334,7 +2334,7 @@ def step_drop_trip(ctx):
         base = t.get("out_base")
         if base and not other:
             if not consulted_s3:
-                objs = s3_objects()
+                objs = s3_objects(ctx)
                 consulted_s3 = True
             if objs:
                 key_part = Path(base).name
