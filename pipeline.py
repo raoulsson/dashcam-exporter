@@ -1253,6 +1253,62 @@ def claim_out_dir(ctx):
     return None       # carry on without the extra proof
 
 
+def working_area_is_expendable(ctx):
+    """(ok, why, stragglers) — is everything in the working area a second copy?
+
+    The sweep at import time used to assert this rather than check it: its
+    comment said the contents "belong to the round that ended by being uploaded
+    or gathered into final_", and nothing anywhere verified either half. Render
+    for hours, have the upload fail or skip it, insert the next card, press 1 —
+    and the renders were unlinked with a line printed after the fact. The
+    premise is a good one; it just has to be true before it is acted on.
+
+    A render is expendable when it is EITHER
+      - in the bucket at a matching size (only checkable with s3_bucket set), OR
+      - inside a final_<date> folder, which is where step 6 moves the deliverable
+        on an install that does not publish.
+    Everything else in the working area — previews/, the caches, the stills — is
+    derived from renders and costs seconds to rebuild, so it never blocks.
+
+    No renders at all is expendable: there is nothing to lose.
+    """
+    out = ctx.out_dir
+    if not out.is_dir():
+        return True, "nothing there", []
+
+    # Renders outside a final_ folder are the ones that still need proving.
+    loose = [f for f in rendered_mp4s(out)
+             if not any(part.startswith(FINAL_PREFIX) for part in f.relative_to(out).parts)]
+    if not loose:
+        return True, "no unfinished renders in the working area", []
+
+    # Gathered: step 6 MOVES a render into final_<date>, so a name that appears
+    # there is the same file, not a copy of it.
+    gathered = set()
+    froot = getattr(ctx, "final_root", out)
+    for base in (froot, out):
+        if base.is_dir():
+            for d in base.glob(FINAL_PREFIX + "*"):
+                for f in d.rglob("*.mp4"):
+                    gathered.add(f.name)
+
+    remote = {}
+    if ctx.cfg_opt("s3_bucket"):
+        remote = s3_objects(ctx) or {}
+
+    stragglers = []
+    for f in loose:
+        if f.name in gathered:
+            continue
+        if any(k.endswith(f.name) and v == f.stat().st_size for k, v in remote.items()):
+            continue
+        stragglers.append(f)
+
+    if stragglers:
+        return False, "%d render(s) neither uploaded nor gathered" % len(stragglers), stragglers
+    return True, "%d render(s), all uploaded or gathered" % len(loose), []
+
+
 def purge_published_renders(ctx, root):
     """Empty the working area. Everything goes except a short keep-list.
 
@@ -1378,15 +1434,26 @@ def step_import(ctx):
         print()
         print(C.yellow("  The working area still holds the previous round: %s"
                        % human_bytes(used)))
-        # No guard, no prompt. The output tree is this tool's workspace, not a
-        # shelf: whatever sits in it when a new card arrives belongs to the round
-        # that ended by being uploaded or gathered into final_. Asking turned the
-        # normal path into a prompt about the obvious, and answering no left both
-        # rounds interleaved in one folder — exactly the state the cleanup is for.
-        # Anything a person parks in here goes too, by the same rule that makes
-        # the sweep predictable rather than clever.
-        n, freed = purge_published_renders(ctx, ctx.render_root)
-        print(C.green("  Cleared %d file(s), %s freed." % (n, human_bytes(freed))))
+        # No prompt — but the premise is CHECKED now. It used to be asserted: the
+        # comment said this belongs to a round that "ended by being uploaded or
+        # gathered into final_", and nothing verified either half, so a render
+        # whose upload failed was unlinked with a line printed after the fact.
+        # When the check passes, the sweep is silent as before. When it does not,
+        # nothing is deleted and it says which files and what would settle it.
+        ok, why, stragglers = working_area_is_expendable(ctx)
+        if ok:
+            n, freed = purge_published_renders(ctx, ctx.render_root)
+            print(C.green("  Cleared %d file(s), %s freed.  (%s)"
+                          % (n, human_bytes(freed), why)))
+        else:
+            print(C.red("  NOT clearing it: %s." % why))
+            for f in stragglers[:6]:
+                print(C.dim("    %s  %s" % (tilde(f), human_bytes(f.stat().st_size))))
+            if len(stragglers) > 6:
+                print(C.dim("    ... and %d more" % (len(stragglers) - 6)))
+            print(C.dim("  Upload them (7), or build the site (6) which moves them"))
+            print(C.dim("  into final_<date>. Either one makes this sweep silent."))
+            print(C.dim("  Importing anyway is fine — the new card lands beside them."))
 
     leftovers = import_candidates(ctx)
     if leftovers:
@@ -3800,16 +3867,32 @@ def step_delete_import(ctx):
     ctx.last_groups = None
     print(C.green("  Deleted %s (%s)" % (target, human_bytes(size))))
 
-    # The renders go too. Every guard above just proved these are on S3 and on
-    # the site, so the copy on this machine is the third one and by far the
-    # largest. Keeping it means keeping files you will later have to reason
-    # about; the _meta.json stay because they ARE the state — the high-water mark
-    # that answers "have I imported this card" and the record the next manifest
-    # build carries forward. 24 KB kept against gigabytes released.
-    n, freed = purge_published_renders(ctx, root)
+    # The renders go too — but only when that is actually proven. The guard
+    # above is is-complete.py, which only runs with a site_repo configured; with
+    # neither bucket nor site the prompt has just finished telling you these
+    # renders are the ONLY copy of the footage, and then this deleted them
+    # anyway. One step, whole drive gone, contradicting the sentence above it.
+    #
+    # And the old comment here promised the _meta.json survive. They do not:
+    # the sweep's keep-list empties the import namespace file by file. What
+    # actually survives is the ledger's high-water mark, written before any of
+    # this runs. Saying so beats a comforting sentence that is false.
+    ok, why, stragglers = working_area_is_expendable(ctx)
+    n = freed = 0
+    if ok:
+        n, freed = purge_published_renders(ctx, root)
+    else:
+        print()
+        print(C.yellow("  Keeping the renders: %s." % why))
+        for f in stragglers[:6]:
+            print(C.dim("    %s" % tilde(f)))
+        print(C.dim("  The original footage is gone; these are now the only copy"))
+        print(C.dim("  of those trips. Upload them (7) or gather them (6), then"))
+        print(C.dim("  the next import sweeps them without asking."))
     if n:
         size += freed
         files += n
+
 
     if do_card:
         gone = cfreed = 0
@@ -3824,7 +3907,7 @@ def step_delete_import(ctx):
                       % (gone, human_bytes(cfreed))))
         size += cfreed
         files += gone
-        print(C.green("  Removed %d published render file(s) (%s); the _meta.json remain."
+        print(C.green("  Removed %d published render file(s) (%s); the ledger keeps the mark."
                       % (n, human_bytes(freed))))
 
     if ctx.selected_import == root:
