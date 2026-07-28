@@ -98,7 +98,7 @@ the map-widget panel (prints a warning). `.venv/` and `.env` are gitignored.
 
 ## Data layout (outside the repo)
 
-- Inputs:  `~/dashcam-data/import_sink/<label>/DCIM/{200video/{front,rear},203gps,...}`
+- Inputs:  `~/dashcam-data/import/<label>/DCIM/{200video/{front,rear},203gps,...}`
   — one folder per import (folder name is arbitrary, usually the import date;
   grouping is timestamp-driven and one folder can span several days of clips).
 - Outputs: `~/dashcam-data/output/` — the `--out` target. Output is
@@ -121,7 +121,7 @@ absolute personal paths into the tracked `config.txt` (shared template) — set
 them per-run, in the wrapper-script OPTS, or a local uncommitted config.
 
 Importing a card: `./import-sd-card.sh [YYYY-MM-DD] [--keep] [--checksum]` copies
-`/Volumes/NO NAME/DCIM` into `import_sink/<day>/`, verifies, then deletes the
+`/Volumes/NO NAME/DCIM` into `import/<day>/`, verifies, then deletes the
 card's FILES only (keeps the DCIM folder tree). Nothing is deleted until verified.
 
 ## Running

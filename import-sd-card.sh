@@ -12,7 +12,7 @@
 # copy verifying, so --delete can never wipe an incomplete import.
 #
 # Usage:
-#   ./import-sd-card.sh                          # /Volumes/NO NAME  ->  ~/dashcam-data/import_sink/<today>
+#   ./import-sd-card.sh                          # /Volumes/NO NAME  ->  ~/dashcam-data/import/<today>
 #   ./import-sd-card.sh 2026-07-20               # name the day folder explicitly
 #   ./import-sd-card.sh --delete                 # copy + verify, THEN erase the card's files
 #   ./import-sd-card.sh --checksum               # rigorous byte-for-byte verify (slow)
@@ -26,7 +26,7 @@
 set -euo pipefail
 
 SRC="/Volumes/NO NAME"
-DEST_ROOT="${DASHCAM_IMPORT_ROOT:-$HOME/dashcam-data/import_sink}"
+DEST_ROOT="${DASHCAM_IMPORT_ROOT:-$HOME/dashcam-data/import}"
 DAY="$(date +%Y-%m-%d)"
 DELETE_SOURCE=0          # default: keep the card; erase only with --delete
 CHECKSUM=0

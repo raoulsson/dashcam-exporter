@@ -55,7 +55,7 @@ from pathlib import Path
 
 DEFAULT_CARD = "/Volumes/NO NAME"                 # make_dashcam_videos.DEFAULT_ROOT
 DEFAULT_OUT = "~/dashcam-data/output"             # make_dashcam_videos.DEFAULT_OUT
-DEFAULT_IMPORT_ROOT = "~/dashcam-data/import_sink"  # import-sd-card.sh DEST_ROOT
+DEFAULT_IMPORT_ROOT = "~/dashcam-data/import"  # import-sd-card.sh DEST_ROOT
 # There is deliberately no default for the site repo, the bucket or the live
 # manifest URL. A default would mean a clone reaching for someone else's
 # checkout on disk and someone else's host on the network, on every launch.

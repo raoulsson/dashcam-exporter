@@ -25,7 +25,7 @@ PY="python3"
 
 OPTS=()
 # Examples — uncomment + adapt:
-# OPTS+=(--root "$HOME/dashcam-data/import_sink")   # a copied card, not the card itself
+# OPTS+=(--root "$HOME/dashcam-data/import")   # a copied card, not the card itself
 # OPTS+=(--out  "$HOME/dashcam-data/output_test")   # render somewhere scratch
 # OPTS+=(--trip-return-m 120)
 
