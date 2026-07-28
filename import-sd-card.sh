@@ -109,10 +109,27 @@ fi
 rsync -a "${PROGRESS[@]}" ${FILTER[@]+"${FILTER[@]}"} "$SRC_ARG" "$DEST/"
 
 # --- verify before we delete anything ---------------------------------------
-echo "Verifying${CHECKSUM:+ (checksum)}..."
+# ${CHECKSUM:+...} expands whenever CHECKSUM is set to ANYTHING, and it is
+# always set — to 0 or 1. So this printed "(checksum)" on every run while the
+# flag was only added below when it is 1: a safety message overstating the
+# rigour of the check that gates erasing the card.
+if [ "$CHECKSUM" -eq 1 ]; then echo "Verifying (checksum)..."; else echo "Verifying..."; fi
 verify_opts=(-a --dry-run --itemize-changes)
 [ "$CHECKSUM" -eq 1 ] && verify_opts+=(--checksum)
-pending=$(rsync "${verify_opts[@]}" ${FILTER[@]+"${FILTER[@]}"} "$SRC_ARG" "$DEST/" | grep -c '^>f' || true)
+
+# Run the verify into a file, and check rsync's OWN exit status, separately from
+# grep's. `rsync ... | grep -c '^>f' || true` swallowed both: the || true is
+# there because grep exits 1 when it matches nothing, but it equally hides an
+# rsync that failed outright — which yields pending=0, "nothing left to copy",
+# and a green light to erase the card on a verify that never ran.
+verify_out="$(mktemp)"
+trap 'rm -f "$verify_out"' EXIT
+if ! rsync "${verify_opts[@]}" ${FILTER[@]+"${FILTER[@]}"} "$SRC_ARG" "$DEST/" > "$verify_out" 2>&1; then
+    echo "ERROR: the verify pass itself failed — NOT deleting source." >&2
+    sed 's/^/    /' "$verify_out" | tail -20 >&2
+    exit 1
+fi
+pending=$(grep -c '^>f' "$verify_out" || true)
 dest_files=$(find "$DEST/DCIM" -type f | wc -l | tr -d ' ')
 if [ "$pending" -ne 0 ]; then
     echo "ERROR: verify found $pending file(s) not yet copied. NOT deleting source." >&2

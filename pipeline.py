@@ -1474,15 +1474,32 @@ def step_import(ctx):
             # just earlier in the cycle, so it cannot be the lax version of it:
             # footage that was never rendered or never published is not rubbish
             # to sweep before a copy.
-            ok, why = import_is_expendable(ctx, leftovers[0])
-            if not ok:
-                print(C.red("  Not clearing: %s" % why))
+            # EVERY candidate, not just the first. import_candidates returns
+            # several — the sink itself when it holds a DCIM tree, plus each
+            # dated subfolder — and proving one of them expendable said nothing
+            # about the rest, which were deleted anyway.
+            unproven = []
+            for src in leftovers:
+                ok, why = import_is_expendable(ctx, src)
+                if not ok:
+                    unproven.append((src, why))
+            if unproven:
+                for src, why in unproven:
+                    print(C.red("  Not clearing %s: %s" % (tilde(src), why)))
                 print(C.dim("  Finish the previous round, or use the delete step which "
                             "explains what is missing."))
                 return record(ctx, "Import from SIM", SKIPPED, started,
-                              "declined: previous import not finished")
+                              "declined: %d import(s) not finished" % len(unproven))
             for src in leftovers:
-                shutil.rmtree(str(src), ignore_errors=True)
+                # The DCIM tree, never the folder holding it. When a candidate IS
+                # the sink — the layout where a card was copied straight into it —
+                # rmtree(src) took every dated sibling import with it. Step 9
+                # narrows to DCIM for exactly this reason; this path did not.
+                dcim = src / "DCIM"
+                if dcim.is_dir():
+                    shutil.rmtree(str(dcim), ignore_errors=True)
+                elif src != ctx.import_root and src != ctx.render_root:
+                    shutil.rmtree(str(src), ignore_errors=True)
                 n, freed = purge_published_renders(ctx, src)
                 if n:
                     print(C.dim("  Removed %d published render file(s), %s — the "
@@ -1636,7 +1653,7 @@ def step_list(ctx):
     # but it arrives after 239 "[scan i/n]" lines, and dumping those scrolls the
     # table away before it can be read. So consume the scan lines into the
     # progress display (which is what they exist for) and keep only the table.
-    rc, lines = run_stream(["./list-trips-data.sh", "--root", str(root)] + ctx.config_args + ctx.scan_args,
+    rc, lines = run_stream(["./list-trips-data.sh", "--root", str(root), "--out", str(ctx.out_dir)] + ctx.config_args + ctx.scan_args,
                            ctx.exporter, "Scan", parser=make_scan_parser(),
                            keep=lambda l: not l.startswith("[scan ") and l.strip() != "")
     if rc != 0:
@@ -1773,7 +1790,7 @@ def load_groups(ctx, root, refresh=False):
     try:
         rc, _lines = run_stream(
             [renderer_python(ctx), "-u", "make_dashcam_videos.py", "--print-groups",
-             "--root", str(root)] + ctx.config_args + ctx.scan_args,
+             "--root", str(root), "--out", str(ctx.out_dir)] + ctx.config_args + ctx.scan_args,
             ctx.exporter, "Grouping", stdout_file=tmp)
         if rc != 0:
             return None
@@ -2239,7 +2256,7 @@ def step_preview(ctx):
         # The renderer prints its usual "[Trip a/b]" headers here, so the real
         # trip counter drives the bar; there are no per-clip lines in this mode,
         # and the parser simply shows no clip counter.
-        cmd = (["./make-trips-rendered.sh", "--sidecars-only", "--root", str(root)]
+        cmd = (["./make-trips-rendered.sh", "--sidecars-only", "--root", str(root), "--out", str(ctx.out_dir)]
                + ctx.config_args + ctx.scan_args)
         rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars", parser=make_scan_parser(),
                                 keep=lambda l: l.startswith("[Trip "))
@@ -2782,7 +2799,7 @@ def step_render(ctx):
 
     cmd = ["./make-trips-rendered.sh"]
     cmd += idx.split()                       # bare integers become --drives
-    cmd += ["--root", str(root), "--output-height", str(height)] + ctx.config_args
+    cmd += ["--root", str(root), "--out", str(ctx.out_dir), "--output-height", str(height)] + ctx.config_args
     # No confirmation here. Choosing the trips, the height and (when there is
     # output to replace) the clean are three deliberate answers already; asking a
     # fourth time with the command spelled out is the same decision again. The
@@ -3768,11 +3785,24 @@ def step_delete_import(ctx):
         ok, missing, mismatched = verify_s3(ctx, quiet=True)
         if ok is None:
             print(C.red("unknown"))
+            if not can_site:
+                print(C.red("        And there is no site to ask instead — refusing."))
+                return record(ctx, "Delete SIM data", SKIPPED, started,
+                              "refused: bucket unlistable and no site to verify against")
             print(C.dim("        Noted, not blocking — is-complete.py below is what decides."))
         elif not ok:
             print(C.red("no"))
             for k in (missing + mismatched)[:10]:
                 print(C.red("        %s" % k))
+            # "Not blocking" is only honest when something else WILL block. With
+            # no site_repo, is-complete.py never runs, so deferring to it deferred
+            # to nothing: the DELETE prompt appeared right after a check that had
+            # just reported the renders are not in the bucket.
+            if not can_site:
+                print(C.red("        And there is no site to ask instead — refusing."))
+                return record(ctx, "Delete SIM data", SKIPPED, started,
+                              "refused: %d missing / %d mismatched on S3, no site check"
+                              % (len(missing), len(mismatched)))
             print(C.dim("        Noted, not blocking — is-complete.py below is what decides."))
         else:
             print(C.green("yes"))
@@ -3943,9 +3973,19 @@ def copy_still_exists(ctx):
     ok, _why = import_is_expendable(ctx, ctx.render_root)
     if ok:
         return True, "published — it is on the site and in the bucket"
-    mp4s = rendered_mp4s(ctx.out_dir / ctx.render_root.name)
+    # The WHOLE output tree, not one namespace. The renderer names its namespace
+    # after the folder it was pointed at — import-sd-card.sh makes <sink>/<day>,
+    # so renders land in out/<day> while this looked in out/<sink name>, which
+    # meant this evidence was structurally always false and the guard rested
+    # entirely on the weakest of the three. final_ folders count too: step 6
+    # moves the deliverable there, and it is still a copy of the footage.
+    mp4s = rendered_mp4s(ctx.out_dir)
+    froot = getattr(ctx, "final_root", ctx.out_dir)
+    if froot.is_dir() and froot != ctx.out_dir:
+        for d in froot.glob(FINAL_PREFIX + "*"):
+            mp4s += [f for f in d.rglob("*.mp4") if f.is_file()]
     if mp4s:
-        return True, "%d rendered trip(s) in %s" % (len(mp4s), tilde(ctx.out_dir))
+        return True, "%d rendered trip(s) on this disk" % len(mp4s)
     clips = 0
     for cand in import_candidates(ctx):
         front = cand / "DCIM" / "200video" / "front"
