@@ -77,7 +77,7 @@ machine.
 | 6 | **Create website** | One self-contained HTML page built from the renders. Nothing leaves the machine. |
 | 7 | **Upload to site** | Syncs the mp4s to your bucket, then verifies they arrived. |
 | 8 | **Update site** | Runs the site repo's deploy. |
-| 9 | **Delete SIM data** &#9888; | Erases the imported footage, the renders and the card — once the site serves every trip. |
+| 9 | **Delete SIM data** &#9888; | Erases the imported footage and the renders — once the site serves every trip. The card is step 10's job. |
 | 10 | **Clean SIM** &#9888; | Erases the card's clips, keeping its folder structure. |
 
 Steps 4, 9 and 10 destroy footage. They run alone, never in a batch, and each
@@ -88,16 +88,24 @@ needs a word typed — `DROP`, `DELETE`, `ERASE` — not an Enter pressed.
 ## The normal cycle
 
 ```
-1  import          card -> workspace, only the new clips
-2  list            what is on it
-3  preview         look at each trip before spending hours encoding
-4  exclude         drop the ones not worth keeping           (optional)
-5  render          the long one
-6  create website  a local page you can open and check
-7  upload          mp4s to the bucket
-8  update site     publish
-9  delete SIM data disk and card both freed
+1   import          card -> workspace, only the new clips
+10  clean SIM       the card is now free — put it back in the car
+2   list            what is on it
+3   preview         look at each trip before spending hours encoding
+4   exclude         drop the ones not worth keeping          (optional)
+5   render          the long one
+6   create website  a local page you can open and check
+7   upload          mp4s to the bucket
+8   update site     publish
+9   delete SIM data the disk is freed
 ```
+
+**10 comes second, not last.** As soon as the import has landed and verified,
+the card has served its purpose — everything after that reads from the
+workspace, and the encode alone is hours. Running 10 here is the whole reason
+the import copies only new clips: the card goes back in the car while the slow
+half runs. Step 9 at the end frees the disk; it does not touch the card,
+because by then the card is not here.
 
 Steps 2 and 3 exist because encoding is hours and uploading is days. Deciding
 what to keep has to be possible before either, and a still plus a map is enough

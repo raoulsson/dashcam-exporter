@@ -1221,7 +1221,10 @@ def import_is_expendable(ctx, root):
         if remote is None:
             return False, "could not list the bucket to confirm the uploads"
         missing = [p.name for p in mp4s
-                   if not any(k.endswith(p.name) and v == p.stat().st_size
+                   # "/" boundary — a bare endswith let sometrip_X.mp4 in the
+                   # bucket vouch for trip_X.mp4 on disk.
+                   if not any((k == p.name or k.endswith("/" + p.name))
+                              and v == p.stat().st_size
                               for k, v in remote.items())]
         if missing:
             return False, "%d render(s) not on S3" % len(missing)
@@ -1282,15 +1285,23 @@ def working_area_is_expendable(ctx):
     if not loose:
         return True, "no unfinished renders in the working area", []
 
-    # Gathered: step 6 MOVES a render into final_<date>, so a name that appears
-    # there is the same file, not a copy of it.
+    # Gathered: step 6 MOVES a render into final_<date>. Matched on name AND
+    # SIZE, because trip filenames repeat exactly across re-renders at the same
+    # height — so a re-rendered trip collided by name with the stale copy in
+    # final_ and was declared expendable, deleting the very file
+    # gather_into_final had refused to overwrite so it could be looked at. Name
+    # equality was another asserted-not-checked premise, the shape this function
+    # exists to remove.
     gathered = set()
     froot = getattr(ctx, "final_root", out)
     for base in (froot, out):
         if base.is_dir():
             for d in base.glob(FINAL_PREFIX + "*"):
                 for f in d.rglob("*.mp4"):
-                    gathered.add(f.name)
+                    try:
+                        gathered.add((f.name, f.stat().st_size))
+                    except OSError:
+                        pass
 
     remote = {}
     if ctx.cfg_opt("s3_bucket"):
@@ -1298,9 +1309,16 @@ def working_area_is_expendable(ctx):
 
     stragglers = []
     for f in loose:
-        if f.name in gathered:
+        try:
+            size = f.stat().st_size
+        except OSError:
             continue
-        if any(k.endswith(f.name) and v == f.stat().st_size for k, v in remote.items()):
+        if (f.name, size) in gathered:
+            continue
+        # endswith on a "/" boundary: a bare endswith let sometrip_X.mp4 in the
+        # bucket satisfy trip_X.mp4 on disk.
+        if any((k == f.name or k.endswith("/" + f.name)) and v == size
+               for k, v in remote.items()):
             continue
         stragglers.append(f)
 
@@ -1500,11 +1518,29 @@ def step_import(ctx):
                     shutil.rmtree(str(dcim), ignore_errors=True)
                 elif src != ctx.import_root and src != ctx.render_root:
                     shutil.rmtree(str(src), ignore_errors=True)
-                n, freed = purge_published_renders(ctx, src)
+            # The renders go only with the SAME proof the other two purge sites
+            # demand. import_is_expendable above proved each candidate's footage
+            # was rendered (and uploaded, when a bucket is configured) — but in a
+            # no-bucket install that proof requires no publication at all, and
+            # purge_published_renders sweeps the WHOLE output tree, not one
+            # candidate's namespace. Unguarded, this deleted a straggler render
+            # the prior_files sweep had just refused to touch, and in the
+            # no-bucket case it erased footage and renders behind one y/n while
+            # step 9 in the same configuration deliberately keeps the renders.
+            # Run ONCE, not per candidate: the purge is tree-wide either way.
+            ok, why, stragglers = working_area_is_expendable(ctx)
+            if ok:
+                n, freed = purge_published_renders(ctx, ctx.render_root)
                 if n:
-                    print(C.dim("  Removed %d published render file(s), %s — the "
-                                "_meta.json stay as state." % (n, human_bytes(freed))))
-            print(C.green("  Cleared. The working dir is empty."))
+                    print(C.dim("  Removed %d render file(s), %s — the ledger keeps "
+                                "the high-water mark." % (n, human_bytes(freed))))
+                print(C.green("  Cleared. The working dir is empty."))
+            else:
+                print(C.yellow("  Footage cleared; keeping the renders: %s." % why))
+                for f in stragglers[:6]:
+                    print(C.dim("    %s" % tilde(f)))
+                print(C.dim("  Upload them (7) or gather them (6); the next import"))
+                print(C.dim("  sweeps them without asking once they are safe."))
         elif not confirm("  Import anyway, on top of what is there?", False):
             return record(ctx, "Import from SIM", SKIPPED, started,
                           "declined: import area not empty")
@@ -3850,37 +3886,12 @@ def step_delete_import(ctx):
         print(C.red("  copy of this footage that exists. Lose that disk and the drive is gone."))
         print(C.dim("  Back the renders up elsewhere first, or leave the import where it is —"))
         print(C.dim("  keeping it costs disk, not data."))
-    # The card comes with it. The point of this step is a cycle that ends with
-    # everything freed: the disk AND a card ready to go back in the car. Leaving
-    # the card for a separate step meant a green is-complete still left it full,
-    # and remembering step 10 became the thing standing between you and a usable
-    # card. It is only offered when the card holds nothing this machine has not
-    # imported — same test step 10 uses, since it is the same question.
-    card_new = card_old = 0
-    do_card = False
-    if (ctx.card / "DCIM").is_dir():
-        card_new, card_old = card_split(ctx.card, last_imported_stamp(ctx))
-        card_files = [f for f in (ctx.card / "DCIM").rglob("*") if f.is_file()]
-        card_size = sum(f.stat().st_size for f in card_files)
-        print()
-        if card_new:
-            print(C.yellow("  The card holds %d clip(s) newer than anything imported —"
-                           % card_new))
-            print(C.yellow("  it is NOT cleaned. Import them first, then run 10)."))
-        elif card_files:
-            do_card = True
-            print(C.red("  The card at %s is erased too: %d file(s), %s."
-                        % (tilde(ctx.card), len(card_files), human_bytes(card_size))))
-            print(C.dim("  Its folders stay so the camera can record."))
-            if can_site:
-                print(C.dim("  Everything on it was imported, and is-complete.py just said"))
-                print(C.dim("  the result is published."))
-            else:
-                # Do not borrow authority from a check that did not run. The
-                # card's clips are in the import, which is all this knows.
-                print(C.dim("  Everything on it was imported. Whether that import is"))
-                print(C.dim("  published was NOT checked — see above."))
-
+    # The card is NOT touched here. Step 10 frees it right after the import, so
+    # by the time this runs it has been back in the car for hours — a block that
+    # erases "the card" at this point can only ever reach a DIFFERENT card than
+    # the one this round came from, guarded by nothing but a ledger comparison.
+    # One step owns the card, and it is 10, which proves the copy still exists
+    # before it erases anything.
     answer = ask("  Type DELETE to erase it, anything else to cancel: ")
     if answer != "DELETE":
         print("  Cancelled.")
@@ -3924,22 +3935,6 @@ def step_delete_import(ctx):
         files += n
 
 
-    if do_card:
-        gone = cfreed = 0
-        for f in [f for f in (ctx.card / "DCIM").rglob("*") if f.is_file()]:
-            try:
-                cfreed += f.stat().st_size
-                f.unlink()
-                gone += 1
-            except OSError as e:
-                print(C.red("  %s: %s" % (f.name, e)))
-        print(C.green("  Card cleaned — %d file(s), %s freed, folders kept."
-                      % (gone, human_bytes(cfreed))))
-        size += cfreed
-        files += gone
-        print(C.green("  Removed %d published render file(s) (%s); the ledger keeps the mark."
-                      % (n, human_bytes(freed))))
-
     if ctx.selected_import == root:
         ctx.selected_import = None
     return record(ctx, "Delete SIM data", RAN, started,
@@ -3973,26 +3968,65 @@ def copy_still_exists(ctx):
     ok, _why = import_is_expendable(ctx, ctx.render_root)
     if ok:
         return True, "published — it is on the site and in the bucket"
-    # The WHOLE output tree, not one namespace. The renderer names its namespace
-    # after the folder it was pointed at — import-sd-card.sh makes <sink>/<day>,
-    # so renders land in out/<day> while this looked in out/<sink name>, which
-    # meant this evidence was structurally always false and the guard rested
-    # entirely on the weakest of the three. final_ folders count too: step 6
-    # moves the deliverable there, and it is still a copy of the footage.
-    mp4s = rendered_mp4s(ctx.out_dir)
+
+    # What is ON THE CARD, so the evidence can be about THIS card. Without this
+    # the two checks below became permanently true the moment any final_ folder
+    # existed — and final_ folders survive every sweep by design. A card whose
+    # import was lost would then be erased on the strength of last month's
+    # renders, which is the exact case the guard exists for.
+    stamps, days = set(), set()
+    front = ctx.card / "DCIM" / "200video" / "front"
+    if front.is_dir():
+        for f in front.glob("*.mp4"):
+            m = STAMP_RE.search(f.name)
+            if m:
+                s = m.group(1)
+                stamps.add(s)
+                days.add("%s-%s-%s" % (s[0:4], s[4:6], s[6:8]))
+    if not stamps:
+        return False, ""
+
+    # The final folder, read from its META rather than its filenames. Each
+    # trip's _meta.json carries the wall-clock `start` and `end` it covers, and a
+    # card clip's name IS its wall clock — so "is this clip inside a rendered
+    # trip" is a real containment test. Matching filename days instead would
+    # accept any render that happens to share a date.
+    covered = 0
+    metas = []
     froot = getattr(ctx, "final_root", ctx.out_dir)
-    if froot.is_dir() and froot != ctx.out_dir:
-        for d in froot.glob(FINAL_PREFIX + "*"):
-            mp4s += [f for f in d.rglob("*.mp4") if f.is_file()]
-    if mp4s:
-        return True, "%d rendered trip(s) on this disk" % len(mp4s)
+    for base in (froot, ctx.out_dir):
+        if base.is_dir():
+            for d in base.glob(FINAL_PREFIX + "*"):
+                metas += list(d.rglob("trip_*_meta.json"))
+    metas += list(ctx.out_dir.rglob("trip_*_meta.json"))
+    spans = []
+    for mp in metas:
+        try:
+            md = json.loads(mp.read_text())
+            s, e = md.get("start"), md.get("end")
+            if s and e:
+                spans.append((s.replace("-", "").replace(":", "").replace(" ", "")[:14],
+                              e.replace("-", "").replace(":", "").replace(" ", "")[:14]))
+        except Exception:
+            continue
+    for st in stamps:
+        if any(a <= st <= b for a, b in spans):
+            covered += 1
+    if covered:
+        return True, "%d of this card's clip(s) are inside rendered trips" % covered
+
+    # Source clips carrying THIS card's stamps — filenames are the stamp, so
+    # this is an identity check rather than a headcount of whatever is around.
     clips = 0
     for cand in import_candidates(ctx):
-        front = cand / "DCIM" / "200video" / "front"
-        if front.is_dir():
-            clips += len(list(front.glob("*.mp4")))
+        cfront = cand / "DCIM" / "200video" / "front"
+        if cfront.is_dir():
+            for f in cfront.glob("*.mp4"):
+                m = STAMP_RE.search(f.name)
+                if m and m.group(1) in stamps:
+                    clips += 1
     if clips:
-        return True, "%d source clip(s) in the workspace" % clips
+        return True, "%d of this card's clip(s) in the workspace" % clips
     return False, ""
 
 
@@ -4309,7 +4343,7 @@ DESC = {
     6: "Build <out>/site: a browsable local site from the renders. Nothing leaves this machine.",
     7: "Sync the mp4s to the configured bucket, then verify. Slow on a home uplink; resumes.",
     8: "Run the site repo's deploy script with SIGNED_VIDEOS=1, so clips load as signed URLs.",
-    9: "Erase the imported footage, the renders AND the SIM. Only once the site serves every trip.",
+    9: "Erase the imported footage and the renders. Only once the site serves every trip.",
     10: "Erase the SIM's clips, keeping its folders. Refuses while anything on it is unimported.",
 }
 
