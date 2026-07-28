@@ -1816,7 +1816,7 @@ def step_render(ctx):
         if have_move:
             print("      total %s span  ->  %s of video to encode"
                   % (human_secs(tot_span), C.bold(human_secs(tot_move))))
-            print(C.dim("      parking inside a trip is cut, which is the whole difference"))
+            print(C.dim("      parking inside a trip is cut"))
         else:
             print(C.dim("  span is start->end. The encode is shorter — parking is cut — but by"))
             print(C.dim("  how much is only known after Preview (3) writes the sidecars."))
