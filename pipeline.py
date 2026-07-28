@@ -2127,7 +2127,7 @@ def step_preview(ctx):
 
     previews_dir = ctx.out_dir / PREVIEW_DIRNAME
     print(C.dim("  Three cheap things, no encoding:"))
-    print(C.dim("    1. --sidecars-only: each trip's .html map, .gpx and _meta.json"))
+    print(C.dim("    1. each trip's .html map, .gpx and _meta.json — only the ones missing"))
     print(C.dim("    2. one still per trip, a frame from its first front clip"))
     print(C.dim("    3. %s/preview_<day>.html — a contact sheet to open locally"
                 % previews_dir))
@@ -2138,15 +2138,46 @@ def step_preview(ctx):
     # on screen whose answer is already on screen — two prompts for one decision,
     # which is how you teach someone to stop reading them.
 
-    # 1. Sidecars. The renderer prints its usual "[Trip a/b]" headers here, so
-    #    the real trip counter drives the bar; there are no per-clip lines in
-    #    this mode, and the parser simply shows no clip counter.
-    cmd = (["./make-trips-rendered.sh", "--sidecars-only", "--root", str(root)]
-           + ctx.config_args + ctx.scan_args)
-    rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars", parser=make_scan_parser(),
-                            keep=lambda l: l.startswith("[Trip "))
-    if rc != 0:
-        return record(ctx, "Preview trips", FAILED, started, "sidecars exit %d" % rc)
+    # 1. Sidecars — but only if they are missing. This step was written for the
+    #    pass BEFORE a render, where nothing exists yet. Run after a render it
+    #    regenerated every .gpx, .html and _meta.json that the render had just
+    #    written, from the same clips, to the same bytes: minutes of decoding for
+    #    a result already on disk. The render writes them itself, so what is
+    #    already there is not a stale copy, it is the copy.
+    #
+    #    "Missing" is per trip, and a trip counts as done when all three exist.
+    #    A partial set means an interrupted pass, so that trip gets redone — and
+    #    since --sidecars-only has no per-trip selection, one missing trip means
+    #    the whole pass runs again. That is the honest trade: correct and
+    #    occasionally slow beats fast and subtly incomplete.
+    have = load_groups(ctx, root)
+    need = True
+    if have:
+        gs = [g for g in have.get("trips", []) if g.get("renderable", True)]
+        if gs:
+            done = 0
+            for g in gs:
+                base = g.get("out_base")
+                if base and all(Path(base + s).is_file()
+                                for s in (".gpx", ".html", "_meta.json")):
+                    done += 1
+            need = done < len(gs)
+            if not need:
+                print(C.dim("  Sidecars already written for all %d trip(s) — skipping"
+                            " that pass." % len(gs)))
+            elif done:
+                print(C.dim("  %d of %d trip(s) have sidecars; rewriting all (the"
+                            " renderer has no per-trip mode)." % (done, len(gs))))
+    if need:
+        # The renderer prints its usual "[Trip a/b]" headers here, so the real
+        # trip counter drives the bar; there are no per-clip lines in this mode,
+        # and the parser simply shows no clip counter.
+        cmd = (["./make-trips-rendered.sh", "--sidecars-only", "--root", str(root)]
+               + ctx.config_args + ctx.scan_args)
+        rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars", parser=make_scan_parser(),
+                                keep=lambda l: l.startswith("[Trip "))
+        if rc != 0:
+            return record(ctx, "Preview trips", FAILED, started, "sidecars exit %d" % rc)
 
     # 2. The grouping — which is also the trip -> source clip mapping the stills
     #    and the contact sheet's clip lists are built from.
@@ -2166,11 +2197,22 @@ def step_preview(ctx):
         front = t.get("front") or []
         name = "trip_%02d_%s_%s.jpg" % (t["index"], t["day"], t["start"][11:16].replace(":", "-"))
         dst = previews_dir / name
-        print("  still %d/%d  %s" % (i, len(trips), name))
         if not front:
+            print("  still %d/%d  %s" % (i, len(trips), name))
             failed.append(t["index"])
             continue
-        if extract_still(Path(front[0]), dst,
+        # Keep a still that is already there and not older than its clip. It is
+        # one ffmpeg seek per trip, which is seconds rather than minutes, but it
+        # is seconds spent producing a file that already exists — and on a
+        # second look at forty trips that is the difference between a glance and
+        # a wait.
+        src = Path(front[0])
+        if dst.is_file() and src.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
+            print("  still %d/%d  %s %s" % (i, len(trips), name, C.dim("(have it)")))
+            stills[t["index"]] = dst
+            continue
+        print("  still %d/%d  %s" % (i, len(trips), name))
+        if extract_still(src, dst,
                          seconds=ctx.still_seconds, width=ctx.still_width):
             stills[t["index"]] = dst
         else:
