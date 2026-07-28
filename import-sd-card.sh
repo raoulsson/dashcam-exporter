@@ -56,13 +56,39 @@ echo "Dest:   $DEST/DCIM"
 
 mkdir -p "$DEST"
 echo "Copying..."
-rsync -a --info=progress2 "$SRC/DCIM" "$DEST/"
+# Optional high-water mark: skip clips at or before a timestamp already
+# imported. DDPAI names every file <YYYYMMDDHHMMSS>_*, so the name alone orders
+# them and an --after of 20260724185333 means "everything since that clip".
+# Without it the card's whole DCIM is copied, which is what a first import wants.
+FILTER=()
+if [ -n "${AFTER_STAMP:-}" ]; then
+    echo ">>> only clips newer than $AFTER_STAMP"
+    tmp_list="$(mktemp)"
+    ( cd "$SRC" && find DCIM -type f ) | while IFS= read -r rel; do
+        base="$(basename "$rel")"
+        stamp="$(printf '%s' "$base" | grep -oE '[0-9]{14}' | head -1)"
+        # keep anything without a timestamp (IPSRecord.txt, the gps tars)
+        if [ -z "$stamp" ] || [ "$stamp" \> "$AFTER_STAMP" ]; then
+            printf '%s\n' "$rel" >> "$tmp_list"
+        fi
+    done
+    echo ">>> $(wc -l < "$tmp_list" | tr -d ' ') of $( ( cd "$SRC" && find DCIM -type f ) | wc -l | tr -d ' ') file(s) selected"
+    # --files-from paths are relative to the SOURCE root, so the source has to
+    # be $SRC (the list already says DCIM/...); pairing it with $SRC/DCIM would
+    # copy into DEST/DCIM/DCIM.
+    FILTER=(--files-from="$tmp_list")
+    SRC_ARG="$SRC"
+else
+    SRC_ARG="$SRC/DCIM"
+fi
+
+rsync -a --info=progress2 ${FILTER[@]+"${FILTER[@]}"} "$SRC_ARG" "$DEST/"
 
 # --- verify before we delete anything ---------------------------------------
 echo "Verifying${CHECKSUM:+ (checksum)}..."
 verify_opts=(-a --dry-run --itemize-changes)
 [ "$CHECKSUM" -eq 1 ] && verify_opts+=(--checksum)
-pending=$(rsync "${verify_opts[@]}" "$SRC/DCIM" "$DEST/" | grep -c '^>f' || true)
+pending=$(rsync "${verify_opts[@]}" ${FILTER[@]+"${FILTER[@]}"} "$SRC_ARG" "$DEST/" | grep -c '^>f' || true)
 dest_files=$(find "$DEST/DCIM" -type f | wc -l | tr -d ' ')
 if [ "$pending" -ne 0 ]; then
     echo "ERROR: verify found $pending file(s) not yet copied. NOT deleting source." >&2

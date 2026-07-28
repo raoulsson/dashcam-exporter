@@ -408,3 +408,14 @@ software = true
 # links and no build step. Copy that directory plus the mp4s to any web root and
 # it is already a website; the S3 + CloudFront route only buys you private,
 # signed delivery and somewhere to keep tens of GB that is not your laptop.
+
+# ============================================================================
+# THE RESULT PAGE
+# ============================================================================
+
+# Each drive on the result page is drawn from its own .gpx. By default the line
+# is coloured by the speed recorded at each point, using the same bands as the
+# map burned into the video (<20 / 20-40 / 40-60 / 60-80 / >80 km/h), so the
+# glyph reads as where you were held up and where you were moving. Set false to
+# draw every route in one colour, which shows the shape and nothing else.
+#speed_colour = true

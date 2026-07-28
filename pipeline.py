@@ -243,6 +243,11 @@ class Ctx:
         # anything changes what is on disk.
         self.last_groups = None
         self.results = []               # StepResult log for the final summary
+        # Colouring the route by speed is on by default because it says something
+        # the shape alone does not — where you were held up and where you were
+        # moving. Someone who wants the shape plain can say so.
+        self.speed_colour = (self.cfg.get("speed_colour", "true").strip().lower()
+                             not in ("false", "no", "0", "off"))
 
     def cfg_opt(self, key):
         """A configured value, or None when the setting is absent.
@@ -832,7 +837,9 @@ def print_status(ctx):
         C.dim("%s in %s" % (human_bytes(size), tilde(ctx.out_dir)))))
 
     # Local site — always meaningful, because Site needs nothing but this machine.
-    site_index = ctx.out_dir / RESULT_FILE
+    # The page lives in the newest final_* folder once one exists.
+    finals = sorted(ctx.out_dir.glob(FINAL_PREFIX + "*")) if ctx.out_dir.is_dir() else []
+    site_index = (finals[-1] / RESULT_FILE) if finals else (ctx.out_dir / RESULT_FILE)
     if site_index.is_file():
         age = human_age(time.time() - site_index.stat().st_mtime)
         print("  Local site   %s  %s" % (
@@ -1003,6 +1010,85 @@ def record(ctx, name, status, started, detail=""):
 # Steps
 # ---------------------------------------------------------------------------
 
+STAMP_RE = re.compile(r"(\d{14})")
+
+
+def last_imported_stamp(ctx):
+    """The newest source clip this machine has already taken in, or None.
+
+    Read from what survives deleting the import: every rendered trip's _meta.json
+    records the wall clock it ended, and the boundary cache records the source
+    filenames it grouped. Both outlive the footage, which is the point — the
+    question "have I already copied this card" has to be answerable after the
+    card's local copy is long gone.
+
+    Returns the DDPAI stamp form (YYYYMMDDHHMMSS) because that is what the clip
+    filenames carry, so the comparison is a string compare on the name itself.
+    """
+    best = ""
+    cache = ctx.out_dir / ".scan_cache.json"
+    if cache.is_file():
+        try:
+            d = json.loads(cache.read_text())
+            for g in d.get("groups", []):
+                for f in g:
+                    m = STAMP_RE.search(Path(f).name)
+                    if m and m.group(1) > best:
+                        best = m.group(1)
+        except Exception:
+            pass
+    if ctx.out_dir.is_dir():
+        for meta in ctx.out_dir.rglob("*_meta.json"):
+            try:
+                end = str(json.loads(meta.read_text()).get("end") or "")
+            except Exception:
+                continue
+            digits = re.sub(r"\D", "", end)[:14]
+            if len(digits) == 14 and digits > best:
+                best = digits
+    return best or None
+
+
+def card_split(card, after):
+    """(new, already) counts of front clips on the card against a stamp."""
+    front = card / "DCIM" / "200video" / "front"
+    if not front.is_dir():
+        return 0, 0
+    new = old = 0
+    for f in front.glob("*.mp4"):
+        m = STAMP_RE.search(f.name)
+        if m and after and m.group(1) <= after:
+            old += 1
+        else:
+            new += 1
+    return new, old
+
+
+def import_is_expendable(ctx, root):
+    """(ok, reason) — is everything from `root` rendered, and published if this
+    install publishes? The delete step's proof, factored out so clearing the
+    working dir before a copy cannot become a softer version of the same act."""
+    ns = ctx.out_dir / root.name
+    mp4s = rendered_mp4s(ns) if ns.is_dir() else []
+    if not mp4s:
+        return False, "nothing from it was rendered"
+    payload = load_groups(ctx, root)
+    gs = (payload or {}).get("trips") or []
+    want = sum(1 for g in gs if g.get("renderable", True)) if gs else None
+    if want is not None and len(mp4s) < want:
+        return False, "%d of %d trip(s) rendered" % (len(mp4s), want)
+    if ctx.cfg_opt("s3_bucket"):
+        remote = s3_objects(ctx.cfg_opt("s3_bucket"))
+        if remote is None:
+            return False, "could not list the bucket to confirm the uploads"
+        missing = [p.name for p in mp4s
+                   if not any(k.endswith(p.name) and v == p.stat().st_size
+                              for k, v in remote.items())]
+        if missing:
+            return False, "%d render(s) not on S3" % len(missing)
+    return True, ""
+
+
 def step_import(ctx):
     """Copy the card's DCIM tree into a dated import folder (import-sd-card.sh)."""
     started = time.time()
@@ -1050,16 +1136,54 @@ def step_import(ctx):
         print(C.dim("  If the previous round is finished (rendered, and published if you"))
         print(C.dim("  publish), clear it with %d) %s first. If it is not, finish it first."
                     % (step_num(step_delete_import), SHORT[step_num(step_delete_import)])))
-        if not confirm("  Import anyway, on top of what is there?", False):
+        print(C.dim("  Or clear it first, so this copy starts from an empty working dir."))
+        if confirm("  Clear the old import before copying?", False):
+            # Same proof the delete step demands. Clearing here is the same act,
+            # just earlier in the cycle, so it cannot be the lax version of it:
+            # footage that was never rendered or never published is not rubbish
+            # to sweep before a copy.
+            ok, why = import_is_expendable(ctx, leftovers[0])
+            if not ok:
+                print(C.red("  Not clearing: %s" % why))
+                print(C.dim("  Finish the previous round, or use the delete step which "
+                            "explains what is missing."))
+                return record(ctx, "Import from SD card", SKIPPED, started,
+                              "declined: previous import not finished")
+            for src in leftovers:
+                shutil.rmtree(str(src), ignore_errors=True)
+            print(C.green("  Cleared. The working dir is empty."))
+        elif not confirm("  Import anyway, on top of what is there?", False):
             return record(ctx, "Import from SD card", SKIPPED, started,
                           "declined: import area not empty")
         print()
+
+    # Delta copy is the default. A card left in the car accumulates: this one
+    # holds 1039 front clips of which 427 were already taken in last time, and
+    # copying those again costs tens of GB and the minutes you want back to put
+    # the card away. The high-water mark survives deleting the local import,
+    # because it is read from the renders and the boundary cache, not the
+    # footage.
+    after = last_imported_stamp(ctx)
+    if after:
+        n_new, n_old = card_split(ctx.card, after)
+        print()
+        print("  Already imported through %s" % C.bold(after))
+        print("  On the card: %s new, %s already here" % (
+            C.bold("%d clip(s)" % n_new), C.dim("%d" % n_old)))
+        if not n_new:
+            print(C.green("  Nothing new on this card — it is already all imported."))
+            return record(ctx, "Import from SD card", SKIPPED, started, "no new clips")
+        delta = confirm("  Copy only the %d new clip(s)?" % n_new, True)
+    else:
+        delta = False
+        print(C.dim("  Nothing imported before, so this copies the whole card."))
 
     day = ask("  Day folder name [%s]: " % time.strftime("%Y-%m-%d"), time.strftime("%Y-%m-%d"))
     print(C.dim("  The card is NOT erased by default; import-sd-card.sh only deletes"))
     print(C.dim("  the card's files after the copy verifies file-for-file."))
     erase = confirm("  Erase the card's files after a verified copy?", False)
 
+    env = {"AFTER_STAMP": after} if (after and delta) else None
     cmd = ["./import-sd-card.sh"]
     if erase:
         cmd.append("--delete")
@@ -1071,7 +1195,9 @@ def step_import(ctx):
         return record(ctx, "Import from SD card", SKIPPED, started, "declined")
 
     rc, lines = run_stream(cmd, ctx.exporter, "Import", parser=rsync_parser,
-                           keep=lambda l: l.startswith(("Verified:", "Card cleaned", "Done.")))
+                           env_extra=env,
+                           keep=lambda l: l.startswith(("Verified:", "Card cleaned", "Done.",
+                                                        ">>> only clips newer", ">>> ")))
     if rc != 0:
         return record(ctx, "Import from SD card", FAILED, started, "exit %d" % rc)
 
@@ -2269,7 +2395,7 @@ def gpx_track(path):
     return pts
 
 
-def route_glyph(pts, w=560, h=280, pad=14):
+def route_glyph(pts, w=560, h=280, pad=14, speed_colour=True):
     """The track as an SVG, speed-coloured, aspect-correct.
 
     Longitude degrees shrink with latitude, so scaling lat and lon by the same
@@ -2291,10 +2417,13 @@ def route_glyph(pts, w=560, h=280, pad=14):
     def xy(p):
         return (ox + (p[1] - lo0) * kx * s, h - (oy + (p[0] - la0) * s))
 
+    # One colour draws the route as a shape; speed colouring makes it a reading of
+    # the drive. Off is a legitimate preference, so it is a setting.
+    plain = "#7DD3A0"
     segs = []
-    run, colour = [xy(pts[0])], _band(pts[0][2])
+    run, colour = [xy(pts[0])], (_band(pts[0][2]) if speed_colour else plain)
     for p in pts[1:]:
-        c = _band(p[2])
+        c = _band(p[2]) if speed_colour else plain
         run.append(xy(p))
         if c != colour:
             segs.append((colour, run))
@@ -2393,6 +2522,69 @@ foot,.foot{display:block;margin-top:34px;color:var(--faint);font-size:12.5px}
 """
 
 RESULT_FILE = "dashcam_import_data_site.html"
+FINAL_PREFIX = "final_"
+
+
+def final_dir_for(out_dir, days):
+    """<out>/final_<newest day in this batch>.
+
+    Dated so successive imports accumulate side by side instead of merging into
+    one heap. Named after the newest TRIP, not the render date: rebuilding the
+    page tomorrow must land in the same folder as today, and a render-date name
+    would quietly start a second one holding the same drives.
+    """
+    tag = max(days) if days else time.strftime("%Y-%m-%d")
+    return out_dir / (FINAL_PREFIX + tag)
+
+
+def gather_into_final(ctx, out_dir):
+    """Move the rendered trips under <out>/final/ so the result is one folder.
+
+    The point is a directory the user can drag anywhere: the page, the videos,
+    the maps and the tracks together, with every link inside it still resolving.
+
+    NOT done when a site_repo is configured. That setup's trips.json records each
+    trip by a uid containing its import folder name, so moving the tree renames
+    every published trip out from under the manifest — the same way renaming the
+    import folder orphaned six of them yesterday. A configured install keeps its
+    layout and just gets the page.
+    """
+    # Which days are in the tree right now — that names the folder.
+    days = set()
+    for child in sorted(out_dir.iterdir()):
+        if child.is_dir() and not child.name.startswith(".") \
+                and not child.name.startswith(FINAL_PREFIX) \
+                and child.name not in ("logs", "previews"):
+            days.update(d.name for d in child.iterdir()
+                        if d.is_dir() and re.match(r"^\d{4}-\d{2}-\d{2}$", d.name))
+    final = final_dir_for(out_dir, days)
+    if ctx.site_ready:
+        return final if final.is_dir() else None
+    moved = 0
+    final.mkdir(parents=True, exist_ok=True)
+    for child in sorted(out_dir.iterdir()):
+        if child == final or child.name.startswith(".") or child.is_file():
+            continue
+        if child.name in ("logs", "previews") or child.name.startswith(FINAL_PREFIX):
+            continue
+        for day in sorted(child.iterdir()):
+            if not day.is_dir():
+                continue
+            dest = final / day.name
+            if dest.exists():
+                for f in sorted(day.iterdir()):
+                    target = dest / f.name
+                    if not target.exists():
+                        shutil.move(str(f), str(target))
+                        moved += 1
+            else:
+                shutil.move(str(day), str(dest))
+                moved += 1
+        try:
+            child.rmdir()          # only succeeds once it is genuinely empty
+        except OSError:
+            pass
+    return final if moved or any(final.iterdir()) else None
 
 
 def _f(v):
@@ -2415,20 +2607,15 @@ def _trip_title(meta, t):
     lbl = (meta.get("route_label") or "").strip()
     if lbl:
         return lbl
+    # Drive N, per day. Several days each having a "Drive 1" is fine — the date
+    # is on the line above, and this is a placeholder for a name a person gives
+    # it later, not an attempt to invent one.
     # trip_index restarts each day, so it produced five drives all called
     # "Drive 1". Weekday and time of day is how you would refer to one of these
     # out loud — "Friday afternoon" — and it comes from the data rather than a
     # counter. The exact timestamp is on the line above, so this can be loose.
-    s = str(meta.get("start") or "")
-    try:
-        dt = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        n = meta.get("trip_index")
-        return "Drive %d" % n if n else "Drive"
-    h = dt.hour
-    part = ("night" if h < 5 else "morning" if h < 12
-            else "afternoon" if h < 17 else "evening" if h < 21 else "night")
-    return "%s %s" % (dt.strftime("%A"), part)
+    n = meta.get("trip_index")
+    return "Drive %d" % n if n else "Drive"
 
 
 def _cell(n, k):
@@ -2442,11 +2629,14 @@ def build_result_page(ctx, out_dir=None):
     will open it once. A folder of assets is the wrong shape for that.
     """
     out_dir = Path(out_dir or ctx.out_dir)
+    # Gather first, so the trips are found where the page will link to them.
+    final = gather_into_final(ctx, out_dir)
+    base = final if final else out_dir
     # The second argument is the directory to EXCLUDE from the walk — it exists
     # so a folder-shaped site does not index itself. There is no such folder
-    # any more, and passing out_dir here would exclude the entire tree.
-    trips = collect_site_trips(out_dir, out_dir / "__no_such_dir__")
-    page = out_dir / RESULT_FILE
+    # any more, and passing base here would exclude the entire tree.
+    trips = collect_site_trips(base, base / "__no_such_dir__")
+    page = base / RESULT_FILE
     made = {"trips": len(trips), "path": page, "no_video": 0, "no_gps": 0}
     if not trips:
         return made
@@ -2474,9 +2664,17 @@ def build_result_page(ctx, out_dir=None):
         n_secs += _f(meta.get("duration_secs")) or 0
 
         shot = still_data_uri(mp4) if mp4 else ""
-        left = ('<img class="shot" src="%s" alt="" loading="lazy">' % shot if shot
-                else '<div class="noshot">no video for this trip</div>')
-        art = route_glyph(pts) if pts else '<div class="nogps">no GPS recorded for this trip</div>'
+        # A player, not a link. "play video" navigated away from the page to a
+        # bare mp4 — which is not playing it, it is leaving. The embedded still
+        # becomes the poster, so the card looks identical until you press play.
+        # preload="none" because six 1-2 GB videos would otherwise all start
+        # fetching the moment the page opens.
+        if mp4:
+            left = ('<video class="shot" controls preload="none"%s src="%s"></video>'
+                    % ((' poster="%s"' % shot) if shot else "", _rel_url(mp4, base)))
+        else:
+            left = '<div class="noshot">no video for this trip</div>'
+        art = route_glyph(pts, speed_colour=ctx.speed_colour) if pts else '<div class="nogps">no GPS recorded for this trip</div>'
 
         rt = '<span class="rt">round trip</span>' if meta.get("round_trip") else ""
         start = str(meta.get("start") or "")
@@ -2484,12 +2682,10 @@ def build_result_page(ctx, out_dir=None):
         clock = start[11:16] if len(start) >= 16 else ""
 
         links = []
-        if mp4:
-            links.append('<a href="%s">play video</a>' % _rel_url(mp4, out_dir))
         if t.get("map"):
-            links.append('<a href="%s">map</a>' % _rel_url(t["map"], out_dir))
+            links.append('<a href="%s">map</a>' % _rel_url(t["map"], base))
         if gpx:
-            links.append('<a href="%s">gpx</a>' % _rel_url(gpx, out_dir))
+            links.append('<a href="%s">gpx</a>' % _rel_url(gpx, base))
 
         rows.append(
             '<section class="trip">'
@@ -3088,7 +3284,9 @@ def fast_enough(ctx, n):
         # is the same kind of proxy as the scan cache below: it says the stills
         # are probably already there.
         try:
-            return (ctx.out_dir / RESULT_FILE).is_file()
+            return any((d / RESULT_FILE).is_file()
+                       for d in ctx.out_dir.glob(FINAL_PREFIX + "*")) \
+                or (ctx.out_dir / RESULT_FILE).is_file()
         except Exception:
             return False
     try:
