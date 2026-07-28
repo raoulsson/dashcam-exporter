@@ -1891,6 +1891,13 @@ details pre{margin:10px 0 0;padding:10px;background:#08111d;border-radius:6px;
             overflow-x:auto;font-size:11.5px;color:var(--faint);
             font-family:ui-monospace,Menlo,monospace}
 footer{max-width:1180px;margin:34px auto 0;color:var(--faint);font-size:12.5px}
+/* The route, drawn from the trip's GPX. Sits between the numbers and the
+   links because it reads as one of the stats, not as an illustration. */
+.route{margin:10px 0 2px;background:#081221;border:1px solid var(--line);
+       border-radius:8px;padding:6px;overflow:hidden}
+.route svg{display:block;width:100%;height:auto}
+.route.none{color:var(--faint);font-size:13px;padding:14px;text-align:center}
+
 """
 
 
@@ -1922,7 +1929,12 @@ def write_contact_sheet(ctx, root, payload, previews_dir, stills):
     No external CSS, fonts, scripts or images and only relative hrefs, because
     the entire point of this pass is reviewing BEFORE anything is published.
     """
-    trips = payload.get("trips", [])
+    # Chronological, earliest first. --print-groups returns them in discovery
+    # order, which is index order and only accidentally the order they were
+    # driven — a card review reads as a day, so the page should too. The trip
+    # INDEX on each card stays what it was, because that is what the drop step
+    # takes and renumbering it here would be a trap.
+    trips = sorted(payload.get("trips", []), key=lambda x: (x.get("start") or "", x["index"]))
     cards = []
     for t in trips:
         idx = t["index"]
@@ -1934,6 +1946,23 @@ def write_contact_sheet(ctx, root, payload, previews_dir, stills):
                     % (rel, rel, idx))
         else:
             shot = '<div class="shot"><div class="none">no still<br>(ffmpeg could not read the first clip)</div></div>'
+
+        # The route, drawn inline. The card used to offer "map (.html)", the
+        # sidecar written by --sidecars-only — which pulls leaflet from unpkg and
+        # tiles from OSM, so on the machine doing the reviewing (often offline,
+        # always before publishing) it opened as an empty grey box. The same GPX
+        # rendered as an SVG needs nothing, and this page's whole premise is that
+        # it works from file:// with no network. The link stays, for when you do
+        # want the pannable version.
+        gpx = Path(t["out_base"] + ".gpx") if t.get("out_base") else None
+        pts = gpx_track(gpx) if (gpx and gpx.is_file()) else []
+        if pts:
+            route = '<div class="route">%s</div>' % route_glyph(
+                pts, w=560, h=200, speed_colour=ctx.speed_colour)
+        elif meta is None:
+            route = ''      # already explained by the flags above
+        else:
+            route = '<div class="route none">no GPS track for this trip</div>'
 
         span_secs = t.get("duration_secs") or 0
         moving = meta.get("moving_min") if meta else None
@@ -1993,10 +2022,10 @@ def write_contact_sheet(ctx, root, payload, previews_dir, stills):
         cards.append(
             '<section class="card">%s<div class="body">'
             '<div class="title"><b>Trip %d</b><span class="day">%s &middot; %s</span></div>'
-            '<div class="flags">%s</div><dl>%s</dl><div class="links">%s</div>%s%s'
+            '<div class="flags">%s</div><dl>%s</dl>%s<div class="links">%s</div>%s%s'
             '</div></section>' % (
                 shot, idx, html.escape(t["day"]), html.escape(t["start"][11:16]),
-                "".join(flags) or '<span class="flag">&nbsp;</span>', dl,
+                "".join(flags) or '<span class="flag">&nbsp;</span>', dl, route,
                 "".join(links),
                 _clip_list_html("front", [Path(p) for p in t.get("front", [])], previews_dir),
                 _clip_list_html("rear", [Path(p) for p in t.get("rear", [])], previews_dir)))
