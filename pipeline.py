@@ -1809,9 +1809,14 @@ def step_render(ctx):
     # order of magnitude they are. The rate below is measured: 1h47m of this card
     # came out at 13.0 GB at crf 23, and crf 26 (the default now) is about half
     # that, giving ~3.6 GB per hour of video at 1080.
+    # Standard rungs. 540 and 360 are exact halves and thirds of 1080, which
+    # keeps the scaling clean; an odd height like 380 buys nothing over 360 and
+    # is not a size anything else uses. Any number is still accepted — the list
+    # is a shortcut, not a restriction.
     OPTS = [(1080, "native 2402x1080, full detail"),
             (720,  "still reads plates and signs"),
-            (540,  "phone and web, clearly softer")]
+            (540,  "half size, fine on a laptop"),
+            (360,  "phone only, plates unreadable")]
     vid_secs = tot_move          # 0 until Preview has written the sidecars
     print()
     print("  Output height:")
@@ -1824,6 +1829,7 @@ def step_render(ctx):
         print("    %4d  %-30s%s%s" % (h, why, C.bold(est), mark))
     if vid_secs:
         print(C.dim("        estimates for %s of video, at the current crf" % human_secs(vid_secs)))
+    print(C.dim("        or type any height"))
     height = ask("  Height [%d]: " % ctx.output_height, str(ctx.output_height))
     try:
         height = int(height)
