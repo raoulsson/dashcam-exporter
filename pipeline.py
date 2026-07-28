@@ -1220,7 +1220,11 @@ def step_import(ctx):
         delta = False
         print(C.dim("  Nothing imported before, so this copies the whole card."))
 
-    day = ask("  Day folder name [%s]: " % time.strftime("%Y-%m-%d"), time.strftime("%Y-%m-%d"))
+    # No prompt for this. It names the folder the copy lands in, which is an
+    # implementation detail of where the tool puts things — asking put a question
+    # on screen that the person cannot answer better than the tool can, and whose
+    # only sane answer is the default. Today's date, which is what it defaulted to.
+    day = time.strftime("%Y-%m-%d")
     print(C.dim("  The card is NOT erased by default; import-sd-card.sh only deletes"))
     print(C.dim("  the card's files after the copy verifies file-for-file."))
     erase = confirm("  Erase the card's files after a verified copy?", False)
@@ -1233,8 +1237,10 @@ def step_import(ctx):
     if str(ctx.card) != DEFAULT_CARD:
         cmd[1:1] = ["--src", str(ctx.card)]
 
-    if not confirm("  Run: %s ?" % " ".join(cmd), True):
-        return record(ctx, "Import from SD card", SKIPPED, started, "declined")
+    # No "Run: ... ?" either. Copying only the new clips was already answered,
+    # and so was erasing the card; the command line adds nothing you can act on.
+    # It is echoed so it is on screen and in the log.
+    print(C.dim("  %s" % " ".join(cmd)))
 
     rc, lines = run_stream(cmd, ctx.exporter, "Import", parser=rsync_parser,
                            env_extra=env,
@@ -2316,9 +2322,12 @@ def collect_site_trips(out_dir, site_dir):
         t["import"] = t["dir"].parent.name
         trips.append(t)
 
-    # Newest first, all the way down: the day you just drove is the one you want
-    # at the top, and the same rule inside a day beats explaining two orders.
-    trips.sort(key=lambda t: (t["day"], t["start"], t["label"]), reverse=True)
+    # Newest DAY first — the day you just drove belongs at the top — but within a
+    # day, earliest first. The drives are numbered in the order they happened, so
+    # listing them newest-first put Drive 2 above Drive 1 and made the numbering
+    # read as a mistake. A day is a sequence; the list of days is not.
+    trips.sort(key=lambda t: (t["start"], t["label"]))
+    trips.sort(key=lambda t: t["day"], reverse=True)
 
     # Page names come from the label; only if two directories produced the same
     # label does the import folder have to appear, and then only for those two.
