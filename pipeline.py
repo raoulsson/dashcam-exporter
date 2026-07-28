@@ -38,6 +38,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -789,7 +790,8 @@ def print_status(ctx):
 
     print("  Repos        %s" % C.dim("%s | %s" % (tilde(ctx.exporter), tilde(ctx.site))))
     if not ctx.site.is_dir():
-        print("  " + C.red("goodnight-drives repo not found — steps 6-8 will not run."))
+        print("  " + C.red("goodnight-drives repo not found — steps 7-9 will not run "
+                           "(1-6, including the local site, do)."))
     print(rule())
 
     # Disk goes below the rule, as a footnote rather than a status row.
@@ -966,7 +968,7 @@ def step_import(ctx):
         print(C.dim("  grouped across everything found, so the two cards would be mixed"))
         print(C.dim("  and there is no record afterwards of which clip came from which."))
         print(C.dim("  If the previous round is finished (rendered, uploaded, published),"))
-        print(C.dim("  clear it with step 8 first. If it is not, finish it first."))
+        print(C.dim("  clear it with step 9 first. If it is not, finish it first."))
         if not confirm("  Import anyway, on top of what is there?", False):
             return record(ctx, "Import from SD card", SKIPPED, started,
                           "declined: import area not empty")
@@ -1950,6 +1952,676 @@ def step_render(ctx):
     return record(ctx, "Render trips", RAN, started, detail)
 
 
+# ---------------------------------------------------------------------------
+# Site: a browsable static site built from what the render already produced
+# ---------------------------------------------------------------------------
+#
+# Nothing here computes anything new. Every number, map and track already exists
+# on disk as a sidecar next to the mp4; this pass only arranges them into pages.
+# That is deliberate: the site has to be buildable by someone who has no S3
+# account, no second repo and no manifest — so it reads the output tree and
+# nothing else. It never calls build_manifest, never lists a bucket, never opens
+# admin.json. If those things are absent the site is still complete.
+#
+# Videos are referenced in place, not copied: a full card is tens of gigabytes
+# and duplicating it to make site/ self-contained would cost more disk than the
+# footage is worth. The consequence is that site/ is portable only together with
+# the render tree above it — copy <out> wholesale and the relative paths hold.
+
+SITE_DIRNAME = "site"
+SITE_STILL_DIRNAME = "still"
+SITE_STILL_W = 1600         # same cap as the preview sheet; never upscales
+SITE_STILL_T = 2.0          # seconds in — see extract_still for why not frame 0
+
+RE_TRIP_VIDEO = re.compile(r"^(?P<label>.+)_h\d+\.mp4$")
+RE_DAY = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+
+def _trip_part(name):
+    """A rendered file name -> (trip label, which kind of file), or None.
+
+    The renderer names every artefact of a trip trip_<label>.<something>, so the
+    label is the join key and this is the only place that knows how to recover
+    it. The video is matched by pattern rather than by a literal _h1080 because
+    output_height is a config setting: a tree rendered at 720 must not silently
+    become a site with no videos in it.
+    """
+    if not name.startswith("trip_"):
+        return None
+    stem = name[len("trip_"):]
+    for suffix, kind in (("_meta.json", "meta"), ("_links.txt", "links"),
+                         (".gpx", "gpx"), (".html", "map")):
+        if stem.endswith(suffix):
+            return stem[:-len(suffix)], kind
+    m = RE_TRIP_VIDEO.match(stem)
+    if m:
+        return m.group("label"), "video"
+    return None
+
+
+def _slug(label):
+    """Label -> a file name safe on any host. Labels are already tame, but they
+    come from the day and clock of a recording and this is what the URLs are
+    made of, so it is not a place to trust an assumption."""
+    return re.sub(r"[^A-Za-z0-9._-]", "-", label)
+
+
+def _rel_url(target, base_dir):
+    """Relative URL from a generated page to a file on disk.
+
+    Quoted, because these end up in href/src: a space or a '#' in a directory
+    name would otherwise truncate the link, and the failure looks like a missing
+    file rather than a bad URL. Forward slashes always — a URL is not a path.
+    """
+    rel = os.path.relpath(str(target), str(base_dir))
+    return urllib.parse.quote(Path(rel).as_posix())
+
+
+def collect_site_trips(out_dir, site_dir):
+    """Every trip in the render tree, newest day first, newest trip first.
+
+    Grouped by directory as well as by label so that two imports that happen to
+    contain a same-named trip cannot merge into one. A trip is anything with at
+    least one artefact — a trip whose mp4 was never rendered still has a map and
+    stats worth showing, and a trip whose meta.json is missing still has a video.
+    """
+    found = {}
+    site_dir = site_dir.resolve() if site_dir.exists() else site_dir
+    for dirpath, dirnames, filenames in os.walk(str(out_dir)):
+        d = Path(dirpath)
+        # Dot directories hold the renderer's per-clip scratch encodes; the site
+        # directory holds our own output. Neither is input.
+        dirnames[:] = sorted(x for x in dirnames if not x.startswith("."))
+        if d == site_dir or site_dir in d.parents:
+            dirnames[:] = []
+            continue
+        for name in sorted(filenames):
+            part = _trip_part(name)
+            if part is None:
+                continue
+            label, kind = part
+            t = found.setdefault((str(d), label), {
+                "label": label, "dir": d, "meta": {},
+                "video": None, "map": None, "gpx": None, "links": None,
+                "still": None,
+            })
+            t[kind if kind != "meta" else "meta_path"] = d / name
+
+    trips = []
+    for t in found.values():
+        mp = t.pop("meta_path", None)
+        if mp is not None:
+            try:
+                t["meta"] = json.loads(mp.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                # A half-written meta.json must not take the whole site down; the
+                # trip still has a video and a map worth linking.
+                t["meta"] = {}
+        meta = t["meta"]
+        m = RE_DAY.search(t["label"])
+        t["day"] = meta.get("day") or (m.group(1) if m else t["dir"].name)
+        t["start"] = meta.get("start") or ""
+        t["import"] = t["dir"].parent.name
+        trips.append(t)
+
+    # Newest first, all the way down: the day you just drove is the one you want
+    # at the top, and the same rule inside a day beats explaining two orders.
+    trips.sort(key=lambda t: (t["day"], t["start"], t["label"]), reverse=True)
+
+    # Page names come from the label; only if two directories produced the same
+    # label does the import folder have to appear, and then only for those two.
+    counts = {}
+    for t in trips:
+        counts[_slug(t["label"])] = counts.get(_slug(t["label"]), 0) + 1
+    for t in trips:
+        s = _slug(t["label"])
+        t["slug"] = s if counts[s] == 1 else "%s-%s" % (_slug(t["import"]), s)
+        t["page"] = "trip-%s.html" % t["slug"]
+    return trips
+
+
+def build_site_stills(trips, still_dir, log=None):
+    """One frame per trip into still_dir. Returns (made, reused, failed labels).
+
+    Regeneration is skipped when the jpg is newer than its mp4, because this step
+    is meant to be cheap to re-run: a site rebuild after an edit to the template
+    should not decode a frame from every video on the disk again.
+    """
+    made, reused, failed = 0, 0, []
+    for t in trips:
+        if t["video"] is None:
+            continue
+        dst = still_dir / ("%s.jpg" % t["slug"])
+        try:
+            fresh = (dst.is_file() and dst.stat().st_size > 0
+                     and dst.stat().st_mtime >= t["video"].stat().st_mtime)
+        except OSError:
+            fresh = False
+        if fresh:
+            t["still"] = dst
+            reused += 1
+            continue
+        if log:
+            log(dst.name)
+        if extract_still(t["video"], dst, seconds=SITE_STILL_T, width=SITE_STILL_W):
+            t["still"] = dst
+            made += 1
+        else:
+            failed.append(t["label"])
+    return made, reused, failed
+
+
+def _jpeg_size(path):
+    """(width, height) of a jpeg, or None. Twenty lines of stdlib instead of a
+    dependency: the pages only need it so the browser can reserve the right box
+    for an image it has not fetched yet, and being wrong is a layout jump, not a
+    wrong number. Walks the segment headers to the frame header (SOF) and reads
+    the two 16-bit fields out of it."""
+    try:
+        with open(path, "rb") as fh:
+            if fh.read(2) != b"\xff\xd8":
+                return None
+            while True:
+                b = fh.read(1)
+                if not b:
+                    return None
+                if b != b"\xff":
+                    continue
+                marker = fh.read(1)
+                while marker == b"\xff":        # fill bytes are legal padding
+                    marker = fh.read(1)
+                if not marker:
+                    return None
+                m = marker[0]
+                if m in (0xD8, 0x01) or 0xD0 <= m <= 0xD7:
+                    continue                    # no payload on these
+                head = fh.read(2)
+                if len(head) < 2:
+                    return None
+                length = (head[0] << 8) + head[1]
+                # Every SOF marker but DHT/DAC/DNL carries size at the same offset.
+                if m in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                         0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                    data = fh.read(7)
+                    if len(data) < 5:
+                        return None
+                    return ((data[3] << 8) + data[4], (data[1] << 8) + data[2])
+                fh.seek(length - 2, os.SEEK_CUR)
+    except OSError:
+        return None
+
+
+def parse_links_file(path):
+    """trip_*_links.txt -> [(label, url)].
+
+    The file is written for a human to read, so the label of a link is the line
+    above it. Anything that does not parse is dropped rather than guessed at —
+    the map and the .gpx are linked separately and do not depend on this.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    out, label, seen = [], "", set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("http"):
+            if line not in seen:
+                seen.add(line)
+                out.append((label or "map link", line))
+        elif line.endswith(":"):
+            label = line[:-1].strip()
+    return out
+
+
+SITE_CSS = """
+:root{--bg0:#060C16;--card:#0b1524;--line:#1b2a3e;--ink:#e8eef6;--dim:#9fb2c9;
+      --faint:#6b7f99;--orange:#E08A3C;--cyan:#35C3D6;
+      --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+      --mono:ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;padding:28px 20px 60px;background:var(--bg0);color:var(--ink);
+     font-family:var(--font);font-size:15px;line-height:1.5}
+a{color:var(--cyan)}
+header,main,footer{max-width:1180px;margin-left:auto;margin-right:auto}
+header{margin-bottom:26px}
+h1{margin:0 0 6px;font-size:22px;letter-spacing:.04em}
+h1 span{color:var(--orange);text-transform:uppercase;letter-spacing:.16em;font-size:15px}
+header p{margin:6px 0;color:var(--dim);font-size:14px;max-width:78ch}
+.totals{display:flex;gap:28px;flex-wrap:wrap;margin:16px 0 0;padding:14px 16px;
+        background:var(--card);border:1px solid var(--line);border-radius:10px}
+.totals div{min-width:110px}
+.k{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+.totals .k{display:block}
+.totals .v{display:block;margin-top:2px;font-size:19px}
+header code{color:var(--ink);background:#0e1a2b;padding:1px 5px;border-radius:4px;
+            font-size:13px}
+main{display:flex;flex-direction:column;gap:30px}
+h2{margin:0 0 12px;font-size:14px;color:var(--dim);letter-spacing:.12em;
+   text-transform:uppercase;border-bottom:1px solid var(--line);padding-bottom:8px}
+.day{margin:0}
+.trips{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+      overflow:hidden;display:flex;flex-direction:column}
+/* The img carries its real width and height (see _jpeg_size), so the browser
+   reserves the right box before the file arrives. Without that a lazily-loaded
+   image is zero pixels tall until it loads and the whole day list jumps under
+   the cursor as you scroll. Cropping to a fixed ratio would have been the easy
+   fix and the wrong one: the rendered frame is a composed panel, not 16:9, and
+   cover would cut the map and the stats off its right-hand edge. */
+.card a.shot{display:block;background:#000;line-height:0}
+.card a.shot img{display:block;width:100%;height:auto}
+.card .none{aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;
+            padding:16px;text-align:center;color:var(--faint);font-size:13px;
+            line-height:1.5;background:#08111d}
+.card .body{padding:14px 16px 16px}
+.card h3{margin:0 0 2px;font-size:17px}
+.card h3 a{text-decoration:none}
+.card h3 a:hover{text-decoration:underline}
+.when{color:var(--dim);font-size:13px;font-family:var(--mono)}
+.flags{margin:10px 0 0;display:flex;gap:8px;flex-wrap:wrap}
+.flag{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);
+      color:var(--dim)}
+.flag.warn{color:var(--orange);border-color:#4a3520}
+.flag.ok{color:var(--cyan);border-color:#1d3a44}
+/* Label and value are one grid cell, not two. As separate dt/dd items in a
+   single auto-fit grid they flow independently and a three-column card ends up
+   showing "distance" above "18.5 min" — every figure captioned by its
+   neighbour's label. Wrapping each pair keeps them together at any width. */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(68px,1fr));
+       gap:10px 14px;margin:12px 0 0}
+.stats .v{display:block;margin-top:2px;font-size:15px}
+.player{background:#000;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.player video{display:block;width:100%;height:auto;background:#000}
+.missing{padding:34px 18px;background:var(--card);border:1px solid var(--line);
+         border-radius:10px;color:var(--dim);font-size:14px}
+.missing b{color:var(--ink);font-weight:600}
+.map{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card)}
+.map iframe{display:block;width:100%;height:460px;border:0;background:#0a1422}
+.note{color:var(--faint);font-size:12.5px;margin:8px 0 0}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:7px 12px 7px 0;border-bottom:1px solid var(--line);
+      vertical-align:top}
+th{color:var(--faint);font-weight:400;font-size:12px;text-transform:uppercase;
+   letter-spacing:.08em;white-space:nowrap;width:190px}
+td.num{font-family:var(--mono)}
+ul.plain{list-style:none;margin:0;padding:0}
+ul.plain li{padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
+ul.plain li span{color:var(--faint);font-family:var(--mono);margin-right:10px}
+.links{margin:0;padding:0;list-style:none}
+.links li{padding:5px 0;font-size:14px}
+.back{display:inline-block;margin-bottom:14px;font-size:13px;text-decoration:none}
+section.block{margin-top:30px}
+footer{margin-top:40px;color:var(--faint);font-size:12.5px;border-top:1px solid var(--line);
+       padding-top:14px}
+"""
+
+
+def _page(title, body):
+    """The one HTML skeleton both page kinds use. Inline CSS, no fonts, no
+    scripts, no CDN — the site has to work from file:// with the wifi off (the
+    map sidecar is the single exception, and it says so on the page)."""
+    return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            "<title>%s</title><style>%s</style></head><body>%s</body></html>"
+            % (html.escape(title), SITE_CSS, body))
+
+
+def _clock(ts):
+    """'2026-07-20 17:12:45' -> '17:12'. Camera local time throughout; there is
+    no timezone in the data and inventing one would be a lie."""
+    return ts[11:16] if len(ts) >= 16 else ""
+
+
+def _label_clock(label):
+    """'2026-07-24_10-39_01' -> '10:39'.
+
+    The fallback for a trip with no meta.json. The renderer builds the label out
+    of the day and the start clock, so the time is recoverable from the file name
+    — which beats titling the page with the raw label next to the day it already
+    contains.
+    """
+    m = re.search(r"_(\d{2})-(\d{2})", label)
+    return "%s:%s" % (m.group(1), m.group(2)) if m else ""
+
+
+def _num(v, fmt="%.1f", dash="&mdash;"):
+    return dash if v is None else fmt % v
+
+
+def _gps_state(t):
+    """'gps' | 'none' | 'unknown'.
+
+    The three are genuinely different and conflating the last two is a lie the
+    page then tells: a trip whose meta.json has not been written yet (a render in
+    flight, or a sidecar pass that has not reached it) has no gps_points key, and
+    reading that as "this drive had no GPS fix" states as fact something nobody
+    knows. Absent data says "not known yet"; a zero says "no fix".
+    """
+    meta = t["meta"]
+    if not meta:
+        return "unknown"
+    return "gps" if meta.get("gps_points") else "none"
+
+
+def _stat_flags(t):
+    meta = t["meta"]
+    flags = []
+    if meta.get("round_trip"):
+        flags.append('<span class="flag ok">round trip</span>')
+    if t["video"] is None:
+        flags.append('<span class="flag warn">no video</span>')
+    state = _gps_state(t)
+    if state == "none":
+        flags.append('<span class="flag warn">no GPS</span>')
+    elif state == "unknown":
+        flags.append('<span class="flag warn">no statistics yet</span>')
+    return "".join(flags)
+
+
+def write_trip_page(t, site_dir):
+    """One page per trip: the video, the route, the numbers, the places."""
+    meta = t["meta"]
+    label = t["label"]
+    title = "%s %s" % (t["day"], _clock(t["start"]) or _label_clock(label) or label)
+
+    # 1. The player. The mp4 is referenced where the render left it.
+    if t["video"] is not None:
+        src = _rel_url(t["video"], site_dir)
+        poster = (' poster="%s"' % _rel_url(t["still"], site_dir)) if t["still"] else ""
+        try:
+            size = human_bytes(t["video"].stat().st_size)
+        except OSError:
+            size = "?"
+        player = (
+            '<div class="player"><video controls preload="metadata" playsinline%s>'
+            '<source src="%s" type="video/mp4">'
+            'This browser cannot play the file. <a href="%s">Open it directly.</a>'
+            '</video></div>'
+            '<p class="note">%s &middot; %s &mdash; played from the render tree, '
+            'not copied into the site.</p>'
+            % (poster, src, src, html.escape(t["video"].name), size))
+    else:
+        player = ('<div class="missing"><b>No video for this trip.</b> The sidecars '
+                  '(map, track, statistics) were written, but nothing was encoded — '
+                  'render the trip and rebuild the site and the player appears here.'
+                  '</div>')
+
+    # 2. The route. The sidecar is a full Leaflet page of its own, so it is
+    #    embedded rather than reimplemented; a trip with no GPS has no sidecar
+    #    and gets a sentence instead of an empty grey rectangle.
+    gps = _gps_state(t)
+    if t["map"] is not None and gps != "none":
+        murl = _rel_url(t["map"], site_dir)
+        route = ('<div class="map"><iframe src="%s" loading="lazy" '
+                 'title="Route map"></iframe></div>'
+                 '<p class="note">The map is the trip\'s own sidecar and it loads '
+                 'Leaflet and OpenStreetMap tiles from the network — it is the only '
+                 'part of this site that does. <a href="%s">Open it on its own.</a></p>'
+                 % (murl, murl))
+    elif gps == "none":
+        route = ('<div class="missing"><b>No GPS for this trip.</b> The camera logged '
+                 'no fixes, so there is no route to draw and the distance and speed '
+                 'figures below are zero rather than unknown.</div>')
+    else:
+        route = ('<div class="missing"><b>No map sidecar on disk.</b> Re-running the '
+                 'render (or the sidecars-only pass) writes one.</div>')
+
+    # 3. Everything the meta file knows, in the order it is useful in.
+    tech = meta.get("technical") or {}
+    rows = [
+        ("day", html.escape(t["day"])),
+        ("start", html.escape(meta.get("start") or "&mdash;")),
+        ("end", html.escape(meta.get("end") or "&mdash;")),
+        ("duration", "%s min <span class=\"k\">wall clock, parking included</span>"
+         % _num(meta.get("duration_min"))),
+        ("moving", "%s min <span class=\"k\">what the video contains</span>"
+         % _num(meta.get("moving_min"))),
+        ("distance", "%s km" % _num(meta.get("distance_km"), "%.2f")),
+        ("max speed", "%s km/h" % _num(meta.get("max_kmh"))),
+        ("avg moving speed", "%s km/h" % _num(meta.get("avg_kmh"))),
+        ("round trip", "yes" if meta.get("round_trip") else "no"),
+        ("gps", "%s point(s), %s segment(s)" % (meta.get("gps_points", 0),
+                                                meta.get("gps_segments", 0))),
+        ("source clips", "%s" % meta.get("n_clips", "&mdash;")),
+        ("trip index", "%s" % meta.get("trip_index", "&mdash;")),
+        ("import", html.escape(str(meta.get("source_import") or t["dir"]))),
+    ]
+    if tech:
+        rows.append(("rendered", html.escape(", ".join(
+            "%s %s" % (k, v) for k, v in sorted(tech.items())))))
+    table = "".join("<tr><th>%s</th><td class=\"num\">%s</td></tr>" % (k, v) for k, v in rows)
+    if not meta:
+        table += ('<tr><th>note</th><td>No <code>_meta.json</code> for this trip yet, '
+                  'so everything above comes from the file names alone.</td></tr>')
+
+    # 4. Stops. video_secs is a position in the rendered video, not a wall clock
+    #    time, so it is labelled as such — the parked minutes are cut out of the
+    #    video, which is exactly why the two do not line up.
+    stops = meta.get("stops") or []
+    if stops:
+        items = []
+        for s in stops:
+            where = ""
+            if s.get("lat") is not None and s.get("lon") is not None:
+                q = "%.6f,%.6f" % (s["lat"], s["lon"])
+                where = (' <a href="https://www.google.com/maps?q=%s">%s</a>'
+                         % (urllib.parse.quote(q), html.escape(q)))
+            items.append("<li><span>%s</span>parked %s%s</li>" % (
+                human_secs(s.get("video_secs") or 0),
+                human_secs(s.get("park_secs") or 0), where))
+        stops_html = ('<ul class="plain">%s</ul>'
+                      '<p class="note">Times are positions in the video, not the '
+                      'clock — the parked minutes themselves are cut out.</p>'
+                      % "".join(items))
+    else:
+        stops_html = '<p class="note">No stops detected on this trip.</p>'
+
+    # 5. The track and the map links, straight from the sidecars.
+    links = []
+    if t["gpx"] is not None:
+        links.append('<li><a href="%s">Track (.gpx)</a> &mdash; open in Google Earth, '
+                     'Strava, Maps.me, Komoot</li>' % _rel_url(t["gpx"], site_dir))
+    for lbl, url in (parse_links_file(t["links"]) if t["links"] else []):
+        links.append('<li><a href="%s">%s</a></li>' % (html.escape(url), html.escape(lbl)))
+    if t["links"] is not None:
+        links.append('<li><a href="%s">The raw links file</a></li>'
+                     % _rel_url(t["links"], site_dir))
+    links_html = ('<ul class="links">%s</ul>' % "".join(links)) if links else \
+        '<p class="note">No track or map links on disk for this trip.</p>'
+
+    # With no meta.json there is nothing to put on the summary line but four
+    # dashes, which reads as data that is zero rather than data that is absent.
+    if meta:
+        summary = ('%s &rarr; %s &middot; %s km &middot; %s min moving'
+                   % (html.escape(_clock(meta.get("start") or "") or "?"),
+                      html.escape(_clock(meta.get("end") or "") or "?"),
+                      _num(meta.get("distance_km"), "%.2f"), _num(meta.get("moving_min"))))
+    else:
+        summary = ('started %s &mdash; no statistics written for this trip yet'
+                   % html.escape(_label_clock(label) or "?"))
+
+    body = (
+        '<header><a class="back" href="index.html">&larr; all drives</a>'
+        '<h1><span>drive</span> %s</h1>'
+        '<p class="when">%s</p>'
+        '<div class="flags">%s</div></header>'
+        '<main>%s'
+        '<section class="block"><h2>Route</h2>%s</section>'
+        '<section class="block"><h2>Statistics</h2><table>%s</table></section>'
+        '<section class="block"><h2>Stops</h2>%s</section>'
+        '<section class="block"><h2>Track and places</h2>%s</section>'
+        '</main>'
+        '<footer>Built locally by pipeline.py from the render sidecars. '
+        'Relative links only: copy this folder together with the render tree and '
+        'it works unchanged on any static host.</footer>' % (
+            html.escape(title), summary,
+            _stat_flags(t) or '<span class="flag">&nbsp;</span>',
+            player, route, table, stops_html, links_html))
+
+    path = site_dir / t["page"]
+    path.write_text(_page("%s — drive" % title, body), encoding="utf-8")
+    return path
+
+
+def write_site_index(trips, site_dir, out_dir):
+    """Days newest first, a card per trip, and the totals across all of them."""
+    days = []
+    for t in trips:
+        if not days or days[-1][0] != t["day"]:
+            days.append((t["day"], []))
+        days[-1][1].append(t)
+
+    sections = []
+    for day, group in days:
+        cards = []
+        for t in group:
+            meta = t["meta"]
+            if t["still"] is not None:
+                wh = _jpeg_size(t["still"])
+                dim = ' width="%d" height="%d"' % wh if wh else ""
+                shot = ('<a class="shot" href="%s"><img src="%s" alt="Frame from the '
+                        '%s drive" loading="lazy"%s></a>'
+                        % (html.escape(t["page"]), _rel_url(t["still"], site_dir),
+                           html.escape(t["day"]), dim))
+            elif t["video"] is None:
+                shot = '<div class="none">no video rendered<br>sidecars only</div>'
+            else:
+                shot = '<div class="none">no still<br>ffmpeg could not read the video</div>'
+
+            when = _clock(meta.get("start") or "") or _label_clock(t["label"]) or t["label"]
+            if meta:
+                stats = [
+                    ("distance", "%s km" % _num(meta.get("distance_km"), "%.2f")),
+                    ("moving", "%s min" % _num(meta.get("moving_min"))),
+                    ("max", "%s km/h" % _num(meta.get("max_kmh"), "%.0f")),
+                    ("avg", "%s km/h" % _num(meta.get("avg_kmh"), "%.0f")),
+                ]
+                dl = "".join('<div><span class="k">%s</span><span class="v">%s</span></div>'
+                             % (k, v) for k, v in stats)
+                span = "%s &rarr; %s &middot; %s min" % (
+                    html.escape(_clock(meta.get("start") or "") or "?"),
+                    html.escape(_clock(meta.get("end") or "") or "?"),
+                    _num(meta.get("duration_min")))
+            else:
+                dl = ""
+                span = "no statistics written for this trip yet"
+            cards.append(
+                '<article class="card">%s<div class="body">'
+                '<h3><a href="%s">%s</a></h3>'
+                '<div class="when">%s</div>'
+                '<div class="flags">%s</div>'
+                '<div class="stats">%s</div></div></article>' % (
+                    shot, html.escape(t["page"]), html.escape(when),
+                    span, _stat_flags(t), dl))
+        sections.append('<section class="day"><h2>%s</h2><div class="trips">%s</div></section>'
+                        % (html.escape(day), "".join(cards)))
+
+    km = sum(t["meta"].get("distance_km") or 0 for t in trips)
+    moving = sum(t["meta"].get("moving_min") or 0 for t in trips)
+    videos = sum(1 for t in trips if t["video"] is not None)
+    totals = (
+        '<div class="totals">'
+        '<div><span class="k">drives</span><span class="v">%d</span></div>'
+        '<div><span class="k">days</span><span class="v">%d</span></div>'
+        '<div><span class="k">distance</span><span class="v">%.1f km</span></div>'
+        '<div><span class="k">video</span><span class="v">%s</span></div>'
+        '<div><span class="k">rendered</span><span class="v">%d of %d</span></div>'
+        '</div>' % (len(trips), len(days), km, human_secs(moving * 60), videos, len(trips)))
+
+    body = (
+        '<header><h1><span>drives</span> %d trip(s)</h1>'
+        '<p>Every trip the exporter has rendered under <code>%s</code>, newest '
+        'first. Video time is moving time — the parked minutes are cut out, which '
+        'is why it is shorter than the clock span of a drive.</p>'
+        '%s</header><main>%s</main>'
+        '<footer>Built locally by pipeline.py. Self-contained pages, relative '
+        'links, videos referenced where the render left them rather than copied. '
+        'The route maps are the render\'s own sidecars and pull Leaflet and '
+        'OpenStreetMap tiles from the network; everything else works offline.'
+        '</footer>' % (len(trips), html.escape(tilde(out_dir)), totals,
+                       "".join(sections) or
+                       '<p class="note">No trips found in the output tree.</p>'))
+
+    path = site_dir / "index.html"
+    path.write_text(_page("Drives", body), encoding="utf-8")
+    return path
+
+
+def build_site(ctx, out_dir=None):
+    """Build <out>/site/ from the render tree. Returns a summary dict.
+
+    Independent of everything private by design: no manifest, no bucket, no
+    admin.json, no second repo. Given a folder of rendered trips it produces a
+    site, and that is the whole contract — which is what makes the public
+    edition possible at all.
+    """
+    out_dir = Path(out_dir) if out_dir is not None else ctx.out_dir
+    site_dir = out_dir / SITE_DIRNAME
+    still_dir = site_dir / SITE_STILL_DIRNAME
+    site_dir.mkdir(parents=True, exist_ok=True)
+    still_dir.mkdir(parents=True, exist_ok=True)
+
+    trips = collect_site_trips(out_dir, site_dir)
+    made, reused, failed = build_site_stills(
+        trips, still_dir, log=lambda n: print("  still  %s" % n))
+    pages = [write_trip_page(t, site_dir) for t in trips]
+    index = write_site_index(trips, site_dir, out_dir)
+    return {
+        "index": index, "site_dir": site_dir, "trips": len(trips), "pages": len(pages),
+        "stills_made": made, "stills_reused": reused, "stills_failed": failed,
+        "no_video": [t["label"] for t in trips if t["video"] is None],
+        "no_gps": [t["label"] for t in trips if _gps_state(t) == "none"],
+        "no_meta": [t["label"] for t in trips if not t["meta"]],
+    }
+
+
+def step_site(ctx):
+    """Build the local site from whatever is already rendered."""
+    started = time.time()
+    print(C.dim("  Reads the render tree and writes %s/:" % (ctx.out_dir / SITE_DIRNAME)))
+    print(C.dim("    index.html      trips by day, with a still and the numbers"))
+    print(C.dim("    trip-*.html     the video, the route, the stats, the places"))
+    print(C.dim("    still/*.jpg     one frame per trip"))
+    print(C.dim("  Nothing is uploaded and no video is copied — the mp4s are"))
+    print(C.dim("  referenced where they already are."))
+
+    if not ctx.out_dir.is_dir():
+        print(C.yellow("  Nothing rendered yet: %s does not exist." % tilde(ctx.out_dir)))
+        return record(ctx, "Build site", SKIPPED, started, "no output tree")
+
+    info = build_site(ctx, ctx.out_dir)
+    if not info["trips"]:
+        print(C.yellow("  No trips found under %s — render some first." % tilde(ctx.out_dir)))
+        return record(ctx, "Build site", SKIPPED, started, "no trips")
+
+    if info["stills_failed"]:
+        print(C.yellow("  No still for %s — ffmpeg could not read the video."
+                       % ", ".join(info["stills_failed"])))
+    if info["no_video"]:
+        print(C.dim("  %d trip(s) have sidecars but no video; their pages say so."
+                    % len(info["no_video"])))
+    if info["no_gps"]:
+        print(C.dim("  %d trip(s) have no GPS; their pages say so instead of showing "
+                    "an empty map." % len(info["no_gps"])))
+    if info["no_meta"]:
+        print(C.dim("  %d trip(s) have no _meta.json yet, so their pages carry no "
+                    "statistics." % len(info["no_meta"])))
+    print()
+    print(C.green("  %d trip(s), %d page(s), %d still(s) (%d reused)"
+                  % (info["trips"], info["pages"] + 1,
+                     info["stills_made"] + info["stills_reused"], info["stills_reused"])))
+    print("  Open it with:")
+    print("    open %s" % info["index"])
+    print(C.dim("  To publish it anywhere: copy the whole of %s to a web root. The"
+                % tilde(ctx.out_dir)))
+    print(C.dim("  links are relative, so there is no build step and no server needed."))
+    return record(ctx, "Build site", RAN, started,
+                  "%d trip(s) in %s" % (info["trips"], info["site_dir"]))
+
+
 def s3_objects(bucket="your-media-bucket"):
     """{key: size} for every .mp4 in the bucket, or None if the listing failed."""
     try:
@@ -2276,10 +2948,16 @@ STEPS = [
     (3, "Preview all trips (sidecars + stills, no encoding)", step_preview, True),
     (4, "Drop trip from import (DESTRUCTIVE)", step_drop_trip, False),
     (5, "Render trips", step_render, True),
-    (6, "Upload videos to S3", step_upload, True),
-    (7, "Deploy site (SIGNED_VIDEOS=1)", step_deploy, True),
-    (8, "Delete import source (DESTRUCTIVE)", step_delete_import, False),
+    (6, "Build local site", step_site, True),
+    (7, "Upload videos to S3", step_upload, True),
+    (8, "Deploy site (SIGNED_VIDEOS=1)", step_deploy, True),
+    (9, "Delete import source (DESTRUCTIVE)", step_delete_import, False),
 ]
+# Site sits at 6 rather than at the end because that is where it belongs in the
+# sequence: it is the last step that needs nothing but this machine. Everything
+# from 7 on reaches for the sibling repo, the bucket and the server, and in the
+# public edition those are simply absent — so the generic pipeline is 1-6 and
+# the private tail is 7-9, which the numbering should show rather than hide.
 
 
 def _compact_ranges(nums):
@@ -2306,17 +2984,18 @@ def solo_steps():
 # names in the menu cost eleven lines every time round the loop.
 SHORT = {
     1: "Import", 2: "List trips", 3: "Preview", 4: "Drop trip", 5: "Render",
-    6: "Upload", 7: "Deploy", 8: "Del source",
+    6: "Site", 7: "Upload", 8: "Deploy", 9: "Del source",
 }
 # Steps safe to start without a "Go?". Not "read-only" — Preview writes sidecars,
-# stills and the contact sheet. The test is that nothing leaves this machine and
-# nothing is destroyed: everything they produce is derived data that the next run
-# regenerates. Upload, Deploy, Drop and Delete are excluded because they publish
-# or destroy; Render because it costs hours.
+# stills and the contact sheet, and Site writes a folder of pages. The test is
+# that nothing leaves this machine and nothing is destroyed: everything they
+# produce is derived data that the next run regenerates. Upload, Deploy, Drop and
+# Delete are excluded because they publish or destroy; Render because it costs
+# hours.
 #
 # Necessary but not sufficient — see fast_enough(). A confirmation guarding
 # nothing is noise, but one guarding a two-minute wait earns its place.
-NO_CONFIRM = {2, 3}
+NO_CONFIRM = {2, 3, 6}
 
 # Steps that ask their own questions once they have something to show. The menu's
 # "Go?" comes BEFORE any of that, so for these it asks you to commit to a
@@ -2326,7 +3005,7 @@ NO_CONFIRM = {2, 3}
 #
 # Upload and Deploy are deliberately NOT here: their inner prompt was removed, so
 # the menu is their only gate before something leaves this machine.
-SELF_CONFIRMS = {1, 4, 5, 8}
+SELF_CONFIRMS = {1, 4, 5, 9}
 
 
 def fast_enough(ctx, n):
@@ -2345,6 +3024,16 @@ def fast_enough(ctx, n):
     """
     if n not in NO_CONFIRM:
         return False
+    if n == 6:
+        # Site is instant on a rebuild and costs one ffmpeg seek per trip on the
+        # first one — seconds either way, but "seconds each for forty trips" is
+        # long enough to be worth agreeing to once. The site directory existing
+        # is the same kind of proxy as the scan cache below: it says the stills
+        # are probably already there.
+        try:
+            return (ctx.out_dir / SITE_DIRNAME).is_dir()
+        except Exception:
+            return False
     try:
         return ctx.scan_cache.is_file()
     except Exception:
@@ -2382,9 +3071,10 @@ DESC = {
     3: "Sidecars, a still per trip and a local contact sheet. No encoding, no deploy.",
     4: "Delete a trip's source clips from the import so it is never rendered or uploaded.",
     5: "Encode the chosen trips. The slow step: hours for a full card.",
-    6: "Sync the mp4s to the Zurich bucket. Slow on a home uplink; resumes if interrupted.",
-    7: "Push the site to EC2 with SIGNED_VIDEOS=1, so clips load as signed CloudFront URLs.",
-    8: "Erase the whole import source. Only after everything is rendered and published.",
+    6: "Build <out>/site: a browsable local site from the renders. Nothing leaves this machine.",
+    7: "Sync the mp4s to the Zurich bucket. Slow on a home uplink; resumes if interrupted.",
+    8: "Push the site to EC2 with SIGNED_VIDEOS=1, so clips load as signed CloudFront URLs.",
+    9: "Erase the whole import source. Only after everything is rendered and published.",
 }
 
 
