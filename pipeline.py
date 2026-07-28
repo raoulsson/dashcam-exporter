@@ -246,6 +246,11 @@ class Ctx:
         # Colouring the route by speed is on by default because it says something
         # the shape alone does not — where you were held up and where you were
         # moving. Someone who wants the shape plain can say so.
+        # Where the finished folders land. Default beside the renders; set it to
+        # an external disk or a Dropbox folder and the result arrives there
+        # directly instead of being moved by hand afterwards.
+        fr = self.cfg_opt("final_dir")
+        self.final_root = Path(fr).expanduser() if fr else self.out_dir
         self.speed_colour = (self.cfg.get("speed_colour", "true").strip().lower()
                              not in ("false", "no", "0", "off"))
 
@@ -842,7 +847,8 @@ def print_status(ctx):
 
     # Local site — always meaningful, because Site needs nothing but this machine.
     # The page lives in the newest final_* folder once one exists.
-    finals = sorted(ctx.out_dir.glob(FINAL_PREFIX + "*")) if ctx.out_dir.is_dir() else []
+    froot = getattr(ctx, "final_root", ctx.out_dir)
+    finals = sorted(froot.glob(FINAL_PREFIX + "*")) if froot.is_dir() else []
     site_index = (finals[-1] / RESULT_FILE) if finals else (ctx.out_dir / RESULT_FILE)
     if site_index.is_file():
         age = human_age(time.time() - site_index.stat().st_mtime)
@@ -2576,7 +2582,7 @@ RESULT_FILE = "dashcam_import_data_site.html"
 FINAL_PREFIX = "final_"
 
 
-def final_dir_for(out_dir, days):
+def final_dir_for(root, days):
     """<out>/final_<newest day in this batch>.
 
     Dated so successive imports accumulate side by side instead of merging into
@@ -2585,7 +2591,7 @@ def final_dir_for(out_dir, days):
     would quietly start a second one holding the same drives.
     """
     tag = max(days) if days else time.strftime("%Y-%m-%d")
-    return out_dir / (FINAL_PREFIX + tag)
+    return root / (FINAL_PREFIX + tag)
 
 
 def gather_into_final(ctx, out_dir):
@@ -2608,11 +2614,15 @@ def gather_into_final(ctx, out_dir):
                 and child.name not in ("logs", "previews"):
             days.update(d.name for d in child.iterdir()
                         if d.is_dir() and re.match(r"^\d{4}-\d{2}-\d{2}$", d.name))
-    final = final_dir_for(out_dir, days)
+    final = final_dir_for(ctx.final_root, days)
     if ctx.site_ready:
         return final if final.is_dir() else None
     moved = 0
+    kept = []
+    existed = final.is_dir()
     final.mkdir(parents=True, exist_ok=True)
+    if existed:
+        print(C.dim("  %s already exists; merging into it." % tilde(final)))
     for child in sorted(out_dir.iterdir()):
         if child == final or child.name.startswith(".") or child.is_file():
             continue
@@ -2623,11 +2633,18 @@ def gather_into_final(ctx, out_dir):
                 continue
             dest = final / day.name
             if dest.exists():
+                # Already there from an earlier run: merge, never replace. A file
+                # that is already in place was produced by this render or a
+                # previous one, and overwriting it is the only way this step could
+                # destroy anything. Anything left behind in the source is a
+                # collision, and it stays put so it can be looked at.
                 for f in sorted(day.iterdir()):
                     target = dest / f.name
                     if not target.exists():
                         shutil.move(str(f), str(target))
                         moved += 1
+                    else:
+                        kept.append(target)
             else:
                 shutil.move(str(day), str(dest))
                 moved += 1
@@ -2635,6 +2652,10 @@ def gather_into_final(ctx, out_dir):
             child.rmdir()          # only succeeds once it is genuinely empty
         except OSError:
             pass
+    if kept:
+        print(C.yellow("  %d file(s) already present were left as they were:" % len(kept)))
+        for f in kept[:5]:
+            print(C.yellow("    %s" % tilde(f)))
     return final if moved or any(final.iterdir()) else None
 
 
@@ -3352,7 +3373,7 @@ def fast_enough(ctx, n):
         # are probably already there.
         try:
             return any((d / RESULT_FILE).is_file()
-                       for d in ctx.out_dir.glob(FINAL_PREFIX + "*")) \
+                       for d in getattr(ctx, "final_root", ctx.out_dir).glob(FINAL_PREFIX + "*")) \
                 or (ctx.out_dir / RESULT_FILE).is_file()
         except Exception:
             return False

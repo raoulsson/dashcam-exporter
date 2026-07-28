@@ -419,3 +419,17 @@ software = true
 # glyph reads as where you were held up and where you were moving. Set false to
 # draw every route in one colour, which shows the shape and nothing else.
 #speed_colour = true
+
+# Where the finished folders land. Each import becomes final_<newest trip day>,
+# holding the videos, the maps, the tracks and the page that links them — one
+# directory to move wherever you keep things. Defaults to the output dir; point
+# it at an external disk and the result arrives there instead of being carried
+# afterwards. An existing folder of the same name is merged into, never
+# overwritten.
+#final_dir = /Volumes/Archive/drives
+
+# --- this machine's publishing setup (local only, keep out of the repo) ---
+site_repo      = ~/dev/your-site
+s3_bucket      = your-media-bucket
+s3_region      = eu-central-2
+live_trips_url = https://example.com/your-site/trips.json
