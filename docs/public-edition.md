@@ -37,7 +37,7 @@ default:
 # config.txt — the PUBLISHING section, all optional
 #site_repo      = ~/dev/your-site
 #s3_bucket      = my-bucket
-#s3_region      = eu-central-2
+#s3_region      = eu-central-1
 #live_trips_url = https://example.com/trips.json
 ```
 

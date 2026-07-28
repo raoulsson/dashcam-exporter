@@ -358,7 +358,9 @@ software = true
 # mean every clone reaching for a checkout it does not have and a host it has
 # never heard of. Set them and the Upload and Deploy steps in the menu light up.
 # Leave them and those steps stay in the menu, greyed out, with the key that
-# would enable them printed underneath. The step NUMBERS never move, so a note
+# would enable them printed underneath. Set them in the gitignored `.env` as
+# SET_SITE_REPO / SET_S3_BUCKET / SET_S3_REGION / SET_LIVE_TRIPS_URL, not
+# here — the examples below show the shape, .env holds the values. The step NUMBERS never move, so a note
 # saying "run 5" means the same thing on every machine.
 
 # The second repo, holding what it takes to publish. pipeline.py runs three
@@ -380,8 +382,8 @@ software = true
 #s3_bucket = my-bucket
 
 # Only needed when the bucket is not in the credentials' default region — an
-# eu-central-2 bucket listed with a us-east-1 default fails.
-#s3_region = eu-central-2
+# eu-central-1 bucket listed with a us-east-1 default fails.
+#s3_region = eu-central-1
 
 # The deployed site's manifest, read once at startup for one status line. Unset
 # means no request is made at all — not a request that quietly fails. This is
@@ -428,8 +430,14 @@ software = true
 # overwritten.
 #final_dir = /Volumes/Archive/drives
 
-# --- this machine's publishing setup (local only, keep out of the repo) ---
-site_repo      = ~/dev/your-site
-s3_bucket      = your-media-bucket
-s3_region      = eu-central-2
-live_trips_url = https://example.com/your-site/trips.json
+# --- this machine's publishing setup ---------------------------------------
+#
+# It does not go here. This file is TRACKED, so a value written under this
+# heading gets committed and pushed — which is what used to happen, despite the
+# heading saying otherwise. The real values belong in `.env`, which .gitignore
+# excludes, under these names:
+#
+#   SET_SITE_REPO   SET_S3_BUCKET   SET_S3_REGION   SET_LIVE_TRIPS_URL
+#
+# .env wins over anything set above, and a real environment variable of the
+# same name wins over .env. See .env.example for the full block.

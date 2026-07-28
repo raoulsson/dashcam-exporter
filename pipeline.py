@@ -174,6 +174,29 @@ def load_config(path):
     return out
 
 
+# The publishing settings point at a specific person's bucket, website and
+# checkout. config.txt is tracked, so putting real values there commits them —
+# which is exactly what happened, and why they now resolve from the gitignored
+# .env first. Same rule the home coordinates already followed: config.txt may
+# carry a commented EXAMPLE, the real value lives in .env or not at all.
+PRIVATE_KEYS = ("site_repo", "s3_bucket", "s3_region", "live_trips_url",
+                "home_lat", "home_lon")
+
+
+def load_env(path):
+    """KEY=value from a .env file. Same forgiving parse as load_config."""
+    out = {}
+    if not path.is_file():
+        return out
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+
 class Ctx:
     """Everything the steps need: resolved paths, config, and session state."""
 
@@ -181,6 +204,15 @@ class Ctx:
         self.exporter = EXPORTER_DIR
         self.config_path = Path(args.config).expanduser() if args.config else self.exporter / "config.txt"
         self.cfg = load_config(self.config_path)
+        # .env overlays config.txt for the private keys, and a real environment
+        # variable beats both — so a one-off run can point somewhere else without
+        # editing a file.
+        env = load_env(self.exporter / ".env")
+        for key in PRIVATE_KEYS:
+            name = "SET_" + key.upper()
+            val = os.environ.get(name) or env.get(name)
+            if val:
+                self.cfg[key] = val
 
         # --- the optional, personal half. All three are unset by default.
         #
@@ -199,7 +231,7 @@ class Ctx:
         # aws s3 sync exits 0 even when objects fail, so this name is what makes
         # "uploaded" provable; without it Upload cannot be trusted and stays off.
         # The region is only needed when the credentials' default is a different
-        # one — an eu-central-2 bucket listed with a us-east-1 default fails.
+        # one — an eu-central-1 bucket listed with a us-east-1 default fails.
         self.s3_bucket = self.cfg_opt("s3_bucket")
         self.s3_region = self.cfg_opt("s3_region")
 
@@ -1118,13 +1150,19 @@ def import_is_expendable(ctx, root):
     mp4s = rendered_mp4s(ns) if ns.is_dir() else []
     if not mp4s:
         return False, "nothing from it was rendered"
-    payload = load_groups(ctx, root)
-    gs = (payload or {}).get("trips") or []
-    want = sum(1 for g in gs if g.get("renderable", True)) if gs else None
-    if want is not None and len(mp4s) < want:
-        return False, "%d of %d trip(s) rendered" % (len(mp4s), want)
+    # Only ask the scanner how many trips there SHOULD be when the source is
+    # still there to scan. Once the import is deleted the question is
+    # unanswerable and asking it makes the renderer error out on a missing DCIM
+    # folder — which is not the same as "these renders are incomplete". The S3
+    # check below still has to pass either way.
+    if (root / "DCIM").is_dir():
+        payload = load_groups(ctx, root)
+        gs = (payload or {}).get("trips") or []
+        want = sum(1 for g in gs if g.get("renderable", True)) if gs else None
+        if want is not None and len(mp4s) < want:
+            return False, "%d of %d trip(s) rendered" % (len(mp4s), want)
     if ctx.cfg_opt("s3_bucket"):
-        remote = s3_objects(ctx.cfg_opt("s3_bucket"))
+        remote = s3_objects(ctx)
         if remote is None:
             return False, "could not list the bucket to confirm the uploads"
         missing = [p.name for p in mp4s
@@ -1227,6 +1265,30 @@ def step_import(ctx):
     # two cards in one place: trips get grouped across both, the renders land in
     # one namespace, and untangling that afterwards means knowing which clip came
     # from which card — which nothing records.
+    # A previous cycle's output is the usual thing in the way, and it is in the
+    # way even when the import dir is empty — deleting the source does not touch
+    # the renders. Offer to clear it here, defaulting to yes, because the whole
+    # point of running the cleanup at import time is that step 9 is easy to skip.
+    prior = [c for c in ctx.out_dir.iterdir()
+             if c.name not in ("logs", LEDGER_FILE) and not c.name.startswith(FINAL_PREFIX)
+             and not c.name.startswith(".")] if ctx.out_dir.is_dir() else []
+    if prior:
+        used = sum(f.stat().st_size for c in prior
+                   for f in ([c] if c.is_file() else c.rglob("*")) if f.is_file())
+        print()
+        print(C.yellow("  The working area still holds the previous round: %s"
+                       % human_bytes(used)))
+        ok, why = import_is_expendable(ctx, ctx.render_root)
+        if ok:
+            print(C.dim("  Rendered and published, so it is safe to clear."))
+            if confirm("  Clear it before copying?", True):
+                n, freed = purge_published_renders(ctx, ctx.render_root)
+                print(C.green("  Cleared %d file(s), %s freed." % (n, human_bytes(freed))))
+        else:
+            print(C.red("  NOT clearing: %s" % why))
+            print(C.dim("  Copying on top of it is allowed, but finish or delete the"))
+            print(C.dim("  previous round first if you can — mixing them is hard to undo."))
+
     leftovers = import_candidates(ctx)
     if leftovers:
         print()

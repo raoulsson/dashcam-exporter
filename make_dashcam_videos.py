@@ -469,8 +469,8 @@ software = true
 #s3_bucket = my-bucket
 
 # Only needed when the bucket is not in the credentials' default region — an
-# eu-central-2 bucket listed with a us-east-1 default fails.
-#s3_region = eu-central-2
+# eu-central-1 bucket listed with a us-east-1 default fails.
+#s3_region = eu-central-1
 
 # The deployed site's manifest, read once at startup for one status line. Unset
 # means no request is made at all — not a request that quietly fails. This is
