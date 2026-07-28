@@ -1768,6 +1768,23 @@ def _overlaps(a_start, a_end, b_start, b_end):
     return a_start < b_end and b_start < a_end
 
 
+def sidecar_set(mp4):
+    """A rendered trip's mp4 and everything written beside it.
+
+    The renderer writes trip_<day>_<time>_<nn>_h<height>.mp4 plus .gpx, .html,
+    _links.txt, _meta.json and a .log under the same stem minus the _h<height>
+    suffix. Deleting the mp4 alone leaves a map and a metadata file that the
+    site build and the manifest still read, so the trip comes back as an entry
+    with no video — which looks like a bug rather than a decision.
+    """
+    out = [mp4]
+    stem = re.sub(r"_h\d+$", "", mp4.stem)
+    for f in sorted(mp4.parent.glob(stem + "*")):
+        if f != mp4 and f.is_file():
+            out.append(f)
+    return out
+
+
 def trip_renders(ctx, payload, trip):
     """Rendered mp4s whose footage is this trip's, as (same_import, other_import).
 
@@ -2241,31 +2258,46 @@ def step_drop_trip(ctx):
         if int(part) not in picked:
             picked.append(int(part))
 
-    # --- guard: never drop the source of something already rendered from THIS
-    # import. That is the delete-import operation, which has its own three
-    # guards (rendered / on S3 / live on the site) precisely because it is a
-    # different and more dangerous thing than discarding footage nobody kept.
-    blocked = []
+    # A trip that is already rendered used to be refused outright, to avoid
+    # leaving a render whose source had gone. But refusing is the wrong answer
+    # to "this trip is bad, remove it": the render is the thing you most want
+    # gone, and you only find out it is bad by watching it, which happens after
+    # rendering. So the render comes too — the mp4 and every sidecar beside it.
+    # That makes the operation whole rather than half of one.
+    render_files = []
     for i in picked:
         same, _other = trip_renders(ctx, payload, by_index[i])
-        if same:
-            blocked.append((i, same))
-    if blocked:
+        for mp4 in same:
+            render_files.extend(sidecar_set(mp4))
+    if render_files:
         print()
-        for i, mp4s in blocked:
-            print(C.red("  Trip %d is already rendered from this import:" % i))
-            for p in mp4s[:5]:
-                print(C.red("      %s" % p))
-        print(C.red("  Refusing. Dropping the source of an existing render is the"))
-        print(C.red("  delete-import operation — use that step, which first proves the"))
-        print(C.red("  renders are on S3 and live on the site."))
-        return record(ctx, "Exclude trip", SKIPPED, started,
-                      "refused: trip(s) %s already rendered" % ", ".join(str(i) for i, _ in blocked))
+        print(C.yellow("  Already rendered. The render goes too, %d file(s):"
+                       % len(render_files)))
+        # Local deletion is not unpublishing. If the mp4 is already in the
+        # bucket it stays there and the site keeps serving it, so say that here
+        # rather than letting a clean-looking local result imply the trip is
+        # gone from the world.
+        if ctx.cfg_opt("s3_bucket"):
+            remote = s3_objects(ctx)
+            up = [f.name for f in render_files
+                  if f.suffix == ".mp4" and remote
+                  and any(k.endswith(f.name) for k in remote)]
+            if up:
+                print(C.red("  NOTE: %d of these are already on S3 and stay there."
+                            % len(up)))
+                print(C.dim("  Deleting locally does not remove them from the bucket or"))
+                print(C.dim("  from the site. Rebuild and redeploy (6, 8) after this, and"))
+                print(C.dim("  remove the object from the bucket if you want it truly gone."))
+        for f in render_files[:8]:
+            print(C.dim("      %s" % tilde(f)))
+        if len(render_files) > 8:
+            print(C.dim("      ... and %d more" % (len(render_files) - 8)))
 
     # --- what will actually be deleted, file by file.
     files, total = [], 0
     for i in picked:
         files.extend(trip_files(by_index[i]))
+    files.extend(render_files)
     for p in files:
         try:
             total += p.stat().st_size
