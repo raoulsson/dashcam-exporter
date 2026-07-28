@@ -256,7 +256,7 @@ compiled-in default outlived the config meant to replace it, a fresh clone
 inherited another checkout's output directory believing it was its own, and the
 sweep followed the constant into a running render.
 
-Everything a person sets is in **[config.txt](config.txt)** — 70 settings, each
+Everything a person sets is in **[config.txt](config.txt)** — 71 settings, each
 documented where it lives. That is why this README does not list them: the file
 is the reference, and it cannot drift from itself.
 
