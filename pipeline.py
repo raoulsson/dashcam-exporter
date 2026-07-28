@@ -1278,16 +1278,30 @@ def step_import(ctx):
         print()
         print(C.yellow("  The working area still holds the previous round: %s"
                        % human_bytes(used)))
+        # Declining is a decision to stop, not a decision to continue anyway.
+        # Nothing later in the run clears these, and the next render writes into
+        # the same output folder, so carrying on is how the two rounds get mixed
+        # — the state this cleanup exists to prevent. Aborting costs one
+        # keystroke to redo, so it is the cheap side of the mistake.
         ok, why = import_is_expendable(ctx, ctx.render_root)
         if ok:
             print(C.dim("  Rendered and published, so it is safe to clear."))
-            if confirm("  Clear it before copying?", True):
-                n, freed = purge_published_renders(ctx, ctx.render_root)
-                print(C.green("  Cleared %d file(s), %s freed." % (n, human_bytes(freed))))
+            if not confirm("  Clear it before copying?", True):
+                print(C.dim("  Stopping. Nothing else in this run removes it, and rendering"))
+                print(C.dim("  the new card would write both rounds into the same folder."))
+                print(C.dim("  Move what you want to keep, then run 1) again."))
+                return False
+            n, freed = purge_published_renders(ctx, ctx.render_root)
+            print(C.green("  Cleared %d file(s), %s freed." % (n, human_bytes(freed))))
         else:
+            # Not clearing anything here — the previous round is unfinished, so
+            # there is nothing safe to delete. The only question is whether to
+            # pile a second card on top of it, and the safe answer is no.
             print(C.red("  NOT clearing: %s" % why))
-            print(C.dim("  Copying on top of it is allowed, but finish or delete the"))
-            print(C.dim("  previous round first if you can — mixing them is hard to undo."))
+            print(C.dim("  Finishing it (5, 7, 8) or dropping it is the way out; importing"))
+            print(C.dim("  now mixes both rounds and there is no record of which is which."))
+            if not confirm("  Import on top of it anyway?", False):
+                return False
 
     leftovers = import_candidates(ctx)
     if leftovers:
