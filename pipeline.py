@@ -2588,7 +2588,43 @@ def step_render(ctx):
             ctx.last_scan.total, ctx.last_scan.renderable,
             (", auto-skipped %s" % sorted(ctx.last_scan.skipped)) if ctx.last_scan.skipped else ""))
 
-    idx = ask("  Trip indices to render (space separated, blank = all renderable): ")
+    # Which trips already have a video. Blank used to mean "all renderable",
+    # which on an import that is already rendered means: clear the day folders
+    # (a full render does that, by design, so a re-group cannot leave stale
+    # trip_* behind), delete every finished mp4, and encode them all again.
+    # Hours, to arrive back where you started. Blank now means "the ones with no
+    # video", which is what re-running a render after a partial one is for, and
+    # passing explicit indices also makes the run resume-like so the day clean
+    # is skipped.
+    done_idx, todo_idx = [], []
+    for g in groups:
+        if not g.get("renderable", True):
+            continue
+        base = g.get("out_base")
+        have = False
+        if base:
+            b = Path(base)
+            have = any(b.parent.glob(b.name + "_h*.mp4"))
+        (done_idx if have else todo_idx).append(g["index"])
+    if done_idx:
+        print()
+        print("  Already rendered: %s" % C.green(", ".join(str(i) for i in done_idx)))
+        if todo_idx:
+            print("  Not yet rendered: %s" % C.bold(", ".join(str(i) for i in todo_idx)))
+            print(C.dim("  Blank renders only those. Naming a rendered trip re-encodes it."))
+        else:
+            print(C.dim("  Every renderable trip has a video. Blank does nothing; name"))
+            print(C.dim("  trips explicitly to re-encode them."))
+
+    idx = ask("  Trip indices to render (space separated, blank = %s): "
+              % ("the %d not yet rendered" % len(todo_idx) if done_idx and todo_idx
+                 else "nothing to do" if done_idx else "all renderable"))
+    if not idx.strip() and done_idx:
+        if not todo_idx:
+            print(C.dim("  Nothing to render."))
+            return record(ctx, "Render videos", SKIPPED, started, "all trips already rendered")
+        idx = " ".join(str(i) for i in todo_idx)
+        print(C.dim("  Rendering %s." % idx))
     # Offer the heights that are actually worth choosing, with what each costs.
     # Bytes scale roughly with pixel count, so halving the height quarters the
     # area — but real footage does not compress linearly, so treat these as the
