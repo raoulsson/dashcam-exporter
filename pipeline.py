@@ -2867,18 +2867,32 @@ def step_delete_import(ctx):
         print(C.red("no"))
         print(C.red("        No mp4 under %s — nothing from this import was rendered." % ns))
         return record(ctx, "Delete import source", SKIPPED, started, "refused: nothing rendered")
-    scan = ctx.last_scan if (ctx.last_scan and ctx.last_scan.root == root) else None
-    if scan is None:
-        print(C.yellow("%d mp4, but no scan of this import in this session" % len(ns_mp4s)))
+    # How many trips SHOULD be here. Prefer this session's scan, but fall back to
+    # the grouping — which the boundary cache makes free, and which is keyed on
+    # the clips and their GPX, so it cannot describe a different card. Demanding
+    # a scan "in this session" was a stand-in for "we know what is on the card";
+    # since the cache persists, the session is no longer what decides that, and
+    # refusing on it sent you to re-run step 2 purely to satisfy bookkeeping.
+    expect = None
+    if ctx.last_scan and ctx.last_scan.root == root:
+        expect, src = ctx.last_scan.renderable, "this session's scan"
+    else:
+        payload = load_groups(ctx, root)
+        gs = (payload or {}).get("trips") or []
+        if gs:
+            expect = sum(1 for g in gs if g.get("renderable", True))
+            src = "the cached grouping"
+    if expect is None:
+        print(C.yellow("%d mp4, but the trip grouping could not be read" % len(ns_mp4s)))
         print(C.yellow("        Cannot prove every trip was rendered. Run step 2 first."))
-        return record(ctx, "Delete import source", SKIPPED, started, "refused: no scan to compare against")
-    if len(ns_mp4s) < scan.renderable:
+        return record(ctx, "Delete import source", SKIPPED, started, "refused: no grouping to compare against")
+    if len(ns_mp4s) < expect:
         print(C.red("no"))
-        print(C.red("        Scan found %d renderable trip(s); only %d mp4 exist." % (
-            scan.renderable, len(ns_mp4s))))
+        print(C.red("        %s found %d renderable trip(s); only %d mp4 exist." % (
+            src.capitalize(), expect, len(ns_mp4s))))
         return record(ctx, "Delete import source", SKIPPED, started,
-                      "refused: %d/%d trips rendered" % (len(ns_mp4s), scan.renderable))
-    print(C.green("yes (%d mp4 for %d renderable trip(s))" % (len(ns_mp4s), scan.renderable)))
+                      "refused: %d/%d trips rendered" % (len(ns_mp4s), expect))
+    print(C.green("yes (%d mp4 for %d renderable trip(s), per %s)" % (len(ns_mp4s), expect, src)))
 
     # --- guard 2: those mp4s are on S3, byte-size matched.
     print("  [2/3] present on S3 ..... ", end="")
