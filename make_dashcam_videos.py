@@ -3359,6 +3359,7 @@ def main() -> int:
         # you to confirm the command, so the log is where it is written down.
         import shlex
         print("$ " + " ".join(shlex.quote(a) for a in sys.argv))
+    _t0 = time.time()
 
     # Handle --write-config and exit
     if args.write_config:
@@ -4452,7 +4453,7 @@ def main() -> int:
         except StopIteration:
             work_dir.rmdir()
 
-    print("\nDone.")
+    print(f"\nDone in {fmt_secs(time.time() - _t0)}.")
     return 0
 
 
