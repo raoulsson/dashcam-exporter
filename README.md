@@ -40,24 +40,24 @@ Then: [Troubleshooting](#troubleshooting) · [Repo layout](#repo-layout) ·
 Default layout — front camera, rear PiP bottom-centre, timestamp + speed +
 watermark in corners, stats panel + map widget on the right:
 
-![Default frame layout](examples/dash-default-view.png)
+![Default frame layout](examples/dash-default-view.jpg)
 
 Same composition with the rear PiP repositioned to the top-left corner
 (`rear_pip_position = top-left` in config.txt):
 
-![Rear PiP in top-left](examples/dash-rear-view-top-left.png)
+![Rear PiP in top-left](examples/dash-rear-view-top-left.jpg)
 
 The interactive HTML map sidecar (Leaflet + OSM tiles, route coloured by
 speed, segment-break dots, opens in any browser):
 
-![Interactive HTML map sidecar](examples/gps-data-on-map.png)
+![Interactive HTML map sidecar](examples/gps-data-on-map.jpg)
 
 The standard `.gpx` sidecar opened in [gpx.studio](https://gpx.studio) —
 because the script emits one `<trkseg>` per contiguous-driving segment, each
 engine-on leg of the trip shows up as its own colored polyline so you can see
 the whole trip at a glance:
 
-![Per-trip GPX in gpx.studio](examples/gps-data-single-drives-on-gpx.studio.png)
+![Per-trip GPX in gpx.studio](examples/gps-data-single-drives-on-gpx.studio.jpg)
 
 
 ---
