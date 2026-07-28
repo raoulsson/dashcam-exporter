@@ -2361,6 +2361,8 @@ def step_drop_trip(ctx):
             print(C.red("   an unknown is not evidence of a copy.)"))
         print(C.red("  " + "!" * (term_width() - 4)))
 
+    if render_files and ctx.site_script("build_manifest.py"):
+        print(C.dim("  Then trips.json is rebuilt so the site stops listing it."))
     answer = ask("  Type DROP to delete these %d file(s), anything else to cancel: " % len(files))
     if answer != "DROP":
         print("  Cancelled.")
@@ -2387,11 +2389,13 @@ def step_drop_trip(ctx):
     ctx.last_groups = None
     ctx.last_scan = None
 
-    # Offer to clear the preview sidecars of the trips that are now gone. They
-    # are not source footage — they are a preview of something that no longer
-    # exists, and left in place build_manifest keeps publishing a trip whose
-    # video can never be rendered. Only ever offered for a trip with NO mp4,
-    # which the guard above has already established.
+    # Preview sidecars of the trips that are now gone. They are not source
+    # footage — they describe something that no longer exists, and left in place
+    # build_manifest keeps publishing a trip whose video can never be rendered.
+    # For a trip that WAS rendered these are already deleted above, since
+    # sidecar_set takes everything sharing the mp4's stem; what this catches is
+    # the preview-only case, where --sidecars-only wrote a map and a meta for a
+    # trip that never got an mp4 at all.
     orphans = []
     for i in picked:
         base = by_index[i].get("out_base")
@@ -2413,6 +2417,25 @@ def step_drop_trip(ctx):
                 except OSError as e:
                     print(C.red("  could not delete %s: %s" % (p, e)))
             print(C.dim("  Removed. The next Preview or Render drops them from the site index."))
+
+    # Rebuild the manifest, so the drop reaches the thing that publishes. The
+    # site reads trips.json, not the directory — leave it and the trip is still
+    # listed, still linked, and the page asks for an mp4 that no longer exists.
+    # Deleting the files and not doing this is a drop that looks complete
+    # locally and changed nothing where anyone is looking.
+    if render_files and ctx.site_script("build_manifest.py"):
+        print()
+        rc, _lines = run_stream(["python3", "build_manifest.py"], ctx.site, "Indexing",
+                                keep=lambda l: l.startswith("wrote trips.json"))
+        if rc != 0:
+            print(C.red("  build_manifest.py exited %d — trips.json still lists the"
+                        " dropped trip." % rc))
+        else:
+            print(C.dim("  trips.json rebuilt without it. Run 8) to put that live —"))
+            print(C.dim("  until then the site still serves the old index."))
+    elif render_files and ctx.site is not None:
+        print(C.yellow("  No build_manifest.py under %s — trips.json was NOT updated."
+                       % tilde(ctx.site)))
 
     if errors:
         return record(ctx, "Exclude trip", FAILED, started,
