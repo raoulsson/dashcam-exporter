@@ -28,7 +28,6 @@ contacts a network host that has not been named in the config.
 """
 from __future__ import annotations
 
-import argparse
 import base64
 from datetime import datetime
 import html
@@ -53,9 +52,15 @@ from pathlib import Path
 # disagree with what those scripts would do on their own.
 # ---------------------------------------------------------------------------
 
-DEFAULT_CARD = "/Volumes/NO NAME"                 # make_dashcam_videos.DEFAULT_ROOT
-DEFAULT_OUT = "~/dashcam-data/output"             # make_dashcam_videos.DEFAULT_OUT
-DEFAULT_IMPORT_ROOT = "~/dashcam-data/import"  # import-sd-card.sh DEST_ROOT
+# Last-resort fallbacks, used only when config.txt says nothing. They are not
+# settings — every one of these is overridable in config.txt, and the code reads
+# it from there. A compiled-in path that a second checkout inherits silently is
+# how ~/dashcam-data/output ended up being swept by a clone that thought it was
+# working on its own data, so anything naming a location belongs in the file the
+# person edits, not in the file they clone.
+FALLBACK_CARD = "/Volumes/NO NAME"                # make_dashcam_videos.DEFAULT_ROOT
+FALLBACK_OUT = "~/dashcam-data/output"            # make_dashcam_videos.FALLBACK_OUT
+FALLBACK_IMPORT_ROOT = "~/dashcam-data/import"    # import-sd-card.sh DEST_ROOT
 # There is deliberately no default for the site repo, the bucket or the live
 # manifest URL. A default would mean a clone reaching for someone else's
 # checkout on disk and someone else's host on the network, on every launch.
@@ -183,6 +188,14 @@ PRIVATE_KEYS = ("site_repo", "s3_bucket", "s3_region", "live_trips_url",
                 "home_lat", "home_lon")
 
 
+def as_bool(v, default=False):
+    """A config value read as a flag. Absent or empty means the default."""
+    s = (v or "").strip().lower()
+    if not s:
+        return default
+    return s in ("1", "true", "yes", "on")
+
+
 def load_env(path):
     """KEY=value from a .env file. Same forgiving parse as load_config."""
     out = {}
@@ -200,9 +213,9 @@ def load_env(path):
 class Ctx:
     """Everything the steps need: resolved paths, config, and session state."""
 
-    def __init__(self, args):
+    def __init__(self):
         self.exporter = EXPORTER_DIR
-        self.config_path = Path(args.config).expanduser() if args.config else self.exporter / "config.txt"
+        self.config_path = self.exporter / "config.txt"
         self.cfg = load_config(self.config_path)
         # .env overlays config.txt for the private keys, and a real environment
         # variable beats both — so a one-off run can point somewhere else without
@@ -223,7 +236,7 @@ class Ctx:
         # same for everyone and the greyed line says which key turns them on.
         # A flag or an env var wins over the file: both exist to point one run
         # somewhere other than the configured place.
-        site = (args.site_repo or os.environ.get("GOODNIGHT_DRIVES_DIR")
+        site = (os.environ.get("GOODNIGHT_DRIVES_DIR")
                 or self.cfg_opt("site_repo"))
         self.site = Path(site).expanduser().resolve() if site else None
 
@@ -242,7 +255,7 @@ class Ctx:
 
         # `root` in config.txt is what make_dashcam_videos reads from. It points
         # at the import sink now, not the card, so renders survive an ejected card.
-        self.render_root = Path(self.cfg.get("root", DEFAULT_CARD)).expanduser()
+        self.render_root = Path(self.cfg.get("root", FALLBACK_CARD)).expanduser()
         # `out` defaults NEXT TO the configured root, not to the global default.
         # A second checkout that sets `root` and leaves `out` alone otherwise
         # inherits ~/dashcam-data/output — the first checkout's live working area
@@ -254,7 +267,7 @@ class Ctx:
         elif self.cfg.get("root"):
             self.out_dir = Path(self.cfg["root"]).expanduser().parent / "output"
         else:
-            self.out_dir = Path(DEFAULT_OUT).expanduser()
+            self.out_dir = Path(FALLBACK_OUT).expanduser()
         # Where import-sd-card.sh drops the card. It follows config's `root`,
         # because that is what every render, scan and delete is pointed at — when
         # the two diverged (renaming `root` while the script kept its own
@@ -262,18 +275,18 @@ class Ctx:
         # nothing said so. DASHCAM_IMPORT_ROOT still wins for a one-off.
         self.import_root = Path(os.environ.get("DASHCAM_IMPORT_ROOT")
                                 or self.cfg.get("root")
-                                or DEFAULT_IMPORT_ROOT).expanduser()
-        self.card = Path(args.card or DEFAULT_CARD)
+                                or FALLBACK_IMPORT_ROOT).expanduser()
+        self.card = Path(self.cfg.get("card", FALLBACK_CARD)).expanduser()
 
         try:
             self.output_height = int(self.cfg.get("output_height", "1080"))
         except ValueError:
             self.output_height = 1080
 
-        self.offline = args.offline
+        self.offline = as_bool(self.cfg.get("offline"), False)
         # A non-default --config must reach the renderer too, or this CLI would
         # compute its paths from one config while the wrappers read another.
-        self.config_args = ["--config", str(self.config_path)] if args.config else []
+        self.config_args = []
         # Trip boundaries are the slowest part of a scan (about two and a half
         # minutes on a full card) and identical for the same inputs, so the cache
         # persists across runs. It is safe to do that because the key covers
@@ -304,8 +317,24 @@ class Ctx:
         # area that gets emptied, and a finished folder is the one thing that
         # must survive that.
         self.final_root = Path(fr).expanduser() if fr else self.out_dir.parent
-        self.speed_colour = (self.cfg.get("speed_colour", "true").strip().lower()
-                             not in ("false", "no", "0", "off"))
+        self.speed_colour = as_bool(self.cfg.get("speed_colour"), True)
+        # Still-frame knobs. Compiled-in numbers are the fallback, config wins.
+        self.still_width = self.cfg_int("still_width", PREVIEW_STILL_W)
+        self.still_seconds = self.cfg_float("still_seconds", PREVIEW_STILL_T)
+        self.site_still_seconds = self.cfg_float("site_still_seconds", 2.0)
+
+    def cfg_int(self, key, default):
+        """An integer setting, falling back rather than crashing on nonsense."""
+        try:
+            return int(self.cfg[key])
+        except (KeyError, ValueError, TypeError):
+            return default
+
+    def cfg_float(self, key, default):
+        try:
+            return float(self.cfg[key])
+        except (KeyError, ValueError, TypeError):
+            return default
 
     def cfg_opt(self, key):
         """A configured value, or None when the setting is absent.
@@ -1451,7 +1480,7 @@ def step_import(ctx):
     if erase:
         cmd.append("--delete")
     cmd.append(day)
-    if str(ctx.card) != DEFAULT_CARD:
+    if str(ctx.card) != FALLBACK_CARD:
         cmd[1:1] = ["--src", str(ctx.card)]
 
     # No "Run: ... ?" either. Copying only the new clips was already answered,
@@ -1774,6 +1803,9 @@ def trip_renders(ctx, payload, trip):
 # ---------------------------------------------------------------------------
 
 PREVIEW_DIRNAME = "previews"
+# Defaults for the still-frame knobs; config.txt's still_width / still_seconds
+# override both the preview sheet and the site page, which is the only sane
+# arrangement — a still that is right for one is right for the other.
 PREVIEW_STILL_W = 1600      # same intent as build_manifest.make_poster's POSTER_W
 PREVIEW_STILL_T = 1.0       # seconds into the clip; see extract_still
 
@@ -2053,7 +2085,8 @@ def step_preview(ctx):
         if not front:
             failed.append(t["index"])
             continue
-        if extract_still(Path(front[0]), dst):
+        if extract_still(Path(front[0]), dst,
+                         seconds=ctx.still_seconds, width=ctx.still_width):
             stills[t["index"]] = dst
         else:
             failed.append(t["index"])
@@ -2485,9 +2518,6 @@ def step_render(ctx):
 # footage is worth. The consequence is that site/ is portable only together with
 # the render tree above it — copy <out> wholesale and the relative paths hold.
 
-SITE_STILL_DIRNAME = "still"
-SITE_STILL_W = 1600         # same cap as the preview sheet; never upscales
-SITE_STILL_T = 2.0          # seconds in — see extract_still for why not frame 0
 
 RE_TRIP_VIDEO = re.compile(r"^(?P<label>.+)_h\d+\.mp4$")
 RE_DAY = re.compile(r"(\d{4}-\d{2}-\d{2})")
@@ -2753,7 +2783,7 @@ def route_glyph(pts, w=560, h=280, pad=14, speed_colour=True):
     return "".join(out)
 
 
-def still_data_uri(mp4, seconds=2, width=760):
+def still_data_uri(mp4, seconds=2.0, width=760):
     """A frame as a data: URI. Deliberately smaller than the poster stills — this
     one is inlined into a file meant to be sent around, and full-width frames
     would make it tens of MB."""
@@ -2987,7 +3017,7 @@ def build_result_page(ctx, out_dir=None):
         top = max(top, mx or 0)
         n_secs += _f(meta.get("duration_secs")) or 0
 
-        shot = still_data_uri(mp4) if mp4 else ""
+        shot = still_data_uri(mp4, seconds=ctx.site_still_seconds) if mp4 else ""
         # A player, not a link. "play video" navigated away from the page to a
         # bare mp4 — which is not playing it, it is leaving. The embedded still
         # becomes the poster, so the card looks identical until you press play.
@@ -3877,28 +3907,24 @@ def run_steps(ctx, numbers):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(
-        description="Interactive driver for the dashcam publishing pipeline.",
-        epilog="Runs the same scripts the READMEs document; it adds status, "
-               "step selection, progress and a summary.")
-    ap.add_argument("--site-repo", help="path to the publishing repo (build_manifest.py, "
-                                        "deploy/*.sh). Overrides site_repo in config.txt "
-                                        "and $GOODNIGHT_DRIVES_DIR; unset means no "
-                                        "Upload/Deploy.")
-    ap.add_argument("--config", help="path to config.txt (default: this repo's)")
-    ap.add_argument("--card", help="SD card mount point (default: %s)" % DEFAULT_CARD)
-    ap.add_argument("--steps", help="run these steps and exit, e.g. '5-8' or 'all'. "
-                                    "Still prompts for confirmations.")
-    ap.add_argument("--offline", action="store_true",
-                    help="skip the live-site lookup in the status screen (already "
-                         "skipped when live_trips_url is unset)")
-    ap.add_argument("--no-color", action="store_true", help="plain output, no ANSI")
-    args = ap.parse_args(argv)
+    """No command line. Everything this needs is in config.txt.
 
-    if args.no_color:
+    The flags that used to live here — --card, --config, --site-repo, --steps,
+    --offline, --no-color — each had a config equivalent or became one, and
+    having both meant the same question had two answers that could disagree.
+    The one that bit: a default compiled in here was inherited by a second
+    checkout that had configured its own paths, and the sweep followed the
+    compiled-in path into somebody else's data. One source, and it is the file
+    the person edits.
+
+    NO_COLOR is still honoured, because that is the environment's convention
+    and not this tool's setting.
+    """
+    if os.environ.get("NO_COLOR"):
         C.enabled = False
 
-    ctx = Ctx(args)
+    ctx = Ctx()
+
 
     print()
     # The subtitle states what this installation actually does, which is not the
@@ -3916,60 +3942,53 @@ def main(argv=None):
 
     exit_code = 0
     try:
-        if args.steps:
-            picked = parse_selection(args.steps)
+        while True:
+            print_menu(ctx)
+            # Hard left, with a blank line above it: everything else on
+            # screen is indented two spaces, so the one line that wants
+            # typing should stand apart from the block above it.
+            print()
+            _HINTED[0] = True          # no hint on the menu itself
+            sel = ask("Select> ", quits=False)
+            if sel.lower() in ("q", "quit", "exit"):
+                break
+            if sel.lower() in ("s", "status", "0"):
+                print_status(ctx)
+                continue
+            picked = parse_selection(sel)
             if not picked:
-                print(C.red("Could not parse --steps %r" % args.steps))
-                return 2
-            run_steps(ctx, picked)
-        else:
-            while True:
-                print_menu(ctx)
-                # Hard left, with a blank line above it: everything else on
-                # screen is indented two spaces, so the one line that wants
-                # typing should stand apart from the block above it.
-                print()
-                _HINTED[0] = True          # no hint on the menu itself
-                sel = ask("Select> ", quits=False)
-                if sel.lower() in ("q", "quit", "exit"):
-                    break
-                if sel.lower() in ("s", "status", "0"):
-                    print_status(ctx)
-                    continue
-                picked = parse_selection(sel)
+                print(C.red("  Did not understand %r." % sel))
+                named = [n for n in solo_steps() if str(n) in re.split(r"[,\s-]+", sel)]
+                if named:
+                    print(C.red("  Step%s %s destroy%s footage — each runs alone, never "
+                                "in a batch." % ("" if len(named) == 1 else "s",
+                                                 ", ".join(str(n) for n in named),
+                                                 "s" if len(named) == 1 else "")))
+                continue
+            # A greyed step is not runnable right now. Say why and drop it,
+            # rather than confirming and then reporting a no-op.
+            blocked = unavailable_steps(ctx)
+            hit = [n for n in picked if n in blocked]
+            if hit:
+                for n in hit:
+                    print(C.yellow("  %d) %s" % (n, blocked[n])))
+                picked = [n for n in picked if n not in blocked]
                 if not picked:
-                    print(C.red("  Did not understand %r." % sel))
-                    named = [n for n in solo_steps() if str(n) in re.split(r"[,\s-]+", sel)]
-                    if named:
-                        print(C.red("  Step%s %s destroy%s footage — each runs alone, never "
-                                    "in a batch." % ("" if len(named) == 1 else "s",
-                                                     ", ".join(str(n) for n in named),
-                                                     "s" if len(named) == 1 else "")))
                     continue
-                # A greyed step is not runnable right now. Say why and drop it,
-                # rather than confirming and then reporting a no-op.
-                blocked = unavailable_steps(ctx)
-                hit = [n for n in picked if n in blocked]
-                if hit:
-                    for n in hit:
-                        print(C.yellow("  %d) %s" % (n, blocked[n])))
-                    picked = [n for n in picked if n not in blocked]
-                    if not picked:
-                        continue
-                # The description now lives here rather than in the grid — this
-                # is the moment it is wanted, and there is room for a sentence.
-                for n in picked:
-                    print("  %s %s" % (C.bold("%d)" % n), SHORT[n]))
-                    print(C.dim("     " + DESC[n]))
-                # Only ask before something that writes, sends or takes a while.
-                # Confirming a read-only scan just trains you to hit enter, which
-                # is exactly the habit you do not want by the time the delete step asks.
-                skip = all((n in NO_CONFIRM and fast_enough(ctx, n)) or n in SELF_CONFIRMS
-                           for n in picked)
-                if not skip:
-                    if not confirm("  Go?", True):
-                        continue
-                run_steps(ctx, picked)
+            # The description now lives here rather than in the grid — this
+            # is the moment it is wanted, and there is room for a sentence.
+            for n in picked:
+                print("  %s %s" % (C.bold("%d)" % n), SHORT[n]))
+                print(C.dim("     " + DESC[n]))
+            # Only ask before something that writes, sends or takes a while.
+            # Confirming a read-only scan just trains you to hit enter, which
+            # is exactly the habit you do not want by the time the delete step asks.
+            skip = all((n in NO_CONFIRM and fast_enough(ctx, n)) or n in SELF_CONFIRMS
+                       for n in picked)
+            if not skip:
+                if not confirm("  Go?", True):
+                    continue
+            run_steps(ctx, picked)
     except (KeyboardInterrupt, Aborted):
         print()
         print(C.yellow("  Interrupted."))
