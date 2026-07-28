@@ -2290,6 +2290,16 @@ SHORT = {
 # nothing is noise, but one guarding a two-minute wait earns its place.
 NO_CONFIRM = {2, 3}
 
+# Steps that ask their own questions once they have something to show. The menu's
+# "Go?" comes BEFORE any of that, so for these it asks you to commit to a
+# decision you have not been shown yet — Render lists the trips, then wants
+# indices, a height, and confirmation of the clean and the command. Four real
+# questions behind one blind one.
+#
+# Upload and Deploy are deliberately NOT here: their inner prompt was removed, so
+# the menu is their only gate before something leaves this machine.
+SELF_CONFIRMS = {1, 4, 5, 8}
+
 
 def fast_enough(ctx, n):
     """Will this step finish in a moment?
@@ -2585,7 +2595,9 @@ def main(argv=None):
                 # Only ask before something that writes, sends or takes a while.
                 # Confirming a read-only scan just trains you to hit enter, which
                 # is exactly the habit you do not want by the time step 9 asks.
-                if not all(n in NO_CONFIRM and fast_enough(ctx, n) for n in picked):
+                skip = all((n in NO_CONFIRM and fast_enough(ctx, n)) or n in SELF_CONFIRMS
+                           for n in picked)
+                if not skip:
                     if not confirm("  Go?", True):
                         continue
                 run_steps(ctx, picked)
