@@ -19,9 +19,12 @@ entry points the READMEs document, streams their output, and turns what it can
 parse into a progress bar. Where real progress cannot be derived it shows an
 elapsed-time spinner rather than inventing a percentage.
 
-Two repos are involved and this file lives in the first:
-    dashcam-exporter/    import + render          (this repo)
-    goodnight-drives/    manifest + S3 + deploy   (sibling; --site-repo to override)
+This repo does import, render and a local site on its own. Publishing — a bucket
+and a deployed website — lives in a second repo and is entirely optional: set
+`site_repo`, `s3_bucket` and `live_trips_url` in config.txt and the Upload and
+Deploy steps light up; leave them unset (what a fresh clone gets) and they stay
+greyed out with the key that would enable them printed underneath. Nothing here
+contacts a network host that has not been named in the config.
 """
 from __future__ import annotations
 
@@ -50,7 +53,9 @@ from pathlib import Path
 DEFAULT_CARD = "/Volumes/NO NAME"                 # make_dashcam_videos.DEFAULT_ROOT
 DEFAULT_OUT = "~/dashcam-data/output"             # make_dashcam_videos.DEFAULT_OUT
 DEFAULT_IMPORT_ROOT = "~/dashcam-data/import_sink"  # import-sd-card.sh DEST_ROOT
-LIVE_TRIPS_URL = "https://example.com/your-site/trips.json"
+# There is deliberately no default for the site repo, the bucket or the live
+# manifest URL. A default would mean a clone reaching for someone else's
+# checkout on disk and someone else's host on the network, on every launch.
 
 EXPORTER_DIR = Path(__file__).resolve().parent
 
@@ -174,10 +179,31 @@ class Ctx:
         self.config_path = Path(args.config).expanduser() if args.config else self.exporter / "config.txt"
         self.cfg = load_config(self.config_path)
 
-        # The site repo is the exporter's sibling by convention; an env var or a
-        # flag wins, because "sibling" is a convention and not a guarantee.
-        site = args.site_repo or os.environ.get("GOODNIGHT_DRIVES_DIR")
-        self.site = Path(site).expanduser().resolve() if site else (self.exporter.parent / "goodnight-drives")
+        # --- the optional, personal half. All three are unset by default.
+        #
+        # The site repo holds the publishing scripts (build_manifest.py,
+        # deploy/upload-videos-s3.sh, deploy/deploy-site.sh). Unset means this
+        # CLI is import -> render -> local site and nothing else; the steps that
+        # need it are greyed out rather than removed, so the numbering is the
+        # same for everyone and the greyed line says which key turns them on.
+        # A flag or an env var wins over the file: both exist to point one run
+        # somewhere other than the configured place.
+        site = (args.site_repo or os.environ.get("GOODNIGHT_DRIVES_DIR")
+                or self.cfg_opt("site_repo"))
+        self.site = Path(site).expanduser().resolve() if site else None
+
+        # The bucket the Upload step verifies against once the sync has run.
+        # aws s3 sync exits 0 even when objects fail, so this name is what makes
+        # "uploaded" provable; without it Upload cannot be trusted and stays off.
+        # The region is only needed when the credentials' default is a different
+        # one — an eu-central-2 bucket listed with a us-east-1 default fails.
+        self.s3_bucket = self.cfg_opt("s3_bucket")
+        self.s3_region = self.cfg_opt("s3_region")
+
+        # The deployed site's manifest, read for one line of the status screen.
+        # Unset means no request is made at all — not a request that fails. A
+        # clone must not phone a host its owner has never heard of.
+        self.live_trips_url = self.cfg_opt("live_trips_url")
 
         # `root` in config.txt is what make_dashcam_videos reads from. It points
         # at the import sink now, not the card, so renders survive an ejected card.
@@ -214,6 +240,35 @@ class Ctx:
         # anything changes what is on disk.
         self.last_groups = None
         self.results = []               # StepResult log for the final summary
+
+    def cfg_opt(self, key):
+        """A configured value, or None when the setting is absent.
+
+        Empty counts as absent: `s3_bucket =` with nothing after it is someone
+        clearing the setting, and the alternative — an empty string that still
+        gets used — produces `s3://` and a listing of the whole account.
+        """
+        v = (self.cfg.get(key) or "").strip()
+        return v or None
+
+    @property
+    def site_ready(self):
+        """Configured AND actually on disk. Two different failures, and the menu
+        distinguishes them: 'needs site_repo in config.txt' is a setup step,
+        'site_repo not found' is a wrong path."""
+        return self.site is not None and self.site.is_dir()
+
+    def site_script(self, *parts):
+        """Path to a script inside the site repo, or None if it is not there.
+
+        The site repo is whatever the user pointed at, so its scripts are a
+        claim rather than a guarantee — checking is what lets the menu say which
+        one is missing instead of failing halfway through a step.
+        """
+        if not self.site_ready:
+            return None
+        p = self.site.joinpath(*parts)
+        return p if p.is_file() else None
 
 
 # ---------------------------------------------------------------------------
@@ -715,10 +770,17 @@ def rendered_mp4s(out_dir):
 
 
 def live_trip_count(ctx):
-    if ctx.offline:
+    """Trips the deployed site is currently serving, or None.
+
+    Returns None WITHOUT touching the network when live_trips_url is unset —
+    that is the whole point of the setting. This runs on every launch, so a
+    hardcoded URL here would mean every clone of this repo pinging one person's
+    host every time anyone opened the menu.
+    """
+    if ctx.offline or not ctx.live_trips_url:
         return None
     try:
-        with urllib.request.urlopen(LIVE_TRIPS_URL, timeout=6) as r:
+        with urllib.request.urlopen(ctx.live_trips_url, timeout=6) as r:
             data = json.load(r)
         # Count the days array, not the top-level trip_count. That field is
         # denormalised and can go stale if anything edits trips.json without
@@ -766,32 +828,47 @@ def print_status(ctx):
         C.bold("%d mp4" % len(mp4s)) if mp4s else C.yellow("none"),
         C.dim("%s in %s" % (human_bytes(size), tilde(ctx.out_dir)))))
 
-    # Manifest / live site
-    manifest = ctx.site / "public_html" / "trips.json"
-    if manifest.is_file():
-        try:
-            local_trips = json.loads(manifest.read_text()).get("trip_count", "?")
-        except Exception:
-            local_trips = "?"
-        age = human_age(time.time() - manifest.stat().st_mtime)
-        print("  Prepared     %s  %s" % (C.bold("%s trips" % local_trips),
-                                         # "just now" already reads as a time;
-                                         # appending "ago" gives "just now ago"
-                                         C.dim("updated %s" % age if age == "just now"
-                                               else "updated %s ago" % age)))
+    # Local site — always meaningful, because Site needs nothing but this machine.
+    site_index = ctx.out_dir / SITE_DIRNAME / "index.html"
+    if site_index.is_file():
+        age = human_age(time.time() - site_index.stat().st_mtime)
+        print("  Local site   %s  %s" % (
+            C.bold(tilde(site_index)),
+            C.dim("built %s" % age if age == "just now" else "built %s ago" % age)))
     else:
-        print("  Prepared     %s  %s" % (C.yellow("none yet"), C.dim(tilde(manifest))))
+        print("  Local site   %s  %s" % (C.yellow("not built"), C.dim(tilde(site_index))))
 
-    live = live_trip_count(ctx)
-    if live is None:
-        print("  Live site    %s" % C.dim("unknown (offline or unreachable)"))
+    # Everything below is the publishing half, and each row appears only when
+    # the thing behind it is configured. A "Live site: unknown" row on a machine
+    # that has no live site is not status, it is a permanent question mark — and
+    # a row naming a repo the reader has never heard of is worse.
+    if ctx.site is not None:
+        manifest = ctx.site / "public_html" / "trips.json"
+        if manifest.is_file():
+            try:
+                local_trips = json.loads(manifest.read_text()).get("trip_count", "?")
+            except Exception:
+                local_trips = "?"
+            age = human_age(time.time() - manifest.stat().st_mtime)
+            print("  Prepared     %s  %s" % (C.bold("%s trips" % local_trips),
+                                             # "just now" already reads as a time;
+                                             # appending "ago" gives "just now ago"
+                                             C.dim("updated %s" % age if age == "just now"
+                                                   else "updated %s ago" % age)))
+        else:
+            print("  Prepared     %s  %s" % (C.yellow("none yet"), C.dim(tilde(manifest))))
+
+    if ctx.live_trips_url:
+        live = live_trip_count(ctx)
+        if live is None:
+            print("  Live site    %s" % C.dim("unknown (offline or unreachable)"))
+        else:
+            print("  Live site    %s" % C.bold("%s trips" % live))
+
+    if ctx.site is not None:
+        print("  Repos        %s" % C.dim("%s | %s" % (tilde(ctx.exporter), tilde(ctx.site))))
     else:
-        print("  Live site    %s" % C.bold("%d trips" % live))
-
-    print("  Repos        %s" % C.dim("%s | %s" % (tilde(ctx.exporter), tilde(ctx.site))))
-    if not ctx.site.is_dir():
-        print("  " + C.red("goodnight-drives repo not found — steps 7-9 will not run "
-                           "(1-6, including the local site, do)."))
+        print("  Repo         %s" % C.dim(tilde(ctx.exporter)))
     print(rule())
 
     # Disk goes below the rule, as a footnote rather than a status row.
@@ -967,8 +1044,9 @@ def step_import(ctx):
         print(C.dim("  Importing now adds this card alongside that footage. Trips are"))
         print(C.dim("  grouped across everything found, so the two cards would be mixed"))
         print(C.dim("  and there is no record afterwards of which clip came from which."))
-        print(C.dim("  If the previous round is finished (rendered, uploaded, published),"))
-        print(C.dim("  clear it with step 9 first. If it is not, finish it first."))
+        print(C.dim("  If the previous round is finished (rendered, and published if you"))
+        print(C.dim("  publish), clear it with %d) %s first. If it is not, finish it first."
+                    % (step_num(step_delete_import), SHORT[step_num(step_delete_import)])))
         if not confirm("  Import anyway, on top of what is there?", False):
             return record(ctx, "Import from SD card", SKIPPED, started,
                           "declined: import area not empty")
@@ -1126,14 +1204,15 @@ def load_groups(ctx, root, refresh=False):
     """Run --print-groups against `root` and return its parsed JSON, or None.
 
     Cached per session per import folder: the scan decodes video to find the
-    pull-away and park moments, so it costs the same minutes as step 2.
+    pull-away and park moments, so it costs the same minutes as List trips.
     """
     if not refresh and ctx.last_groups and ctx.last_groups[0] == root:
         print(C.dim("  Using the trip grouping already scanned in this session."))
         return ctx.last_groups[1]
 
     print(C.dim("  Scanning %s for the authoritative trip grouping." % root))
-    print(C.dim("  This is the same work as step 2 (it walks the video), so it takes"))
+    print(C.dim("  This is the same work as %d) %s (it walks the video), so it takes"
+                % (step_num(step_list), SHORT[step_num(step_list)])))
     print(C.dim("  a while; the result is reused for the rest of this session."))
     fd, tmp = tempfile.mkstemp(prefix="dashcam-groups-", suffix=".json")
     os.close(fd)
@@ -1549,15 +1628,18 @@ def step_preview(ctx):
 
     index = write_contact_sheet(ctx, root, payload, previews_dir, stills)
 
-    # 4. Keep trips.json current. The site is not deployed here — this only means
-    #    a later deploy is not carrying a stale manifest.
-    if ctx.site.is_dir():
+    # 4. Keep trips.json current, if there is a site repo to keep it current in.
+    #    The site is not deployed here — this only means a later deploy is not
+    #    carrying a stale manifest. With no site_repo there is no manifest and
+    #    nothing to say about it.
+    if ctx.site_script("build_manifest.py"):
         rc, _lines = run_stream(["python3", "build_manifest.py"], ctx.site, "Indexing",
                                 keep=lambda l: l.startswith("wrote trips.json"))
         if rc != 0:
             return record(ctx, "Preview all trips", FAILED, started, "build_manifest exit %d" % rc)
-    else:
-        print(C.yellow("  goodnight-drives not at %s — the site index was not updated." % ctx.site))
+    elif ctx.site is not None:
+        print(C.yellow("  No build_manifest.py under %s — the site index was not updated."
+                       % tilde(ctx.site)))
 
     print()
     print(C.green("  previews are in %s" % previews_dir))
@@ -1781,7 +1863,7 @@ def step_render(ctx):
     if root is None:
         return record(ctx, "Render trips", SKIPPED, started, "no import folder")
 
-    # Show the trips here rather than making him remember them from step 2 or go
+    # Show the trips here rather than making him remember them from the listing or go
     # back for them. The grouping comes from --print-groups (cached, so this is
     # instant once the boundaries are known) — the same source the drop step
     # deletes by, so what is listed is exactly what would be rendered.
@@ -1943,7 +2025,7 @@ def step_render(ctx):
     # for the same reason. (This is why there is no Manifest entry in the menu —
     # it was a step you could forget, in a sequence where forgetting it looks
     # exactly like success.)
-    if new and ctx.site.is_dir():
+    if new and ctx.site_script("build_manifest.py"):
         rc2, _l = run_stream(["python3", "build_manifest.py"], ctx.site, "Indexing",
                              keep=lambda l: l.startswith("wrote trips.json"))
         if rc2 != 0:
@@ -2622,11 +2704,21 @@ def step_site(ctx):
                   "%d trip(s) in %s" % (info["trips"], info["site_dir"]))
 
 
-def s3_objects(bucket="your-media-bucket"):
-    """{key: size} for every .mp4 in the bucket, or None if the listing failed."""
+def s3_objects(ctx):
+    """{key: size} for every .mp4 in the configured bucket, or None.
+
+    None means "could not find out" — no bucket configured, aws missing, no
+    credentials, network down. Every caller treats that as unproven rather than
+    as an empty bucket, which is why there is no default bucket name here: a
+    wrong-but-plausible one would answer the question with someone else's data.
+    """
+    if not ctx.s3_bucket:
+        return None
+    cmd = ["aws", "s3", "ls", "s3://%s/" % ctx.s3_bucket, "--recursive"]
+    if ctx.s3_region:
+        cmd += ["--region", ctx.s3_region]
     try:
-        p = subprocess.run(["aws", "s3", "ls", "s3://%s/" % bucket, "--recursive"],
-                           capture_output=True, text=True, timeout=180)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if p.returncode != 0:
@@ -2644,7 +2736,13 @@ def s3_objects(bucket="your-media-bucket"):
 
 def deleted_ids(ctx):
     """Trip ids the admin flagged mode=delete — upload-videos-s3.sh skips these,
-    so they must not count as 'missing from S3' when we verify the sync."""
+    so they must not count as 'missing from S3' when we verify the sync.
+
+    No site repo means no curation file and so no exclusions: everything local
+    is expected on S3.
+    """
+    if ctx.site is None:
+        return set()
     p = ctx.site / "admin.json"
     if not p.is_file():
         return set()
@@ -2664,10 +2762,12 @@ def verify_s3(ctx, quiet=False):
     """
     local = rendered_mp4s(ctx.out_dir)
     skip = deleted_ids(ctx)
-    objs = s3_objects()
+    objs = s3_objects(ctx)
     if objs is None:
         if not quiet:
-            print(C.red("  Could not list the bucket (aws missing, no credentials, or network)."))
+            print(C.red("  Could not list %s (no s3_bucket configured, aws missing, "
+                        "no credentials, or network)."
+                        % ("s3://%s" % ctx.s3_bucket if ctx.s3_bucket else "the bucket")))
         return None, [], []
     missing, mismatched = [], []
     for p in local:
@@ -2683,10 +2783,15 @@ def verify_s3(ctx, quiet=False):
 
 
 def step_upload(ctx):
-    """Sync the rendered mp4s to the private S3 bucket, then verify."""
+    """Sync the rendered mp4s to the configured S3 bucket, then verify."""
     started = time.time()
-    if not ctx.site.is_dir():
-        return record(ctx, "Upload videos to S3", FAILED, started, "site repo missing")
+    # The menu greys this step out when the config is absent, so reaching here
+    # without it means something bypassed the menu (--steps). Say the same thing
+    # the greyed line says rather than crashing on a None.
+    reason = upload_blocked(ctx)
+    if reason:
+        print(C.red("  %s" % reason))
+        return record(ctx, "Upload videos to S3", SKIPPED, started, reason)
     if not shutil.which("aws"):
         print(C.red("  awscli not found. brew install awscli && aws configure"))
         return record(ctx, "Upload videos to S3", FAILED, started, "awscli missing")
@@ -2706,7 +2811,12 @@ def step_upload(ctx):
         print(C.yellow("  No rendered mp4s under %s — nothing to upload." % ctx.out_dir))
         return record(ctx, "Upload videos to S3", SKIPPED, started, "no renders")
     total = sum(p.stat().st_size for p in local)
-    print("  %d local mp4 (%s) -> s3://your-media-bucket" % (len(local), human_bytes(total)))
+    print("  %d local mp4 (%s) -> s3://%s%s" % (
+        len(local), human_bytes(total), ctx.s3_bucket,
+        " (%s)" % ctx.s3_region if ctx.s3_region else ""))
+    print(C.dim("  The script decides the destination; s3_bucket is what this CLI"))
+    print(C.dim("  verifies against afterwards. If they name different buckets the"))
+    print(C.dim("  verification fails, which is the intended way to find that out."))
     # No second confirmation: the menu already asked "Go?", and the line above
     # states the size and the destination. Two prompts for one decision is how
     # you teach someone to stop reading them — which costs most at the steps that
@@ -2739,18 +2849,20 @@ def step_upload(ctx):
 
 
 def step_deploy(ctx):
-    """Push the site to EC2. SIGNED_VIDEOS=1 is not optional — see below."""
+    """Run the site repo's deploy script. SIGNED_VIDEOS=1 is not optional — see below."""
     started = time.time()
-    if not ctx.site.is_dir():
-        return record(ctx, "Deploy site", FAILED, started, "site repo missing")
+    reason = deploy_blocked(ctx)
+    if reason:
+        print(C.red("  %s" % reason))
+        return record(ctx, "Deploy site", SKIPPED, started, reason)
 
     print(C.dim("  deploy-site.sh pulls the live curation + trips.json first (the live"))
     print(C.dim("  site is the merge base), re-indexes, then rsyncs public_html/."))
     print(C.yellow("  SIGNED_VIDEOS=1 is set for this run."))
-    print(C.dim("  Since 2026-07-26 the bucket is PRIVATE. Deploying without SIGNED_VIDEOS=1"))
-    print(C.dim("  writes a config.js pointing the page at raw S3 URLs, which now 403 —"))
-    print(C.dim("  the site comes up and no video plays. There is no reason to deploy"))
-    print(C.dim("  without it while the bucket is private, so this CLI always sets it."))
+    print(C.dim("  It is set unconditionally because the alternative is a silent failure:"))
+    print(C.dim("  against a private bucket, deploying without it writes a config.js"))
+    print(C.dim("  pointing the page at raw S3 URLs, which 403 — the site comes up and no"))
+    print(C.dim("  video plays. A deploy script that ignores the variable is unaffected."))
     # As with Upload: the menu asked, and the target is printed above. One
     # decision, one prompt.
 
@@ -2779,6 +2891,8 @@ def is_complete_summary(ctx):
     pin the guard shut forever after the first deletion. We re-count from its
     table instead, skipping the flagged trips.
     """
+    if not ctx.site_script("deploy", "is-complete.py"):
+        return None, None, ["no deploy/is-complete.py to run"]
     try:
         p = subprocess.run(["python3", "deploy/is-complete.py", str(ctx.out_dir)],
                            cwd=str(ctx.site), capture_output=True, text=True, timeout=900)
@@ -2816,12 +2930,18 @@ def is_complete_summary(ctx):
 def step_delete_import(ctx):
     """Erase the original footage of one import. Unrecoverable — heavily gated.
 
-    Three independent things must hold before the prompt even appears:
+    Up to three independent things must hold before the prompt even appears:
       1. every renderable trip in that import has a rendered mp4 locally,
       2. every rendered mp4 is on S3 with a matching size,
       3. is-complete.py agrees every trip is fully published (S3 + live site).
     Then the word DELETE has to be typed. A y/n here is too easy to fat-finger
     for an action that destroys tens of GB of irreplaceable source footage.
+
+    Guards 2 and 3 need a bucket and a site repo. Where those are not
+    configured the proof does not exist, and the one thing this must not do is
+    quietly count an unasked question as a pass — nothing was checked, so the
+    renders under <out> are the only copy of that footage in the world. That is
+    stated in place of the missing guards, and the DELETE prompt still stands.
     """
     started = time.time()
     root = pick_import(ctx, "deletion")
@@ -2856,12 +2976,26 @@ def step_delete_import(ctx):
         files, C.bold(human_bytes(size))))
     print()
 
+    # Which proofs are even possible here depends on what is configured, so the
+    # count comes first and the guards number themselves against it. Writing
+    # "[1/3]" when only one check can run would claim two that never happened.
+    can_s3 = bool(ctx.s3_bucket)
+    can_site = bool(ctx.site_script("deploy", "is-complete.py"))
+    n_guards = 1 + int(can_s3) + int(can_site)
+    guard = 0
+
+    def guard_label(text):
+        """'  [2/3] present on S3 ......... ' — padded so the verdicts line up
+        whatever the guard count is."""
+        return "  [%d/%d] %s " % (guard, n_guards, (text + " ").ljust(30, "."))
+
     # --- guard 1: everything renderable in this import has actually been rendered.
     # Renders are namespaced by import folder name (out_dir/<import name>/<day>/),
     # so this compares like with like and ignores other imports' output.
     ns = ctx.out_dir / root.name
     ns_mp4s = rendered_mp4s(ns)
-    print("  [1/3] rendered locally ... ", end="")
+    guard += 1
+    print(guard_label("rendered locally"), end="")
     sys.stdout.flush()
     if not ns_mp4s:
         print(C.red("no"))
@@ -2872,7 +3006,7 @@ def step_delete_import(ctx):
     # the clips and their GPX, so it cannot describe a different card. Demanding
     # a scan "in this session" was a stand-in for "we know what is on the card";
     # since the cache persists, the session is no longer what decides that, and
-    # refusing on it sent you to re-run step 2 purely to satisfy bookkeeping.
+    # refusing on it sent you to re-run the listing purely to satisfy bookkeeping.
     expect = None
     if ctx.last_scan and ctx.last_scan.root == root:
         expect, src = ctx.last_scan.renderable, "this session's scan"
@@ -2884,7 +3018,8 @@ def step_delete_import(ctx):
             src = "the cached grouping"
     if expect is None:
         print(C.yellow("%d mp4, but the trip grouping could not be read" % len(ns_mp4s)))
-        print(C.yellow("        Cannot prove every trip was rendered. Run step 2 first."))
+        print(C.yellow("        Cannot prove every trip was rendered. Run %d) %s first."
+                       % (step_num(step_list), SHORT[step_num(step_list)])))
         return record(ctx, "Delete import source", SKIPPED, started, "refused: no grouping to compare against")
     if len(ns_mp4s) < expect:
         print(C.red("no"))
@@ -2895,41 +3030,60 @@ def step_delete_import(ctx):
     print(C.green("yes (%d mp4 for %d renderable trip(s), per %s)" % (len(ns_mp4s), expect, src)))
 
     # --- guard 2: those mp4s are on S3, byte-size matched.
-    print("  [2/3] present on S3 ..... ", end="")
-    sys.stdout.flush()
-    ok, missing, mismatched = verify_s3(ctx, quiet=True)
-    if ok is None:
-        print(C.red("unknown"))
-        print(C.red("        Could not list the bucket. Refusing to delete on an unknown."))
-        return record(ctx, "Delete import source", SKIPPED, started, "refused: S3 unverifiable")
-    if not ok:
-        print(C.red("no"))
-        for k in (missing + mismatched)[:10]:
-            print(C.red("        %s" % k))
-        return record(ctx, "Delete import source", SKIPPED, started,
-                      "refused: %d missing / %d mismatched on S3" % (len(missing), len(mismatched)))
-    print(C.green("yes"))
+    if can_s3:
+        guard += 1
+        print(guard_label("present on s3://%s" % ctx.s3_bucket), end="")
+        sys.stdout.flush()
+        ok, missing, mismatched = verify_s3(ctx, quiet=True)
+        if ok is None:
+            print(C.red("unknown"))
+            print(C.red("        Could not list the bucket. Refusing to delete on an unknown."))
+            return record(ctx, "Delete import source", SKIPPED, started, "refused: S3 unverifiable")
+        if not ok:
+            print(C.red("no"))
+            for k in (missing + mismatched)[:10]:
+                print(C.red("        %s" % k))
+            return record(ctx, "Delete import source", SKIPPED, started,
+                          "refused: %d missing / %d mismatched on S3" % (len(missing), len(mismatched)))
+        print(C.green("yes"))
 
     # --- guard 3: the site actually serves them.
-    print("  [3/3] published on the site (is-complete.py) ... ", end="")
-    sys.stdout.flush()
-    safe, total, out_lines = is_complete_summary(ctx)
-    if safe is None:
-        print(C.red("unknown"))
-        for l in out_lines[-15:]:
-            print(C.dim("        " + l))
-        return record(ctx, "Delete import source", SKIPPED, started, "refused: is-complete.py inconclusive")
-    if total == 0 or safe < total:
-        print(C.red("no (%s/%s)" % (safe, total)))
-        for l in out_lines:
-            print(C.dim("        " + l))
-        return record(ctx, "Delete import source", SKIPPED, started,
-                      "refused: %s/%s trips fully published" % (safe, total))
-    print(C.green("yes (%d/%d)" % (safe, total)))
+    if can_site:
+        guard += 1
+        print(guard_label("published on the site (is-complete.py)"), end="")
+        sys.stdout.flush()
+        safe, total, out_lines = is_complete_summary(ctx)
+        if safe is None:
+            print(C.red("unknown"))
+            for l in out_lines[-15:]:
+                print(C.dim("        " + l))
+            return record(ctx, "Delete import source", SKIPPED, started, "refused: is-complete.py inconclusive")
+        if total == 0 or safe < total:
+            print(C.red("no (%s/%s)" % (safe, total)))
+            for l in out_lines:
+                print(C.dim("        " + l))
+            return record(ctx, "Delete import source", SKIPPED, started,
+                          "refused: %s/%s trips fully published" % (safe, total))
+        print(C.green("yes (%d/%d)" % (safe, total)))
 
     print()
     print(C.red("  Deleting %s removes %s of original footage permanently." % (target, human_bytes(size))))
-    print(C.dim("  The renders and their S3 copies stay; the raw clips do not come back."))
+    if can_s3 and can_site:
+        print(C.dim("  The renders and their S3 copies stay; the raw clips do not come back."))
+    else:
+        # The unconfigured case. Not a warning about missing setup — a statement
+        # of what survives this, which is strictly less than it would be with a
+        # bucket and a site behind it. The check that could not run is named, so
+        # it is obvious this passed unexamined rather than passed.
+        print(C.red("  Publication was NOT verified — it could not be:"))
+        if not can_s3:
+            print(C.red("    no s3_bucket in config.txt, so no copy off this machine was checked"))
+        if not can_site:
+            print(C.red("    no site_repo in config.txt, so no published copy was checked"))
+        print(C.red("  The renders under %s are therefore the only" % tilde(ctx.out_dir)))
+        print(C.red("  copy of this footage that exists. Lose that disk and the drive is gone."))
+        print(C.dim("  Back the renders up elsewhere first, or leave the import where it is —"))
+        print(C.dim("  keeping it costs disk, not data."))
     answer = ask("  Type DELETE to erase it, anything else to cancel: ")
     if answer != "DELETE":
         print("  Cancelled.")
@@ -2969,9 +3123,27 @@ STEPS = [
 ]
 # Site sits at 6 rather than at the end because that is where it belongs in the
 # sequence: it is the last step that needs nothing but this machine. Everything
-# from 7 on reaches for the sibling repo, the bucket and the server, and in the
-# public edition those are simply absent — so the generic pipeline is 1-6 and
-# the private tail is 7-9, which the numbering should show rather than hide.
+# from 7 on reaches for a second repo, a bucket and a server.
+#
+# This table does NOT change with the configuration. When the publishing half is
+# unconfigured its steps are greyed out with the key that would enable them
+# (see NOOP_CHECK below), not removed — so every number means the same thing on
+# every machine, and someone who has never set any of it up can see that the
+# publishing half exists and what turns it on. A menu that renumbers itself
+# would make every sentence anyone writes about "step 5" true only locally.
+
+
+def step_num(fn):
+    """The number a step function currently sits at.
+
+    Prose that names a step reads it from here. The numbers are fixed, but they
+    are fixed in one place; a sentence with a literal number in it is a second
+    place, and second places go stale silently.
+    """
+    for n, _name, f, _in_all in STEPS:
+        if f is fn:
+            return n
+    return 0
 
 
 def _compact_ranges(nums):
@@ -3009,7 +3181,7 @@ SHORT = {
 #
 # Necessary but not sufficient — see fast_enough(). A confirmation guarding
 # nothing is noise, but one guarding a two-minute wait earns its place.
-NO_CONFIRM = {2, 3, 6}
+NO_CONFIRM = {step_num(step_list), step_num(step_preview), step_num(step_site)}
 
 # Steps that ask their own questions once they have something to show. The menu's
 # "Go?" comes BEFORE any of that, so for these it asks you to commit to a
@@ -3019,7 +3191,8 @@ NO_CONFIRM = {2, 3, 6}
 #
 # Upload and Deploy are deliberately NOT here: their inner prompt was removed, so
 # the menu is their only gate before something leaves this machine.
-SELF_CONFIRMS = {1, 4, 5, 9}
+SELF_CONFIRMS = {step_num(step_import), step_num(step_drop_trip),
+                 step_num(step_render), step_num(step_delete_import)}
 
 
 def fast_enough(ctx, n):
@@ -3038,7 +3211,7 @@ def fast_enough(ctx, n):
     """
     if n not in NO_CONFIRM:
         return False
-    if n == 6:
+    if n == step_num(step_site):
         # Site is instant on a rebuild and costs one ffmpeg seek per trip on the
         # first one — seconds either way, but "seconds each for forty trips" is
         # long enough to be worth agreeing to once. The site directory existing
@@ -3070,15 +3243,58 @@ def _noop_import(ctx):
         n = clip_count(cands[0])
         # Terse on purpose: this sits under the menu on every draw, so a long
         # sentence there costs a line of a narrow screen every time.
-        return "already have %s clips — select 3 or 5" % n
+        return "already have %s clips — select %d or %d" % (
+            n, step_num(step_preview), step_num(step_render))
     return None
 
 
-# A step can declare that, right now, it would do nothing. Asking "Go?" for a
-# step that is about to no-op is a confirmation guarding nothing, and worse it is
-# practice at pressing enter — the habit you least want by the time step 9 asks.
-# Answer the question at selection time instead, and do not run it at all.
-NOOP_CHECK = {1: _noop_import}
+def deploy_blocked(ctx):
+    """Why Deploy cannot run, or None.
+
+    The reason names the config key, because this line is where someone who
+    cloned the repo finds out that publishing exists at all. "not configured"
+    would tell them nothing they can act on.
+    """
+    if ctx.site is None:
+        return "needs site_repo in config.txt"
+    if not ctx.site.is_dir():
+        return "site_repo not found: %s" % tilde(ctx.site)
+    if not ctx.site_script("deploy", "deploy-site.sh"):
+        return "no deploy/deploy-site.sh in %s" % tilde(ctx.site)
+    return None
+
+
+def upload_blocked(ctx):
+    """Why Upload cannot run, or None.
+
+    The bucket is named first when both are missing: it is the setting that
+    distinguishes this step from Deploy, and the site repo is asked for on the
+    line below anyway. Without the bucket the sync could still run, but its
+    result could not be verified — and `aws s3 sync` exits 0 on failed objects,
+    so an unverifiable upload is one this CLI has no business reporting on.
+    """
+    if not ctx.s3_bucket:
+        return "needs s3_bucket in config.txt"
+    if ctx.site is None:
+        return "needs site_repo in config.txt"
+    if not ctx.site.is_dir():
+        return "site_repo not found: %s" % tilde(ctx.site)
+    if not ctx.site_script("deploy", "upload-videos-s3.sh"):
+        return "no deploy/upload-videos-s3.sh in %s" % tilde(ctx.site)
+    return None
+
+
+# A step can declare that, right now, it would do nothing — either because there
+# is nothing to do (Import with the sink already full) or because the config it
+# needs is absent (Upload, Deploy). Asking "Go?" for such a step is a
+# confirmation guarding nothing, and worse it is practice at pressing enter —
+# the habit you least want by the time the delete step asks. Answer at selection
+# time instead, greyed in the menu with the reason underneath, and do not run it.
+NOOP_CHECK = {
+    step_num(step_import): _noop_import,
+    step_num(step_upload): upload_blocked,
+    step_num(step_deploy): deploy_blocked,
+}
 DESC = {
     1: "Copy the card's DCIM tree into the import sink, verify, then optionally erase the card.",
     2: "Scan the import and print the trip table. Reads nothing else, changes nothing.",
@@ -3086,8 +3302,8 @@ DESC = {
     4: "Delete a trip's source clips from the import so it is never rendered or uploaded.",
     5: "Encode the chosen trips. The slow step: hours for a full card.",
     6: "Build <out>/site: a browsable local site from the renders. Nothing leaves this machine.",
-    7: "Sync the mp4s to the Zurich bucket. Slow on a home uplink; resumes if interrupted.",
-    8: "Push the site to EC2 with SIGNED_VIDEOS=1, so clips load as signed CloudFront URLs.",
+    7: "Sync the mp4s to the configured bucket, then verify. Slow on a home uplink; resumes.",
+    8: "Run the site repo's deploy script with SIGNED_VIDEOS=1, so clips load as signed URLs.",
     9: "Erase the whole import source. Only after everything is rendered and published.",
 }
 
@@ -3255,14 +3471,17 @@ def main(argv=None):
         description="Interactive driver for the dashcam publishing pipeline.",
         epilog="Runs the same scripts the READMEs document; it adds status, "
                "step selection, progress and a summary.")
-    ap.add_argument("--site-repo", help="path to the goodnight-drives repo "
-                                        "(default: sibling of this repo, or $GOODNIGHT_DRIVES_DIR)")
+    ap.add_argument("--site-repo", help="path to the publishing repo (build_manifest.py, "
+                                        "deploy/*.sh). Overrides site_repo in config.txt "
+                                        "and $GOODNIGHT_DRIVES_DIR; unset means no "
+                                        "Upload/Deploy.")
     ap.add_argument("--config", help="path to config.txt (default: this repo's)")
     ap.add_argument("--card", help="SD card mount point (default: %s)" % DEFAULT_CARD)
     ap.add_argument("--steps", help="run these steps and exit, e.g. '5-8' or 'all'. "
                                     "Still prompts for confirmations.")
     ap.add_argument("--offline", action="store_true",
-                    help="skip the live-site lookups in the status screen")
+                    help="skip the live-site lookup in the status screen (already "
+                         "skipped when live_trips_url is unset)")
     ap.add_argument("--no-color", action="store_true", help="plain output, no ANSI")
     args = ap.parse_args(argv)
 
@@ -3272,7 +3491,13 @@ def main(argv=None):
     ctx = Ctx(args)
 
     print()
-    print(C.bold("  dashcam pipeline") + C.dim("   card -> render -> S3 -> site"))
+    # The subtitle states what this installation actually does, which is not the
+    # same on every machine: with nothing configured the chain really does stop
+    # at a local site, and saying "-> S3 -> site" there would be a promise the
+    # greyed-out menu below then breaks.
+    chain = "card -> render -> S3 -> site" if (ctx.s3_bucket and ctx.site) else (
+        "card -> render -> site" if ctx.site else "card -> render -> local site")
+    print(C.bold("  dashcam pipeline") + C.dim("   " + chain))
     # Checked before the status screen: there is nothing useful to show if the
     # numbers behind it would come from the wrong grouping.
     if not require_ego_motion(ctx):
@@ -3328,7 +3553,7 @@ def main(argv=None):
                     print(C.dim("     " + DESC[n]))
                 # Only ask before something that writes, sends or takes a while.
                 # Confirming a read-only scan just trains you to hit enter, which
-                # is exactly the habit you do not want by the time step 9 asks.
+                # is exactly the habit you do not want by the time the delete step asks.
                 skip = all((n in NO_CONFIRM and fast_enough(ctx, n)) or n in SELF_CONFIRMS
                            for n in picked)
                 if not skip:

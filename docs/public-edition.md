@@ -4,7 +4,11 @@ Goal: someone clones this, points it at their card, and gets rendered trips plus
 a browsable site on their own machine. No S3, no EC2, no second repo, nothing
 that assumes raoulsson.com exists.
 
-## What is actually entangled
+## What was actually entangled
+
+This was the diagnosis, and it is now the changelog: every row below is
+configurable and unset by default. Kept because it is still the shortest
+description of where the private half lives.
 
 Less than it looks. The renderer (`make_dashcam_videos.py`) is already
 self-contained — it reads a card and writes trips into `--out`, and knows nothing
@@ -26,20 +30,46 @@ import, scan, preview, drop, render — is generic.
 
 **One codebase, not a fork.** A fork means every fix lands twice and drifts; and
 the public edition is not a different program, it is this one with the private
-tail absent. So: the private steps appear only when a site repo is configured.
+tail absent. So the private half moved into config.txt, all of it unset by
+default:
 
 ```
-# config.txt
-#site_repo = ~/dev/your-site     # unset in the public edition
+# config.txt — the PUBLISHING section, all optional
+#site_repo      = ~/dev/your-site
+#s3_bucket      = my-bucket
+#s3_region      = eu-central-2
+#live_trips_url = https://example.com/trips.json
 ```
 
-- **unset** (the default, and what a clone gets): Import, List, Preview, Drop,
-  Render, Site. Everything lands under `out`.
-- **set and present**: the four private steps appear as they do today.
+**Disabled, not hidden.** The first draft of this said the private steps would
+*appear* only when configured. They do not: every step is always in the menu at
+its own fixed number, and the ones whose config is absent are greyed out with
+the key that would enable them printed underneath —
 
-That also fixes a smaller thing: today the CLI prints "goodnight-drives repo not
-found — steps 6-8 will not run" at anyone who does not have it, which is noise
-about a repo they have never heard of.
+```
+   7) needs s3_bucket in config.txt
+   8) needs site_repo in config.txt
+```
+
+Two reasons, and both were worth more than the tidiness of a shorter menu. The
+numbering never shifts between setups, so anything anyone writes about "step 5"
+is true on every machine. And the greyed line is the discovery path: a stranger
+can see that publishing exists and exactly what turns it on, in the place they
+are already looking. The mechanism was already there — `NOOP_CHECK` /
+`unavailable_steps()`, which greys Import when the sink is already full.
+
+- **nothing set** (the default, and what a clone gets): Import, List, Preview,
+  Drop, Render, Site run; Upload and Deploy are greyed. Everything lands under
+  `out`, and nothing contacts a network host.
+- **`site_repo` set**: Deploy lights up.
+- **`site_repo` + `s3_bucket`**: Upload lights up too, and the status screen
+  grows the Prepared row; `live_trips_url` adds the Live site row and is the
+  only thing that makes the CLI fetch anything at startup.
+
+That also fixes a smaller thing: the CLI used to print "goodnight-drives repo
+not found — steps 7-9 will not run" at anyone who did not have it, which is
+noise about a repo they have never heard of. It is gone; a disabled step says
+for itself why it is disabled.
 
 ## The Site step
 

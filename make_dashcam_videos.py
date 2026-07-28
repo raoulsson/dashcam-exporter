@@ -431,6 +431,72 @@ software = true
 # Software H.264 (libx264) tuning.
 #x264_preset = veryfast
 #x264_crf    = 26
+
+
+# ============================================================================
+# PUBLISHING — all optional, all unset by default
+# ============================================================================
+#
+# Nothing below is needed to use this repo. Unset (a fresh clone) the pipeline
+# is: import the card, render the trips, build a browsable site under <out>/site
+# and open it with file://. That path touches no network host and no account.
+#
+# These four settings are read by pipeline.py, not by the renderer. They exist
+# because the publishing half of this pipeline — a bucket the videos live in and
+# a website that serves them — is one person's setup, and hardcoding it would
+# mean every clone reaching for a checkout it does not have and a host it has
+# never heard of. Set them and the Upload and Deploy steps in the menu light up.
+# Leave them and those steps stay in the menu, greyed out, with the key that
+# would enable them printed underneath. The step NUMBERS never move, so a note
+# saying "run 5" means the same thing on every machine.
+
+# The second repo, holding what it takes to publish. pipeline.py runs three
+# things out of it and nothing else, so anything providing them works:
+#   build_manifest.py           indexes the render tree into public_html/trips.json
+#   deploy/upload-videos-s3.sh  syncs the mp4s to the bucket ($1 = source dir)
+#   deploy/deploy-site.sh       pushes public_html/ to wherever the site is served
+#   deploy/is-complete.py       (optional) prints a per-trip published/not table;
+#                               the delete guard reads it, see below
+# Setting this enables Deploy. --site-repo overrides it for one run.
+#site_repo = ~/dev/your-site
+
+# The bucket the videos end up in. Setting it (together with site_repo) enables
+# Upload. It is NOT how the sync is aimed — upload-videos-s3.sh picks its own
+# destination — it is what this CLI lists afterwards to prove the sync landed,
+# because `aws s3 sync` exits 0 even when individual objects fail. Name the same
+# bucket the script uploads to; if the two disagree, verification fails, which
+# is the intended way to discover it. Needs awscli configured.
+#s3_bucket = my-bucket
+
+# Only needed when the bucket is not in the credentials' default region — an
+# eu-central-2 bucket listed with a us-east-1 default fails.
+#s3_region = eu-central-2
+
+# The deployed site's manifest, read once at startup for one status line. Unset
+# means no request is made at all — not a request that quietly fails. This is
+# the only thing here that would otherwise touch the network on every launch,
+# which is why it is a setting rather than a constant.
+#live_trips_url = https://example.com/trips.json
+
+# THE DELETE GUARD. "Delete import source" erases the original clips, and what
+# it can prove first depends on what is set here. It always checks that every
+# renderable trip in the import has an mp4 on disk. With s3_bucket it also
+# checks every mp4 is in the bucket at a matching size; with site_repo (and
+# deploy/is-complete.py) it also checks the site actually serves them. With
+# neither, those checks are not silently skipped — it says plainly that
+# publication could not be verified and that the renders under <out> are then
+# the only copy of that footage, and still makes you type DELETE.
+
+# REPRODUCING THE FULL SETUP, if you want it. The shape is: an S3 bucket holding
+# the mp4s (private, fronted by CloudFront with signed URLs — deploy-site.sh
+# takes SIGNED_VIDEOS=1 for that), and a small static site on a host of your
+# choice whose pages point at those URLs. build_manifest.py turns the render
+# tree into the JSON the pages read; the deploy script rsyncs the result. None
+# of that is provided here — this repo produces the videos and their sidecars,
+# and <out>/site is a working example of a site built from them, with relative
+# links and no build step. Copy that directory plus the mp4s to any web root and
+# it is already a website; the S3 + CloudFront route only buys you private,
+# signed delivery and somewhere to keep tens of GB that is not your laptop.
 """
 
 # Parking detection / "Fast forwarding..." transition defaults
