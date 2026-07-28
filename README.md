@@ -138,15 +138,16 @@ contiguous driving segment, so each engine-on leg is its own polyline:
 ~/dashcam-data/                     <- the workspace root
 |-- import/                         <- import_dir: footage being worked on
 |   `-- 2026-07-28/DCIM/...         <- one folder per import
+|-- final_2026-07-28/               <- the finished deliverable, BESIDE output/
+|                                      (output/ is swept on every import)
 `-- output/                         <- derived from import_dir; renders land here
-    |-- import/2026-07-28/          <- rendered trips, by source day
+    |-- 2026-07-28/                 <- rendered trips, namespaced by the import
     |   |-- trip_2026-07-28_08-57_01_h1080.mp4
     |   |-- trip_2026-07-28_08-57_01.gpx
     |   |-- trip_2026-07-28_08-57_01.html       <- interactive map
     |   |-- trip_2026-07-28_08-57_01_meta.json  <- the state that outlives the video
     |   `-- trip_2026-07-28_08-57_01_links.txt
     |-- previews/preview_2026-07-28.html        <- the contact sheet
-    |-- final_2026-07-28/                       <- the finished deliverable
     |-- logs/run-20260728-192417.log
     |-- .imported.json                          <- the ledger
     `-- .owned-by                               <- which checkout owns this dir
@@ -254,7 +255,7 @@ The handful most people touch:
 | `output_height` | `1080` | 720 and 540 are much smaller files |
 | `x264_crf` | `26` | quality; lower is bigger and better |
 | `speed_colour` | `true` | colour the route by speed |
-| `final_dir` | the output dir | where the finished folder is gathered |
+| `final_dir` | beside the output dir | where the finished folder is gathered |
 
 Two environment variables still apply, because they are conventions rather than
 settings of this tool: `NO_COLOR` disables colour, and `DASHCAM_IMPORT_ROOT`

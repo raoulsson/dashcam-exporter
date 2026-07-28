@@ -6,7 +6,7 @@ watermark), a moving-marker map widget + stats panel, automatic parking-skip,
 and per-trip HTML / GPX / links / meta sidecars. DDPAI-specific (tested on Mola
 N3 Pro). macOS-first (hardware VideoToolbox); Linux works via libx264.
 
-Almost everything lives in one file: `make_dashcam_videos.py` (~3000 lines).
+Almost everything lives in one file: `make_dashcam_videos.py` (~4500 lines).
 There is no package, no tests — it's a prototype script. Reshaping it is fine;
 less code is better.
 
@@ -17,8 +17,9 @@ day). `group_into_trips` is a **park-to-park state machine**: a boundary is the
 car actually PARKING at the anchor, not a radius crossing.
 
 - **Anchor** = where the car last parked (carried forward; a configured `home`
-  is an extra always-valid park target). `home` comes from a **gitignored `.env`**
-  (`SET_HOME_LAT/LON/RADIUS_M`) via `load_dotenv`, NEVER config.txt (public repo).
+`home_lat` / `home_lon` / `home_radius_m` are read from config.txt; the
+gitignored .env still WINS for the coordinates (SET_HOME_LAT / SET_HOME_LON),
+which is where a real address belongs. config.txt ships a Zurich example.
 - **DEPART → drive → ARRIVE+PARK.** Departure found by `find_drive_away_by_video`
   (median optical flow rises), arrival by `find_park_second_by_video` (flow
   falls to baseline and stays). GPS position only gates WHICH clips get the
@@ -120,9 +121,14 @@ Pass `--root <import-folder>` and `--out <output-dir>`. Do NOT bake these
 absolute personal paths into the tracked `config.txt` (shared template) — set
 them per-run, in the wrapper-script OPTS, or a local uncommitted config.
 
-Importing a card: `./import-sd-card.sh [YYYY-MM-DD] [--keep] [--checksum]` copies
-`/Volumes/NO NAME/DCIM` into `import/<day>/`, verifies, then deletes the
-card's FILES only (keeps the DCIM folder tree). Nothing is deleted until verified.
+Importing a card: `./import-sd-card.sh [YYYY-MM-DD] [--delete] [--checksum] [--src PATH]` copies
+the card's `DCIM` into `<import_dir>/<day>/`, verifies file-for-file, and KEEPS
+the card — deletion is opt-in via `--delete`, and `--keep` survives only as a
+back-compat no-op. With `--delete` it removes the card's files and keeps the
+folder tree so the camera can record. Nothing is deleted until the verify pass
+succeeds, and the verify refuses if rsync itself failed. `AFTER_STAMP` in the
+environment makes it a delta copy; `--delete` is refused after one, because the
+skipped clips were verified by an earlier run this script cannot see.
 
 ## Running
 
@@ -146,8 +152,9 @@ card's FILES only (keeps the DCIM folder tree). Nothing is deleted until verifie
 
 ## Output files per trip
 
-Under `out_dir/<extract-day>/`: `trip_<day>_<HH-MM>_<NN>[_hHHH].mp4` (NN = global
-1-based index; size tag omitted at native 1080), plus un-tagged `.html`, `.gpx`,
+Under `out_dir/<extract-day>/`: `trip_<day>_<HH-MM>_<NN>_hHHH.mp4` (NN = the per-DAY
+publish index, restarting at 01 each day; the _h<height> tag is always written,
+native 1080 included), plus un-tagged `.html`, `.gpx`,
 `_links.txt`, and `_meta.json` (day, start/end, round_trip bool, fixes,
 distance). Each day folder also holds `info.txt` (source import folder).
 

@@ -5,7 +5,8 @@
 # the copy, then delete the source FILES from the card — keeping the DCIM folder
 # structure so the dashcam can keep recording into it. Nothing on the card is
 # deleted until the copy has been verified byte-count/– file-for-file, and the
-# verify is skipped entirely with --keep.
+#   The verify ALWAYS runs and always gates the delete; --keep is a
+#   back-compat no-op now that keeping the card is the default.
 #
 # The card is NOT erased by default. Import first, render, check the result —
 # then come back with --delete once you're happy. Deleting is still gated on the

@@ -44,6 +44,10 @@ import_dir = ~/dashcam-data/import
 #out = ~/dashcam-data/output
 
 
+# Re-encode even when the output already exists. Off by default: a finished mp4
+# is not rebuilt, which is what makes an interrupted render restartable.
+#force = false
+
 # ============================================================================
 # TRIP GROUPING
 # ============================================================================
@@ -83,8 +87,8 @@ import_dir = ~/dashcam-data/import
 # wins for the coordinates, precisely so a public file can hold an example.
 #
 # The RADIUS is not private, just a tuning knob like trip_return_m, so it stays
-# here. Metres from home that still count as "at home". Default 50.
-#home_radius_m = 50
+# here. Metres from home that still count as "at home". Default 100.
+#home_radius_m = 100
 
 # Return-to-anchor distance in metres. Back within this of where the trip
 # started closes the trip. Default 100.
@@ -408,14 +412,21 @@ software = true
 # which is why it is a setting rather than a constant.
 #live_trips_url = https://example.com/trips.json
 
-# THE DELETE GUARD. "Delete import source" erases the original clips, and what
-# it can prove first depends on what is set here. It always checks that every
-# renderable trip in the import has an mp4 on disk. With s3_bucket it also
-# checks every mp4 is in the bucket at a matching size; with site_repo (and
-# deploy/is-complete.py) it also checks the site actually serves them. With
-# neither, those checks are not silently skipped — it says plainly that
-# publication could not be verified and that the renders under <out> are then
-# the only copy of that footage, and still makes you type DELETE.
+# THE DELETE GUARD. "Delete SIM data" (9) erases the original clips, and what it
+# can prove first depends on what is set here.
+#
+# Two checks run and are ADVISORY: how many renderable trips have an mp4, and
+# whether those mp4s are in the bucket at a matching size. Neither refuses on its
+# own — a mismatch there is usually bookkeeping (a trip you dropped, a re-encode
+# changing a size), and refusing on it stranded gigabytes over something the site
+# had already settled.
+#
+# What decides is deploy/is-complete.py in the site repo: green deletes, anything
+# else refuses. With s3_bucket set but NO site_repo there is no site to ask, so
+# the bucket check becomes the decider rather than deferring to something that
+# will never run. With neither configured nothing can be verified: it says so in
+# red, keeps the renders instead of purging them, and still makes you type
+# DELETE.
 
 # REPRODUCING THE FULL SETUP, if you want it. The shape is: an S3 bucket holding
 # the mp4s (private, fronted by CloudFront with signed URLs — deploy-site.sh
@@ -441,7 +452,10 @@ software = true
 
 # Where the finished folders land. Each import becomes final_<newest trip day>,
 # holding the videos, the maps, the tracks and the page that links them — one
-# directory to move wherever you keep things. Defaults to the output dir; point
+# directory to move wherever you keep things. Unset, it lands BESIDE the output
+# dir (<parent of out>/final_<day>), deliberately: the output tree is swept on
+# every import and a finished deliverable must not be inside the thing that gets
+# emptied. Point
 # it at an external disk and the result arrives there instead of being carried
 # afterwards. An existing folder of the same name is merged into, never
 # overwritten.
@@ -469,7 +483,9 @@ software = true
 # ---------------------------------------------------------------------------
 
 # Where the card mounts. The DDPAI mounts as NO NAME unless you renamed it.
-# Read ONLY by the import step (status screen, and passed to import-sd-card.sh
+# Read by the import step (status screen, passed to import-sd-card.sh as --src)
+# and by steps 9 and 10, which erase it. Nothing renders from here.
+# (was: passed to import-sd-card.sh
 # as --src). Nothing renders from here — that is import_dir at the top.
 #card = /Volumes/NO NAME
 
