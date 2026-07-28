@@ -1918,8 +1918,12 @@ def step_render(ctx):
     cmd = ["./make-trips-rendered.sh"]
     cmd += idx.split()                       # bare integers become --drives
     cmd += ["--root", str(root), "--output-height", str(height)] + ctx.config_args
-    if not confirm("  Run: %s ?" % " ".join(cmd), True):
-        return record(ctx, "Render trips", SKIPPED, started, "declined")
+    # No confirmation here. Choosing the trips, the height and (when there is
+    # output to replace) the clean are three deliberate answers already; asking a
+    # fourth time with the command spelled out is the same decision again. The
+    # renderer records its own argv at the top of the run log, so what ran is
+    # still written down — just not asked about.
+    print(C.dim("  %s" % " ".join(cmd)))
 
     rc, _lines = run_stream(cmd, ctx.exporter, "Render", parser=make_render_parser(),
                             keep=lambda l: l.startswith("[Trip ") or l.strip().startswith("✓ "))

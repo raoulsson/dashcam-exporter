@@ -3355,6 +3355,10 @@ def main() -> int:
         # errors belong in the log, and an OS-level 2>&1 would bypass this
         # object entirely and never reach the file.
         sys.stdout = sys.stderr = _tee
+        # First line of the log: exactly what was run. The CLI no longer asks
+        # you to confirm the command, so the log is where it is written down.
+        import shlex
+        print("$ " + " ".join(shlex.quote(a) for a in sys.argv))
 
     # Handle --write-config and exit
     if args.write_config:
