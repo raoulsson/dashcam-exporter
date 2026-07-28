@@ -3731,16 +3731,16 @@ def step_clean_card(ctx):
 
 
 STEPS = [
-    (1, "Import from SD card", step_import, True),
+    (1, "Import from SIM", step_import, True),
     (2, "List trips (dry-run scan)", step_list, True),
-    (3, "Preview all trips (sidecars + stills, no encoding)", step_preview, True),
-    (4, "Drop trip from import (DESTRUCTIVE)", step_drop_trip, False),
-    (5, "Render trips", step_render, True),
-    (6, "Build local site", step_site, True),
-    (7, "Upload videos to S3", step_upload, True),
-    (8, "Deploy site (SIGNED_VIDEOS=1)", step_deploy, True),
-    (9, "Delete import source (DESTRUCTIVE)", step_delete_import, False),
-    (10, "Clean card (DESTRUCTIVE)", step_clean_card, False),
+    (3, "Preview trips (sidecars + stills, no encoding)", step_preview, True),
+    (4, "Exclude trip (DESTRUCTIVE)", step_drop_trip, False),
+    (5, "Render videos", step_render, True),
+    (6, "Create website", step_site, True),
+    (7, "Upload to site", step_upload, True),
+    (8, "Update site (SIGNED_VIDEOS=1)", step_deploy, True),
+    (9, "Delete SIM data (DESTRUCTIVE)", step_delete_import, False),
+    (10, "Clean SIM (DESTRUCTIVE)", step_clean_card, False),
 ]
 # Site sits at 6 rather than at the end because that is where it belongs in the
 # sequence: it is the last step that needs nothing but this machine. Everything
@@ -3790,8 +3790,9 @@ def solo_steps():
 # where there is room for it and where it is actually wanted. Keeping the long
 # names in the menu cost eleven lines every time round the loop.
 SHORT = {
-    1: "Import", 2: "List trips", 3: "Preview", 4: "Drop trip", 5: "Render",
-    6: "Site", 7: "Upload", 8: "Deploy", 9: "Del source", 10: "Clean card",
+    1: "Import from SIM", 2: "List trips", 3: "Preview trips", 4: "Exclude trip",
+    5: "Render videos", 6: "Create website", 7: "Upload to site",
+    8: "Update site", 9: "Delete SIM data", 10: "Clean SIM",
 }
 # Steps safe to start without a "Go?". Not "read-only" — Preview writes sidecars,
 # stills and the contact sheet, and Site writes a folder of pages. The test is
@@ -3936,16 +3937,16 @@ NOOP_CHECK = {
     step_num(step_deploy): deploy_blocked,
 }
 DESC = {
-    1: "Copy the card's DCIM tree into the import sink, verify, then optionally erase the card.",
+    1: "Copy the SIM's DCIM tree into the workspace and verify it file-for-file.",
     2: "Scan the import and print the trip table. Reads nothing else, changes nothing.",
     3: "Sidecars, a still per trip and a local contact sheet. No encoding, no deploy.",
-    4: "Delete a trip's source clips from the import so it is never rendered or uploaded.",
+    4: "Delete a trip's source clips so it is never rendered, uploaded or published.",
     5: "Encode the chosen trips. The slow step: hours for a full card.",
     6: "Build <out>/site: a browsable local site from the renders. Nothing leaves this machine.",
     7: "Sync the mp4s to the configured bucket, then verify. Slow on a home uplink; resumes.",
     8: "Run the site repo's deploy script with SIGNED_VIDEOS=1, so clips load as signed URLs.",
-    9: "Erase the import source, the renders AND the card. Only once the site serves every trip.",
-    10: "Erase the card's clips, keeping its folders. Refuses while anything on it is unimported.",
+    9: "Erase the imported footage, the renders AND the SIM. Only once the site serves every trip.",
+    10: "Erase the SIM's clips, keeping its folders. Refuses while anything on it is unimported.",
 }
 
 
@@ -3980,7 +3981,10 @@ def print_menu(ctx, blocked=None):
     print(rule())
     blocked = unavailable_steps(ctx) if blocked is None else blocked
     w = term_width()
-    cell = max(len(s) for s in SHORT.values()) + 6      # "! 9) Del source" + gap
+    # label + "! nn) " + a gap wide enough to read as a gap. At +6 the longest
+    # label left exactly one space before the next column, which reads as one
+    # run-on line rather than a grid.
+    cell = max(len(s) for s in SHORT.values()) + 9
     cols = max(1, min(4, w // cell))
     rows = (len(STEPS) + cols - 1) // cols
     ordered = sorted(STEPS, key=lambda s: s[0])
@@ -4002,7 +4006,10 @@ def print_menu(ctx, blocked=None):
                 mark = C.red("!")
                 body = C.red(label)
             txt = "%s %d) %s" % (mark, num, body)
-            pad = cell - (len(label) + 5)
+            # Measure the prefix rather than assuming it: "! 9) " is five
+            # characters and "! 10) " is six, so a fixed 5 put every column
+            # after a two-digit step one character out of line.
+            pad = cell - (len(label) + len(str(num)) + 4)
             line += txt + " " * max(1, pad)
         print("  " + line.rstrip())
     for num in sorted(blocked):
