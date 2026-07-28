@@ -3666,6 +3666,35 @@ def step_delete_import(ctx):
 # Clean the card — DESTRUCTIVE, and the only step whose target has no copy
 # ---------------------------------------------------------------------------
 
+def copy_still_exists(ctx):
+    """(ok, what) — is the footage the ledger claims actually still here?
+
+    The ledger records that a verified copy WAS made. It cannot notice that the
+    copy was later deleted, moved to a disk that is not plugged in, or lost to a
+    sweep — and "imported through X" reads identically in all those cases. On
+    its own it is a claim, and Clean SIM acting on a claim means erasing the
+    last copy of a drive because a 154-byte JSON file said not to worry.
+
+    So the ledger decides WHETHER the card's clips were ever copied, and this
+    decides whether that copy is still somewhere. Three kinds of evidence, best
+    first; any one is enough, and each is a thing you can go and look at.
+    """
+    ok, _why = import_is_expendable(ctx, ctx.render_root)
+    if ok:
+        return True, "published — it is on the site and in the bucket"
+    mp4s = rendered_mp4s(ctx.out_dir / ctx.render_root.name)
+    if mp4s:
+        return True, "%d rendered trip(s) in %s" % (len(mp4s), tilde(ctx.out_dir))
+    clips = 0
+    for cand in import_candidates(ctx):
+        front = cand / "DCIM" / "200video" / "front"
+        if front.is_dir():
+            clips += len(list(front.glob("*.mp4")))
+    if clips:
+        return True, "%d source clip(s) in the workspace" % clips
+    return False, ""
+
+
 def step_clean_card(ctx):
     """Erase the card's clips, keeping its folder structure.
 
@@ -3715,19 +3744,32 @@ def step_clean_card(ctx):
         return record(ctx, "Clean SIM", SKIPPED, started,
                       "refused: %d clip(s) not imported" % n_new)
 
+    have, what = copy_still_exists(ctx)
+    if not have:
+        print(C.red("  The ledger says imported through %s — but nothing on this" % after))
+        print(C.red("  machine holds it now. No source clips in the workspace, no"))
+        print(C.red("  renders, nothing published."))
+        print()
+        print(C.dim("  The ledger records that a copy was MADE. It cannot see that the"))
+        print(C.dim("  copy was deleted afterwards, and both look the same from here."))
+        print(C.dim("  If the footage is on another disk, that is fine — but this"))
+        print(C.dim("  machine cannot confirm it, and the card is the copy it can see."))
+        print(C.dim("  Refusing. Import again, or erase the card yourself."))
+        return record(ctx, "Clean SIM", SKIPPED, started,
+                      "refused: ledger claims imported, no copy found")
+
     print(C.green("  All %d clip(s) on the card were imported and verified." % n_old))
+    print(C.dim("  Still here: %s." % what))
     # Rendered and published is NOT required here, and deliberately so. The
     # import is a verified copy on a disk you control; requiring the whole
     # pipeline to finish before the card can be reused would keep the car
     # without a camera for as long as an encode and an upload take, which is the
     # thing the delta import exists to avoid.
     ok, why = import_is_expendable(ctx, ctx.render_root)
-    if ok:
-        print(C.dim("  Also already %s." % why))
-    else:
-        print(C.yellow("  Not yet rendered or published (%s)." % why))
-        print(C.dim("  That is fine for the card: the import is a verified copy. It"))
-        print(C.dim("  only means the local import is still the one you must not lose."))
+    if not ok:
+        print(C.yellow("  Not yet published (%s)." % why))
+        print(C.dim("  Fine for the card — the copy above is verified — but it does"))
+        print(C.dim("  mean that copy is now the only one, so do not lose it."))
     print()
     print(C.red("  Erasing %s from %s. The folders stay so the camera can record."
                 % (human_bytes(size), tilde(ctx.card))))
