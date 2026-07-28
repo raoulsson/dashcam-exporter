@@ -842,10 +842,18 @@ def hint_reset():
     _HINTED[0] = False
 
 
-def ask(prompt, default=""):
+def ask(prompt, default="", quits=True):
+    """quits: a bare q answers "take me back to the menu".
+
+    Ctrl-C already did this, but only if you knew — and inside a step every
+    prompt looks like it wants a value, so q was being read as one (as an index,
+    as a height). It raises the same Aborted that Ctrl-C does, which run_steps
+    catches per step, so the step stops and the menu comes back. Off at the menu
+    itself, where q is handled as a real answer.
+    """
     if not _HINTED[0]:
         _HINTED[0] = True
-        print(C.dim("  (ctrl-c to abort)"))
+        print(C.dim("  (q or ctrl-c to go back)"))
     # Ctrl-C at a prompt has to mean the same thing as Ctrl-C during a child
     # process: abort the step and let it be recorded, not slip out at exit 0.
     try:
@@ -853,12 +861,14 @@ def ask(prompt, default=""):
     except (EOFError, KeyboardInterrupt):
         print()
         raise Aborted()
+    if quits and s.lower() in ("q", "quit"):
+        raise Aborted()
     return s or default
 
 
 def confirm(prompt, default=False):
     suffix = " [Y/n] " if default else " [y/N] "
-    s = ask(prompt + suffix).lower()
+    s = ask(prompt + suffix).lower()      # q here aborts the step, as elsewhere
     if not s:
         return default
     return s in ("y", "yes")
@@ -2577,7 +2587,7 @@ def main(argv=None):
                 # typing should stand apart from the block above it.
                 print()
                 _HINTED[0] = True          # no hint on the menu itself
-                sel = ask("Select> ")
+                sel = ask("Select> ", quits=False)
                 if sel.lower() in ("q", "quit", "exit"):
                     break
                 if sel.lower() in ("s", "status", "0"):
