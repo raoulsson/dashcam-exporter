@@ -3579,6 +3579,95 @@ def step_delete_import(ctx):
 # 2-4 are the deciding phase: list what is on the card, look at it, throw away
 # what is not worth keeping. All of it happens before step 5, because encoding is
 # hours and uploading is days — pruning after either is paying for footage twice.
+# ---------------------------------------------------------------------------
+# Clean the card — DESTRUCTIVE, and the only step whose target has no copy
+# ---------------------------------------------------------------------------
+
+def step_clean_card(ctx):
+    """Erase the card's clips, keeping its folder structure.
+
+    Every other destructive step deletes something that exists elsewhere: the
+    drop step removes clips you decided not to keep, the delete step removes an
+    import already rendered and published. This one erases the original. Until
+    it has been copied, the card IS the footage.
+
+    So the guard is not "are you sure" but "is it somewhere else", and the
+    answer comes from the same high-water mark the delta import uses: a clip
+    stamped at or before it was copied by a run that verified file-for-file.
+    Anything newer has never been read by this machine, and no confirmation
+    makes deleting it recoverable — so that case refuses rather than asks.
+
+    Folders stay. The camera writes into DCIM/200video/{front,rear} and expects
+    them to exist; erasing the tree makes the next recording fail in the car,
+    which you would find out about later and far from a computer.
+    """
+    started = time.time()
+    dcim = ctx.card / "DCIM"
+    if not dcim.is_dir():
+        print(C.yellow("  No card at %s — nothing to clean." % ctx.card))
+        return record(ctx, "Clean card", SKIPPED, started, "no card")
+
+    files = [f for f in dcim.rglob("*") if f.is_file()]
+    size = sum(f.stat().st_size for f in files)
+    after = last_imported_stamp(ctx)
+    n_new, n_old = card_split(ctx.card, after)
+
+    print()
+    print("  Card:  %s" % tilde(ctx.card))
+    print("  Holds: %d file(s), %s" % (len(files), human_bytes(size)))
+    if after:
+        print("  Imported through %s" % C.bold(after))
+    print()
+
+    if not after:
+        print(C.red("  Nothing has ever been imported on this machine."))
+        print(C.red("  There is no record that any of this exists anywhere else."))
+        print(C.dim("  Run 1) Import first. Refusing."))
+        return record(ctx, "Clean card", SKIPPED, started, "refused: nothing imported")
+
+    if n_new:
+        print(C.red("  %d clip(s) on the card are NEWER than anything imported." % n_new))
+        print(C.red("  Those exist here and nowhere else. Erasing them is final."))
+        print(C.dim("  Run 1) Import to copy them first — it only takes the new ones."))
+        return record(ctx, "Clean card", SKIPPED, started,
+                      "refused: %d clip(s) not imported" % n_new)
+
+    print(C.green("  All %d clip(s) on the card were imported and verified." % n_old))
+    # Rendered and published is NOT required here, and deliberately so. The
+    # import is a verified copy on a disk you control; requiring the whole
+    # pipeline to finish before the card can be reused would keep the car
+    # without a camera for as long as an encode and an upload take, which is the
+    # thing the delta import exists to avoid.
+    ok, why = import_is_expendable(ctx, ctx.render_root)
+    if ok:
+        print(C.dim("  Also already %s." % why))
+    else:
+        print(C.yellow("  Not yet rendered or published (%s)." % why))
+        print(C.dim("  That is fine for the card: the import is a verified copy. It"))
+        print(C.dim("  only means the local import is still the one you must not lose."))
+    print()
+    print(C.red("  Erasing %s from %s. The folders stay so the camera can record."
+                % (human_bytes(size), tilde(ctx.card))))
+
+    if ask("  Type ERASE to clean the card, anything else to cancel: ") != "ERASE":
+        print("  Cancelled.")
+        return record(ctx, "Clean card", SKIPPED, started, "cancelled at the prompt")
+
+    gone = freed = 0
+    for f in files:
+        try:
+            freed += f.stat().st_size
+            f.unlink()
+            gone += 1
+        except OSError as e:
+            print(C.red("  %s: %s" % (f.name, e)))
+    left = sum(1 for f in dcim.rglob("*") if f.is_file())
+    print(C.green("  Erased %d file(s), %s freed. %d file(s) left, folders kept."
+                  % (gone, human_bytes(freed), left)))
+    return record(ctx, "Clean card", RAN, started,
+                  "%d file(s), %s" % (gone, human_bytes(freed)))
+
+
 STEPS = [
     (1, "Import from SD card", step_import, True),
     (2, "List trips (dry-run scan)", step_list, True),
@@ -3589,6 +3678,7 @@ STEPS = [
     (7, "Upload videos to S3", step_upload, True),
     (8, "Deploy site (SIGNED_VIDEOS=1)", step_deploy, True),
     (9, "Delete import source (DESTRUCTIVE)", step_delete_import, False),
+    (10, "Clean card (DESTRUCTIVE)", step_clean_card, False),
 ]
 # Site sits at 6 rather than at the end because that is where it belongs in the
 # sequence: it is the last step that needs nothing but this machine. Everything
@@ -3639,7 +3729,7 @@ def solo_steps():
 # names in the menu cost eleven lines every time round the loop.
 SHORT = {
     1: "Import", 2: "List trips", 3: "Preview", 4: "Drop trip", 5: "Render",
-    6: "Site", 7: "Upload", 8: "Deploy", 9: "Del source",
+    6: "Site", 7: "Upload", 8: "Deploy", 9: "Del source", 10: "Clean card",
 }
 # Steps safe to start without a "Go?". Not "read-only" — Preview writes sidecars,
 # stills and the contact sheet, and Site writes a folder of pages. The test is
@@ -3769,8 +3859,17 @@ def upload_blocked(ctx):
 # confirmation guarding nothing, and worse it is practice at pressing enter —
 # the habit you least want by the time the delete step asks. Answer at selection
 # time instead, greyed in the menu with the reason underneath, and do not run it.
+def _noop_clean_card(ctx):
+    """No card, nothing to clean. Same wording as the import step's check, since
+    it is the same fact."""
+    if (ctx.card / "DCIM").is_dir():
+        return None
+    return "no card at %s" % tilde(ctx.card)
+
+
 NOOP_CHECK = {
     step_num(step_import): _noop_import,
+    step_num(step_clean_card): _noop_clean_card,
     step_num(step_upload): upload_blocked,
     step_num(step_deploy): deploy_blocked,
 }
@@ -3784,6 +3883,7 @@ DESC = {
     7: "Sync the mp4s to the configured bucket, then verify. Slow on a home uplink; resumes.",
     8: "Run the site repo's deploy script with SIGNED_VIDEOS=1, so clips load as signed URLs.",
     9: "Erase the whole import source. Only after everything is rendered and published.",
+    10: "Erase the card's clips, keeping its folders. Refuses while anything on it is unimported.",
 }
 
 
