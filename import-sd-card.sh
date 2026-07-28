@@ -64,25 +64,49 @@ FILTER=()
 if [ -n "${AFTER_STAMP:-}" ]; then
     echo ">>> only clips newer than $AFTER_STAMP"
     tmp_list="$(mktemp)"
-    ( cd "$SRC" && find DCIM -type f ) | while IFS= read -r rel; do
-        base="$(basename "$rel")"
-        stamp="$(printf '%s' "$base" | grep -oE '[0-9]{14}' | head -1)"
-        # keep anything without a timestamp (IPSRecord.txt, the gps tars)
+    # Matched with bash's own regex, not `grep | head`. Under `set -euo pipefail`
+    # a filename with no 14-digit stamp — IPSRecord.txt, the gps tars — makes
+    # grep exit 1, pipefail propagates it, and set -e kills the script before the
+    # "keep anything without a timestamp" branch below can ever run. The import
+    # died at exit 1 with no message for exactly that reason. This also drops two
+    # subprocesses per file, which over 2700 files is most of the loop's runtime.
+    while IFS= read -r rel; do
+        base="${rel##*/}"
+        if [[ $base =~ ([0-9]{14}) ]]; then
+            stamp="${BASH_REMATCH[1]}"
+        else
+            stamp=""      # no timestamp: always keep it
+        fi
         if [ -z "$stamp" ] || [ "$stamp" \> "$AFTER_STAMP" ]; then
             printf '%s\n' "$rel" >> "$tmp_list"
         fi
-    done
+    done < <( cd "$SRC" && find DCIM -type f )
     echo ">>> $(wc -l < "$tmp_list" | tr -d ' ') of $( ( cd "$SRC" && find DCIM -type f ) | wc -l | tr -d ' ') file(s) selected"
     # --files-from paths are relative to the SOURCE root, so the source has to
     # be $SRC (the list already says DCIM/...); pairing it with $SRC/DCIM would
     # copy into DEST/DCIM/DCIM.
     FILTER=(--files-from="$tmp_list")
     SRC_ARG="$SRC"
+    # What THIS run is responsible for. The completeness check below compares
+    # against it, not against the card: a delta import is expected to leave most
+    # of the card behind, so measuring the copy against the whole DCIM tree
+    # declares every successful delta a failure.
+    expect_files=$(wc -l < "$tmp_list" | tr -d ' ')
 else
     SRC_ARG="$SRC/DCIM"
+    expect_files="$src_files"
 fi
 
-rsync -a --info=progress2 ${FILTER[@]+"${FILTER[@]}"} "$SRC_ARG" "$DEST/"
+# macOS ships openrsync ("rsync 2.6.9 compatible"), which does NOT accept
+# --info=progress2 — it prints its usage and exits non-zero, with or without
+# --files-from. Homebrew's rsync 3.x does. Probe rather than assume, because the
+# failure mode is a wall of usage text and an exit code, which reads like a
+# broken argument list rather than a missing feature.
+PROGRESS=(--progress)
+if rsync --help 2>&1 | grep -q -- '--info='; then
+    PROGRESS=(--info=progress2)
+fi
+rsync -a "${PROGRESS[@]}" ${FILTER[@]+"${FILTER[@]}"} "$SRC_ARG" "$DEST/"
 
 # --- verify before we delete anything ---------------------------------------
 echo "Verifying${CHECKSUM:+ (checksum)}..."
@@ -94,13 +118,20 @@ if [ "$pending" -ne 0 ]; then
     echo "ERROR: verify found $pending file(s) not yet copied. NOT deleting source." >&2
     exit 1
 fi
-if [ "$dest_files" -lt "$src_files" ]; then
-    echo "ERROR: dest has $dest_files files but source has $src_files. NOT deleting source." >&2
+if [ "$dest_files" -lt "$expect_files" ]; then
+    echo "ERROR: dest has $dest_files files but this run should have copied $expect_files. NOT deleting source." >&2
     exit 1
 fi
-echo "Verified: $dest_files files present in dest (>= $src_files on card)."
+echo "Verified: $dest_files file(s) in dest ($expect_files expected from this run)."
 
 # --- clean the card (files only, keep the folder tree) ----------------------
+if [ "$DELETE_SOURCE" -eq 1 ] && [ -n "${AFTER_STAMP:-}" ]; then
+    echo "Refusing --delete after a filtered copy: this run only brought over the" >&2
+    echo "clips newer than $AFTER_STAMP, so erasing the card would take the earlier" >&2
+    echo "ones with it, and their only proof of having been imported is a ledger" >&2
+    echo "this script cannot read. Erase it with a full import, or by hand." >&2
+    exit 1
+fi
 if [ "$DELETE_SOURCE" -eq 1 ]; then
     echo "Deleting source FILES (keeping DCIM folder structure)..."
     find "$SRC/DCIM" -type f -delete
@@ -111,5 +142,5 @@ else
     echo "result, erase it with:  $0 --delete ${DAY}"
 fi
 
-echo "Done. Imported $src_files files to $DEST/DCIM"
+echo "Done. Imported $dest_files file(s) to $DEST/DCIM"
 echo "Render with: ./make-trips-rendered.sh --root \"$DEST\" --out \"${DASHCAM_OUT_ROOT:-$HOME/dashcam-data/output}\""

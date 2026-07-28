@@ -244,7 +244,14 @@ class Ctx:
         # at the import sink now, not the card, so renders survive an ejected card.
         self.render_root = Path(self.cfg.get("root", DEFAULT_CARD)).expanduser()
         self.out_dir = Path(self.cfg.get("out", DEFAULT_OUT)).expanduser()
-        self.import_root = Path(os.environ.get("DASHCAM_IMPORT_ROOT", DEFAULT_IMPORT_ROOT)).expanduser()
+        # Where import-sd-card.sh drops the card. It follows config's `root`,
+        # because that is what every render, scan and delete is pointed at — when
+        # the two diverged (renaming `root` while the script kept its own
+        # default) the copy landed in a folder no later step ever looked in, and
+        # nothing said so. DASHCAM_IMPORT_ROOT still wins for a one-off.
+        self.import_root = Path(os.environ.get("DASHCAM_IMPORT_ROOT")
+                                or self.cfg.get("root")
+                                or DEFAULT_IMPORT_ROOT).expanduser()
         self.card = Path(args.card or DEFAULT_CARD)
 
         try:
@@ -1278,9 +1285,14 @@ def step_import(ctx):
     prior = [c for c in ctx.out_dir.iterdir()
              if c.name not in ("logs", LEDGER_FILE) and not c.name.startswith(FINAL_PREFIX)
              and not c.name.startswith(".")] if ctx.out_dir.is_dir() else []
-    if prior:
-        used = sum(f.stat().st_size for c in prior
-                   for f in ([c] if c.is_file() else c.rglob("*")) if f.is_file())
+    prior_files = [f for c in prior
+                   for f in ([c] if c.is_file() else c.rglob("*")) if f.is_file()]
+    # An empty import/ directory is left standing by the sweep so the next copy
+    # has somewhere to land, so `prior` being non-empty says nothing on its own.
+    # Announcing "still holds the previous round: 0 B" and then clearing nothing
+    # is noise on the path that is already clean, which is most of them.
+    if prior_files:
+        used = sum(f.stat().st_size for f in prior_files)
         print()
         print(C.yellow("  The working area still holds the previous round: %s"
                        % human_bytes(used)))
@@ -1358,11 +1370,23 @@ def step_import(ctx):
     # on screen that the person cannot answer better than the tool can, and whose
     # only sane answer is the default. Today's date, which is what it defaulted to.
     day = time.strftime("%Y-%m-%d")
-    print(C.dim("  The card is NOT erased by default; import-sd-card.sh only deletes"))
-    print(C.dim("  the card's files after the copy verifies file-for-file."))
-    erase = confirm("  Erase the card's files after a verified copy?", False)
+    # Not offered after a delta copy. Only the new clips come over, so erasing
+    # the card would take the earlier ones — the ones already imported, whose
+    # only record is a ledger the shell script cannot read. The script refuses
+    # the combination outright; asking here would just be a prompt whose yes
+    # ends in a failed run.
+    if delta and after:
+        print(C.dim("  Copying only the new clips, so the card is kept: erasing it now"))
+        print(C.dim("  would also take the earlier clips this run deliberately skipped."))
+        erase = False
+    else:
+        print(C.dim("  The card is NOT erased by default; import-sd-card.sh only deletes"))
+        print(C.dim("  the card's files after the copy verifies file-for-file."))
+        erase = confirm("  Erase the card's files after a verified copy?", False)
 
-    env = {"AFTER_STAMP": after} if (after and delta) else None
+    env = {"DASHCAM_IMPORT_ROOT": str(ctx.import_root)}
+    if after and delta:
+        env["AFTER_STAMP"] = after
     cmd = ["./import-sd-card.sh"]
     if erase:
         cmd.append("--delete")
@@ -3868,12 +3892,13 @@ if __name__ == "__main__":
 # Notes on things that surprised me while wiring this up — kept here rather than
 # in a doc, because they are the reasons the code above is shaped the way it is.
 #
-# * Two import layouts coexist. import-sd-card.sh writes to
-#   <sink>/<YYYY-MM-DD>/DCIM, but config.txt's `root` currently points at the
-#   sink itself, which today holds a DCIM tree directly. Neither is wrong; they
-#   are just different vintages. Rather than pick one, import_candidates()
-#   accepts both and every render/scan/delete passes an explicit --root, so the
-#   CLI never depends on which layout is in place.
+# * Two import LAYOUTS still coexist — <root>/<YYYY-MM-DD>/DCIM from the import
+#   script, and a DCIM tree sitting directly in <root> from older imports — and
+#   import_candidates() accepts both, with every render/scan/delete passing an
+#   explicit --root. What no longer coexists is two import ROOTS. The script used
+#   to default to its own sink while config's `root` said somewhere else, so
+#   renaming `root` sent the copy to a folder nothing downstream read. The CLI
+#   now passes DASHCAM_IMPORT_ROOT, and there is one answer to "where did it go".
 #
 # * `aws s3 sync` exits 0 even when individual objects fail to upload. The
 #   upload step therefore ignores the exit code as evidence and re-lists the
