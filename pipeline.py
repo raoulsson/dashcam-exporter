@@ -831,7 +831,21 @@ def _readline_safe(s):
     return re.sub(r"(\x1b\[[0-9;]*m)", "\001\\1\002", s)
 
 
+# Printed once per step, above its first prompt. Ctrl-C is the way out of a
+# prompt sequence — Render alone asks four questions — and it is only obvious if
+# you already know it. Once per step, not once per prompt: repeating it four
+# times is the kind of noise that stops being read.
+_HINTED = [True]     # True at the menu, so the hint never appears there
+
+
+def hint_reset():
+    _HINTED[0] = False
+
+
 def ask(prompt, default=""):
+    if not _HINTED[0]:
+        _HINTED[0] = True
+        print(C.dim("  (ctrl-c to abort)"))
     # Ctrl-C at a prompt has to mean the same thing as Ctrl-C during a child
     # process: abort the step and let it be recorded, not slip out at exit 0.
     try:
@@ -2497,6 +2511,7 @@ def run_steps(ctx, numbers):
         # then arrived as a quiet line underneath. The outcome is the message.
         print()
         print(C.bold("== %d) %s" % (n, SHORT.get(n, name))))
+        hint_reset()
         try:
             ok = fn(ctx)
         except Aborted:
@@ -2561,6 +2576,7 @@ def main(argv=None):
                 # screen is indented two spaces, so the one line that wants
                 # typing should stand apart from the block above it.
                 print()
+                _HINTED[0] = True          # no hint on the menu itself
                 sel = ask("Select> ")
                 if sel.lower() in ("q", "quit", "exit"):
                     break
