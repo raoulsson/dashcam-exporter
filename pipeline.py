@@ -3678,6 +3678,14 @@ def fast_enough(ctx, n):
     """
     if n not in NO_CONFIRM:
         return False
+    if n == step_num(step_list):
+        # Never asked. It reads the import and prints a table — no file written,
+        # nothing deleted, nothing published — so the only thing a confirmation
+        # protects is a wait, and ctrl-C already does that better than a prompt
+        # answered before the wait exists. Guarding a read teaches you to hit
+        # Enter without looking, which is precisely the habit the delete step
+        # needs you not to have.
+        return True
     if n == step_num(step_site):
         # Site is instant on a rebuild and costs one ffmpeg seek per trip on the
         # first one — seconds either way, but "seconds each for forty trips" is
