@@ -1329,11 +1329,11 @@ def step_import(ctx):
                           % (tilde(src), n, sz)))
             print(C.dim("  That is the configured root from config.txt. Go to Preview (3) "
                         "or Render (5)."))
-            return record(ctx, "Import from SD card", SKIPPED, started,
+            return record(ctx, "Import from SIM", SKIPPED, started,
                           "import already present, %s clips" % n)
         print(C.yellow("  No card at %s and no footage under %s — is the card mounted?"
                        % (tilde(ctx.card), tilde(ctx.render_root))))
-        return record(ctx, "Import from SD card", SKIPPED, started, "no card, no import")
+        return record(ctx, "Import from SIM", SKIPPED, started, "no card, no import")
 
     clips = clip_count(ctx.card)
     size = tree_size(ctx.card / "DCIM")
@@ -1370,7 +1370,7 @@ def step_import(ctx):
         print(C.dim("  Not touching it. Set `out` in config.txt to a directory of"))
         print(C.dim("  your own, or delete %s if that claim is stale."
                     % tilde(ctx.out_dir / OWNER_FILE)))
-        return record(ctx, "Import from SD card", SKIPPED, started,
+        return record(ctx, "Import from SIM", SKIPPED, started,
                       "output dir owned by %s" % other)
 
     if prior_files:
@@ -1412,7 +1412,7 @@ def step_import(ctx):
                 print(C.red("  Not clearing: %s" % why))
                 print(C.dim("  Finish the previous round, or use the delete step which "
                             "explains what is missing."))
-                return record(ctx, "Import from SD card", SKIPPED, started,
+                return record(ctx, "Import from SIM", SKIPPED, started,
                               "declined: previous import not finished")
             for src in leftovers:
                 shutil.rmtree(str(src), ignore_errors=True)
@@ -1422,7 +1422,7 @@ def step_import(ctx):
                                 "_meta.json stay as state." % (n, human_bytes(freed))))
             print(C.green("  Cleared. The working dir is empty."))
         elif not confirm("  Import anyway, on top of what is there?", False):
-            return record(ctx, "Import from SD card", SKIPPED, started,
+            return record(ctx, "Import from SIM", SKIPPED, started,
                           "declined: import area not empty")
         print()
 
@@ -1441,7 +1441,7 @@ def step_import(ctx):
             C.bold("%d clip(s)" % n_new), C.dim("%d" % n_old)))
         if not n_new:
             print(C.green("  Nothing new on this card — it is already all imported."))
-            return record(ctx, "Import from SD card", SKIPPED, started, "no new clips")
+            return record(ctx, "Import from SIM", SKIPPED, started, "no new clips")
         delta = confirm("  Copy only the %d new clip(s)?" % n_new, True)
     else:
         delta = False
@@ -1495,7 +1495,7 @@ def step_import(ctx):
                            keep=lambda l: l.startswith(("Verified:", "Card cleaned", "Done.",
                                                         ">>> only clips newer", ">>> ")))
     if rc != 0:
-        return record(ctx, "Import from SD card", FAILED, started, "exit %d" % rc)
+        return record(ctx, "Import from SIM", FAILED, started, "exit %d" % rc)
 
     dest = ctx.import_root / day
     ctx.selected_import = dest if (dest / "DCIM").is_dir() else ctx.selected_import
@@ -1505,7 +1505,28 @@ def step_import(ctx):
     # approve erasing footage nothing has ever looked at.
     ctx.last_scan = None
     ctx.last_groups = None
-    return record(ctx, "Import from SD card", RAN, started,
+
+    # Record the high-water mark HERE, not only at cleanup. import-sd-card.sh
+    # exits 0 only after verifying the copy file-for-file, so a verified copy of
+    # everything up to this stamp now exists on this disk — which is the fact
+    # the ledger holds. Writing it only after publishing had it backwards: right
+    # after an import nothing had recorded it, so Clean SIM refused to free the
+    # card, and the card stayed on the desk instead of going back in the car.
+    # That is the entire reason the delta import exists.
+    #
+    # Taken from the CARD, because the card is what the next delta compares
+    # against. The same number by a shorter route than walking the import.
+    newest = ""
+    front = ctx.card / "DCIM" / "200video" / "front"
+    if front.is_dir():
+        for f in front.glob("*.mp4"):
+            m = STAMP_RE.search(f.name)
+            if m and m.group(1) > newest:
+                newest = m.group(1)
+    if newest and newest > (read_ledger(ctx).get("through") or ""):
+        write_ledger(ctx, newest, "imported and verified")
+
+    return record(ctx, "Import from SIM", RAN, started,
                   "%s clips, %s -> %s" % (clips, human_bytes(size), dest))
 
 
@@ -2085,7 +2106,7 @@ def step_preview(ctx):
     started = time.time()
     root = pick_import(ctx, "the preview pass")
     if root is None:
-        return record(ctx, "Preview all trips", SKIPPED, started, "no import folder")
+        return record(ctx, "Preview trips", SKIPPED, started, "no import folder")
 
     previews_dir = ctx.out_dir / PREVIEW_DIRNAME
     print(C.dim("  Three cheap things, no encoding:"))
@@ -2108,17 +2129,17 @@ def step_preview(ctx):
     rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars", parser=make_scan_parser(),
                             keep=lambda l: l.startswith("[Trip "))
     if rc != 0:
-        return record(ctx, "Preview all trips", FAILED, started, "sidecars exit %d" % rc)
+        return record(ctx, "Preview trips", FAILED, started, "sidecars exit %d" % rc)
 
     # 2. The grouping — which is also the trip -> source clip mapping the stills
     #    and the contact sheet's clip lists are built from.
     payload = load_groups(ctx, root)
     if payload is None:
-        return record(ctx, "Preview all trips", FAILED, started, "--print-groups failed")
+        return record(ctx, "Preview trips", FAILED, started, "--print-groups failed")
     trips = payload.get("trips", [])
     if not trips:
         print(C.yellow("  The scan found no trips in %s." % root))
-        return record(ctx, "Preview all trips", SKIPPED, started, "no trips")
+        return record(ctx, "Preview trips", SKIPPED, started, "no trips")
 
     # 3. Stills. Every trip gets one, including the auto-skipped fragments — he
     #    is deciding what to keep, and a trip he cannot see is one he cannot judge.
@@ -2151,7 +2172,7 @@ def step_preview(ctx):
         rc, _lines = run_stream(["python3", "build_manifest.py"], ctx.site, "Indexing",
                                 keep=lambda l: l.startswith("wrote trips.json"))
         if rc != 0:
-            return record(ctx, "Preview all trips", FAILED, started, "build_manifest exit %d" % rc)
+            return record(ctx, "Preview trips", FAILED, started, "build_manifest exit %d" % rc)
     elif ctx.site is not None:
         print(C.yellow("  No build_manifest.py under %s — the site index was not updated."
                        % tilde(ctx.site)))
@@ -2164,7 +2185,7 @@ def step_preview(ctx):
     print(C.dim("  trips would say the video is not available — that is expected: the"))
     print(C.dim("  sidecars carry the map, the stats and the places, but no video exists"))
     print(C.dim("  yet. Render (and only then upload) the ones you decide to keep."))
-    return record(ctx, "Preview all trips", RAN, started,
+    return record(ctx, "Preview trips", RAN, started,
                   "%d trip(s), %d still(s) in %s" % (len(trips), len(stills), previews_dir))
 
 
@@ -2187,15 +2208,15 @@ def step_drop_trip(ctx):
     started = time.time()
     root = pick_import(ctx, "dropping a trip")
     if root is None:
-        return record(ctx, "Drop trip from import", SKIPPED, started, "no import folder")
+        return record(ctx, "Exclude trip", SKIPPED, started, "no import folder")
 
     payload = load_groups(ctx, root)
     if payload is None:
-        return record(ctx, "Drop trip from import", FAILED, started, "--print-groups failed")
+        return record(ctx, "Exclude trip", FAILED, started, "--print-groups failed")
     trips = payload.get("trips", [])
     if not trips:
         print(C.yellow("  No trips in %s — nothing to drop." % root))
-        return record(ctx, "Drop trip from import", SKIPPED, started, "no trips")
+        return record(ctx, "Exclude trip", SKIPPED, started, "no trips")
 
     print()
     print(rule("trips in %s" % root.name))
@@ -2211,12 +2232,12 @@ def step_drop_trip(ctx):
 
     sel = ask("  Trip indices to DROP (space separated, blank = cancel): ")
     if not sel.strip():
-        return record(ctx, "Drop trip from import", SKIPPED, started, "cancelled")
+        return record(ctx, "Exclude trip", SKIPPED, started, "cancelled")
     picked = []
     for part in re.split(r"[,\s]+", sel.strip()):
         if not part.isdigit() or int(part) not in by_index:
             print(C.red("  %r is not one of the listed trip indices." % part))
-            return record(ctx, "Drop trip from import", SKIPPED, started, "bad selection")
+            return record(ctx, "Exclude trip", SKIPPED, started, "bad selection")
         if int(part) not in picked:
             picked.append(int(part))
 
@@ -2238,7 +2259,7 @@ def step_drop_trip(ctx):
         print(C.red("  Refusing. Dropping the source of an existing render is the"))
         print(C.red("  delete-import operation — use that step, which first proves the"))
         print(C.red("  renders are on S3 and live on the site."))
-        return record(ctx, "Drop trip from import", SKIPPED, started,
+        return record(ctx, "Exclude trip", SKIPPED, started,
                       "refused: trip(s) %s already rendered" % ", ".join(str(i) for i, _ in blocked))
 
     # --- what will actually be deleted, file by file.
@@ -2311,7 +2332,7 @@ def step_drop_trip(ctx):
     answer = ask("  Type DROP to delete these %d file(s), anything else to cancel: " % len(files))
     if answer != "DROP":
         print("  Cancelled.")
-        return record(ctx, "Drop trip from import", SKIPPED, started, "cancelled at the prompt")
+        return record(ctx, "Exclude trip", SKIPPED, started, "cancelled at the prompt")
 
     deleted, freed, errors = 0, 0, []
     for p in files:
@@ -2362,11 +2383,11 @@ def step_drop_trip(ctx):
             print(C.dim("  Removed. The next Preview or Render drops them from the site index."))
 
     if errors:
-        return record(ctx, "Drop trip from import", FAILED, started,
+        return record(ctx, "Exclude trip", FAILED, started,
                       "%d of %d file(s) deleted, %d error(s)" % (deleted, len(files), len(errors)))
     print(C.green("  Dropped trip(s) %s: %d file(s), %s freed." % (
         ", ".join(str(i) for i in picked), deleted, human_bytes(freed))))
-    return record(ctx, "Drop trip from import", RAN, started,
+    return record(ctx, "Exclude trip", RAN, started,
                   "trip(s) %s, %d file(s), %s freed" % (
                       ", ".join(str(i) for i in picked), deleted, human_bytes(freed)))
 
@@ -2376,7 +2397,7 @@ def step_render(ctx):
     started = time.time()
     root = pick_import(ctx, "rendering")
     if root is None:
-        return record(ctx, "Render trips", SKIPPED, started, "no import folder")
+        return record(ctx, "Render videos", SKIPPED, started, "no import folder")
 
     # Show the trips here rather than making him remember them from the listing or go
     # back for them. The grouping comes from --print-groups (cached, so this is
@@ -2458,7 +2479,7 @@ def step_render(ctx):
         height = int(height)
     except ValueError:
         print(C.red("  Not a number."))
-        return record(ctx, "Render trips", SKIPPED, started, "bad height")
+        return record(ctx, "Render videos", SKIPPED, started, "bad height")
 
     before = set(rendered_mp4s(ctx.out_dir))
 
@@ -2498,7 +2519,7 @@ def step_render(ctx):
                        % (len(doomed), human_bytes(size))))
         print(C.dim("  Maps, GPX and metadata beside them are left alone; only video goes."))
         if not confirm("  Delete and re-render?", True):
-            return record(ctx, "Render trips", SKIPPED, started, "declined the clean")
+            return record(ctx, "Render videos", SKIPPED, started, "declined the clean")
         for f in doomed:
             try:
                 f.unlink()
@@ -2529,7 +2550,7 @@ def step_render(ctx):
     after = set(rendered_mp4s(ctx.out_dir))
     new = after - before
     if rc != 0:
-        return record(ctx, "Render trips", FAILED, started,
+        return record(ctx, "Render videos", FAILED, started,
                       "exit %d (%d new mp4 before the failure)" % (rc, len(new)))
     detail = "%d new mp4, %s" % (len(new), human_bytes(sum(p.stat().st_size for p in new)))
 
@@ -2544,9 +2565,9 @@ def step_render(ctx):
         rc2, _l = run_stream(["python3", "build_manifest.py"], ctx.site, "Indexing",
                              keep=lambda l: l.startswith("wrote trips.json"))
         if rc2 != 0:
-            return record(ctx, "Render trips", FAILED, started,
+            return record(ctx, "Render videos", FAILED, started,
                           detail + ", but build_manifest failed (exit %d)" % rc2)
-    return record(ctx, "Render trips", RAN, started, detail)
+    return record(ctx, "Render videos", RAN, started, detail)
 
 
 # ---------------------------------------------------------------------------
@@ -3152,12 +3173,12 @@ def step_site(ctx):
 
     if not ctx.out_dir.is_dir():
         print(C.yellow("  Nothing rendered yet: %s does not exist." % tilde(ctx.out_dir)))
-        return record(ctx, "Build site", SKIPPED, started, "no output tree")
+        return record(ctx, "Create website", SKIPPED, started, "no output tree")
 
     info = build_result_page(ctx, ctx.out_dir)
     if not info["trips"]:
         print(C.yellow("  No trips found under %s — render some first." % tilde(ctx.out_dir)))
-        return record(ctx, "Build site", SKIPPED, started, "no trips")
+        return record(ctx, "Create website", SKIPPED, started, "no trips")
 
     if info["no_video"]:
         print(C.dim("  %d trip(s) have no video yet; the page says so." % info["no_video"]))
@@ -3168,7 +3189,7 @@ def step_site(ctx):
     print(C.green("  %s" % info["path"]))
     print("  %d drive(s), %s. Open it with:" % (info["trips"], human_bytes(info.get("bytes", 0))))
     print("    open %s" % info["path"])
-    return record(ctx, "Build site", RAN, started,
+    return record(ctx, "Create website", RAN, started,
                   "%d trip(s), %s" % (info["trips"], human_bytes(info.get("bytes", 0))))
 
 def s3_objects(ctx):
@@ -3258,10 +3279,10 @@ def step_upload(ctx):
     reason = upload_blocked(ctx)
     if reason:
         print(C.red("  %s" % reason))
-        return record(ctx, "Upload videos to S3", SKIPPED, started, reason)
+        return record(ctx, "Upload to site", SKIPPED, started, reason)
     if not shutil.which("aws"):
         print(C.red("  awscli not found. brew install awscli && aws configure"))
-        return record(ctx, "Upload videos to S3", FAILED, started, "awscli missing")
+        return record(ctx, "Upload to site", FAILED, started, "awscli missing")
 
     # upload-videos-s3.sh syncs whatever public_html/videos resolves to, and the
     # object keys are paths relative to THAT. If it points somewhere other than
@@ -3271,12 +3292,12 @@ def step_upload(ctx):
     if target != ctx.out_dir.resolve():
         print(C.red("  public_html/videos -> %s but config out is %s" % (target, ctx.out_dir)))
         print(C.red("  Point the symlink at the render output before uploading."))
-        return record(ctx, "Upload videos to S3", FAILED, started, "videos symlink mismatch")
+        return record(ctx, "Upload to site", FAILED, started, "videos symlink mismatch")
 
     local = rendered_mp4s(ctx.out_dir)
     if not local:
         print(C.yellow("  No rendered mp4s under %s — nothing to upload." % ctx.out_dir))
-        return record(ctx, "Upload videos to S3", SKIPPED, started, "no renders")
+        return record(ctx, "Upload to site", SKIPPED, started, "no renders")
     total = sum(p.stat().st_size for p in local)
     print("  %d local mp4 (%s) -> s3://%s%s" % (
         len(local), human_bytes(total), ctx.s3_bucket,
@@ -3297,21 +3318,21 @@ def step_upload(ctx):
                             parser=make_upload_parser(),
                             keep=lambda l: l.startswith(("Skipping ", "Creating bucket")))
     if rc != 0:
-        return record(ctx, "Upload videos to S3", FAILED, started, "exit %d" % rc)
+        return record(ctx, "Upload to site", FAILED, started, "exit %d" % rc)
 
     # aws s3 sync returns 0 even when some objects failed. Verify by comparison.
     print(C.dim("  Verifying against the bucket listing (sync's exit code is not proof)..."))
     ok, missing, mismatched = verify_s3(ctx)
     if ok is None:
-        return record(ctx, "Upload videos to S3", FAILED, started, "could not verify (no bucket listing)")
+        return record(ctx, "Upload to site", FAILED, started, "could not verify (no bucket listing)")
     if not ok:
         for k in missing[:10]:
             print(C.red("    missing on S3: %s" % k))
         for k in mismatched[:10]:
             print(C.red("    size mismatch: %s" % k))
-        return record(ctx, "Upload videos to S3", FAILED, started,
+        return record(ctx, "Upload to site", FAILED, started,
                       "%d missing, %d size mismatch" % (len(missing), len(mismatched)))
-    return record(ctx, "Upload videos to S3", RAN, started,
+    return record(ctx, "Upload to site", RAN, started,
                   "%d mp4 verified on S3, %s" % (len(local), human_bytes(total)))
 
 
@@ -3321,7 +3342,7 @@ def step_deploy(ctx):
     reason = deploy_blocked(ctx)
     if reason:
         print(C.red("  %s" % reason))
-        return record(ctx, "Deploy site", SKIPPED, started, reason)
+        return record(ctx, "Update site", SKIPPED, started, reason)
 
     print(C.dim("  deploy-site.sh pulls the live curation + trips.json first (the live"))
     print(C.dim("  site is the merge base), re-indexes, then rsyncs public_html/."))
@@ -3337,10 +3358,10 @@ def step_deploy(ctx):
                             env_extra={"SIGNED_VIDEOS": "1"},
                             keep=lambda l: l.startswith("=== ") or l.startswith("Done."))
     if rc != 0:
-        return record(ctx, "Deploy site", FAILED, started, "exit %d" % rc)
+        return record(ctx, "Update site", FAILED, started, "exit %d" % rc)
 
     live = live_trip_count(ctx)
-    return record(ctx, "Deploy site", RAN, started,
+    return record(ctx, "Update site", RAN, started,
                   "live site reports %s trips" % (live if live is not None else "?"))
 
 
@@ -3413,7 +3434,7 @@ def step_delete_import(ctx):
     started = time.time()
     root = pick_import(ctx, "deletion")
     if root is None:
-        return record(ctx, "Delete import source", SKIPPED, started, "no import folder")
+        return record(ctx, "Delete SIM data", SKIPPED, started, "no import folder")
 
     # What actually gets erased. If `root` is the sink itself it may also contain
     # OTHER imports as dated subfolders (<sink>/<day>/DCIM), and those have not
@@ -3432,7 +3453,7 @@ def step_delete_import(ctx):
         target = root
     if not target.is_dir():
         print(C.red("  Nothing to delete at %s" % target))
-        return record(ctx, "Delete import source", SKIPPED, started, "nothing at the target")
+        return record(ctx, "Delete SIM data", SKIPPED, started, "nothing at the target")
 
     size = tree_size(target)
     files = count_files(target)
@@ -3467,7 +3488,7 @@ def step_delete_import(ctx):
     if not ns_mp4s:
         print(C.red("no"))
         print(C.red("        No mp4 under %s — nothing from this import was rendered." % ns))
-        return record(ctx, "Delete import source", SKIPPED, started, "refused: nothing rendered")
+        return record(ctx, "Delete SIM data", SKIPPED, started, "refused: nothing rendered")
     # How many trips SHOULD be here. Prefer this session's scan, but fall back to
     # the grouping — which the boundary cache makes free, and which is keyed on
     # the clips and their GPX, so it cannot describe a different card. Demanding
@@ -3527,12 +3548,12 @@ def step_delete_import(ctx):
             print(C.red("unknown"))
             for l in out_lines[-15:]:
                 print(C.dim("        " + l))
-            return record(ctx, "Delete import source", SKIPPED, started, "refused: is-complete.py inconclusive")
+            return record(ctx, "Delete SIM data", SKIPPED, started, "refused: is-complete.py inconclusive")
         if total == 0 or safe < total:
             print(C.red("no (%s/%s)" % (safe, total)))
             for l in out_lines:
                 print(C.dim("        " + l))
-            return record(ctx, "Delete import source", SKIPPED, started,
+            return record(ctx, "Delete SIM data", SKIPPED, started,
                           "refused: %s/%s trips fully published" % (safe, total))
         print(C.green("yes (%d/%d)" % (safe, total)))
 
@@ -3588,13 +3609,13 @@ def step_delete_import(ctx):
     answer = ask("  Type DELETE to erase it, anything else to cancel: ")
     if answer != "DELETE":
         print("  Cancelled.")
-        return record(ctx, "Delete import source", SKIPPED, started, "cancelled at the prompt")
+        return record(ctx, "Delete SIM data", SKIPPED, started, "cancelled at the prompt")
 
     try:
         shutil.rmtree(str(target))
     except OSError as e:
         print(C.red("  Delete failed: %s" % e))
-        return record(ctx, "Delete import source", FAILED, started, str(e))
+        return record(ctx, "Delete SIM data", FAILED, started, str(e))
     if ctx.selected_import == root:
         ctx.selected_import = None
     ctx.last_scan = None
@@ -3630,7 +3651,7 @@ def step_delete_import(ctx):
 
     if ctx.selected_import == root:
         ctx.selected_import = None
-    return record(ctx, "Delete import source", RAN, started,
+    return record(ctx, "Delete SIM data", RAN, started,
                   "%d file(s), %s freed" % (files, human_bytes(size)))
 
 
@@ -3667,7 +3688,7 @@ def step_clean_card(ctx):
     dcim = ctx.card / "DCIM"
     if not dcim.is_dir():
         print(C.yellow("  No card at %s — nothing to clean." % ctx.card))
-        return record(ctx, "Clean card", SKIPPED, started, "no card")
+        return record(ctx, "Clean SIM", SKIPPED, started, "no card")
 
     files = [f for f in dcim.rglob("*") if f.is_file()]
     size = sum(f.stat().st_size for f in files)
@@ -3685,13 +3706,13 @@ def step_clean_card(ctx):
         print(C.red("  Nothing has ever been imported on this machine."))
         print(C.red("  There is no record that any of this exists anywhere else."))
         print(C.dim("  Run 1) Import first. Refusing."))
-        return record(ctx, "Clean card", SKIPPED, started, "refused: nothing imported")
+        return record(ctx, "Clean SIM", SKIPPED, started, "refused: nothing imported")
 
     if n_new:
         print(C.red("  %d clip(s) on the card are NEWER than anything imported." % n_new))
         print(C.red("  Those exist here and nowhere else. Erasing them is final."))
         print(C.dim("  Run 1) Import to copy them first — it only takes the new ones."))
-        return record(ctx, "Clean card", SKIPPED, started,
+        return record(ctx, "Clean SIM", SKIPPED, started,
                       "refused: %d clip(s) not imported" % n_new)
 
     print(C.green("  All %d clip(s) on the card were imported and verified." % n_old))
@@ -3713,7 +3734,7 @@ def step_clean_card(ctx):
 
     if ask("  Type ERASE to clean the card, anything else to cancel: ") != "ERASE":
         print("  Cancelled.")
-        return record(ctx, "Clean card", SKIPPED, started, "cancelled at the prompt")
+        return record(ctx, "Clean SIM", SKIPPED, started, "cancelled at the prompt")
 
     gone = freed = 0
     for f in files:
@@ -3726,7 +3747,7 @@ def step_clean_card(ctx):
     left = sum(1 for f in dcim.rglob("*") if f.is_file())
     print(C.green("  Erased %d file(s), %s freed. %d file(s) left, folders kept."
                   % (gone, human_bytes(freed), left)))
-    return record(ctx, "Clean card", RAN, started,
+    return record(ctx, "Clean SIM", RAN, started,
                   "%d file(s), %s" % (gone, human_bytes(freed)))
 
 
