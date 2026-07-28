@@ -177,11 +177,18 @@ checkout refuse to sweep a directory another one has claimed.
 ### Only metadata is kept
 
 The working area is swept on every import: everything that is not `logs/`, the
-ledger, the owner marker or a `final_*` folder. Renders are ~1.4 GB each and
-live on S3 once uploaded; source clips are ~400 MB each and live on the card
-until you erase it. What survives is a few KB of metadata — and that is the
-point. `_meta.json` and `.imported.json` answer "have I already imported this
-card" long after the footage is gone.
+ledger, the owner marker, a `_meta.json`, or a `final_*` folder. Renders are
+~1.4 GB each and live on S3 once uploaded; source clips are ~400 MB each and
+live on the card until you erase it. What survives is a few KB of metadata —
+and that is the point. `_meta.json` and `.imported.json` answer "have I already
+imported this card" long after the footage is gone, and they are what Clean SIM
+reads to decide whether a card's clips are inside a rendered trip.
+
+The sweep only runs when the round is **finished**, and finished means one of
+two things: every render is inside a `final_<date>` folder, or every render is
+in the bucket. Either way the workspace holds nothing that exists only there.
+If neither is true it deletes nothing, names the files, and says which of the
+two would settle it.
 
 Anything you park in the working area goes with it. It is the tool's workspace,
 not a shelf.

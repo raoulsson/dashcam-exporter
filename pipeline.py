@@ -1337,8 +1337,17 @@ def purge_published_renders(ctx, root):
     that are impossible to make a decision about later.
 
     Kept: logs/ (the history of what was done), the import directory itself so
-    the next copy has somewhere to land, and the ledger. Any final_* folder is
-    unaffected because it lives beside this tree, not in it.
+    the next copy has somewhere to land, the ledger, and every *_meta.json. Any
+    final_* folder is unaffected because it lives beside this tree, not in it.
+
+    The metadata stays because it IS the state, and it is nothing: ~1.4 KB per
+    trip against gigabytes released. It is what last_imported_stamp reads to
+    answer "have I already imported this card" once the footage is gone, what
+    build_manifest carries forward for a trip whose render was deleted after
+    publishing, and what Clean SIM's evidence check reads to decide whether a
+    card's clips are inside a rendered trip. Earlier this swept them away while
+    two printed messages claimed they survived — the messages were right about
+    the intent and the code was wrong.
 
     The ledger is written BEFORE anything is removed. It is the only fact here
     that cannot be recovered from somewhere else — how far the imports have
@@ -1372,12 +1381,25 @@ def purge_published_renders(ctx, root):
             continue
         try:
             if child.is_dir():
-                for f in child.rglob("*"):
-                    if f.is_file():
+                # Delete file by file so the metadata can be spared, then drop
+                # the directories that end up empty. rmtree would take the
+                # _meta.json with everything else.
+                for f in sorted(child.rglob("*")):
+                    if f.is_file() and not f.name.endswith("_meta.json"):
                         freed += f.stat().st_size
+                        f.unlink()
                         n += 1
-                shutil.rmtree(str(child), ignore_errors=True)
-            else:
+                for d in sorted(child.rglob("*"), reverse=True):
+                    if d.is_dir():
+                        try:
+                            d.rmdir()
+                        except OSError:
+                            pass          # still holds metadata — that is the point
+                try:
+                    child.rmdir()
+                except OSError:
+                    pass
+            elif not child.name.endswith("_meta.json"):
                 freed += child.stat().st_size
                 child.unlink()
                 n += 1
