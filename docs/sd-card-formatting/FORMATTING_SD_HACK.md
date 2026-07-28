@@ -54,7 +54,7 @@ Look for the 256 GB `FDisk_partition_scheme`. Then, substituting the
 real number for N:
 
     sudo diskutil unmountDisk /dev/diskN
-    sudo dd if=~/dev/dashcam-exporter/mbr-fat32-patched.bin of=/dev/rdiskN bs=512 count=1
+    sudo dd if=~/dev/dashcam-exporter/docs/sd-card-formatting/mbr-fat32-patched.bin of=/dev/rdiskN bs=512 count=1
 
 Expect `1+0 records in / 1+0 records out`. `0+0 records out` means the
 write was rejected and nothing changed.
@@ -65,7 +65,7 @@ and Finder should mount it.
 ## Reverting
 
     sudo diskutil unmountDisk /dev/diskN
-    sudo dd if=~/dev/dashcam-exporter/mbr-original-ddpai.bin of=/dev/rdiskN bs=512 count=1
+    sudo dd if=~/dev/dashcam-exporter/docs/sd-card-formatting/mbr-original-ddpai.bin of=/dev/rdiskN bs=512 count=1
 
 ## Caveats
 

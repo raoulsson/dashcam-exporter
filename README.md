@@ -345,7 +345,7 @@ A clip's name carries its timestamp (`YYYYMMDDHHMMSS`), which is what makes the
 delta import a string comparison rather than a guess.
 
 If your card came formatted so macOS will not mount it, see
-[FORMATTING_SD_HACK.md](FORMATTING_SD_HACK.md).
+[docs/sd-card-formatting/](docs/sd-card-formatting/FORMATTING_SD_HACK.md).
 
 ---
 
@@ -374,7 +374,7 @@ You do not need it. The local website is a real deliverable on its own.
 - **[config.txt](config.txt)** — every setting, documented where it lives
 - **[docs/public-edition.md](docs/public-edition.md)** — notes on the
   configured/unconfigured split
-- **[FORMATTING_SD_HACK.md](FORMATTING_SD_HACK.md)** — when the card will not mount
+- **[docs/sd-card-formatting/](docs/sd-card-formatting/FORMATTING_SD_HACK.md)** — patching the MBR when the card will not mount
 - **[CLAUDE.md](CLAUDE.md)** — architecture notes
 
 ## Licence
