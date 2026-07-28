@@ -2055,8 +2055,23 @@ def write_contact_sheet(ctx, root, payload, previews_dir, stills):
             html.escape(root.name), PREVIEW_CSS, len(trips), html.escape(str(root)),
             human_bytes(total_bytes), "".join(cards)))
 
-    index = previews_dir / "index.html"
+    # Named for what it is and which footage it describes, not "index.html".
+    # It gets opened from a file manager, mailed, kept next to a final_<date>
+    # folder — and in every one of those places "index.html" is the name of a
+    # hundred other files. The date is the newest day in the batch, the same
+    # tag final_dir_for uses, so the pair reads as one thing.
+    days = sorted({t.get("day") for t in trips if t.get("day")})
+    tag = days[-1] if days else time.strftime("%Y-%m-%d")
+    index = previews_dir / ("preview_%s.html" % tag)
     index.write_text(doc, encoding="utf-8")
+    # A stale page from an earlier run of the same batch would sit beside it
+    # looking equally current.
+    for old_page in previews_dir.glob("preview_*.html"):
+        if old_page != index:
+            old_page.unlink()
+    stale = previews_dir / "index.html"
+    if stale.is_file():
+        stale.unlink()
     return index
 
 
@@ -2076,7 +2091,8 @@ def step_preview(ctx):
     print(C.dim("  Three cheap things, no encoding:"))
     print(C.dim("    1. --sidecars-only: each trip's .html map, .gpx and _meta.json"))
     print(C.dim("    2. one still per trip, a frame from its first front clip"))
-    print(C.dim("    3. %s/index.html — a contact sheet to open locally" % previews_dir))
+    print(C.dim("    3. %s/preview_<day>.html — a contact sheet to open locally"
+                % previews_dir))
     print(C.dim("  Reviewing is entirely offline; deploying stays a separate choice."))
 
     # No second confirmation here: the menu already asked "Go?", and the source
@@ -3492,7 +3508,8 @@ def step_delete_import(ctx):
             for k in (missing + mismatched)[:10]:
                 print(C.red("        %s" % k))
             print(C.dim("        Noted, not blocking — is-complete.py below is what decides."))
-        print(C.green("yes"))
+        else:
+            print(C.green("yes"))
 
     # --- the decision. The two checks above describe the local tree and the
     # bucket; this one asks the site what it actually serves, which is the only
@@ -3537,6 +3554,37 @@ def step_delete_import(ctx):
         print(C.red("  copy of this footage that exists. Lose that disk and the drive is gone."))
         print(C.dim("  Back the renders up elsewhere first, or leave the import where it is —"))
         print(C.dim("  keeping it costs disk, not data."))
+    # The card comes with it. The point of this step is a cycle that ends with
+    # everything freed: the disk AND a card ready to go back in the car. Leaving
+    # the card for a separate step meant a green is-complete still left it full,
+    # and remembering step 10 became the thing standing between you and a usable
+    # card. It is only offered when the card holds nothing this machine has not
+    # imported — same test step 10 uses, since it is the same question.
+    card_new = card_old = 0
+    do_card = False
+    if (ctx.card / "DCIM").is_dir():
+        card_new, card_old = card_split(ctx.card, last_imported_stamp(ctx))
+        card_files = [f for f in (ctx.card / "DCIM").rglob("*") if f.is_file()]
+        card_size = sum(f.stat().st_size for f in card_files)
+        print()
+        if card_new:
+            print(C.yellow("  The card holds %d clip(s) newer than anything imported —"
+                           % card_new))
+            print(C.yellow("  it is NOT cleaned. Import them first, then run 10)."))
+        elif card_files:
+            do_card = True
+            print(C.red("  The card at %s is erased too: %d file(s), %s."
+                        % (tilde(ctx.card), len(card_files), human_bytes(card_size))))
+            print(C.dim("  Its folders stay so the camera can record."))
+            if can_site:
+                print(C.dim("  Everything on it was imported, and is-complete.py just said"))
+                print(C.dim("  the result is published."))
+            else:
+                # Do not borrow authority from a check that did not run. The
+                # card's clips are in the import, which is all this knows.
+                print(C.dim("  Everything on it was imported. Whether that import is"))
+                print(C.dim("  published was NOT checked — see above."))
+
     answer = ask("  Type DELETE to erase it, anything else to cancel: ")
     if answer != "DELETE":
         print("  Cancelled.")
@@ -3563,6 +3611,20 @@ def step_delete_import(ctx):
     if n:
         size += freed
         files += n
+
+    if do_card:
+        gone = cfreed = 0
+        for f in [f for f in (ctx.card / "DCIM").rglob("*") if f.is_file()]:
+            try:
+                cfreed += f.stat().st_size
+                f.unlink()
+                gone += 1
+            except OSError as e:
+                print(C.red("  %s: %s" % (f.name, e)))
+        print(C.green("  Card cleaned — %d file(s), %s freed, folders kept."
+                      % (gone, human_bytes(cfreed))))
+        size += cfreed
+        files += gone
         print(C.green("  Removed %d published render file(s) (%s); the _meta.json remain."
                       % (n, human_bytes(freed))))
 
@@ -3882,7 +3944,7 @@ DESC = {
     6: "Build <out>/site: a browsable local site from the renders. Nothing leaves this machine.",
     7: "Sync the mp4s to the configured bucket, then verify. Slow on a home uplink; resumes.",
     8: "Run the site repo's deploy script with SIGNED_VIDEOS=1, so clips load as signed URLs.",
-    9: "Erase the whole import source. Only after everything is rendered and published.",
+    9: "Erase the import source, the renders AND the card. Only once the site serves every trip.",
     10: "Erase the card's clips, keeping its folders. Refuses while anything on it is unimported.",
 }
 
