@@ -243,7 +243,18 @@ class Ctx:
         # `root` in config.txt is what make_dashcam_videos reads from. It points
         # at the import sink now, not the card, so renders survive an ejected card.
         self.render_root = Path(self.cfg.get("root", DEFAULT_CARD)).expanduser()
-        self.out_dir = Path(self.cfg.get("out", DEFAULT_OUT)).expanduser()
+        # `out` defaults NEXT TO the configured root, not to the global default.
+        # A second checkout that sets `root` and leaves `out` alone otherwise
+        # inherits ~/dashcam-data/output — the first checkout's live working area
+        # — and step 1 sweeps that without asking. A clone set up to be
+        # independent has to actually be independent, and the setting the person
+        # did supply is the best evidence of where their data lives.
+        if self.cfg.get("out"):
+            self.out_dir = Path(self.cfg["out"]).expanduser()
+        elif self.cfg.get("root"):
+            self.out_dir = Path(self.cfg["root"]).expanduser().parent / "output"
+        else:
+            self.out_dir = Path(DEFAULT_OUT).expanduser()
         # Where import-sd-card.sh drops the card. It follows config's `root`,
         # because that is what every render, scan and delete is pointed at — when
         # the two diverged (renaming `root` while the script kept its own
@@ -1186,6 +1197,31 @@ def import_is_expendable(ctx, root):
     return True, ""
 
 
+OWNER_FILE = ".owned-by"
+
+
+def claim_out_dir(ctx):
+    """Record which checkout this working area belongs to, and return the other
+    one if it is already claimed by somebody else.
+
+    Deriving `out` from `root` fixes the accidental case; this catches the
+    deliberate one, where two checkouts are pointed at the same directory on
+    purpose or by a copied config. The sweep is silent and total, so "whose
+    files are these" has to be answerable before it runs, not after.
+    """
+    marker = ctx.out_dir / OWNER_FILE
+    mine = str(ctx.exporter)
+    try:
+        if marker.is_file():
+            owner = marker.read_text(encoding="utf-8").strip()
+            return None if owner == mine else owner
+        ctx.out_dir.mkdir(parents=True, exist_ok=True)
+        marker.write_text(mine + "\n", encoding="utf-8")
+    except OSError:
+        pass          # unwritable is not a reason to refuse; it is a reason to
+    return None       # carry on without the extra proof
+
+
 def purge_published_renders(ctx, root):
     """Empty the working area. Everything goes except a short keep-list.
 
@@ -1208,7 +1244,7 @@ def purge_published_renders(ctx, root):
     out = ctx.out_dir
     if not out.is_dir():
         return 0, 0
-    keep_names = {"logs", LEDGER_FILE, root.name}
+    keep_names = {"logs", LEDGER_FILE, OWNER_FILE, root.name}
     freed = n = 0
     for child in sorted(out.iterdir()):
         if child.name in keep_names or child.name.startswith(FINAL_PREFIX):
@@ -1291,6 +1327,21 @@ def step_import(ctx):
     # has somewhere to land, so `prior` being non-empty says nothing on its own.
     # Announcing "still holds the previous round: 0 B" and then clearing nothing
     # is noise on the path that is already clean, which is most of them.
+    other = claim_out_dir(ctx)
+    if other:
+        # Never sweep on somebody else's behalf. Two checkouts sharing a working
+        # area is not automatically wrong — but the sweep deletes everything it
+        # does not recognise, and what the other checkout left there looks
+        # exactly like leftovers from here.
+        print()
+        print(C.red("  %s is claimed by another checkout:" % tilde(ctx.out_dir)))
+        print(C.red("    %s" % tilde(Path(other))))
+        print(C.dim("  Not touching it. Set `out` in config.txt to a directory of"))
+        print(C.dim("  your own, or delete %s if that claim is stale."
+                    % tilde(ctx.out_dir / OWNER_FILE)))
+        return record(ctx, "Import from SD card", SKIPPED, started,
+                      "output dir owned by %s" % other)
+
     if prior_files:
         used = sum(f.stat().st_size for f in prior_files)
         print()
@@ -1515,11 +1566,52 @@ def require_ego_motion(ctx):
     A silently worse answer is the failure mode worth refusing outright.
     """
     py = renderer_python(ctx)
-    r = subprocess.run([py, "-c", "import cv2, numpy"],
-                       capture_output=True, cwd=str(ctx.exporter))
-    if r.returncode == 0:
+    # Say what is happening first. Importing cv2 for the first time reads ~100 MB
+    # of shared libraries, and on a machine already busy encoding that can take
+    # the better part of a minute — during which a silent check is
+    # indistinguishable from a hang, and the natural response is ctrl-C. The
+    # message is erased again on success so the normal startup stays clean.
+    msg = "  Checking for ego-motion support (first run can take a moment)..."
+    live = sys.stdout.isatty()
+    if live:
+        sys.stdout.write(C.dim(msg))
+        sys.stdout.flush()
+    try:
+        # The timeout is generous rather than snappy: it exists to end a genuine
+        # hang, not to judge a slow import, and failing a working install because
+        # ffmpeg had the CPU would be the worse error by far.
+        r = subprocess.run([py, "-c", "import cv2, numpy"],
+                           capture_output=True, cwd=str(ctx.exporter), timeout=180)
+        rc, why = r.returncode, ""
+    except subprocess.TimeoutExpired:
+        rc, why = 1, "timeout"
+    except KeyboardInterrupt:
+        if live:
+            sys.stdout.write("\r" + " " * len(msg) + "\r")
+        print(C.dim("  Cancelled."))
+        return False
+    if live:
+        sys.stdout.write("\r" + " " * len(msg) + "\r")
+        sys.stdout.flush()
+    if rc == 0:
         return True
     print()
+    # A timeout is not the same finding as a failed import, and giving it the
+    # install advice sends someone to reinstall a working venv. It says nothing
+    # was learned, because that is what happened.
+    if why == "timeout":
+        print()
+        print(C.yellow("  Could not verify ego-motion support — the check timed out."))
+        print()
+        print("  Importing opencv reads about 120 MB from disk, and on a machine")
+        print("  already busy encoding that can exceed the 3 minutes allowed. This")
+        print("  says nothing about the install: it neither succeeded nor failed.")
+        print()
+        print("  Try again once the render finishes. If it times out on an idle")
+        print("  machine, then something really is wrong with:")
+        print("    %s" % py)
+        print()
+        return False
     print(C.red("  Ego-motion detection is not available — refusing to start."))
     print()
     print("  Trip boundaries would fall back to a GPS radius, which groups this")
@@ -3893,6 +3985,13 @@ def main(argv=None):
 if __name__ == "__main__":
     try:
         sys.exit(main())
+    except KeyboardInterrupt:
+        # main() catches this around the menu loop, but not around startup — so
+        # a ctrl-C while the ego-motion check or the config load was still going
+        # printed a traceback, which reads like a crash caused by pressing it.
+        print()
+        print("  Cancelled.")
+        sys.exit(130)
     finally:
         show_cursor()
 
