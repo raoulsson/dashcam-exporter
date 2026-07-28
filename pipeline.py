@@ -2460,6 +2460,51 @@ def step_drop_trip(ctx):
                     print(C.red("  could not delete %s: %s" % (p, e)))
             print(C.dim("  Removed. The next Preview or Render drops them from the site index."))
 
+    # Exclude it from the site's curation. Deleting the files is NOT enough:
+    # build_manifest deliberately carries a previously-published trip forward
+    # when its local output is gone, because that is what makes "delete local
+    # after publish" safe. A dropped trip and a cleaned-up published trip look
+    # identical to it — uid in the previous manifest, nothing on disk — so no
+    # rebuild can tell them apart. The excluded list is the one place that says
+    # which of the two this is, and build_manifest omits what is in it.
+    #
+    # Written to the LOCAL admin.json, which the next local build honours. It is
+    # not the last word: deploy-site.sh pulls the live server's state over this
+    # file first, so the live site keeps showing the trip until the same
+    # exclusion is made there. Saying so beats a silent half-fix.
+    if render_files and ctx.site:
+        admin = ctx.site / "admin.json"
+        uids = []
+        for i in picked:
+            base = by_index[i].get("out_base")
+            if base:
+                # The BASE name, not the uid path. build_manifest matches the
+                # excluded list against the trip's id (trip_<day>_<time>_<nn>)
+                # in two places; the path-style uid matches neither, so an
+                # exclusion written that way is silently ignored.
+                uids.append(Path(base).name)
+        try:
+            state = json.loads(admin.read_text()) if admin.is_file() else {}
+        except Exception:
+            state = {}
+        ex = state.setdefault("excluded", [])
+        added = 0
+        for uid in uids:
+            if not any(x.get("id") == uid for x in ex):
+                ex.append({"id": uid, "title": "", "day": "",
+                           "mode": "delete", "at": int(time.time())})
+                added += 1
+        if added:
+            admin.write_text(json.dumps(state, indent=1), encoding="utf-8")
+            print()
+            print(C.dim("  Excluded %d trip(s) in %s, so the next build omits them."
+                        % (added, tilde(admin))))
+            print(C.yellow("  The LIVE site still shows them: deploy pulls the server's"))
+            print(C.yellow("  curation over this file. Exclude them in the site's admin"))
+            print(C.yellow("  view too, or this is undone on the next deploy."))
+            for uid in uids:
+                print(C.dim("    %s" % uid))
+
     # Rebuild the manifest, so the drop reaches the thing that publishes. The
     # site reads trips.json, not the directory — leave it and the trip is still
     # listed, still linked, and the page asks for an mp4 that no longer exists.
