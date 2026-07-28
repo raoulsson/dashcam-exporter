@@ -1761,9 +1761,9 @@ def step_render(ctx):
     # deletes by, so what is listed is exactly what would be rendered.
     payload = load_groups(ctx, root)
     groups = (payload or {}).get("trips") or []
+    tot_span = tot_move = 0.0     # also read by the height estimates below
     if groups:
         print()
-        tot_span = tot_move = 0.0
         have_move = False
         for g in groups:
             mark = "  " if g.get("renderable", True) else C.dim(" -")
@@ -1803,7 +1803,28 @@ def step_render(ctx):
             (", auto-skipped %s" % sorted(ctx.last_scan.skipped)) if ctx.last_scan.skipped else ""))
 
     idx = ask("  Trip indices to render (space separated, blank = all renderable): ")
-    height = ask("  Output height [%d]: " % ctx.output_height, str(ctx.output_height))
+    # Offer the heights that are actually worth choosing, with what each costs.
+    # Bytes scale roughly with pixel count, so halving the height quarters the
+    # area — but real footage does not compress linearly, so treat these as the
+    # order of magnitude they are. The rate below is measured: 1h47m of this card
+    # came out at 13.0 GB at crf 23, and crf 26 (the default now) is about half
+    # that, giving ~3.6 GB per hour of video at 1080.
+    OPTS = [(1080, "native 2402x1080, full detail"),
+            (720,  "still reads plates and signs"),
+            (540,  "phone and web, clearly softer")]
+    vid_secs = tot_move          # 0 until Preview has written the sidecars
+    print()
+    print("  Output height:")
+    for h, why in OPTS:
+        est = ""
+        if vid_secs:
+            gb = 3.6 * (vid_secs / 3600.0) * (h / 1080.0) ** 2
+            est = "  ~%.1f GB" % gb
+        mark = C.bold(" <- default") if h == ctx.output_height else ""
+        print("    %4d  %-30s%s%s" % (h, why, C.bold(est), mark))
+    if vid_secs:
+        print(C.dim("        estimates for %s of video, at the current crf" % human_secs(vid_secs)))
+    height = ask("  Height [%d]: " % ctx.output_height, str(ctx.output_height))
     try:
         height = int(height)
     except ValueError:
