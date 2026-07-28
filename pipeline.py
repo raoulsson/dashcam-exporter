@@ -827,7 +827,11 @@ def print_status(ctx):
                 C.bold(tilde(p)),
                 C.dim("%s clips, %s" % (n if n is not None else "?", human_bytes(tree_size(p))))))
     else:
-        print("  Import       %s  %s" % (C.dim("empty"), C.dim(tilde(ctx.import_root))))
+        # Name the folder the config actually points at — import_root is only a
+        # fallback, and showing it sends you to create the wrong directory.
+        print("  Import       %s  %s" % (C.dim("empty"),
+                                         C.dim(tilde(ctx.render_root if ctx.render_root
+                                                     else ctx.import_root))))
 
     # Renders
     mp4s = rendered_mp4s(ctx.out_dir)
