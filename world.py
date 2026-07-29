@@ -94,7 +94,15 @@ def _same_object(key: str, name: str) -> bool:
     """Key match on a "/" boundary.
 
     A bare endswith let sometrip_X.mp4 in the bucket vouch for trip_X.mp4 on
-    disk. This rule lives here and nowhere else now.
+    disk, which is how a render read as published while its only other copy
+    was the workspace about to be erased.
+
+    This is the version the ITEMS judge. pipeline.py still hand-writes the same
+    comparison in four more places (working_area_is_expendable,
+    import_is_expendable, uploads_outstanding's disk walk and the progress
+    count), so the rule holds in five places and is enforced in one. Folding
+    those onto this function is worth doing; until it happens, changing the
+    rule here changes it for the guards only.
     """
     return key == name or key.endswith("/" + name)
 
