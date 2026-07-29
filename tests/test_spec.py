@@ -143,7 +143,11 @@ class TestAvailability(SpecTest):
         self.assertBlocked(WIPE_SIM)
 
     def test_can_wipe_a_sim_that_is_mounted(self):
-        self.b.card_in()
+        # Mounted AND accounted for: the wipe's own runtime guard refuses while
+        # nothing was ever imported, so the menu offering it on a bare card was
+        # the drift the step graph exists to catch. The rule this file already
+        # states — sidecars before wipe sim — applies here too.
+        self.b.card_in().imported().sidecars()
         self.assertAvailable(WIPE_SIM)
 
     def test_cannot_upload_without_the_render_step(self):
@@ -156,8 +160,10 @@ class TestAvailability(SpecTest):
         self.assertAvailable(UPLOAD)
 
     def test_can_deploy_the_site_without_the_render_step(self):
-        """You CAN deploy the site without the render step."""
-        self.b.site_repo()
+        """You CAN deploy the site without the render step — but not without
+        sidecars: deploying with nothing to publish is a no-op, and this file's
+        own rule lists deploy-site among the steps that wait for sidecars."""
+        self.b.imported().sidecars().site_repo()
         self.assertAvailable(DEPLOY, "deploy publishes curation; renders are not required")
 
     def test_cannot_upload_without_sidecars(self):

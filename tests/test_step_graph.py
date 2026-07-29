@@ -171,6 +171,63 @@ class TestGraphConsistency(GraphTest):
                 self.assertIn(S.IMPORT, S.ALL_STEPS[S.DELETE_WS].reaches_to(strategy))
 
 
+class TestInterfaceMatchesBehaviour(GraphTest):
+    """What a step SAYS about itself has to be what the tool DOES."""
+
+    def test_start_nodes_are_exactly_the_steps_enabled_on_a_cold_start(self):
+        """is_start_node() must equal is_enabled() on an untouched workspace.
+
+        A step advertising itself as an entry point while the menu greys it out
+        is the same class of drift the two-sided edges exist to catch.
+        """
+        for strategy in S.Strategy:
+            m = MockState(strategy)
+            try:
+                m.with_card()          # "nothing happened" = card in, nothing done
+                self._bucket_contents = {}
+                for step in S.ALL_STEPS.values():
+                    with self.subTest(strategy=strategy.value, step=step.number):
+                        self.assertEqual(
+                            step.is_start_node(m.ctx), step.is_enabled(m.ctx),
+                            "step %d: is_start_node=%s but is_enabled=%s on a cold start"
+                            % (step.number, step.is_start_node(m.ctx), step.is_enabled(m.ctx)))
+            finally:
+                m.cleanup()
+
+    def test_the_ways_in(self):
+        """Footage always enters through Import — the ONLY start node, under
+        both strategies. Deploy looked like a second way in on a publishing
+        install, but deploying with no sidecars publishes nothing: it needs the
+        sidecar pass first, so it cannot be the first thing you do."""
+        local = MockState(S.Strategy.LOCAL_DEFAULT_WEBSITE)
+        pub = MockState(S.Strategy.WEBSITE_REPO)
+        try:
+            self.assertEqual(
+                [s.number for s in S.ALL_STEPS.values() if s.is_start_node(local.ctx)],
+                [S.IMPORT])
+            self.assertEqual(
+                [s.number for s in S.ALL_STEPS.values() if s.is_start_node(pub.ctx)],
+                [S.IMPORT])
+        finally:
+            local.cleanup(); pub.cleanup()
+
+    def test_destructive_steps_are_the_ones_that_erase(self):
+        destructive = {s.number for s in S.ALL_STEPS.values() if s.is_destructive()}
+        self.assertEqual(destructive, {S.EXCLUDE, S.DELETE_WS, S.WIPE_SIM})
+
+    def test_is_enabled_is_the_negation_of_a_reason(self):
+        """One answer, not two: enabled iff nothing is in the way."""
+        m = MockState()
+        try:
+            self._bucket_contents = {}
+            for step in S.ALL_STEPS.values():
+                with self.subTest(step=step.number):
+                    self.assertEqual(step.is_enabled(m.ctx),
+                                     step.blocked_because(m.ctx) is None)
+        finally:
+            m.cleanup()
+
+
 class TestStrategySplit(GraphTest):
     """The two products differ where they should and nowhere else."""
 
@@ -191,7 +248,11 @@ class TestStrategySplit(GraphTest):
                  step.reaches_to(S.Strategy.LOCAL_DEFAULT_WEBSITE))
             if a != b:
                 differing.add(step.number)
-        self.assertEqual(differing, {S.RENDER, S.SITE, S.UPLOAD, S.DEPLOY, S.DELETE_WS},
+        # PREVIEW is in the set because on a publishing install the sidecars
+        # unlock Deploy — publish early, catch a broken pipeline before the
+        # render — an edge the local product does not have.
+        self.assertEqual(differing,
+                         {S.PREVIEW, S.RENDER, S.SITE, S.UPLOAD, S.DEPLOY, S.DELETE_WS},
                          "the split should touch publishing and what settles the workspace")
 
     def test_local_product_settles_the_workspace_by_gathering(self):

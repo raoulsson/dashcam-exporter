@@ -166,6 +166,18 @@ def _sidecar_debt_settled(ctx) -> bool:
     return _has_metas(ctx)
 
 
+def _sidecars_absent(ctx) -> Optional[str]:
+    """Reason when NO sidecars exist at all, or None.
+
+    Stricter than _sidecars_missing: an empty workspace passes that one (there
+    is no import owing a look), but a step that publishes the trips' metadata —
+    Deploy — has nothing to say until the sidecar pass has run at least once.
+    """
+    if _has_metas(ctx):
+        return None
+    return _SIDECAR_REASON % (PREVIEW, ALL_STEPS[PREVIEW].title)
+
+
 def _nothing_imported(ctx, reason: str) -> Optional[str]:
     """The given reason when the workspace holds no import, else None."""
     if _machinery(ctx).import_candidates(ctx):
@@ -257,9 +269,11 @@ class Step(ABC):
 
         Not the same as having no inbound edges: Import has two — you come back
         to it after clearing the workspace or the card — and is still an entry
-        point. It takes the state because the answer is strategy-dependent: on a
-        publishing install you can curate online and deploy without ever
-        touching a card, so Update site is an entry too.
+        point. It takes the state because the answer could depend on it; today
+        Import is the ONLY way in under both strategies, because every other
+        step consumes something a previous step produced. Deploy looked like a
+        second way in on a publishing install, but deploying with no sidecars
+        publishes nothing.
 
         A test holds this to is_enabled() on a cold workspace, so a step cannot
         advertise itself as an entry point while the menu greys it out.
@@ -382,7 +396,13 @@ class PreviewTrips(Step):
         return {IMPORT, LIST}
 
     def reaches_to(self, s: Strategy) -> Set[int]:
-        # Preview writes the sidecars, which is what everything downstream reads.
+        # Preview writes the sidecars, which is what everything downstream
+        # reads. On a publishing install they also unlock Deploy directly:
+        # publishing the page from sidecars alone exercises the real publish
+        # path — curation pull, manifest rebuild, asset split — hours before a
+        # render finishes, which is when a broken pipeline is cheap to catch.
+        if s is Strategy.WEBSITE_REPO:
+            return {EXCLUDE, RENDER, DEPLOY}
         return {EXCLUDE, RENDER}
 
     def blocked_because(self, ctx: Ctxish) -> Optional[str]:
@@ -502,15 +522,11 @@ class UploadToSite(Step):
 class UpdateSite(Step):
     number, title = DEPLOY, "Update site"
 
-    def is_start_node(self, ctx: "Ctxish") -> bool:
-        # Deploy publishes CURATION, which is authored online and owes nothing
-        # to the card. On a publishing install it is a second way in.
-        return Strategy.of(ctx) is Strategy.WEBSITE_REPO
-
     def reachable_from(self, s: Strategy) -> Set[int]:
-        # Deploy publishes curation, so it stands alone as well as following an
-        # upload — you can deploy without having rendered anything.
-        return {UPLOAD} if s is Strategy.WEBSITE_REPO else set()
+        # From Preview as well as Upload: the sidecars are what the manifest is
+        # built from, so deploy can (and should) run before any render — to the
+        # REAL site, to catch a broken publish path early. See PreviewTrips.
+        return {PREVIEW, UPLOAD} if s is Strategy.WEBSITE_REPO else set()
 
     def reaches_to(self, s: Strategy) -> Set[int]:
         return {DELETE_WS} if s is Strategy.WEBSITE_REPO else set()
@@ -518,13 +534,15 @@ class UpdateSite(Step):
     def blocked_because(self, ctx: Ctxish) -> Optional[str]:
         """Why Deploy cannot run, or None.
 
-        Deploy is allowed WITHOUT renders — it publishes curation — but not
-        without sidecars when an import is sitting there unlooked-at: the
-        deploy would carry a manifest that says nothing about the trips on
-        disk.
+        Deploy is allowed WITHOUT the render step and WITHOUT an upload — it
+        publishes the page, the manifest and the curation, not video — but
+        never without sidecars: the manifest is built from them, so before the
+        sidecar pass has run at least once there is nothing to deploy, and
+        deploying with an import sitting there unlooked-at would publish a
+        manifest that says nothing about the trips on disk.
         """
         checks = (lambda c: _site_repo_missing(c, "deploy-site.sh"),
-                  _sidecars_missing)
+                  _sidecars_absent)
         return _first_reason(ctx, checks)
 
 
@@ -541,10 +559,19 @@ class DeleteSimData(Step):
         return {IMPORT}
 
     def blocked_because(self, ctx: Ctxish) -> Optional[str]:
-        """The delete has its own heavy gates; the menu-level one is only that
-        the trips were looked at (sidecars) before the footage is put beyond
-        looking."""
-        return _sidecars_missing(ctx)
+        """The delete has its own heavy gates; the menu-level ones are that
+        something exists to delete at all, and that the trips were looked at
+        (sidecars) before the footage is put beyond looking."""
+        return _first_reason(ctx, (self._nothing_to_delete, _sidecars_missing))
+
+    def _nothing_to_delete(self, ctx) -> Optional[str]:
+        if self._holdings(ctx):
+            return None
+        return "nothing imported — nothing to delete"
+
+    def _holdings(self, ctx):
+        pl = _machinery(ctx)
+        return pl.import_candidates(ctx) or pl.rendered_mp4s(ctx.out_dir)
 
 
 class CleanSim(Step):
@@ -561,8 +588,15 @@ class CleanSim(Step):
         return {IMPORT}
 
     def blocked_because(self, ctx: Ctxish) -> Optional[str]:
-        """No card, nothing to clean; an empty card offers nothing to wipe."""
-        checks = (self._no_source, self._already_clean, _sidecars_missing)
+        """The same guards wipe_card enforces at run time, asked up front.
+
+        This is the one step whose target may have no copy, so the menu must
+        not offer it on evidence the step itself would refuse: the ledger has
+        to show an import, no clip on the card may be newer than it, and the
+        copy the ledger claims has to still be findable on this machine.
+        """
+        checks = (self._no_source, self._already_clean, self._never_imported,
+                  self._unimported_clips, self._copy_lost, _sidecars_missing)
         return _first_reason(ctx, checks)
 
     def _no_source(self, ctx) -> Optional[str]:
@@ -575,6 +609,26 @@ class CleanSim(Step):
         if next(iter(files), None) is None:
             return "card is already clean — nothing to wipe"
         return None
+
+    def _never_imported(self, ctx) -> Optional[str]:
+        if _machinery(ctx).last_imported_stamp(ctx):
+            return None
+        return "nothing ever imported — no record this footage exists anywhere else"
+
+    def _unimported_clips(self, ctx) -> Optional[str]:
+        pl = _machinery(ctx)
+        pl.excluded_stamps(ctx)          # refresh the cache card_split reads
+        n_new, _n_old = pl.card_split(ctx.card, pl.last_imported_stamp(ctx))
+        if n_new:
+            return "%d clip(s) on the card were never imported" % n_new
+        return None
+
+    def _copy_lost(self, ctx) -> Optional[str]:
+        have, _what = _machinery(ctx).copy_still_exists(ctx)
+        if have:
+            return None
+        return "the ledger claims imported, but no copy is still on this machine"
+
 
 def _is_file(p) -> bool:
     return p.is_file()
