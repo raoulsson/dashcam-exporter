@@ -3991,13 +3991,19 @@ def copy_still_exists(ctx):
     last copy of a drive because a 154-byte JSON file said not to worry.
 
     So the ledger decides WHETHER the card's clips were ever copied, and this
-    decides whether that copy is still somewhere. Three kinds of evidence, best
-    first; any one is enough, and each is a thing you can go and look at.
-    """
-    ok, _why = import_is_expendable(ctx, ctx.render_root)
-    if ok:
-        return True, "published — it is on the site and in the bucket"
+    decides whether that copy is still somewhere. Two kinds of evidence, best
+    first; either is enough, and each is a thing you can go and look at.
 
+    Both are about THIS card, deliberately. There used to be a shortcut first —
+    import_is_expendable on the workspace — and it broke the rule the other two
+    exist to enforce: it proves the CURRENT import is rendered (and uploaded,
+    when a bucket is configured), which says nothing about the card in the slot.
+    A card whose own import was lost was approved on the strength of a different
+    round's renders — the exact case this guard exists for. Its message also
+    claimed "on the site", which nothing here checks. If the card's clips really
+    were rendered and published, their _meta.json survive every sweep and the
+    span check below is what says so.
+    """
     # What is ON THE CARD, so the evidence can be about THIS card. Without this
     # the two checks below became permanently true the moment any final_ folder
     # existed — and final_ folders survive every sweep by design. A card whose
