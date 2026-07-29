@@ -374,9 +374,13 @@ class Ctx:
 
     @property
     def site_ready(self):
-        """Configured AND actually on disk. Two different failures, and the menu
-        distinguishes them: 'needs site_repo in config.txt' is a setup step,
-        'site_repo not found' is a wrong path."""
+        """Configured AND actually on disk.
+
+        Only the second failure reaches an item's answer: unset means the
+        publishing edition was never resolved, so the menu says the entry is
+        not part of this edition and the startup line says which edition that
+        is. Set but absent is a wrong path, which is this world's problem and
+        so is the item's to report."""
         return self.site is not None and self.site.is_dir()
 
     def site_script(self, *parts):
@@ -5072,11 +5076,12 @@ class Publisher:
         self._ctx = ctx
 
     def why_not(self, world):
-        """The configuration questions, named by the key that fixes them.
+        """What is missing from THIS world, in the world's own terms.
 
-        This is where someone who cloned the repo finds out publishing exists
-        at all, so the reason names the config key rather than saying "not
-        configured", which tells them nothing they can act on.
+        Never how to change the installation. Which product this is and how to
+        turn the other one on is said once at startup and belongs in the
+        README; an item that answered it would be describing the machine it
+        runs in rather than the job it does.
         """
         return _first_reason(_publish_reasons(self._ctx, world))
 
@@ -5093,7 +5098,7 @@ class NoPublisher:
     """
 
     def why_not(self, world):
-        return "needs site_repo and s3_bucket in config.txt"
+        return "not part of this edition"
 
     def run(self, world):        # pragma: no cover - unreachable by two rules
         return menu.stopped("publishing is not configured")
@@ -5104,27 +5109,19 @@ def _first_reason(reasons):
 
 
 def _publish_reasons(ctx, world):
-    return (_no_bucket_reason(world), _no_site_reason(ctx, world),
-            _no_script_reason(world), _no_awscli_reason(world),
-            guards.videos_link_wrong(world))
-
-
-def _no_bucket_reason(world):
-    if not isinstance(world.bucket, W.NoBucket):
-        return None
-    return "needs s3_bucket in config.txt"
+    return (_no_site_reason(ctx, world), _no_script_reason(world),
+            _no_awscli_reason(world), guards.videos_link_wrong(world))
 
 
 def _no_site_reason(ctx, world):
+    """A configured path that is not there. Which is a fact about this world,
+    unlike "set site_repo in config.txt", which was a fact about the
+    installation and could not be true here anyway: this publisher is only
+    built when the strategy resolved, and the strategy resolves on both keys
+    being set."""
     if world.site.on_disk:
         return None
-    return _site_key_or_path(ctx, world)
-
-
-def _site_key_or_path(ctx, world):
-    if world.site.configured:
-        return "site_repo not found: %s" % tilde(ctx.site)
-    return "needs site_repo in config.txt"
+    return "site_repo not found: %s" % tilde(ctx.site)
 
 
 _PUBLISH_SCRIPTS = ("upload-videos-s3.sh", "deploy-site.sh")
@@ -5530,6 +5527,19 @@ def _lock_taken(ctx):
     return 2
 
 
+def _edition_line(ctx):
+    """Which of the two editions this install is, named once, at the top.
+
+    The menu says "not available for <edition>" about the entries the other one
+    owns, and this is where that word is explained. It lives here rather than
+    in the item that is switched off because how an installation is configured
+    is not something a menu entry knows about — an entry answers for its own
+    job, and the shape of the machine around it is the session's to state.
+    """
+    return C.dim("  %s edition — README.md has the step graph and what each"
+                 " edition does." % menu.Strategy.of(ctx).value)
+
+
 def _chain(ctx):
     """What THIS installation actually does, which is not the same on every
     machine: with nothing configured the chain really does stop at a local
@@ -5599,6 +5609,7 @@ def main(argv=None):
 def _start(ctx):
     print()
     print(C.bold("  dashcam pipeline") + C.dim("   " + _chain(ctx)))
+    print(_edition_line(ctx))
     # Checked before the status screen: there is nothing useful to show if the
     # numbers behind it would come from the wrong grouping.
     if not require_ego_motion(ctx):
