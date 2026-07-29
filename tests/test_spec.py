@@ -144,6 +144,13 @@ class TestAvailability(SpecTest):
         half."""
         self.assertBlocked(CLEANUP)
 
+    def test_cannot_clean_up_with_only_leftover_renders(self):
+        """Renders without an import folder: the step's first act (picking an
+        import) has nothing to pick, so the menu must not offer it. The
+        leftovers' designed path is upload or gather, then the import sweep."""
+        self.b.render()                     # a render, but no DCIM tree anywhere
+        self.assertBlocked(CLEANUP)
+
     def test_can_clean_up_once_the_card_is_accounted_for(self):
         # Mounted AND accounted for: the clean-up's own runtime guard refuses
         # while nothing was ever imported, so the menu offering it on a bare

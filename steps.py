@@ -623,13 +623,19 @@ class CleanUp(Step):
 
     # -- the workspace half -------------------------------------------------
     def _nothing_to_clear(self, ctx) -> Optional[str]:
-        if self._holdings(ctx):
-            return None
-        return "nothing imported — nothing to clean up"
-
-    def _holdings(self, ctx):
+        """The step works ON an import (pick_import is its first act), so no
+        import folder means it cannot start — offering it anyway made the menu
+        say yes and the step answer 'no import folder' one keypress later.
+        Leftover renders without an import are real, but they are not this
+        step's to clean: the designed path is upload or gather, after which
+        the next import sweeps them without asking."""
         pl = _machinery(ctx)
-        return pl.import_candidates(ctx) or pl.rendered_mp4s(ctx.out_dir)
+        if pl.import_candidates(ctx):
+            return None
+        if pl.rendered_mp4s(ctx.out_dir):
+            return ("no import to clean — upload (%d) or gather (%d) the leftover"
+                    " renders; the next import sweeps them" % (UPLOAD, SITE))
+        return "nothing imported — nothing to clean up"
 
     # -- the card half, asked only when a card with footage is in ----------
     def _card_reason(self, ctx) -> Optional[str]:
