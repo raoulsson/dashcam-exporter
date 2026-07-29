@@ -4326,15 +4326,30 @@ def step_cleanup(ctx):
         if gs:
             expect = sum(1 for g in gs if g.get("renderable", True))
             src = "the cached grouping"
+    # "Noted, not blocking" is only honest when something else WILL block —
+    # the same rule the S3 guard below learned. With no site_repo, is-complete
+    # never runs, so an under-rendered import fell through to the CLEAN prompt
+    # and the rmtree erased footage of trips that were never encoded: those
+    # exist in no render, no bucket, nowhere. Refuse instead when nothing
+    # later can decide.
     if expect is None:
         print(C.yellow("%d mp4, but the trip grouping could not be read" % len(ns_mp4s)))
+        if not can_site:
+            print(C.red("        And there is no site to ask instead — refusing."))
+            return record(ctx, "Clean up", SKIPPED, started,
+                          "refused: trip count unknown and no site to verify against")
         print(C.dim("        Noted, not blocking — is-complete.py below is what decides."))
     elif len(ns_mp4s) < expect:
         print(C.red("no"))
         print(C.red("        %s found %d renderable trip(s); only %d mp4 exist." % (
             src.capitalize(), expect, len(ns_mp4s))))
+        if not can_site:
+            print(C.red("        And there is no site to ask instead — refusing."))
+            return record(ctx, "Clean up", SKIPPED, started,
+                          "refused: %d of %d trip(s) rendered, no site check"
+                          % (len(ns_mp4s), expect))
         print(C.dim("        Noted, not blocking — is-complete.py below is what decides."))
-    elif expect is not None:
+    else:
         print(C.green("yes (%d mp4 for %d renderable trip(s), per %s)" % (len(ns_mp4s), expect, src)))
 
     # --- guard 2: those mp4s are on S3, byte-size matched.

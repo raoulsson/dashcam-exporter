@@ -20,6 +20,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -320,6 +321,44 @@ class TestCleanSimEvidence(GuardTest):
         self.w.clips(["20260728100000"], where="import")       # the other clip
         ok, why = P.copy_still_exists(self.w.ctx)
         self.assertTrue(ok, why)
+
+
+# ---------------------------------------------------------------------------
+# The clean-up's workspace half: guard 1 must be conclusive when nothing
+# later can decide
+# ---------------------------------------------------------------------------
+
+class TestCleanupRefusesWhenNothingElseCanBlock(GuardTest):
+    """'Noted, not blocking — is-complete.py decides' is only honest when
+    is-complete.py will actually run. With no site repo it never does, so the
+    under-rendered branches must refuse rather than defer to nothing — the
+    rmtree would erase footage of trips that were never encoded."""
+
+    def setUp(self):
+        super().setUp()
+        self.w.ctx.results = []
+        self.w.clips(["20260728090000"], where="import")
+        self.w.render("trip_A", ns="import")            # 1 mp4 exists
+
+    def _run(self, groups):
+        with mock.patch.object(P, "load_groups", return_value=groups), \
+             mock.patch.object(P, "ask", side_effect=AssertionError(
+                 "must refuse before the CLEAN prompt")):
+            P.step_cleanup(self.w.ctx)
+        return self.w.ctx.results[-1]
+
+    def test_under_rendered_import_refuses_without_a_site(self):
+        r = self._run({"trips": [{"renderable": True}] * 3})   # 1 of 3 rendered
+        self.assertEqual(r.status, P.SKIPPED)
+        self.assertIn("refused", r.detail)
+        self.assertTrue((self.w.ctx.render_root / "DCIM").is_dir(),
+                        "the footage must survive the refusal")
+
+    def test_unreadable_grouping_refuses_without_a_site(self):
+        r = self._run(None)                                    # scanner failed
+        self.assertEqual(r.status, P.SKIPPED)
+        self.assertIn("refused", r.detail)
+        self.assertTrue((self.w.ctx.render_root / "DCIM").is_dir())
 
 
 # ---------------------------------------------------------------------------
