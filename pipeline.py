@@ -1362,10 +1362,17 @@ def purge_published_renders(ctx, root):
     freed = n = 0
     for child in sorted(out.iterdir()):
         if child.name in keep_names or child.name.startswith(FINAL_PREFIX):
-            # the import dir stays, but empties
+            # The import dir stays, but empties. The SAME _meta.json exemption
+            # as the general branch below, because this branch does not only see
+            # footage: renders are namespaced out_dir/<import name>/, so the
+            # render namespace of the very import being cleaned up carries
+            # root's name and lands HERE, not below. Without the exemption the
+            # sweep destroyed exactly the metas the docstring promises to keep,
+            # for exactly the trips whose footage was just deleted. A real
+            # footage dir holds no _meta.json, so sparing them costs nothing.
             if child.name == root.name and child.is_dir():
                 for f in sorted(child.rglob("*")):
-                    if f.is_file():
+                    if f.is_file() and not f.name.endswith("_meta.json"):
                         try:
                             freed += f.stat().st_size
                             f.unlink()
@@ -3936,10 +3943,10 @@ def step_delete_import(ctx):
     # renders are the ONLY copy of the footage, and then this deleted them
     # anyway. One step, whole drive gone, contradicting the sentence above it.
     #
-    # And the old comment here promised the _meta.json survive. They do not:
-    # the sweep's keep-list empties the import namespace file by file. What
-    # actually survives is the ledger's high-water mark, written before any of
-    # this runs. Saying so beats a comforting sentence that is false.
+    # What survives the sweep: the ledger's high-water mark, written before any
+    # of this runs, and every _meta.json — including the ones in this import's
+    # own render namespace, which shares root's name and is emptied by the
+    # sweep's keep-branch rather than the general one.
     ok, why, stragglers = working_area_is_expendable(ctx)
     n = freed = 0
     if ok:
