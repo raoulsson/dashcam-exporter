@@ -129,12 +129,18 @@ class Recorder(U.WebsiteUploaderInterface):
 
     def __init__(self, holds=YES, published=YES, owed=ALL, raises=None,
                  builds=True, uploads=True, no_build=None, no_upload=None,
-                 settles=False,
+                 settles=False, carries=None,
                  describes="Push the drives onto the test's own shelf."):
         self.calls = []            # every question asked, in order
         self.uis = []              # what was handed over as a Ui
         self.dropped_ids = []
         self._holds = _as_list(holds)
+        # carries() is a LOOSER question than holds() — "is there anything
+        # there for this trip", not "this exact file at this exact size, fully
+        # published" — so a real target answers them differently and the
+        # default here follows holds only so the tests that predate the knob
+        # keep meaning what they meant.
+        self._carries = _as_list(holds if carries is None else carries)
         self._published = _as_list(published)
         self._owed = owed
         self._raises = raises
@@ -205,7 +211,7 @@ class Recorder(U.WebsiteUploaderInterface):
     def carries(self, trip_ids):
         self.calls.append("carries")
         self._maybe_raise()
-        return _answer(_scripted(self._holds), list(trip_ids))
+        return _answer(_scripted(self._carries), list(trip_ids))
 
     def dropped(self, trip_ids, ui):
         self.calls.append("dropped")
@@ -829,6 +835,31 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         ran = b.run(EXCLUDE, typed=["1", "DROP"])
         self.assertIn("ONLY copy", ran.printed)
         self.assertIn("No website_uploader is configured", ran.printed)
+
+    def test_a_copy_that_stays_behind_is_named_even_when_holds_says_no(self):
+        """The note above the file list is the loose question too.
+
+        holds() means "this exact file, at this exact size, and fully
+        published". A trip re-rendered since it was uploaded fails it on the
+        size alone; a machine whose deploy record is gone fails it outright.
+        In both states the copy at the destination is still there and still
+        serving, and a drop does not touch it — so a note driven off holds()
+        goes silent in exactly the states where the operator most needs it,
+        and he deletes locally believing the trip is gone everywhere.
+        """
+        target = Recorder(holds=NO, carries=YES)
+        b = self.bench(target).complete()
+        ran = b.run(EXCLUDE, typed=["1", "DROP"])
+        self.assertIn("stay there", ran.printed)
+        self.assertIn("Deleting locally does not remove them", ran.printed)
+
+    def test_a_copy_the_target_does_not_carry_is_not_claimed_to_stay(self):
+        """The control. The note is about a copy that survives the drop, so a
+        destination with nothing for this trip must not produce it — the
+        operator would go looking for a copy that was never there."""
+        b = self.bench(Recorder(holds=YES, carries=NO)).complete()
+        ran = b.run(EXCLUDE, typed=["1", "DROP"])
+        self.assertNotIn("stay there", ran.printed)
 
     def test_dropping_a_rendered_trip_tells_the_target_it_was_on_purpose(self):
         """A dropped trip and a cleaned-up published trip are indistinguishable

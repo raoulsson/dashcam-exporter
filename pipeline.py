@@ -2593,15 +2593,47 @@ def _renders_of(ctx, payload, by_index, picked):
     return out
 
 
-def _note_renders_published(world, render_files):
+def _picked_ids(by_index, picked):
+    """The trip ids behind the chosen rows, e.g. trip_2026-07-28_08-57_01.
+
+    The name everything off this machine is keyed on: out_base is a path under
+    <out>, and only its last component means anything to a target.
+    """
+    return list(filter(None, map(lambda i: _out_base_name(by_index[i]), picked)))
+
+
+def _out_base_name(trip):
+    base = trip.get("out_base")
+    return Path(base).name if base else None
+
+
+def _note_trips_published(world, ids):
     """Local deletion is not unpublishing. Say so rather than letting a clean
-    local result imply the trip is gone from the world."""
-    up = [f.name for f in render_files if f.suffix == ".mp4"
-          and world.target.holds.about(f.name) is menu.Evidence.YES]
-    if not up:
-        return
-    print(C.red("  NOTE: %d of these are already at %s and stay there."
-                % (len(up), world.target.name)))
+    local result imply the trip is gone from the world.
+
+    Asked through carries() and not holds(), for the same reason the only-copy
+    warning below it is. holds() means "this exact file, at this exact size,
+    and fully published"; this is the loose question — is there ANYTHING at the
+    destination for this trip that deleting locally will not touch. A trip
+    re-rendered since it was uploaded fails holds() on the size alone, and a
+    machine that has lost its deploy record fails it outright, and in both
+    states the copy at the destination is still there and still being served.
+    Driven off holds() the note went silent in exactly those states, which is
+    the reading that lets an operator believe a drop removed the trip from the
+    world.
+    """
+    up = list(filter(lambda t: _carried_there(world, t), ids))
+    if up:
+        _say_they_stay(world.target.name, len(up))
+
+
+def _carried_there(world, trip_id) -> bool:
+    return world.target.carried.about(trip_id) is menu.Evidence.YES
+
+
+def _say_they_stay(where, count):
+    print(C.red("  NOTE: %d of these trip(s) are already at %s and stay there."
+                % (count, where)))
     print(C.dim("  Deleting locally does not remove them from the destination."))
     print(C.dim("  Rebuild and republish (%d, %d) after this, and remove them"
                 % (BUILD, UPLOAD)))
@@ -2746,7 +2778,7 @@ def _drop_plan_for(ctx, world, payload, by_index, picked, started):
         print()
         print(C.yellow("  Already rendered. The render goes too, %d file(s):"
                        % len(render_files)))
-        _note_renders_published(world, render_files)
+        _note_trips_published(world, _picked_ids(by_index, picked))
         for f in render_files[:8]:
             print(C.dim("      %s" % tilde(f)))
         if len(render_files) > 8:
@@ -2882,8 +2914,7 @@ def _tell_the_target(ctx, by_index, picked, render_files):
     """
     if not (render_files and ctx.uploader):
         return
-    ids = [Path(by_index[i]["out_base"]).name for i in picked
-           if by_index[i].get("out_base")]
+    ids = _picked_ids(by_index, picked)
     if not ids:
         return
     print()
