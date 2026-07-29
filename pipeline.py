@@ -3915,13 +3915,39 @@ def _clean_target(ctx, root):
 
 
 def _print_gates(world):
-    """The three gates and what each one answered.
+    """Who is being asked, then the gates and what each one answered.
 
     Which proofs are even possible depends on what is configured, so the count
     comes first and the gates number themselves against it. Writing "[1/3]"
     when only one check can run would claim two that never happened.
     """
-    readings = [(label, e) for label, e in guards.gate_readings(world) if e.applicable]
+    _print_who_answers(world.target)
+    _print_readings(_applicable_readings(world))
+
+
+def _print_who_answers(target):
+    """Which implementation the two destination gates are asking.
+
+    Attribution, not a safeguard — a component inside the trust boundary needs
+    no policing, and this line polices nothing. It is so that if footage is
+    gone and the answer was wrong, the operator can read whose answer he acted
+    on off the tool rather than out of memory. The first gate is deliberately
+    not covered by it: that one never leaves this machine.
+    """
+    if not target.configured:
+        return
+    print(C.dim("  destination: %s" % target.origin))
+
+
+def _applicable_readings(world):
+    return list(filter(_can_answer, guards.gate_readings(world)))
+
+
+def _can_answer(reading):
+    return reading[1].applicable
+
+
+def _print_readings(readings):
     for i, (label, e) in enumerate(readings, 1):
         print("  [%d/%d] %s %s" % (i, len(readings), (label + " ").ljust(40, "."),
                                    _evidence_colour(e)))
@@ -3935,25 +3961,44 @@ def _evidence_colour(e):
 
 def _clean_banner(ctx, world, target, size):
     """The last thing on screen before the word is asked for."""
-    lines = [C.red("  Deleting %s removes %s of original footage permanently."
-                   % (target, human_bytes(size)))]
+    return (C.red("  Deleting %s removes %s of original footage permanently."
+                  % (target, human_bytes(size))),) + _what_survives(ctx, world)
+
+
+def _what_survives(ctx, world):
     unproven = guards.unproven_lines(world)
-    if not unproven:
-        lines.append(C.dim("  The renders and the copies %s holds stay; the raw clips"
-                           " do not come back." % world.target.name))
-        return tuple(lines)
-    # Not a warning about missing setup — a statement of what survives this,
-    # which is strictly less than it would be with something to publish to. The
-    # check that could not run is named, so it is obvious this passed unexamined
-    # rather than passed.
-    lines.append(C.red("  Publication was NOT verified — it could not be:"))
-    lines.extend(C.red("    " + line) for line in unproven)
-    lines.append(C.red("  The renders under %s are therefore the only" % tilde(ctx.out_dir)))
-    lines.append(C.red("  copy of this footage that exists. Lose that disk and the drive"
-                       " is gone."))
-    lines.append(C.dim("  Back the renders up elsewhere first, or leave the import where"
-                       " it is — keeping it costs disk, not data."))
-    return tuple(lines)
+    if unproven:
+        return _nothing_off_this_machine_was_checked(ctx, unproven)
+    return _on_the_targets_word(world.target)
+
+
+def _on_the_targets_word(target):
+    """What survives, and whose answer says so.
+
+    The second line names the implementation because the erase is proceeding
+    on ITS answer, not on anything this repo checked. Not a warning: whoever
+    configured it owns what it does, exactly as with any library. It is there
+    so the decision stays attributable afterwards, when the footage is gone
+    and the only question left is who said it was safe.
+    """
+    return (C.dim("  The renders and the copies %s holds stay; the raw clips"
+                  " do not come back." % target.name),
+            C.dim("  Proceeding on %s's answer that these renders are published."
+                  % target.origin))
+
+
+def _nothing_off_this_machine_was_checked(ctx, unproven):
+    """Not a warning about missing setup — a statement of what survives this,
+    which is strictly less than it would be with something to publish to. The
+    check that could not run is named, so it is obvious this passed unexamined
+    rather than passed."""
+    return ((C.red("  Publication was NOT verified — it could not be:"),)
+            + tuple(C.red("    " + line) for line in unproven)
+            + (C.red("  The renders under %s are therefore the only" % tilde(ctx.out_dir)),
+               C.red("  copy of this footage that exists. Lose that disk and the drive"
+                     " is gone."),
+               C.dim("  Back the renders up elsewhere first, or leave the import where"
+                     " it is — keeping it costs disk, not data.")))
 
 
 def clean_workspace_plan(ctx, world):
@@ -4036,7 +4081,21 @@ def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
     else:
         _keeping_the_renders(why, stragglers)
     return _outcome(record(ctx, NAME[CLEAN_WS], RAN, started,
-                           "%d file(s), %s freed" % (files + n, human_bytes(size + freed))))
+                           "%d file(s), %s freed%s"
+                           % (files + n, human_bytes(size + freed),
+                              _on_whose_word(fresh.target))))
+
+
+def _on_whose_word(target):
+    """The origin, carried into the summary line and the crash log.
+
+    The banner said it on screen; this is the copy that outlives the session.
+    A screen is read once and by one person, and the question "who said the
+    footage was safe to erase" gets asked weeks later.
+    """
+    if not target.configured:
+        return ""
+    return " (on %s's answer)" % target.origin
 
 
 def _keeping_the_renders(why, stragglers):

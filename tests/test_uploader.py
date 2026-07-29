@@ -8,10 +8,12 @@ footage on the strength of these answers, so "could not ask" arriving as YES or
 NA is the one reading that must be unwritable rather than merely unwritten.
 """
 
+import io
 import os
 import sys
 import textwrap
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -293,6 +295,78 @@ class SilentUi(U.Ui):
 
     def run(self, cmd, cwd, label, env=None):        # pragma: no cover
         raise AssertionError("the example must not run a subprocess")
+
+
+class TestTheEraseSaysWhoseAnswerItActedOn(unittest.TestCase):
+    """Attribution, which is not a safeguard.
+
+    An implementation is inside the trust boundary and needs no policing; what
+    it says is believed. But footage is not recoverable, so when the erase went
+    ahead on somebody's answer, WHOSE answer has to be readable off the tool
+    rather than reconstructed from memory weeks later. Three places carry it:
+    the gate table, the banner above the CLEAN prompt, and the recorded step.
+    """
+
+    def setUp(self):
+        import pipeline as P
+
+        self.P = P
+        self.render = W.Render("trip_A_h1080.mp4", 10)
+        self.target = W.TargetFacts(
+            configured=True, name="fortknox",
+            origin="fortknox (~/dev/mine/up.py:FortKnox)",
+            holds=U.Answers.of({self.render.name: M.Evidence.YES}),
+            published=U.Answers.of({self.render.name: M.Evidence.YES}))
+
+    def _world(self, target):
+        return W.World(out_dir=Path("/w/out"), renders=(self.render,),
+                       renders_here=(self.render,), expected_trips=1,
+                       target=target)
+
+    def _printed(self, world):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.P._print_gates(world)
+        return out.getvalue()
+
+    def test_the_gate_table_names_the_implementation_being_asked(self):
+        self.assertIn("fortknox (~/dev/mine/up.py:FortKnox)",
+                      self._printed(self._world(self.target)))
+
+    def test_with_nothing_configured_there_is_nobody_to_name(self):
+        """The local edition asks no one, so a "destination:" line would be a
+        row about a thing that does not exist."""
+        self.assertNotIn("destination:", self._printed(self._world(W.TargetFacts())))
+
+    def test_the_banner_says_whose_answer_the_erase_proceeds_on(self):
+        lines = self.P._clean_banner(
+            _a_ctx(), self._world(self.target), Path("/w/import"), 1024)
+        said = "\n".join(lines)
+        self.assertIn("fortknox (~/dev/mine/up.py:FortKnox)", said)
+        self.assertIn("Proceeding on", said)
+
+    def test_an_unconfigured_install_gets_the_unverified_banner_instead(self):
+        """Nothing was asked, so nothing is attributed — and the sentence that
+        replaces it is the stronger one: these renders are the only copy."""
+        lines = self.P._clean_banner(
+            _a_ctx(), self._world(W.TargetFacts()), Path("/w/import"), 1024)
+        said = "\n".join(lines)
+        self.assertIn("NOT verified", said)
+        self.assertNotIn("Proceeding on", said)
+
+    def test_the_recorded_step_outlives_the_screen(self):
+        """A screen is read once, by one person. The question "who said this
+        was safe" gets asked after the session is over."""
+        self.assertIn("fortknox", self.P._on_whose_word(self.target))
+        self.assertEqual(self.P._on_whose_word(W.TargetFacts()), "")
+
+
+def _a_ctx():
+    import pipeline as P
+
+    ctx = P.Ctx.__new__(P.Ctx)
+    ctx.out_dir = Path("/w/out")
+    return ctx
 
 
 class TestTheToolStopsRatherThanDegrading(unittest.TestCase):
