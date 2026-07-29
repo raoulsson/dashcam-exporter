@@ -42,9 +42,9 @@ class Strategy(Enum):
         """Was an implementation supplied. That is the whole question.
 
         It takes the uploader itself, not the ctx it came from: asked of a ctx
-        this would read config keys, and the keys it read were one operator's
-        — a site repo and a bucket name. Which product this is has to be
-        answerable without knowing how anybody publishes.
+        this would read config keys, and the keys it read named one operator's
+        arrangement. Which product this is has to be answerable without knowing
+        how anybody publishes.
         """
         return cls.UPLOADER if uploader is not None else cls.LOCAL_PAGE
 
@@ -138,8 +138,8 @@ class Evidence(Enum):
     """Three-valued, plus 'this check could not apply here at all'.
 
     Collapsing UNKNOWN into NO or YES is how a guard gets weakened without the
-    diff looking like it: "could not list the bucket" is not "not in the
-    bucket", and neither is "there is no bucket".
+    diff looking like it: "could not ask the destination" is not "not at the
+    destination", and neither is "there is no destination".
     """
 
     YES = "yes"
@@ -252,8 +252,10 @@ class Scope(Enum):
     """How much of the world an item's guard needs to see.
 
     LOCAL is the filesystem and is what the menu draws on every loop. FULL
-    also lists the bucket and shells out to is-complete.py, which is a network
-    call and a subprocess — fine once per dispatch, not once per keystroke.
+    also asks the configured publishing target what it holds and serves, which
+    may go to the network or shell out — fine once per dispatch, not once per
+    keystroke. At LOCAL scope a configured target reads UNKNOWN everywhere,
+    which every guard already treats as not proven.
     """
 
     LOCAL = "local"

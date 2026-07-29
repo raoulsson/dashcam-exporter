@@ -40,16 +40,16 @@ deliberate — see [One source of truth](#one-source-of-truth).
 ## What it looks like
 
 ```
-  dashcam pipeline   card -> render -> S3 -> site
+  dashcam pipeline   card -> render -> folder(~/dashcam-published)
+  uploader edition — README.md has the step graph and what each edition does.
 
 -- status ---------------------------------------------------------------------
   Source       present  /Volumes/NO NAME  (222 clips)
   Import       ~/dashcam-data/import/2026-07-28  612 clips, 116.6 GB
   Rendered     6 mp4  8.3 GB in ~/dashcam-data/output
   Local site   ~/dashcam-data/output/dashcam_export_data_site.html  built 22 min ago
-  Prepared     29 trips  updated 2 h ago
-  Live site    23 trips
-  Repos        ~/dev/dashcam-exporter | ~/dev/goodnight-drives
+  Folder       ~/dashcam-published  29 file(s)
+  Repo         ~/dev/dashcam-exporter
 --------------------------------------------------------------------------------
   disk: 238.8 GB free of 917.0 GB
 --------------------------------------------------------------------------------
@@ -80,9 +80,9 @@ never moves, so "run 5" means the same thing on every machine.
 | 3 | **Build Preview** | One still per trip and a local contact sheet, from the sidecars. No encoding. |
 | 4 | **Exclude Trip** &#9888; | Deletes one trip's source clips, its render and its site entry. |
 | 5 | **Render Videos** | Encodes the chosen trips. The slow step — hours for a full card. |
-| 6 | **Build Website** | One self-contained HTML page built from the renders. Nothing leaves the machine. |
-| 7 | **Upload Website** | Puts the built site online: the mp4s to your bucket, verified object by object, then the pages to your server. |
-| 8 | **Clean Workspace** &#9888; | Erases the imported footage and the renders it produced, once the site says they are published. |
+| 6 | **Build Website** | Builds what this installation publishes. With nothing configured: one self-contained HTML page from the renders, and nothing leaves the machine. |
+| 7 | **Upload Website** | Puts it online, through whatever you configured. One job — how many transports it takes is the implementation's business, not the menu's. |
+| 8 | **Clean Workspace** &#9888; | Erases the imported footage and the renders it produced, once this machine and the publishing target both say they are safe. |
 | 9 | **Delete SIM Data** &#9888; | Erases the card's clips, keeping its folders so the camera can record, once every clip is accounted for elsewhere. |
 
 Items 4, 8 and 9 destroy footage, and each needs a distinct word typed —
@@ -104,8 +104,8 @@ cancelled leaves the pipeline exactly where it was.
 3   build preview     look at each trip before spending hours encoding
 4   exclude trip      drop the ones not worth keeping          (optional)
 5   render videos     the long one
-6   build website     a local page you can open and check
-7   upload website    mp4s to the bucket, then the pages to the server
+6   build website     what your target publishes; a local page if there is none
+7   upload website    put it online, through whatever you configured
 8   clean workspace   erase the footage and the renders — the cycle is closed
 9   delete sim data   free the card, at any point once its clips are safe
 ```
@@ -202,8 +202,8 @@ another one has claimed.
 
 Clean Workspace erases everything that is not `logs/`, the ledger, the owner
 marker, a `_meta.json`, or a `final_*` folder. Renders are ~1.4 GB each and
-live on S3 once uploaded; source clips are ~400 MB each and live on the card
-until you erase it. What survives is a few KB of metadata — and that is the
+live at the publishing target once uploaded; source clips are ~400 MB each and
+live on the card until you erase it. What survives is a few KB of metadata — and that is the
 point. `_meta.json` and `.imported.json` answer "have I already imported this
 card" long after the footage is gone, and they are what Delete SIM Data reads
 to decide whether a card's clips are inside a rendered trip. That is also why
@@ -216,10 +216,10 @@ graph Import SIM reaches Clean Workspace directly, so the offer had nowhere to
 earn its place.
 
 The sweep only runs when the round is **finished**, and finished means one of
-two things: every render is inside a `final_<date>` folder, or every render is
-in the bucket. Either way the workspace holds nothing that exists only there.
-If neither is true it deletes nothing, names the files, and says which of the
-two would settle it.
+two things: every render is inside a `final_<date>` folder, or the configured
+target says it holds every render. Either way the workspace holds nothing that
+exists only there. If neither is true it deletes nothing, names the files, and
+says which of the two would settle it.
 
 Anything you park in the working area goes with it. It is the tool's workspace,
 not a shelf.
@@ -251,24 +251,24 @@ machine with four Pythons on PATH, only one of them has opencv.
 ## Two editions
 
 Nothing about publishing is required. The tool works out what it can do from
-what you have configured:
+one setting:
 
 | Configured | You get |
 |---|---|
 | nothing | Import, render, and `dashcam_export_data_site.html` — one self-contained page, every still embedded, every route drawn from its GPX. Opens from `file://` with no network. |
-| `site_repo`, `s3_bucket` | Item 7, Upload Website, wakes up: the mp4s to your bucket, then the pages to your site. |
+| `website_uploader` | Item 6 builds what YOUR target publishes instead of the local page, and item 7, Upload Website, wakes up. |
 
-Unconfigured, item 7 stays in the menu, greyed out, with the setting that
-would enable them printed underneath. Run the cycle and the result is gathered
-into `final_<date>/` — page, videos and sidecars together, ready to move
-wherever you keep things.
+Unconfigured, item 7 stays in the menu, greyed out, with the reason printed
+underneath. Run the cycle and the result is gathered into `final_<date>/` —
+page, videos and sidecars together, ready to move wherever you keep things.
 
-The publishing half is one person's setup, so it lives in the **gitignored
-`.env`**, never in `config.txt`:
+There is no second edition of this repo and no fork. There is one program, and
+whether it publishes depends on whether you supplied something that publishes.
+
+The value lives in the **gitignored `.env`**, never in `config.txt`:
 
 ```
-SET_SITE_REPO      SET_S3_BUCKET      SET_S3_REGION      SET_LIVE_TRIPS_URL
-SET_HOME_LAT       SET_HOME_LON
+SET_WEBSITE_UPLOADER      SET_HOME_LAT      SET_HOME_LON
 ```
 
 `config.txt` is tracked, so a value written there gets committed and pushed —
@@ -385,14 +385,72 @@ If your card came formatted so macOS will not mount it, see
 
 ---
 
-## Publishing
+## Publishing — plugging in your own
 
-The other half is [goodnight-drives](https://github.com/raoulsson/goodnight-drives):
-a private website with invite-only access, videos in a private S3 bucket served
-through CloudFront as short-lived signed URLs. Point `site_repo` at it in `.env`
-and Upload Website (7) wakes up.
+This repo does not know where your videos go, and it is not supposed to. It
+knows one interface, `WebsiteUploaderInterface` in
+[uploader.py](uploader.py), and it calls whatever class you point it at.
 
-You do not need it. The local website is a real deliverable on its own.
+Set one thing, in the gitignored `.env`:
+
+```
+SET_WEBSITE_UPLOADER=~/dev/my-site/my_uploader.py:MyTarget
+```
+
+`<path to a .py>:<ClassName>`. A file path rather than a dotted module name,
+because your implementation lives somewhere that is not installed and must not
+have to be — and when the path is wrong, the error names your file instead of
+Python's search path.
+
+**Start from [examples/uploader_folder.py](examples/uploader_folder.py).** It
+is a complete implementation in about eighty lines that publishes to a folder:
+no network, no credentials, no second repo, so what is left is the shape and
+nothing else. The test suite drives the real menu through it, which is the
+point — an example nobody runs rots into a lie.
+
+Eight questions, in three groups plus one:
+
+| | |
+|---|---|
+| `build(world, ui)` | Item 6. Produce whatever you publish, from the renders. |
+| `upload(world, ui)` | Item 7. Put it online. One job; how many transports that takes is yours, not the menu's. |
+| `why_not_build(world)` / `why_not_upload(world)` | `None`, or one reason in the operator's words. Asked on **every menu draw**, so keep them cheap and local — no network, no subprocess. |
+| `owes(renders)` | Which renders `upload()` would still act on. Empty means item 7 reports "settled" instead of offering itself. |
+| `holds(renders)` | Is this exact render at the destination, at this exact size? |
+| `published(renders)` | Is it actually being **served**, not merely stored? |
+| `carries(trip_ids)` | Is there anything there for these trips, by id — for a trip whose local render is already gone. |
+| `dropped(trip_ids, ui)`, `status_lines()`, `name()`, `describe()` | Have defaults. Ignore them until you want them. |
+
+### What the exporter will and will not believe
+
+Your class is **inside the trust boundary**. Whoever installed it owns what it
+does, exactly as with any library — the exporter runs your code and believes
+what it says. There is no sandbox and no output validation, because there is no
+threat model in which those would help: you chose the class.
+
+Two things follow, and they are the whole design:
+
+**"I could not find out" must be unwritable as "yes".** An implementation whose
+target is unreachable answers `Answers.unknown(...)`, and unreachable is not
+permission. `Answers.not_applicable(...)` is a different thing — the question
+does not *arise* for your target (a folder holds files; it does not serve them)
+— and it removes the gate rather than failing it. Getting those two the wrong
+way round is how Clean Workspace erases footage on the strength of a check that
+never ran. A render name you simply did not mention reads UNKNOWN, never yes:
+there is no accessor that takes a default.
+
+**The exporter still answers its own questions.** "Were these trips rendered on
+this machine" never leaves home. An implementation that answers yes to
+everything still cannot get an import that produced no renders erased, because
+that gate is not delegated — not out of distrust, but because the tool already
+knows the answer.
+
+And when the erase does go ahead on your answer, the gate table, the banner
+above the CLEAN prompt and the recorded step all name your implementation. Not
+a safeguard; attribution. If footage is gone and the answer was wrong, whose
+answer it was should be readable off the tool rather than out of memory.
+
+You do not need any of this. The local page is a real deliverable on its own.
 
 ---
 

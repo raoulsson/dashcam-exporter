@@ -370,89 +370,99 @@ software = true
 # ============================================================================
 #
 # Nothing below is needed to use this repo. Unset (a fresh clone) the pipeline
-# is: import the card, render the trips, build a browsable site under <out>/site
-# and open it with file://. That path touches no network host and no account.
+# is: import the card, render the trips, build a browsable local page under
+# <out> and open it with file://. That path touches no network host and no
+# account.
 #
-# These four settings are read by pipeline.py, not by the renderer. They exist
-# because the publishing half of this pipeline — a bucket the videos live in and
-# a website that serves them — is one person's setup, and hardcoding it would
-# mean every clone reaching for a checkout it does not have and a host it has
-# never heard of. Set them and 7) Upload Website in the menu lights up.
-# Leave them and it stays in the menu, greyed out, with the key that
-# would enable it printed underneath. Set them in the gitignored `.env` as
-# SET_SITE_REPO / SET_S3_BUCKET / SET_S3_REGION / SET_LIVE_TRIPS_URL, not
-# here — the examples below show the shape, .env holds the values. The item
-# NUMBERS never move, so a note saying "run 5" means the same thing on every
-# machine.
+# There is exactly ONE setting about publishing, and it names an implementation
+# rather than describing a destination. Where the videos end up, what serves
+# them, whether that involves a bucket, a second repo, a rack in a cupboard or
+# a folder on an external disk, is that implementation's business and not this
+# repo's. Set it and 6) Build Website builds what YOUR target publishes and
+# 7) Upload Website lights up. Leave it and both stay exactly as a fresh clone
+# has them: item 6 writes the local page, item 7 sits in the menu greyed out
+# with the reason printed underneath. The item NUMBERS never move, so a note
+# saying "run 5" means the same thing on every machine.
 
-# The second repo, holding what it takes to publish. pipeline.py runs three
-# things out of it and nothing else, so anything providing them works:
-#   build_manifest.py           indexes the render tree into public_html/trips.json
-#   deploy/upload-videos-s3.sh  syncs the mp4s to the bucket ($1 = source dir)
-#   deploy/deploy-site.sh       pushes public_html/ to wherever the site is served
-#   deploy/is-complete.py       (optional) prints a per-trip published/not table;
-#                               the delete guard reads it, see below
-# pipeline.py drives the first three from ONE menu item — 7) Upload Website —
-# because they are one job: getting the built site online. Setting this is half
-# of what enables it. --site-repo overrides it for one run.
-#site_repo = ~/dev/your-site
-
-# The bucket the videos end up in. Setting it (together with site_repo) enables
-# 7) Upload Website. It is NOT how the sync is aimed — upload-videos-s3.sh picks its own
-# destination — it is what this CLI lists afterwards to prove the sync landed,
-# because `aws s3 sync` exits 0 even when individual objects fail. Name the same
-# bucket the script uploads to; if the two disagree, verification fails, which
-# is the intended way to discover it. Needs awscli configured.
-#s3_bucket = my-bucket
-
-# Only needed when the bucket is not in the credentials' default region — an
-# eu-central-1 bucket listed with a us-east-1 default fails.
-#s3_region = eu-central-1
-
-# The deployed site's manifest, read once at startup for one status line. Unset
-# means no request is made at all — not a request that quietly fails. This is
-# the only thing here that would otherwise touch the network on every launch,
-# which is why it is a setting rather than a constant.
-#live_trips_url = https://example.com/trips.json
+# The class that publishes, as "<path to a .py>:<ClassName>". It must subclass
+# uploader.WebsiteUploaderInterface, which is the whole contract: build,
+# upload, why_not_build, why_not_upload, owes, holds, published and carries —
+# plus dropped() and status_lines(), which have defaults and may be ignored.
+#
+# examples/uploader_folder.py is a complete working one in about eighty lines,
+# and the test suite drives the menu through it, so it cannot rot into a lie.
+# Read that first, then copy it.
+#
+#   website_uploader = ~/dev/dashcam-exporter/examples/uploader_folder.py:FolderTarget
+#
+# A file path rather than a dotted module name, because the implementation
+# lives somewhere that is not installed and must not have to be — and when the
+# path is wrong the error names YOUR file instead of Python's search path.
+#
+# The value belongs in the gitignored .env as SET_WEBSITE_UPLOADER, not here:
+# this file is tracked, and a path to your own work written here gets
+# committed. The line above is the SHAPE; .env holds the value.
+#
+# A named implementation that will not load STOPS THE TOOL, loudly, before the
+# menu is drawn. It never falls back to the local edition — a menu that has
+# quietly stopped publishing looks exactly like a menu that is publishing fine,
+# and the renders stop reaching the world with nothing on screen to say so.
+#website_uploader =
 
 # THE DELETE GUARD. 8) Clean Workspace erases the original clips and the renders
 # they produced, and what it can prove first depends on what is set here. (The
 # card is not this item's business — that is 9) Delete SIM Data, with its own
 # evidence and its own word.)
 #
-# THE RULE, in one sentence: the site decides when it can be asked; otherwise
+# THE RULE, in one sentence: the target decides when it can be asked; otherwise
 # every check that can answer must say yes.
 #
-# Three gates. How many renderable trips have an mp4; whether those mp4s are in
-# the bucket at a matching size; and what deploy/is-complete.py says the live
-# site actually serves. The third is the authority whenever it can run, because
-# it asks what is really being served rather than what ought to be — so with a
-# site_repo set, a short local count is commentary and a green from the script
-# deletes.
+# Three gates. How many renderable trips have an mp4 ON THIS MACHINE; whether
+# your target says it HOLDS those mp4s at a matching size; and whether it says
+# they are actually SERVED. The third is the authority whenever it can run,
+# because it asks what is really being served rather than what ought to be — so
+# a short local count is commentary next to a yes from it.
 #
-# Without a site_repo there is nothing to defer TO, and this is where the rule
-# earns its keep. It is NOT "the last check that can answer wins": with three
-# trips grouped, one encoded, no site repo, and that one mp4 sitting in the
-# bucket at a matching size, the bucket would be the last word and would say
-# yes — while the two trips that were never encoded exist in no render, in no
-# bucket, nowhere. Their footage would go. So every gate that CAN answer has to
-# say yes, and a gate that cannot read the grouping answers "unknown", which is
-# not a yes.
+# GATE ONE NEVER LEAVES THIS MACHINE, and that is deliberate. Your
+# implementation runs inside the trust boundary: whatever it says is believed,
+# and whatever it really does with your footage is between you and it. But a
+# question this tool can answer itself is not delegated, so an implementation
+# that answers yes to everything still cannot get an import that produced no
+# renders erased. Gates two and three are yours; gate one is not, and it can
+# block on its own.
 #
-# With neither configured nothing can be verified: it says so in red, names the
-# check that could not run, keeps the renders instead of purging them, and
-# still makes you type CLEAN.
+# It is NOT "the last check that can answer wins": with three trips grouped,
+# one encoded, a target that does not serve anything, and that one mp4 at the
+# destination at a matching size, the destination would be the last word and
+# would say yes — while the two trips that were never encoded exist in no
+# render, at no destination, nowhere. Their footage would go. So every gate
+# that CAN answer has to say yes, and a gate that could not find out answers
+# "unknown", which is not a yes.
+#
+# THE ONE READING THAT MUST NEVER BE INVENTABLE is "could not find out". An
+# implementation whose target is unreachable says UNKNOWN, and unreachable is
+# not permission. Answers.not_applicable() is a different thing entirely — it
+# means the question does not ARISE here (a folder holds files; it does not
+# serve them) and it removes the gate rather than failing it. Getting those two
+# the wrong way round is how footage gets erased on the strength of a check
+# that never ran.
+#
+# With no website_uploader configured nothing can be verified: it says so in
+# red, names the check that could not run, keeps the renders instead of purging
+# them, and still makes you type CLEAN.
+#
+# When it DOES go ahead on your target's answer, the gate table and the banner
+# name the implementation that gave it, and so does the recorded step. Not a
+# safeguard — a trusted component needs none — but so that afterwards, when the
+# footage is gone, whose answer it was is readable off the tool.
 
-# REPRODUCING THE FULL SETUP, if you want it. The shape is: an S3 bucket holding
-# the mp4s (private, fronted by CloudFront with signed URLs — deploy-site.sh
-# takes SIGNED_VIDEOS=1 for that), and a small static site on a host of your
-# choice whose pages point at those URLs. build_manifest.py turns the render
-# tree into the JSON the pages read; the deploy script rsyncs the result. None
-# of that is provided here — this repo produces the videos and their sidecars,
-# and <out>/site is a working example of a site built from them, with relative
-# links and no build step. Copy that directory plus the mp4s to any web root and
-# it is already a website; the S3 + CloudFront route only buys you private,
-# signed delivery and somewhere to keep tens of GB that is not your laptop.
+# WRITING YOUR OWN. Copy examples/uploader_folder.py and answer the eight
+# questions honestly. There is no shape you have to reproduce and no service
+# you have to sign up for: object storage behind a CDN, an rsync to a box, a
+# copy onto an external disk and a page you open by hand — all of them are the
+# same eight answers. This repo produces the videos and their sidecars; what
+# counts as "published" is yours to define, and holds()/published() are where
+# you define it.
 
 # ============================================================================
 # THE RESULT PAGE
@@ -482,7 +492,7 @@ software = true
 # heading gets committed and pushed. The real values belong in `.env`, which
 # .gitignore excludes, under these names:
 #
-#   SET_SITE_REPO   SET_S3_BUCKET   SET_S3_REGION   SET_LIVE_TRIPS_URL
+#   SET_WEBSITE_UPLOADER   SET_HOME_LAT   SET_HOME_LON
 #
 # .env wins over anything set above, and a real environment variable of the
 # same name wins over .env. See .env.example for the full block.

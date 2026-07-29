@@ -45,9 +45,9 @@ def _nothing_rendered(world):
     Evidence, not order: the old wording was "nothing rendered to upload — run
     6 first", and only the second half of that sentence was an ordering claim.
     The fact itself survives an operator deleting the renders in Finder, and
-    without it an empty tree answers SATISFIED — "every render is on the
-    bucket" is vacuously true of no renders, which is the wrong sentence to
-    put in front of someone who has published nothing.
+    without it an empty tree answers SATISFIED — "the target has everything"
+    is vacuously true of no renders, which is the wrong sentence to put in
+    front of someone who has published nothing.
     """
     if world.renders:
         return None
@@ -229,7 +229,7 @@ class ExcludeTrip(Destructive):
                    "uploaded or published.")
     DESTR = True
     WORD = "DROP"
-    SCOPE = Scope.FULL          # the only-copy warning needs the bucket listing
+    SCOPE = Scope.FULL          # the only-copy warning has to ask the target
     OUT = _both(_e(EXCLUDE, META, CLEAN_WS, ERASE_CARD))
     IN_AUTHORED = _both_sets(EXCLUDE, META, PREVIEW)
 
@@ -301,11 +301,11 @@ class BuildWebsite(MenuItem):
     number = BUILD
     NAME = "Build Website"
     DESCRIPTION = ("Build what this installation publishes, from the renders.")
-    # DEVIATION FROM THE OWNER'S TABLE: 7 added to the outbound under
-    # website_repo. His inbound column for item 7 says {7,6} — build the site,
-    # then put it online — but no outbound set anywhere offered 7, so Upload
-    # Website was unreachable by its own natural route. This is the edge that
-    # makes publishing work.
+    # DEVIATION FROM THE OWNER'S TABLE: 7 added to the outbound under the
+    # publishing edition. His inbound column for item 7 says {7,6} — build the
+    # site, then put it online — but no outbound set anywhere offered 7, so
+    # Upload Website was unreachable by its own natural route. This is the edge
+    # that makes publishing work.
     OUT = {
         Strategy.UPLOADER: _e(BUILD, META, PREVIEW, EXCLUDE, RENDER, UPLOAD,
                                   CLEAN_WS, ERASE_CARD),
@@ -364,10 +364,11 @@ class UploadWebsite(MenuItem):
     NAME = "Upload Website"
     DESCRIPTION = "Put what was built online. Resumes where it left off."
     SCOPE = Scope.FULL
-    # DEVIATION FROM THE OWNER'S TABLE: 6 added to the outbound under
-    # website_repo. He wrote 7 into item 6's INBOUND column — after uploading
-    # you fix a caption and rebuild — and left it out of item 7's outbound.
-    # Deriving the inbound would have silently deleted an edge he authored.
+    # DEVIATION FROM THE OWNER'S TABLE: 6 added to the outbound under the
+    # publishing edition. He wrote 7 into item 6's INBOUND column — after
+    # uploading you fix a caption and rebuild — and left it out of item 7's
+    # outbound. Deriving the inbound would have silently deleted an edge he
+    # authored.
     OUT = {
         Strategy.UPLOADER: _e(UPLOAD, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                                   CLEAN_WS, ERASE_CARD),
@@ -451,11 +452,12 @@ class CleanWorkspace(Destructive):
     def evaluate(self, world) -> Verdict:
         """The cheap half only.
 
-        The three heavy gates — rendered locally, on the bucket, published on
-        the site — are plan.guard, asked against a world captured at dispatch
-        and again after the word is typed. Asking them on every menu draw
-        would shell out to is-complete.py forty times a session, and a menu
-        that is not instant stops being recomputed and starts being remembered.
+        The three heavy gates — rendered locally, held at the destination,
+        published at the destination — are plan.guard, asked against a world
+        captured at dispatch and again after the word is typed. The last two go
+        to whatever was configured to publish, and asking that forty times a
+        session makes the menu slow; a menu that is not instant stops being
+        recomputed and starts being remembered.
         """
         return _first_block(
             _no_import(world, "nothing imported — nothing to clean up"),

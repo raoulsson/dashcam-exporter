@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """pipeline.py — the whole dashcam publishing pipeline, in one interactive CLI.
 
-Card -> import -> sidecars -> preview -> render -> local page -> bucket and
-site -> clear the workspace, and separately free the card. Each of those
-already has a script; the point of this file is that nobody should have to
-remember which script, in which repo, with which flag. Run it, look at the
-status screen, pick an item.
+Card -> import -> sidecars -> preview -> render -> build -> publish -> clear
+the workspace, and separately free the card. Each of those already has a
+script; the point of this file is that nobody should have to remember which
+script, with which flag. Run it, look at the status screen, pick an item.
 
 Build Preview and Exclude Trip in the middle are the cheap decision point:
 sidecars and one still per trip cost minutes, while encoding costs hours and
@@ -27,12 +26,13 @@ entry points the READMEs document, streams their output, and turns what it can
 parse into a progress bar. Where real progress cannot be derived it shows an
 elapsed-time spinner rather than inventing a percentage.
 
-This repo does import, render and a local site on its own. Publishing — a bucket
-and a deployed website — lives in a second repo and is entirely optional: set
-`site_repo`, `s3_bucket` and `live_trips_url` in config.txt and Upload Website
-lights up; leave them unset (what a fresh clone gets) and it stays greyed out
-with the key that would enable it printed underneath. Nothing here contacts a
-network host that has not been named in the config.
+This repo does import, render and a local page on its own. Publishing is
+supplied from outside: `website_uploader` names a class implementing
+uploader.WebsiteUploaderInterface, and where that class sends things is its
+business, not this module's. Set it and items 6 and 7 do what it does; leave it
+unset (what a fresh clone gets) and item 7 stays greyed out with the reason
+printed underneath. Nothing in this repo contacts a network host at any point —
+not as a setting, but because there is no networked code left here.
 """
 from __future__ import annotations
 
@@ -87,9 +87,8 @@ NAME = items.NAMES
 FALLBACK_CARD = "/Volumes/NO NAME"                # make_dashcam_videos.DEFAULT_ROOT
 FALLBACK_OUT = "~/dashcam-data/output"            # make_dashcam_videos.FALLBACK_OUT
 FALLBACK_IMPORT_ROOT = "~/dashcam-data/import"    # import-sd-card.sh DEST_ROOT
-# There is deliberately no default for the site repo, the bucket or the live
-# manifest URL. A default would mean a clone reaching for someone else's
-# checkout on disk and someone else's host on the network, on every launch.
+# There is deliberately no default for `website_uploader`. A default would
+# mean a clone loading and running someone else's code on every launch.
 
 EXPORTER_DIR = Path(__file__).resolve().parent
 
@@ -835,7 +834,7 @@ def rendered_mp4s(out_dir):
     # reason: anything else in the working area is somebody's file, not this
     # tool's output, and must not move a published/not-published decision in
     # either direction. Four source clips parked in there read as "4 renders not
-    # on S3"; six named right would read as a finished round. The sweep still
+    # published"; six named right would read as a finished round. The sweep still
     # takes everything — this is only about what counts as EVIDENCE.
     return sorted(p for p in out_dir.rglob("trip_*.mp4")
                   if p.is_file() and not any(part.startswith(".") for part in p.relative_to(out_dir).parts))
@@ -1350,7 +1349,7 @@ def working_area_is_expendable(ctx, target):
     A render is expendable when it is EITHER
       - held at the configured destination, which is the TARGET's answer and
         the target's definition of "there" — one arrangement meant an object in
-        a bucket at a matching size AND a deploy record naming it, and that
+        the destination at a matching size, and that
         two-part rule now lives with the arrangement instead of here, OR
       - inside a final_<date> folder, which is where Build Website moves the
         deliverable on an install that does not publish.
@@ -1424,7 +1423,7 @@ def purge_published_renders(ctx, root):
     The metadata stays because it IS the state, and it is nothing: ~1.4 KB per
     trip against gigabytes released. It is what last_imported_stamp reads to
     answer "have I already imported this card" once the footage is gone, what
-    build_manifest carries forward for a trip whose render was deleted after
+    an index rebuild carries forward for a trip whose render was deleted after
     publishing, and what Delete SIM Data's evidence check reads to decide whether a
     card's clips are inside a rendered trip. Earlier this swept them away while
     two printed messages claimed they survived — the messages were right about
@@ -2136,16 +2135,15 @@ PREVIEW_DIRNAME = "previews"
 # Defaults for the still-frame knobs; config.txt's still_width / still_seconds
 # override both the preview sheet and the site page, which is the only sane
 # arrangement — a still that is right for one is right for the other.
-PREVIEW_STILL_W = 1600      # same intent as build_manifest.make_poster's POSTER_W
+PREVIEW_STILL_W = 1600      # wide enough to be a poster frame, not just a thumb
 PREVIEW_STILL_T = 1.0       # seconds into the clip; see extract_still
 
 
 def extract_still(src, dst, seconds=PREVIEW_STILL_T, width=PREVIEW_STILL_W):
     """One frame from a source clip, written as a jpg. True on success.
 
-    Same recipe as build_manifest.make_poster, for the same reasons: a beat in,
-    so a fade-from-black or still-auto-exposing first frame is not what he
-    judges the trip by, and scale='min(W,iw)' so a clip narrower than W is
+    A beat in, so a fade-from-black or still-auto-exposing first frame is not
+    what he judges the trip by, and scale='min(W,iw)' so a clip narrower than W is
     never upscaled into invented detail. `-ss` before `-i` plus -frames:v 1
     means ffmpeg seeks and decodes one frame — it does not read the clip.
     """
@@ -2525,7 +2523,7 @@ def step_preview(ctx):
 
     # No trips.json refresh here any more. Preview used to re-index the site
     # manifest "while we're here", which made a looking-step write into the
-    # site repo; deploy-site.sh re-indexes as its own first act, so the deploy
+    # target; whatever publishes re-indexes as its own first act, so publishing
     # never carries a stale manifest anyway. One step, one job.
 
     print()
@@ -2839,7 +2837,7 @@ def _drop_orphan_sidecars(by_index, picked):
     """Sidecars of trips that are now gone.
 
     They are not source footage — they describe something that no longer
-    exists, and left in place build_manifest keeps publishing a trip whose
+    exists, and left in place an index rebuild keeps publishing a trip whose
     video can never be rendered. For a trip that WAS rendered these went with
     the render; what this catches is the preview-only case.
     """
@@ -3159,12 +3157,13 @@ def step_render(ctx):
     # A finished render leaves renders and sidecars, not scratch.
     after_render(ctx)
 
-    # No manifest rebuild here any more. Rebuilding trips.json is the site
-    # repo's index, which is Upload Website's business, and deploy-site.sh
-    # re-indexes as its own first act — so the publish path never carried a
-    # stale manifest because of this. One item, one job. (Exclude Trip still
-    # rebuilds, for a reason that is not convenience: it is the only place
-    # that can tell build_manifest a trip was DROPPED rather than cleaned up.)
+    # Nothing is told to the publishing target here. Whatever index it keeps
+    # is Upload Website's business, and a target rebuilds as its own first act
+    # — so the publish path never carried a stale index because of this. One
+    # item, one job. (Exclude Trip still calls dropped(), for a reason that is
+    # not convenience: it is the only place that can say a trip was DROPPED
+    # rather than cleaned up after publishing, and the two are indistinguishable
+    # from the outside afterwards.)
     return record(ctx, NAME[RENDER], _render_status(new), started, detail)
 
 
@@ -3187,10 +3186,10 @@ def _render_status(new):
 #
 # Nothing here computes anything new. Every number, map and track already exists
 # on disk as a sidecar next to the mp4; this pass only arranges them into pages.
-# That is deliberate: the site has to be buildable by someone who has no S3
+# That is deliberate: the page has to be buildable by someone who has no
 # account, no second repo and no manifest — so it reads the output tree and
-# nothing else. It never calls build_manifest, never lists a bucket, never opens
-# admin.json. If those things are absent the site is still complete.
+# nothing else. It never asks the configured target anything and never reaches
+# a network host. If nothing is configured the page is still complete.
 #
 # Videos are referenced in place, not copied: a full card is tens of gigabytes
 # and duplicating it to make site/ self-contained would cost more disk than the
@@ -4030,7 +4029,7 @@ def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
     print(C.green("  Deleted %s (%s)" % (target, human_bytes(size))))
 
     # The renders go too — but only when that is separately proven. The gates
-    # above approved deleting the FOOTAGE; with neither bucket nor site the
+    # above approved deleting the FOOTAGE; with nothing configured to publish to,
     # banner has just finished saying these renders are the only copy of it,
     # and deleting them anyway would contradict the sentence above it. What
     # survives either way: the ledger's high-water mark, written before any of
@@ -4291,8 +4290,8 @@ def _unlink_card_files(dcim):
 # function of it.
 #
 # Two scopes. LOCAL is the filesystem alone and is what the menu draws on every
-# loop; FULL also lists the bucket and shells out to is-complete.py, which is a
-# network call and a subprocess. Painting the menu with FULL would put both on
+# loop; FULL also asks the configured target what it holds and serves, which may
+# go to the network or shell out. Painting the menu with FULL would put that on
 # every keystroke, and a menu that is not instant stops being recomputed and
 # starts being remembered — which is the one thing a greying rule must never be.
 # ---------------------------------------------------------------------------
@@ -4518,7 +4517,7 @@ def _asked(ctx, scope, renders, trip_ids):
 
     The menu is redrawn on every keystroke. At LOCAL scope a configured target
     reads UNKNOWN everywhere, which every guard already treats as not proven —
-    the same shape the bucket listing had, for the same reason.
+    the same shape the old bucket listing had, for the same reason.
     """
     if scope is not menu.Scope.FULL:
         return _not_at_this_scope(ctx, renders)
@@ -5435,12 +5434,6 @@ if __name__ == "__main__":
 #   would send the copy to a folder nothing downstream reads. One answer to
 #   "where did it go".
 #
-# * `aws s3 sync` exits 0 even when individual objects fail to upload. The
-#   upload step therefore ignores the exit code as evidence and re-lists the
-#   bucket, comparing keys and sizes against the local mp4s. Trips the admin
-#   flagged mode=delete are excluded from that comparison, because
-#   upload-videos-s3.sh deliberately does not upload them.
-#
 # * Progress can only be derived where the tool emits it: rsync's --info=progress2
 #   percentage (import) and the renderer's [Trip a/b] + [clip/N] lines (render).
 #   A tool that prints nothing countable shows a spinner instead. Many draw with
@@ -5450,12 +5443,6 @@ if __name__ == "__main__":
 #
 # * The renderer's "[Trip a/b]" a is the per-DAY publish number, so it repeats
 #   across days within one run. Only b is usable; the counter is our own.
-#
-# * is-complete.py's own "N/M fully published" line cannot gate the delete. It
-#   walks every local trip including ones the admin flagged mode=delete, which
-#   are off S3 and off the site on purpose and so can never be complete — the
-#   guard would jam shut permanently after the first admin deletion. We re-count
-#   from its table with those rows skipped.
 #
 # * The sink can hold several imports side by side (<sink>/<day>/DCIM). Deleting
 #   the sink itself would take the ones nothing has verified, so when siblings
@@ -5478,9 +5465,4 @@ if __name__ == "__main__":
 #   ctx.last_groups — and cleared by anything that changes the clips on disk (an
 #   import merges new files in, a drop removes some, a delete removes all).
 #
-# * The preview contact sheet lives in <out>/previews/ and deploy-site.sh excludes
-#   that directory. It sits inside the tree the `videos` symlink points at (it has
-#   to, for its relative links to the .html/.gpx sidecars to resolve from file://),
-#   and without the exclude a deploy would publish stills of footage he may be
-#   about to drop.
 # ---------------------------------------------------------------------------
