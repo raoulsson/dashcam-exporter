@@ -407,6 +407,48 @@ class TestWorkspaceRefusesWhenNothingElseCanDecide(GuardTest):
         self.assertFalse(verdict.blocked, verdict.reason)
 
 
+class TestNothingRenderedIsBelowTheSitesWordEntirely(GuardTest):
+    """A yes from is-complete.py cannot vouch for an import it never saw.
+
+    is-complete.py walks the trip metas under <out>, and those outlive every
+    sweep — so on a machine that published last month it reports last month's
+    trips all live while today's import has not been encoded at all. The
+    site's word is decisive about SHORT counts, which is the case the deferral
+    was written for; it is not evidence about footage that produced no render
+    for it to look at.
+    """
+
+    def test_a_published_site_does_not_excuse_an_import_with_no_renders(self):
+        """Import today, sidecars, no render, then Clean Workspace. Every gate
+        above is vacuously happy: the bucket "covers" an empty render list and
+        is-complete.py is talking about a previous round. The rmtree would
+        take footage that exists in no render, no bucket and on no site."""
+        verdict = guards.workspace_is_expendable(
+            _world(renders_here=0, expected=3, bucket=W.Listed({}),
+                   published=M.Evidence.YES))
+        self.assertTrue(verdict.blocked, verdict.reason)
+        self.assertIn("nothing from this import was rendered", verdict.reason)
+
+    def test_it_refuses_before_the_site_is_consulted_at_all(self):
+        """Not "the site said no" — the site is not what decided. Asserted on
+        an UNKNOWN grouping too, so the refusal cannot be read as the count
+        comparison happening to fail."""
+        for expected in (None, 0, 3):
+            with self.subTest(expected=expected):
+                verdict = guards.workspace_is_expendable(
+                    _world(renders_here=0, expected=expected,
+                           published=M.Evidence.YES))
+                self.assertTrue(verdict.blocked, verdict.reason)
+
+    def test_the_gate_table_and_the_verdict_agree(self):
+        """The screen printed "rendered locally .... no" and then proceeded to
+        the CLEAN prompt. A gate the operator can read must be a gate."""
+        world = _world(renders_here=0, expected=3, published=M.Evidence.YES)
+        readings = dict(guards.gate_readings(world))
+        self.assertIs(readings["rendered locally"], M.Evidence.NO)
+        self.assertTrue(guards.workspace_is_expendable(world).blocked)
+
+
 # ---------------------------------------------------------------------------
 # import_is_expendable — freed by the arc removal and kept as 9) Delete SIM
 # Data's advisory: erasing the card is allowed on the strength of a copy being

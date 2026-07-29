@@ -118,9 +118,31 @@ WORKSPACE_GATES = (("rendered locally", rendered_locally),
 WORKSPACE_GUARDS = tuple(fn for _label, fn in WORKSPACE_GATES)
 
 
+def nothing_was_rendered_here(world) -> Optional[Verdict]:
+    """The floor under the whole rule: not ONE mp4 from this import exists.
+
+    is-complete.py is asked about the local trip metas under <out>, which
+    outlive every sweep — so on a machine that published last month it answers
+    a confident yes about last month's trips while this import has not been
+    encoded at all. Letting it decide alone in that state erases footage that
+    exists in no render, no bucket and on no site, and the gate table on
+    screen says "rendered locally .... no" one line above the CLEAN prompt.
+
+    So this is asked BEFORE the site, and no answer overrides it. Short or
+    unreadable render counts still defer to is-complete.py, which is the case
+    the deferral was written for — a trip dropped after grouping, a size that
+    moved under a re-encode. Zero is not that case: it is the absence of the
+    thing every later gate reasons about.
+    """
+    if world.renders_here:
+        return None
+    return blocked("%s answered %s — nothing from this import was rendered"
+                   % (WORKSPACE_GATES[0][0], Evidence.NO.value))
+
+
 def workspace_is_expendable(world) -> Verdict:
-    """The site decides when it can be asked; otherwise every check that can
-    answer must say yes.
+    """Nothing rendered refuses outright; otherwise the site decides when it
+    can be asked, and failing that every check that can answer must say yes.
 
     Today this is three gates, each carrying a hand-written "and there is no
     site to ask instead — refusing" branch. That shape says two things at
@@ -135,6 +157,10 @@ def workspace_is_expendable(world) -> Verdict:
     footage would go. tests/test_guards.py enumerates all 48 combinations of
     the three gates against the branches this replaces.
     """
+    return nothing_was_rendered_here(world) or _decided_by_the_gates(world)
+
+
+def _decided_by_the_gates(world) -> Verdict:
     if world.site.published.applicable:
         return _verdict_of(WORKSPACE_GATES[2][0], world.site.published)
     return _unanimous(world)
