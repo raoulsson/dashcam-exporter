@@ -19,6 +19,10 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+import items                     # noqa: E402,F401  (registers the ten)
+import menu as M                 # noqa: E402
 
 
 def load_pipeline():
@@ -31,7 +35,11 @@ def load_pipeline():
 
 P = load_pipeline()
 
-IMPORT, PROGRESS, GENERATE_META, PREVIEW, EXCLUDE, RENDER, SITE, UPLOAD, DEPLOY, CLEANUP = range(1, 11)
+# The numbering is imported, never restated. Written out here it was a second
+# declaration of the same thing, and it would have gone on passing against the
+# old numbers while the tool moved to the new ones.
+from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER,   # noqa: E402
+                  BUILD, UPLOAD, CLEAN_WS, ERASE_CARD)
 
 
 class Bench:
@@ -100,6 +108,14 @@ class Bench:
             (s / "deploy" / "deploy-site.sh").write_text("#!/bin/sh\n")
             (s / "deploy" / "upload-videos-s3.sh").write_text("#!/bin/sh\n")
             (s / "build_manifest.py").write_text("")
+        # A publishing install HAS this symlink: upload-videos-s3.sh derives
+        # its object keys from whatever it resolves to, so verifying a
+        # different tree than the one uploaded is worse than not verifying.
+        # A bench without it is not a configured install.
+        (s / "public_html").mkdir(parents=True, exist_ok=True)
+        link = s / "public_html" / "videos"
+        if not link.exists():
+            link.symlink_to(self.ctx.out_dir)
         self.ctx.site = s
         return self
 
@@ -109,8 +125,19 @@ class Bench:
         P.s3_objects = lambda ctx: mapping
         return self
 
+    def verdicts(self, scope=None):
+        """What each of the ten items says about this bench, right now.
+
+        One world, captured once, and ten pure questions over it — which is
+        the whole point of the move: a guard no longer decides when it goes
+        and looks.
+        """
+        world = P.capture_world(self.ctx, scope or M.Scope.FULL)
+        menu_items = M.build_menu(M.Strategy.of(self.ctx), P.Work(self.ctx))
+        return {n: item.evaluate(world) for n, item in menu_items.items()}
+
     def blocked(self):
-        return P.unavailable_steps(self.ctx)
+        return {n: v.reason for n, v in self.verdicts().items() if v.blocked}
 
     def cleanup(self):
         shutil.rmtree(self.root, ignore_errors=True)
@@ -125,11 +152,11 @@ class SpecTest(unittest.TestCase):
         P.s3_objects = self._s3
         self.b.cleanup()
 
-    def assertBlocked(self, step, msg=""):
-        self.assertIn(step, self.b.blocked(), msg or "step %d should be unavailable" % step)
+    def assertBlocked(self, item, msg=""):
+        self.assertIn(item, self.b.blocked(), msg or "item %d should be unavailable" % item)
 
-    def assertAvailable(self, step, msg=""):
-        self.assertNotIn(step, self.b.blocked(), msg or "step %d should be available" % step)
+    def assertAvailable(self, item, msg=""):
+        self.assertNotIn(item, self.b.blocked(), msg or "item %d should be available" % item)
 
 
 # ---------------------------------------------------------------------------
@@ -138,26 +165,36 @@ class SpecTest(unittest.TestCase):
 
 class TestAvailability(SpecTest):
 
-    def test_cannot_clean_up_before_anything_happened(self):
-        """The clean-up (workspace + SIM, folded into one step) has nothing to
-        do on an untouched bench — and with no card in, that includes the SIM
-        half."""
-        self.assertBlocked(CLEANUP)
+    def test_cannot_clean_the_workspace_before_anything_happened(self):
+        """Clean Workspace has nothing to do on an untouched bench."""
+        self.assertBlocked(CLEAN_WS)
 
-    def test_cannot_clean_up_with_only_leftover_renders(self):
-        """Renders without an import folder: the step's first act (picking an
-        import) has nothing to pick, so the menu must not offer it. The
-        leftovers' designed path is upload or gather, then the import sweep."""
+    def test_cannot_clean_the_workspace_with_only_leftover_renders(self):
+        """Renders without an import folder: the item's first act (picking an
+        import) has nothing to pick, so it must not be offered. The leftovers'
+        designed path is to publish or gather them."""
         self.b.render()                     # a render, but no DCIM tree anywhere
-        self.assertBlocked(CLEANUP)
+        self.assertBlocked(CLEAN_WS)
 
-    def test_can_clean_up_once_the_card_is_accounted_for(self):
-        # Mounted AND accounted for: the clean-up's own runtime guard refuses
-        # while nothing was ever imported, so the menu offering it on a bare
-        # card was the drift the step graph exists to catch. The rule this file
-        # already states — sidecars before the clean-up — applies here too.
+    def test_can_clean_the_workspace_once_there_is_an_import_with_sidecars(self):
+        # The cheap half only. Whether the footage may actually GO is the three
+        # heavy gates, asked at dispatch and again after CLEAN is typed —
+        # putting them here would shell out to is-complete.py on every draw.
         self.b.card_in().imported().sidecars()
-        self.assertAvailable(CLEANUP)
+        self.assertAvailable(CLEAN_WS)
+
+    def test_erasing_the_card_is_a_separate_item_from_clearing_the_workspace(self):
+        """The unfold, as a rule rather than as a comment.
+
+        Folded, one step gathered the card's evidence from the workspace, erased
+        the workspace, and then refused the card half after the irreversible half
+        had run — having already printed that the card was verified. Two items
+        cannot do that, and Clean Workspace's outbound of {1} means it can never
+        even precede the other.
+        """
+        built = M.build_menu(M.Strategy.of(self.b.ctx), P.Work(self.b.ctx))
+        self.assertNotIn(ERASE_CARD,
+                         built[CLEAN_WS].outbound().offers(frozenset(built)))
 
     def test_cannot_upload_without_the_render_step(self):
         """You cannot upload without the render step."""
@@ -168,31 +205,40 @@ class TestAvailability(SpecTest):
         self.b.site_repo().bucket({}).imported().sidecars().render()
         self.assertAvailable(UPLOAD)
 
-    def test_can_deploy_the_site_without_the_render_step(self):
-        """You CAN deploy the site without the render step — but not without
-        sidecars: deploying with nothing to publish is a no-op, and this file's
-        own rule lists deploy-site among the steps that wait for sidecars."""
-        self.b.imported().sidecars().site_repo()
-        self.assertAvailable(DEPLOY, "deploy publishes curation; renders are not required")
+    def test_publishing_is_no_longer_reachable_before_a_render(self):
+        """Deploying straight from the sidecars is REMOVED by the owner's table.
+
+        It used to be an edge from Generate Meta: publish the page hours early
+        and find out then that the publish path is broken. His item 2 outbound
+        is {2,3,4,5,6,8,9} — no 7 — and item 7's inbound is {7,6}, so the route
+        is gone. Nothing about the world blocks it; the graph does, which is
+        why this is asserted on the edges and not on a verdict.
+        """
+        self.b.imported().sidecars().site_repo().bucket({})
+        built = M.build_menu(M.Strategy.of(self.b.ctx), P.Work(self.b.ctx))
+        self.assertNotIn(UPLOAD, built[META].outbound().offers(frozenset(built)))
+        self.assertEqual(set(built[UPLOAD].inbound().edges()), {BUILD, UPLOAD})
 
     def test_cannot_upload_without_sidecars(self):
         """You cannot upload a site without the sidecars created."""
         self.b.site_repo().bucket({}).imported().render()      # render, no sidecars
         self.assertBlocked(UPLOAD)
 
-    def test_sidecars_are_required_before_the_steps_that_consume_them(self):
-        """You have to create sidecars before preview / deploy site / render /
-        upload / delete / wipe sim / wipe WS."""
+    def test_sidecars_are_required_before_the_items_that_consume_them(self):
+        """You have to create sidecars before preview / publish / render /
+        clear the workspace. Upload Website carries the rule the folded-in
+        deploy step used to: with no sidecar anywhere there is no metadata to
+        put online."""
         self.b.card_in().imported().site_repo().bucket({})
         blocked = self.b.blocked()
-        for step in (PREVIEW, RENDER, UPLOAD, DEPLOY, CLEANUP):
-            self.assertIn(step, blocked, "step %d must wait for sidecars" % step)
+        for item in (PREVIEW, RENDER, UPLOAD, CLEAN_WS):
+            self.assertIn(item, blocked, "item %d must wait for sidecars" % item)
 
     def test_cannot_create_sidecars_without_gpx(self):
         """You cannot create sidecars without gpx. The step that CREATES them
         is Generate meta now — Preview only looks at what it wrote."""
         self.b.imported()                                       # clips, no 203gps
-        self.assertBlocked(GENERATE_META, "no GPX means no sidecars can be built")
+        self.assertBlocked(META, "no GPX means no sidecars can be built")
 
 
 # ---------------------------------------------------------------------------
@@ -315,14 +361,17 @@ class TestExcludedTrips(SpecTest):
 class TestStepOrder(SpecTest):
 
     def test_generate_meta_needs_an_import(self):
-        """Nothing to build sidecars from before anything is imported. (These
-        two were List trips' availability tests; the generative half of step 2
-        moved into Generate meta, and Progress — the view — is never blocked.)"""
-        self.assertBlocked(GENERATE_META)
+        """Nothing to build sidecars from before anything is imported.
+
+        Not an ordering check even though it reads like one: items 2 and 4
+        both lead back to item 2, so an emptied workspace is genuinely
+        reachable here, and the honest answer is that there is no work rather
+        than that a step was skipped."""
+        self.assertBlocked(META)
 
     def test_generate_meta_is_available_once_clips_are_in(self):
         self.b.imported().gpx()
-        self.assertAvailable(GENERATE_META)
+        self.assertAvailable(META)
 
     def test_render_needs_an_import_not_just_a_card(self):
         """A mounted card is not a workspace: render reads the copy."""
@@ -332,14 +381,14 @@ class TestStepOrder(SpecTest):
     def test_exclude_needs_something_to_exclude(self):
         self.assertBlocked(EXCLUDE)
 
-    def test_site_step_needs_renders(self):
-        """The local site is built FROM the renders."""
+    def test_build_website_needs_renders(self):
+        """The local page is built FROM the renders."""
         self.b.imported().gpx().sidecars()
-        self.assertBlocked(SITE, "no renders means no site to build")
+        self.assertBlocked(BUILD, "no renders means no page to build")
 
-    def test_site_step_available_once_rendered(self):
+    def test_build_website_available_once_rendered(self):
         self.b.imported().gpx().sidecars().render()
-        self.assertAvailable(SITE)
+        self.assertAvailable(BUILD)
 
 
 class TestPostState(SpecTest):
@@ -391,10 +440,20 @@ class TestIdempotence(SpecTest):
         after = sorted(p.name for p in self.b.ctx.out_dir.rglob("*") if p.is_file())
         self.assertEqual(before, after)
 
-    def test_a_second_wipe_of_an_empty_card_is_a_no_op(self):
+    def test_a_second_wipe_of_an_empty_card_is_a_no_op_not_a_warning(self):
+        """An already-clean card is SATISFIED, and must not cry wolf.
+
+        Standing alone, this case used to answer "the ledger claims imported,
+        but no copy is still on this machine" — a lost-footage warning fired at
+        a card that is simply empty. A guard that cries wolf is how an operator
+        learns to stop reading guards.
+        """
         self.b.card_in()
         (self.b.ctx.card / "DCIM" / "200video" / "front" / "20260728090000_0060.mp4").unlink()
-        self.assertBlocked(CLEANUP, "an empty card and an empty workspace offer nothing to clean")
+        verdict = self.b.verdicts()[ERASE_CARD]
+        self.assertFalse(verdict.blocked, verdict.reason)
+        self.assertIs(verdict.ruling, M.Ruling.SATISFIED)
+        self.assertIn("nothing to erase", verdict.reason)
 
 
 if __name__ == "__main__":

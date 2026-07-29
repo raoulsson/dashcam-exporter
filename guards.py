@@ -136,28 +136,28 @@ def workspace_is_expendable(world) -> Verdict:
     the three gates against the branches this replaces.
     """
     if world.site.published.applicable:
-        return _verdict_of(world.site.published)
+        return _verdict_of(WORKSPACE_GATES[2][0], world.site.published)
     return _unanimous(world)
 
 
-def _applicable(e: Evidence) -> bool:
-    return e.applicable
+def _applicable(reading) -> bool:
+    return reading[1].applicable
 
 
-def _not_yes(e: Evidence) -> bool:
-    return e is not Evidence.YES
+def _not_yes(reading) -> bool:
+    return reading[1] is not Evidence.YES
 
 
 def _unanimous(world) -> Verdict:
-    answers = map(lambda g: g(world), WORKSPACE_GUARDS)
-    can_answer = filter(_applicable, answers)
-    return _verdict_of(next(filter(_not_yes, can_answer), Evidence.YES))
+    can_answer = filter(_applicable, gate_readings(world))
+    label, evidence = next(filter(_not_yes, can_answer), ("every check", Evidence.YES))
+    return _verdict_of(label, evidence)
 
 
-def _verdict_of(e: Evidence) -> Verdict:
+def _verdict_of(label: str, e: Evidence) -> Verdict:
     if e is Evidence.YES:
         return go()
-    return blocked("the check that decides answered %s" % e.value)
+    return blocked("%s answered %s" % (label, e.value))
 
 
 def gate_readings(world) -> Tuple[Tuple[str, Evidence], ...]:
@@ -209,6 +209,20 @@ def sidecars_missing(world) -> Optional[str]:
     if _sidecar_debt_settled(world):
         return None
     return "no sidecars on disk for the import"
+
+
+def no_sidecars_at_all(world) -> Optional[str]:
+    """Stricter than sidecars_missing: NOTHING has been written, anywhere.
+
+    Publishing is the act of putting the trips' metadata online. With no
+    sidecar in the tree there is nothing to say, and a deploy would push a
+    manifest that describes no drives — a live site that comes up empty rather
+    than one that refuses. An empty workspace does not settle this the way it
+    settles sidecars_missing, which is exactly the difference between the two.
+    """
+    if world.metas:
+        return None
+    return "no sidecars anywhere — publishing them would put an empty index live"
 
 
 def track_missing(world) -> Optional[str]:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The step graph, checked as a whole rather than one rule at a time.
+"""The menu graph, checked as a whole rather than one rule at a time.
 
-test_spec.py states individual rules; this walks every step under both
+test_spec.py states individual rules; this walks every item under both
 strategies in one loop, so a rule changed in one place and not the other is
 caught without anyone remembering to add a test for it.
 
@@ -20,8 +20,13 @@ from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "tests"))
 
-import steps as S            # noqa: E402  (after sys.path)
+import items                     # noqa: E402,F401  (registers the ten)
+import menu as M                 # noqa: E402
+from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
+                  UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
+from print_step_graph import NullWork                # noqa: E402
 
 
 def load_pipeline():
@@ -35,15 +40,59 @@ def load_pipeline():
 P = load_pipeline()
 
 
+# The owner's inbound column, transcribed. It is NOT what the tool runs on —
+# menu.derive_inbound computes that from every item's outbound — but it is not
+# thrown away either: every difference between the two is a finding for the
+# person who wrote the table, and this is where they are pinned so a NEW one
+# fails the suite instead of passing unnoticed.
+#
+# Items 0 and 1 are absent by definition rather than by exemption: their
+# inbound is a KIND (Anywhere, StartNode), not a set of numbers.
+AUTHORED_INBOUND = {
+    M.Strategy.WEBSITE_REPO: {
+        META: {META, IMPORT, EXCLUDE},
+        PREVIEW: {PREVIEW, META, EXCLUDE},
+        EXCLUDE: {EXCLUDE, META, PREVIEW},
+        RENDER: {RENDER, META, PREVIEW, EXCLUDE, BUILD, UPLOAD},
+        BUILD: {BUILD, META, PREVIEW, EXCLUDE, RENDER, UPLOAD},
+        UPLOAD: {UPLOAD, BUILD},
+        CLEAN_WS: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD},
+        ERASE_CARD: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD},
+    },
+    M.Strategy.LOCAL_DEFAULT_WEBSITE: {
+        META: {META, IMPORT, EXCLUDE},
+        PREVIEW: {PREVIEW, META, EXCLUDE},
+        EXCLUDE: {EXCLUDE, META, PREVIEW},
+        RENDER: {RENDER, META, PREVIEW, EXCLUDE, BUILD},
+        BUILD: {BUILD, META, PREVIEW, EXCLUDE, RENDER},
+        UPLOAD: set(),
+        CLEAN_WS: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD},
+        ERASE_CARD: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD},
+    },
+}
+
+# Which items the derivation legitimately parts company with, and why. Every
+# entry is a decision, not a waiver: a difference NOT listed here fails.
+EXPLAINED = {
+    META: "back-edges: 3, 5, 6 and 7 all offer 2, which he wrote into their "
+          "outbound and not into 2's inbound",
+    PREVIEW: "adds the same back-edges; drops 4, because Exclude Trip's "
+             "outbound is the narrow {4,2,8,9} of the owner's rule 6",
+    EXCLUDE: "adds the back-edges from 5, 6 and 7",
+    RENDER: "drops 4, for the same rule-6 reason as 3",
+    BUILD: "drops 4, for the same rule-6 reason as 3",
+}
+
+
 class MockState:
     """A workspace in whatever condition a test needs, without doing the work.
 
     Each `with_*` marks one milestone as reached — the file-level evidence the
-    real steps leave behind — so a test can say "as if rendered but not
+    real items leave behind — so a test can say "as if rendered but not
     uploaded" in one line.
     """
 
-    def __init__(self, strategy=S.Strategy.LOCAL_DEFAULT_WEBSITE):
+    def __init__(self, strategy=M.Strategy.LOCAL_DEFAULT_WEBSITE):
         self.root = Path(tempfile.mkdtemp(prefix="dashcam-graph-"))
         (self.root / "out").mkdir()
         (self.root / "import").mkdir()
@@ -63,7 +112,7 @@ class MockState:
         c.config_args = []
         c.scan_args = []
         self.ctx = c
-        if strategy is S.Strategy.WEBSITE_REPO:
+        if strategy is M.Strategy.WEBSITE_REPO:
             self.with_site_repo().with_bucket()
 
     # -- milestones --------------------------------------------------------
@@ -104,6 +153,12 @@ class MockState:
         for name in ("deploy-site.sh", "upload-videos-s3.sh"):
             (s / "deploy" / name).write_text("#!/bin/sh\n")
         (s / "build_manifest.py").write_text("")
+        # The symlink upload-videos-s3.sh derives its object keys from. A
+        # publishing install has it; a bench without it is not one.
+        (s / "public_html").mkdir(parents=True, exist_ok=True)
+        link = s / "public_html" / "videos"
+        if not link.exists():
+            link.symlink_to(self.ctx.out_dir)
         self.ctx.site = s
         return self
 
@@ -112,6 +167,19 @@ class MockState:
         self.ctx.s3_bucket = "bucket"
         self._bucket = contents or {}
         return self
+
+    def menu(self):
+        """The ten items, built for whatever this ctx configures."""
+        return M.build_menu(M.Strategy.of(self.ctx), P.Work(self.ctx))
+
+    def verdicts(self, scope=None):
+        """{number: Verdict} — what each item says about this world."""
+        world = P.capture_world(self.ctx, scope or M.Scope.LOCAL)
+        return {n: item.evaluate(world) for n, item in self.menu().items()}
+
+    def blocked(self, scope=None):
+        """{number: reason} for the items that would do nothing right now."""
+        return {n: v.reason for n, v in self.verdicts(scope).items() if v.blocked}
 
     def cleanup(self):
         shutil.rmtree(self.root, ignore_errors=True)
@@ -125,6 +193,7 @@ class GraphTest(unittest.TestCase):
                 self, "_bucket_contents", {})),
             mock.patch.object(P, "run_stream", side_effect=AssertionError(
                 "a graph test must not run a subprocess")),
+            mock.patch.object(P, "load_groups", side_effect=lambda *a, **k: None),
         ]
         for p in self.patches:
             p.start()
@@ -135,98 +204,190 @@ class GraphTest(unittest.TestCase):
 
 
 class TestGraphConsistency(GraphTest):
-    """Every edge is declared from both ends, under both strategies."""
+    """The graph holds together, under both strategies."""
 
-    def test_edges_agree_in_both_directions(self):
-        for strategy in S.Strategy:
-            with self.subTest(strategy=strategy.value):
-                problems = S.inconsistent_edges(strategy)
-                self.assertEqual(problems, [], "one-sided edges: %r" % (problems,))
+    def test_the_authored_inbound_column_differs_only_where_explained(self):
+        """The owner's hand-written inbound against the derivation.
 
-    def test_every_step_is_reachable_or_an_entry_point(self):
-        for strategy in S.Strategy:
-            for step in S.ALL_STEPS.values():
-                with self.subTest(strategy=strategy.value, step=step.number):
-                    incoming = step.reachable_from(strategy)
-                    if strategy is S.Strategy.LOCAL_DEFAULT_WEBSITE and step.number in (
-                            S.UPLOAD, S.DEPLOY):
-                        self.assertEqual(incoming, set(),
-                                         "publishing steps have no place in the local product")
-                    else:
-                        self.assertTrue(incoming,
-                                        "step %d is unreachable" % step.number)
+        Reported, never silently reconciled. A one-sided edge cannot exist any
+        more — there is only one side, the outbound — so what this catches is
+        a NEW divergence between what he wrote and what the items declare.
+        """
+        for strategy in M.Strategy:
+            derived = M.derive_inbound(M.registry(), strategy)
+            for number, authored in AUTHORED_INBOUND[strategy].items():
+                with self.subTest(strategy=strategy.value, item=number):
+                    if derived[number].edges() == authored:
+                        continue
+                    self.assertIn(number, EXPLAINED,
+                                  "item %d: authored %s, derived %s — an unexplained "
+                                  "difference from the owner's table"
+                                  % (number, sorted(authored),
+                                     sorted(derived[number].edges())))
+
+    def test_only_items_0_and_1_declare_a_kind_instead_of_edges(self):
+        """The two exemptions are by definition, not by a skip list.
+
+        Progress neighbours everything and must not force the other nine to
+        declare it back; Import SIM is where footage comes in and declares no
+        inbound even though Clean Workspace offers it.
+        """
+        for strategy in M.Strategy:
+            built = M.build_menu(strategy, NullWork())
+            kinds = {n for n, i in built.items() if i.inbound().edges() is None}
+            self.assertEqual(kinds, {PROGRESS, IMPORT})
+
+    def test_every_item_is_reachable_or_declares_why_not(self):
+        for strategy in M.Strategy:
+            built = M.build_menu(strategy, NullWork())
+            for number, item in built.items():
+                with self.subTest(strategy=strategy.value, item=number):
+                    self._reachable_or_exempt(strategy, number, item)
+
+    def _reachable_or_exempt(self, strategy, number, item):
+        incoming = item.inbound().edges()
+        if number in (PROGRESS, IMPORT):
+            self.assertIsNone(incoming, "a kind, not an edge set")
+        elif strategy is M.Strategy.LOCAL_DEFAULT_WEBSITE and number == UPLOAD:
+            self.assertEqual(incoming, frozenset(),
+                             "publishing has no place in the local product")
+        else:
+            self.assertTrue(incoming, "item %d is unreachable" % number)
 
     def test_the_cycle_closes(self):
         """Every strategy has a path from import back to import."""
-        for strategy in S.Strategy:
+        for strategy in M.Strategy:
             with self.subTest(strategy=strategy.value):
-                seen, frontier = set(), {S.IMPORT}
-                while frontier:
-                    n = frontier.pop()
-                    if n in seen:
-                        continue
-                    seen.add(n)
-                    frontier |= S.ALL_STEPS[n].reaches_to(strategy)
-                self.assertIn(S.CLEANUP, seen, "no route to clearing the workspace")
-                self.assertIn(S.IMPORT, S.ALL_STEPS[S.CLEANUP].reaches_to(strategy))
+                built = M.build_menu(strategy, NullWork())
+                seen = self._walk(built, IMPORT)
+                self.assertIn(CLEAN_WS, seen, "no route to clearing the workspace")
+                self.assertIn(IMPORT,
+                              built[CLEAN_WS].outbound().offers(frozenset(built)))
+
+    def _walk(self, built, start):
+        seen, frontier = set(), {start}
+        universe = frozenset(built)
+        while frontier:
+            n = frontier.pop()
+            if n in seen:
+                continue
+            seen.add(n)
+            frontier |= set(built[n].outbound().offers(universe))
+        return seen
+
+    def test_publishing_is_reached_from_building_and_nowhere_else(self):
+        """The edge the owner's table was missing.
+
+        He wrote 6 into item 7's inbound and never put 7 into any outbound, so
+        Upload Website was unreachable by its own natural route. Item 5 offered
+        it instead, which skips building the site item 7 uploads.
+        """
+        built = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        universe = frozenset(built)
+        self.assertIn(UPLOAD, built[BUILD].outbound().offers(universe))
+        self.assertNotIn(UPLOAD, built[RENDER].outbound().offers(universe))
+
+
+class TestTheUnfoldIsStructural(GraphTest):
+    """8 cannot precede 9 in one cycle, and 9 can precede 8.
+
+    The folded clean-up gathered the card's evidence from the workspace, erased
+    the workspace, then refused the card half after the irreversible half had
+    already run — having printed that the card was verified. With the halves
+    unfolded, item 8's outbound is {1}, so that sequence cannot be expressed.
+    """
+
+    def test_clean_workspace_offers_only_a_new_cycle(self):
+        for strategy in M.Strategy:
+            built = M.build_menu(strategy, NullWork())
+            offered = built[CLEAN_WS].outbound().offers(frozenset(built))
+            with self.subTest(strategy=strategy.value):
+                self.assertEqual(set(offered), {IMPORT})
+                self.assertNotIn(ERASE_CARD, offered)
+
+    def test_erasing_the_card_hands_the_position_back(self):
+        """Freeing the card does not interrupt the cycle, so Clean Workspace
+        is still reachable afterwards — the safe order is the permitted one."""
+        built = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        position = M.position_for(built)
+        position.current = RENDER
+        self.assertEqual(built[ERASE_CARD].settles_at(RENDER), RENDER)
+        self.assertIn(CLEAN_WS, position.selectable(built))
+
+
+class TestTheOwnersWorkedExample(GraphTest):
+    """Rule 6, asserted literally against the graph."""
+
+    def test_after_a_preview_and_then_an_exclusion(self):
+        built = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        position = M.position_for(built)
+        position.current = PREVIEW
+        self.assertEqual(sorted(position.selectable(built)),
+                         [PROGRESS, META, PREVIEW, EXCLUDE, RENDER, BUILD,
+                          CLEAN_WS, ERASE_CARD])
+        position.current = EXCLUDE
+        self.assertEqual(sorted(position.selectable(built)),
+                         [PROGRESS, META, EXCLUDE, CLEAN_WS, ERASE_CARD])
 
 
 class TestInterfaceMatchesBehaviour(GraphTest):
-    """What a step SAYS about itself has to be what the tool DOES."""
-
-    def test_start_nodes_are_exactly_the_steps_enabled_on_a_cold_start(self):
-        """is_start_node() must equal is_enabled() on an untouched workspace.
-
-        A step advertising itself as an entry point while the menu greys it out
-        is the same class of drift the two-sided edges exist to catch.
-        """
-        for strategy in S.Strategy:
-            m = MockState(strategy)
-            try:
-                m.with_card()          # "nothing happened" = card in, nothing done
-                self._bucket_contents = {}
-                for step in S.ALL_STEPS.values():
-                    with self.subTest(strategy=strategy.value, step=step.number):
-                        self.assertEqual(
-                            step.is_start_node(m.ctx), step.is_enabled(m.ctx),
-                            "step %d: is_start_node=%s but is_enabled=%s on a cold start"
-                            % (step.number, step.is_start_node(m.ctx), step.is_enabled(m.ctx)))
-            finally:
-                m.cleanup()
+    """What an item SAYS about itself has to be what the tool DOES."""
 
     def test_the_ways_in(self):
-        """Footage always enters through Import — the only ACTING start node
-        under both strategies. Deploy looked like a second way in on a
-        publishing install, but deploying with no sidecars publishes nothing.
-        Progress is a start node too, because looking at an empty workspace is
-        legitimate — it is a view, not a transition."""
-        local = MockState(S.Strategy.LOCAL_DEFAULT_WEBSITE)
-        pub = MockState(S.Strategy.WEBSITE_REPO)
-        try:
-            self.assertEqual(
-                [s.number for s in S.ALL_STEPS.values() if s.is_start_node(local.ctx)],
-                [S.IMPORT, S.PROGRESS])
-            self.assertEqual(
-                [s.number for s in S.ALL_STEPS.values() if s.is_start_node(pub.ctx)],
-                [S.IMPORT, S.PROGRESS])
-        finally:
-            local.cleanup(); pub.cleanup()
+        """Footage enters through Import, the only start node.
 
-    def test_destructive_steps_are_the_ones_that_erase(self):
-        destructive = {s.number for s in S.ALL_STEPS.values() if s.is_destructive()}
-        self.assertEqual(destructive, {S.EXCLUDE, S.CLEANUP})
+        Progress is NOT one, and the owner's `start = -` for it is right: a
+        view is not a transition. It reaches the menu through its neighbour
+        KIND instead, which is why it is selectable from anywhere including
+        nowhere.
+        """
+        for strategy in M.Strategy:
+            built = M.build_menu(strategy, NullWork())
+            with self.subTest(strategy=strategy.value):
+                self.assertEqual([n for n, i in sorted(built.items()) if i.start()],
+                                 [IMPORT])
+                position = M.position_for(built)
+                self.assertEqual(sorted(position.selectable(built)),
+                                 [PROGRESS, IMPORT])
 
-    def test_is_enabled_is_the_negation_of_a_reason(self):
-        """One answer, not two: enabled iff nothing is in the way."""
+    def test_destructive_items_are_the_ones_that_erase(self):
+        built = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        self.assertEqual({n for n, i in built.items() if i.destr()},
+                         {EXCLUDE, CLEAN_WS, ERASE_CARD})
+
+    def test_every_destructive_item_asks_for_a_distinct_word(self):
+        """Two identical prompts is how the second one gets typed from muscle
+        memory, and items 8 and 9 are now two prompts."""
+        built = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        words = [i.word() for i in built.values() if i.destr()]
+        self.assertEqual(sorted(words), ["CLEAN", "DROP", "ERASE"])
+
+    def test_the_items_that_end_the_cycle_say_so(self):
+        built = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        self.assertEqual({n for n, i in built.items() if i.end()},
+                         {CLEAN_WS, ERASE_CARD})
+
+    def test_a_blocked_verdict_always_carries_a_reason(self):
+        """One answer, not two: blocked iff there is something to say."""
         m = MockState()
         try:
             self._bucket_contents = {}
-            for step in S.ALL_STEPS.values():
-                with self.subTest(step=step.number):
-                    self.assertEqual(step.is_enabled(m.ctx),
-                                     step.blocked_because(m.ctx) is None)
+            for number, verdict in m.verdicts().items():
+                with self.subTest(item=number):
+                    self.assertEqual(verdict.blocked, bool(verdict.reason)
+                                     and verdict.blocked)
+                    if verdict.blocked:
+                        self.assertTrue(verdict.reason, "item %d blocked in silence"
+                                        % number)
         finally:
             m.cleanup()
+
+    def test_completed_is_an_error_before_the_item_has_run(self):
+        """Never a default answer. A stale read here is the difference between
+        a report saying the card was erased and one saying it was refused."""
+        built = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        with self.assertRaises(M.NotRun):
+            built[ERASE_CARD].completed()
 
 
 class TestStrategySplit(GraphTest):
@@ -234,110 +395,122 @@ class TestStrategySplit(GraphTest):
 
     def test_strategy_is_decided_by_configuration(self):
         local = MockState()
-        self.assertIs(S.Strategy.of(local.ctx), S.Strategy.LOCAL_DEFAULT_WEBSITE)
+        self.assertIs(M.Strategy.of(local.ctx), M.Strategy.LOCAL_DEFAULT_WEBSITE)
         local.cleanup()
-        pub = MockState(S.Strategy.WEBSITE_REPO)
-        self.assertIs(S.Strategy.of(pub.ctx), S.Strategy.WEBSITE_REPO)
+        pub = MockState(M.Strategy.WEBSITE_REPO)
+        self.assertIs(M.Strategy.of(pub.ctx), M.Strategy.WEBSITE_REPO)
         pub.cleanup()
 
-    def test_only_the_publishing_steps_differ(self):
-        differing = set()
-        for step in S.ALL_STEPS.values():
-            a = (step.reachable_from(S.Strategy.WEBSITE_REPO),
-                 step.reaches_to(S.Strategy.WEBSITE_REPO))
-            b = (step.reachable_from(S.Strategy.LOCAL_DEFAULT_WEBSITE),
-                 step.reaches_to(S.Strategy.LOCAL_DEFAULT_WEBSITE))
-            if a != b:
-                differing.add(step.number)
-        # GENERATE_META is in the set because on a publishing install the
-        # sidecars unlock Deploy — publish early, catch a broken pipeline
-        # before the render — an edge the local product does not have.
-        self.assertEqual(differing,
-                         {S.GENERATE_META, S.RENDER, S.SITE, S.UPLOAD, S.DEPLOY, S.CLEANUP},
-                         "the split should touch publishing and what settles the workspace")
+    def test_only_the_publishing_items_declare_different_edges(self):
+        """The AUTHORED column — outbound — differs for exactly two items.
+
+        Item 6 gains the edge to publishing, and item 7 has no edges at all
+        under the local product. Every other difference in the table is in the
+        DERIVED inbound and follows from these two.
+        """
+        a = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        b = M.build_menu(M.Strategy.LOCAL_DEFAULT_WEBSITE, NullWork())
+        differing = {n for n in a
+                     if a[n].outbound().edges() != b[n].outbound().edges()}
+        self.assertEqual(differing, {BUILD, UPLOAD})
 
     def test_local_product_settles_the_workspace_by_gathering(self):
-        s = S.Strategy.LOCAL_DEFAULT_WEBSITE
-        self.assertIn(S.CLEANUP, S.ALL_STEPS[S.SITE].reaches_to(s))
+        b = M.build_menu(M.Strategy.LOCAL_DEFAULT_WEBSITE, NullWork())
+        self.assertIn(CLEAN_WS, b[BUILD].outbound().offers(frozenset(b)))
 
     def test_publishing_product_settles_the_workspace_by_deploying(self):
-        s = S.Strategy.WEBSITE_REPO
-        self.assertIn(S.CLEANUP, S.ALL_STEPS[S.DEPLOY].reaches_to(s))
-        self.assertNotIn(S.CLEANUP, S.ALL_STEPS[S.SITE].reaches_to(s))
+        a = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        self.assertIn(CLEAN_WS, a[UPLOAD].outbound().offers(frozenset(a)))
+
+    def test_publishing_is_unavailable_in_the_local_product(self):
+        """Twice over, and neither is an `if` in a body: nothing offers it,
+        and its own guard blocks it."""
+        m = MockState(M.Strategy.LOCAL_DEFAULT_WEBSITE)
+        try:
+            m.with_import().with_sidecars().with_render()
+            self._bucket_contents = {}
+            self.assertIn(UPLOAD, m.blocked())
+            built = m.menu()
+            self.assertEqual(set(built[UPLOAD].outbound().offers(frozenset(built))),
+                             set())
+        finally:
+            m.cleanup()
 
 
-class TestAvailabilityMatchesTheGraph(GraphTest):
-    """Walk every step in one loop: with its predecessors done it is offered,
-    and from an empty workspace it is not."""
+class TestAvailabilityMatchesTheWorld:
+    """Left as a name only: what an item may do is now two separate answers.
+
+    The graph says whether it may follow where we are (TestTheOwnersWorkedExample)
+    and the guard says whether it would do anything (below). They used to be one
+    function, unavailable_steps(), which is why this class has no tests of its own.
+    """
+
+
+class TestGuardsSeeTheWorld(GraphTest):
+    """With its evidence absent an item blocks; with it present it does not."""
 
     MILESTONES = {
-        S.GENERATE_META: lambda m: m.with_import(),
-        S.PREVIEW:  lambda m: m.with_import().with_sidecars(),
-        S.EXCLUDE:  lambda m: m.with_import().with_sidecars(),
-        S.RENDER:   lambda m: m.with_import().with_sidecars(),
-        S.SITE:     lambda m: m.with_import().with_sidecars().with_render(),
-        S.UPLOAD:   lambda m: m.with_import().with_sidecars().with_render(),
-        # No card: the clean-up's card half is only asked when a card with
-        # footage is in; the workspace half alone is a legitimate run.
-        S.CLEANUP:  lambda m: m.with_import().with_sidecars(),
+        META: lambda m: m.with_import(),
+        PREVIEW: lambda m: m.with_import().with_sidecars(),
+        EXCLUDE: lambda m: m.with_import().with_sidecars(),
+        RENDER: lambda m: m.with_import().with_sidecars(),
+        BUILD: lambda m: m.with_import().with_sidecars().with_render(),
+        # No card: item 9 is the card's own item now, so the workspace half
+        # never has to reason about one.
+        CLEAN_WS: lambda m: m.with_import().with_sidecars(),
     }
 
-    def test_each_step_is_unavailable_from_an_empty_workspace(self):
-        for number in (S.GENERATE_META, S.PREVIEW, S.EXCLUDE, S.RENDER, S.SITE, S.CLEANUP):
+    def test_each_item_is_blocked_on_an_empty_workspace(self):
+        for number in self.MILESTONES:
             m = MockState()
             try:
                 self._bucket_contents = {}
-                blocked = P.unavailable_steps(m.ctx)
-                with self.subTest(step=number):
-                    self.assertIn(number, blocked,
-                                  "step %d should not be offered on an empty workspace" % number)
+                with self.subTest(item=number):
+                    self.assertIn(number, m.blocked(),
+                                  "item %d has no evidence to work from" % number)
             finally:
                 m.cleanup()
 
-    def test_each_step_is_available_once_its_predecessors_are_done(self):
+    def test_each_item_is_offered_once_its_evidence_is_there(self):
         for number, prepare in self.MILESTONES.items():
-            strategy = (S.Strategy.WEBSITE_REPO if number in (S.UPLOAD,)
-                        else S.Strategy.LOCAL_DEFAULT_WEBSITE)
-            m = MockState(strategy)
+            m = MockState()
             try:
                 prepare(m)
                 self._bucket_contents = {}
-                blocked = P.unavailable_steps(m.ctx)
-                with self.subTest(step=number, strategy=strategy.value):
+                blocked = m.blocked()
+                with self.subTest(item=number):
                     self.assertNotIn(number, blocked,
-                                     "step %d should be offered: %s"
+                                     "item %d should be offered: %s"
                                      % (number, blocked.get(number)))
             finally:
                 m.cleanup()
 
-    def test_publishing_steps_are_unavailable_in_the_local_product(self):
-        m = MockState(S.Strategy.LOCAL_DEFAULT_WEBSITE)
+    def test_progress_is_never_blocked(self):
+        """An empty workspace is a legitimate thing to report."""
+        m = MockState()
         try:
-            m.with_import().with_sidecars().with_render()
-            blocked = P.unavailable_steps(m.ctx)
-            for number in (S.UPLOAD, S.DEPLOY):
-                with self.subTest(step=number):
-                    self.assertIn(number, blocked)
+            self._bucket_contents = {}
+            self.assertNotIn(PROGRESS, m.blocked())
         finally:
             m.cleanup()
 
 
 class TestMockedWork(GraphTest):
-    """The expensive steps are mocked: the graph is exercised, nothing runs."""
+    """The expensive items are mocked: the graph is exercised, nothing runs."""
 
     def test_a_mocked_render_moves_the_state_forward(self):
         m = MockState()
         try:
             m.with_import().with_sidecars()
             self._bucket_contents = {}
-            self.assertIn(S.SITE, P.unavailable_steps(m.ctx), "no renders yet")
-            m.with_render()                       # as if step 5 had run
-            self.assertNotIn(S.SITE, P.unavailable_steps(m.ctx))
+            self.assertIn(BUILD, m.blocked(), "no renders yet")
+            m.with_render()                       # as if Render Videos had run
+            self.assertNotIn(BUILD, m.blocked())
         finally:
             m.cleanup()
 
     def test_a_mocked_upload_makes_the_workspace_expendable(self):
-        m = MockState(S.Strategy.WEBSITE_REPO)
+        m = MockState(M.Strategy.WEBSITE_REPO)
         try:
             m.with_import().with_sidecars().with_render(size=64)
             self._bucket_contents = {}

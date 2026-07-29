@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What the destructive steps delete, and what they refuse to.
+"""What the destructive items delete, and what they refuse to.
 
 Every test builds a throwaway workspace under a temp dir. Nothing here reads the
 real card, the real import or the real output tree — a test that needed those
@@ -7,10 +7,12 @@ would be a test you cannot run.
 
 Run with:  ./run-tests.sh          (or: python3 -m unittest discover -s tests)
 
-The four paths that erase things are steps 4, 9 and 10 plus the import-time
-sweep, and each one is guarded by a predicate. These lock the predicates down:
-what makes something expendable, what counts as evidence a copy survives, and
-what the sweep keeps when it does run.
+THREE paths erase things — 4) Exclude Trip, 8) Clean Workspace and 9) Delete
+SIM Data — and each is guarded by a predicate. It used to be four: the import
+step swept the previous round from inside itself, which was item 8's job run
+from item 1, and that arc is gone. These lock the predicates down: what makes
+something expendable, what counts as evidence a copy survives, and what the
+sweep keeps when it does run.
 """
 
 import json
@@ -23,6 +25,12 @@ from pathlib import Path
 from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+import guards                    # noqa: E402
+import items                     # noqa: E402,F401  (registers the ten)
+import menu as M                 # noqa: E402
+import world as W                # noqa: E402
 
 
 def load_pipeline():
@@ -114,7 +122,7 @@ class GuardTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# working_area_is_expendable — the predicate the import sweep and step 9 obey
+# working_area_is_expendable — the predicate 8) Clean Workspace obeys
 # ---------------------------------------------------------------------------
 
 class TestWorkingAreaIsExpendable(GuardTest):
@@ -265,8 +273,8 @@ class TestLedgerAndDelta(GuardTest):
 
 
 # ---------------------------------------------------------------------------
-# copy_still_exists — the guard on Clean SIM, the only step whose target has
-# no second copy
+# copy_still_exists — the guard on 9) Delete SIM Data, the only item whose
+# target has no second copy
 # ---------------------------------------------------------------------------
 
 class TestCleanSimEvidence(GuardTest):
@@ -324,45 +332,85 @@ class TestCleanSimEvidence(GuardTest):
 
 
 # ---------------------------------------------------------------------------
-# The clean-up's workspace half: guard 1 must be conclusive when nothing
-# later can decide
+# 8) Clean Workspace: the site decides when it can be asked, and otherwise
+# every check that CAN answer must say yes
 # ---------------------------------------------------------------------------
 
-class TestCleanupRefusesWhenNothingElseCanBlock(GuardTest):
+def _world(renders_here=1, expected=3, bucket=None, published=M.Evidence.NA):
+    """A world built by hand, with no filesystem anywhere near it.
+
+    This is what the move off the disk bought: the guard is a pure function, so
+    a test states the evidence directly instead of arranging a fixture tree and
+    hoping it produces the state it meant.
+    """
+    return W.World(
+        renders_here=tuple(W.Render("trip_%d.mp4" % i, 64) for i in range(renders_here)),
+        expected_trips=expected,
+        bucket=bucket if bucket is not None else W.NoBucket(),
+        site=W.SiteFacts(published=published))
+
+
+class TestWorkspaceRefusesWhenNothingElseCanDecide(GuardTest):
     """'Noted, not blocking — is-complete.py decides' is only honest when
     is-complete.py will actually run. With no site repo it never does, so the
     under-rendered branches must refuse rather than defer to nothing — the
-    rmtree would erase footage of trips that were never encoded."""
+    rmtree would erase footage of trips that were never encoded.
 
-    def setUp(self):
-        super().setUp()
-        self.w.ctx.results = []
-        self.w.clips(["20260728090000"], where="import")
-        self.w.render("trip_A", ns="import")            # 1 mp4 exists
-
-    def _run(self, groups):
-        with mock.patch.object(P, "load_groups", return_value=groups), \
-             mock.patch.object(P, "ask", side_effect=AssertionError(
-                 "must refuse before the CLEAN prompt")):
-            P.step_cleanup(self.w.ctx)
-        return self.w.ctx.results[-1]
+    Deliberately NOT "the last applicable check wins". Under that reading the
+    bucket has the last word when there is no site, and it says yes about the
+    renders that exist while saying nothing at all about the trips that were
+    never encoded — whose footage exists in no render, no bucket, nowhere.
+    """
 
     def test_under_rendered_import_refuses_without_a_site(self):
-        r = self._run({"trips": [{"renderable": True}] * 3})   # 1 of 3 rendered
-        self.assertEqual(r.status, P.SKIPPED)
-        self.assertIn("refused", r.detail)
-        self.assertTrue((self.w.ctx.render_root / "DCIM").is_dir(),
-                        "the footage must survive the refusal")
+        verdict = guards.workspace_is_expendable(_world(renders_here=1, expected=3))
+        self.assertTrue(verdict.blocked, verdict.reason)
+        self.assertIn("rendered locally", verdict.reason)
 
     def test_unreadable_grouping_refuses_without_a_site(self):
-        r = self._run(None)                                    # scanner failed
-        self.assertEqual(r.status, P.SKIPPED)
-        self.assertIn("refused", r.detail)
-        self.assertTrue((self.w.ctx.render_root / "DCIM").is_dir())
+        verdict = guards.workspace_is_expendable(_world(renders_here=1, expected=None))
+        self.assertTrue(verdict.blocked, verdict.reason)
+        self.assertIn("unknown", verdict.reason)
+
+    def test_a_full_bucket_does_not_excuse_an_under_rendered_import(self):
+        """The divergence that made the fold worth checking by enumeration.
+
+        One mp4 exists, three trips were expected, there is no site_repo, and
+        that one mp4 IS on the bucket at a matching size. The two trips that
+        were never encoded exist nowhere. This must refuse.
+        """
+        listed = W.Listed({"v/trip_0.mp4": 64})
+        verdict = guards.workspace_is_expendable(
+            _world(renders_here=1, expected=3, bucket=listed))
+        self.assertTrue(verdict.blocked, verdict.reason)
+
+    def test_the_site_has_the_last_word_when_it_can_be_asked(self):
+        """is-complete.py asks what the live site actually serves, which is the
+        only question that matters — so a short local count is commentary once
+        it can run, and its NO is decisive even when everything else says yes."""
+        yes = guards.workspace_is_expendable(
+            _world(renders_here=1, expected=3, published=M.Evidence.YES))
+        self.assertFalse(yes.blocked, yes.reason)
+        no = guards.workspace_is_expendable(
+            _world(renders_here=3, expected=3, bucket=W.Listed({}),
+                   published=M.Evidence.NO))
+        self.assertTrue(no.blocked, no.reason)
+
+    def test_an_unlistable_bucket_is_not_a_yes(self):
+        """Fails closed: "could not find out" is not "it is there"."""
+        verdict = guards.workspace_is_expendable(
+            _world(renders_here=3, expected=3, bucket=W.Unlistable()))
+        self.assertTrue(verdict.blocked, verdict.reason)
+
+    def test_everything_proven_locally_is_expendable(self):
+        verdict = guards.workspace_is_expendable(_world(renders_here=3, expected=3))
+        self.assertFalse(verdict.blocked, verdict.reason)
 
 
 # ---------------------------------------------------------------------------
-# import_is_expendable — the proof the delete step demands
+# import_is_expendable — freed by the arc removal and kept as 9) Delete SIM
+# Data's advisory: erasing the card is allowed on the strength of a copy being
+# here, and if that copy is not published it becomes the only one.
 # ---------------------------------------------------------------------------
 
 class TestImportIsExpendable(GuardTest):

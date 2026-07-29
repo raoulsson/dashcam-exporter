@@ -17,22 +17,41 @@ menu.disagreements diffs the two.
 from __future__ import annotations
 
 from menu import (Anywhere, Destructive, Edges, MenuItem, Plan, Scope, StartNode,
-                  StepBack, Strategy, Verdict, blocked, did, go, satisfied,
-                  stopped, PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER,
+                  StepBack, Strategy, Verdict, blocked, go, satisfied,
+                  PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER,
                   BUILD, UPLOAD, CLEAN_WS, ERASE_CARD)
 import guards
 
 
+def _reason(*reasons):
+    """The first reason anything is in the way, or None."""
+    return next(filter(None, reasons), None)
+
+
 def _first_block(*reasons) -> Verdict:
     """The first reason anything is in the way, or GO."""
-    hit = next(filter(None, reasons), None)
-    return _blocked_or_go(hit)
+    return _blocked_or_go(_reason(*reasons))
 
 
 def _blocked_or_go(reason) -> Verdict:
     if reason:
         return blocked(reason)
     return go()
+
+
+def _nothing_rendered(world):
+    """No mp4 on disk to put online.
+
+    Evidence, not order: the old wording was "nothing rendered to upload — run
+    6 first", and only the second half of that sentence was an ordering claim.
+    The fact itself survives an operator deleting the renders in Finder, and
+    without it an empty tree answers SATISFIED — "every render is on the
+    bucket" is vacuously true of no renders, which is the wrong sentence to
+    put in front of someone who has published nothing.
+    """
+    if world.renders:
+        return None
+    return "no renders on disk to publish"
 
 
 def _no_import(world, reason: str):
@@ -347,9 +366,17 @@ class UploadWebsite(MenuItem):
         self._publish = work.publisher(strategy)
 
     def evaluate(self, world) -> Verdict:
-        why = self._publish.why_not(world)
-        if why:
-            return blocked(why)
+        """Configuration first, then evidence, then "is there anything left".
+
+        The sidecar check is the one guard that came across from the folded-in
+        deploy step and it is evidence, not order: publishing is putting the
+        trips' metadata online, and with no sidecar anywhere the deploy pushes
+        an index describing no drives.
+        """
+        stop = _reason(self._publish.why_not(world), _nothing_rendered(world),
+                       guards.no_sidecars_at_all(world))
+        if stop:
+            return blocked(stop)
         return self._outstanding(world)
 
     def _outstanding(self, world) -> Verdict:
