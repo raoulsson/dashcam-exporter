@@ -434,5 +434,88 @@ class TestImportIsExpendable(GuardTest):
         self.assertIn("not on S3", why)
 
 
+# ---------------------------------------------------------------------------
+# The sequence every destructive item inherits: show, ask for the word,
+# RE-DERIVE the world, re-ask the guard, act. Driven end to end against the
+# card, because it is the one target with no second copy.
+# ---------------------------------------------------------------------------
+
+class TestTheDestructiveSequence(GuardTest):
+
+    def setUp(self):
+        super().setUp()
+        self.w.ctx.results = []
+        # One clip, on the card AND in the workspace, so erasing the card is
+        # allowed: its footage is provably somewhere else.
+        for base in (self.w.ctx.card, self.w.ctx.render_root):
+            d = base / "DCIM" / "200video" / "front"
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "20260728090000_0060.mp4").write_text("clip")
+        P.write_ledger(self.w.ctx, "20260728090000")
+        self.clip = (self.w.ctx.card / "DCIM" / "200video" / "front"
+                     / "20260728090000_0060.mp4")
+        self.item = M.build_menu(M.Strategy.of(self.w.ctx),
+                                 P.Work(self.w.ctx))[M.ERASE_CARD]
+
+    def _run(self, answer):
+        with mock.patch.object(P, "ask", return_value=answer):
+            return self.item.execute(P.capture_world(self.w.ctx, M.Scope.FULL))
+
+    def test_the_wrong_word_erases_nothing_and_does_not_complete(self):
+        """Not completing is what leaves the position where it was — the
+        owner's rule 3, and the only thing that makes a cancel a cancel."""
+        outcome = self._run("yes")
+        self.assertFalse(outcome.completed)
+        self.assertFalse(self.item.completed())
+        self.assertTrue(self.clip.is_file(), "the footage must survive a cancel")
+
+    def test_the_word_erases_the_files_and_keeps_the_folders(self):
+        outcome = self._run("ERASE")
+        self.assertTrue(outcome.completed, outcome.note)
+        self.assertFalse(self.clip.exists())
+        self.assertTrue((self.w.ctx.card / "DCIM" / "200video" / "front").is_dir(),
+                        "the camera writes into these and expects them to exist")
+
+    def test_a_second_run_does_not_reach_the_prompt(self):
+        """The idempotence invariant, as behaviour rather than as intent.
+
+        evaluate() answers SATISFIED on an already-empty card, and SATISFIED
+        must mean the body never runs — otherwise the operator is asked to
+        type ERASE to find out there is nothing behind it.
+        """
+        self._run("ERASE")
+        with mock.patch.object(P, "ask", side_effect=AssertionError(
+                "an already-satisfied item must not prompt")):
+            outcome = self.item.execute(P.capture_world(self.w.ctx, M.Scope.FULL))
+        self.assertTrue(outcome.completed)
+        self.assertIn("nothing to erase", outcome.note)
+
+    def test_the_guard_is_re_asked_against_a_world_captured_after_the_word(self):
+        """The refresh point, proven rather than asserted in a comment.
+
+        The evidence here is "the clip is in the workspace". Something removes
+        the workspace while the prompt is on screen; the re-check must see
+        that and refuse, having erased nothing.
+        """
+        import shutil as _sh
+
+        def answer_and_move_the_world(_prompt, *a, **k):
+            _sh.rmtree(str(self.w.ctx.render_root / "DCIM"))
+            return "ERASE"
+
+        with mock.patch.object(P, "ask", side_effect=answer_and_move_the_world):
+            outcome = self.item.execute(P.capture_world(self.w.ctx, M.Scope.FULL))
+        self.assertFalse(outcome.completed)
+        self.assertIn("refused after re-check", outcome.note)
+        self.assertTrue(self.clip.is_file(), "nothing may be erased after a refusal")
+
+    def test_every_destructive_plan_carries_a_callable_re_check(self):
+        """A plan with no guard used to be constructible, and crashed at the
+        moment it mattered — after the operator had typed the word."""
+        plan = M.Plan.nothing_to_do("nothing")
+        self.assertTrue(callable(plan.guard))
+        self.assertTrue(callable(plan.act))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

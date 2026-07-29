@@ -2795,18 +2795,18 @@ def drop_plan(ctx, world):
     started = time.time()
     root = pick_import(ctx, "dropping a trip")
     if root is None:
-        return menu.Plan(nothing="no import folder")
+        return menu.Plan.nothing_to_do("no import folder")
     payload = load_groups(ctx, root)
     if payload is None:
-        return menu.Plan(nothing="--print-groups failed")
+        return menu.Plan.nothing_to_do("--print-groups failed")
     trips = payload.get("trips", [])
     if not trips:
         print(C.yellow("  No trips in %s — nothing to drop." % root))
-        return menu.Plan(nothing="no trips")
+        return menu.Plan.nothing_to_do("no trips")
     by_index = _print_trip_table(ctx, root, trips)
     picked = _ask_trip_indices(by_index)
     if not picked:
-        return menu.Plan(nothing="cancelled")
+        return menu.Plan.nothing_to_do("cancelled")
     return _drop_plan_for(ctx, world, payload, by_index, picked, started)
 
 
@@ -2840,9 +2840,10 @@ def _drop_plan_for(ctx, world, payload, by_index, picked, started):
     print(C.dim("   harmless without their clips.)"))
 
     banner = _only_copy_lines(ctx, world, payload, by_index, picked)
-    return menu.Plan(banner=banner, guard=None,
-                     act=lambda fresh: _drop_commit(ctx, picked, by_index,
-                                                    files, render_files, started))
+    return menu.Plan(menu.nothing_to_recheck,
+                     lambda fresh: _drop_commit(ctx, picked, by_index, files,
+                                                render_files, started),
+                     banner=banner)
 
 
 def _size_of(p):
@@ -4282,7 +4283,7 @@ def is_complete_summary(ctx):
 def _nothing(ctx, number, started, reason):
     """Record a plan that found nothing to do, and say so to the item."""
     record(ctx, NAME[number], SKIPPED, started, reason)
-    return menu.Plan(nothing=reason)
+    return menu.Plan.nothing_to_do(reason)
 
 
 def _clean_target(ctx, root):
@@ -4377,10 +4378,10 @@ def clean_workspace_plan(ctx, world):
         _print_gate_detail(world)
         return _nothing(ctx, CLEAN_WS, started, "refused: %s" % verdict.reason)
 
-    return menu.Plan(banner=_clean_banner(ctx, world, target, size),
-                     guard=guards.workspace_is_expendable,
-                     act=lambda fresh: _clean_workspace_commit(
-                         ctx, root, target, size, files, started))
+    return menu.Plan(guards.workspace_is_expendable,
+                     lambda fresh: _clean_workspace_commit(ctx, root, target,
+                                                           size, files, started),
+                     banner=_clean_banner(ctx, world, target, size))
 
 
 def _print_gate_detail(world):
@@ -4465,8 +4466,9 @@ def erase_card_plan(ctx, world):
                    " record." % len(world.card.stamps)),
              C.green("  Every clip is accounted for: %s." % world.card.note)]
     lines.extend(_card_advisory(ctx))
-    return menu.Plan(banner=tuple(lines), guard=guards.card_is_expendable,
-                     act=lambda fresh: _erase_card_commit(ctx, started))
+    return menu.Plan(guards.card_is_expendable,
+                     lambda fresh: _erase_card_commit(ctx, started),
+                     banner=tuple(lines))
 
 
 def _erase_card_commit(ctx, started):

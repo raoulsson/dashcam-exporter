@@ -108,6 +108,23 @@ def stopped(note: str) -> Outcome:
     return Outcome(False, note)
 
 
+def _not_doing(verdict: Verdict) -> Outcome:
+    """The two ways an item does not run, which are not the same answer.
+
+    BLOCKED did not happen and does not complete: the pipeline stays where it
+    was. SATISFIED did not happen either and DOES complete: the postcondition
+    already holds, nothing is owed, and the pipeline may move on. That is the
+    whole reason evaluate() is three-valued while completed() is two-valued.
+
+    This is also what makes execute() idempotent rather than merely re-runnable.
+    A second Delete SIM Data on a card it has just emptied must not reach the
+    ERASE prompt to find out there is nothing behind it.
+    """
+    if verdict.blocked:
+        return stopped(verdict.reason)
+    return did(verdict.reason)
+
+
 class NotRun(Exception):
     """completed() read before execute() ran. Never a default answer."""
 
@@ -352,9 +369,9 @@ class MenuItem(ABC):
 
     def _guarded(self, world) -> Outcome:
         verdict = self.evaluate(world)
-        if verdict.blocked:
-            return stopped(verdict.reason)
-        return self._perform(world)
+        if verdict.ruling is Ruling.GO:
+            return self._perform(world)
+        return _not_doing(verdict)
 
     @abstractmethod
     def evaluate(self, world) -> Verdict:
@@ -372,14 +389,43 @@ class MenuItem(ABC):
 # Destructive items: the sequence that puts a fresh world under the guard
 # ---------------------------------------------------------------------------
 
+def nothing_to_recheck(world) -> Verdict:
+    """A deliberate no-op re-check, for the one item whose evidence cannot
+    change between the prompt and the act.
+
+    Exclude Trip deletes the clips the operator just picked off a list. A clip
+    that vanished while the prompt was on screen makes the delete a no-op
+    rather than a hazard, so there is nothing a second look could refuse on.
+    It is a NAMED function passed explicitly rather than a default, because
+    "this one needs no re-check" has to be a decision somebody wrote down and
+    not a field nobody filled in.
+    """
+    return go()
+
+
+def _no_plan(world) -> Verdict:          # pragma: no cover - never reached
+    return blocked("this plan found nothing to do")
+
+
 @dataclass(frozen=True)
 class Plan:
-    """What would be erased, which guard says so, and what does it."""
+    """What would be erased, which guard says so, and what does it.
 
+    `guard` and `act` have NO defaults on purpose. They are the two halves of
+    the re-check that stands between a typed word and an irreversible call, and
+    a plan that forgot one used to be constructible — and crashed at the moment
+    it mattered, after the operator had typed DROP.
+    """
+
+    guard: object                  # world -> Verdict; the SAME callable evaluate uses
+    act: object                    # world -> Outcome
     banner: Tuple[str, ...] = ()
-    guard: object = None           # world -> Verdict; the SAME callable evaluate uses
-    act: object = None             # world -> Outcome
     nothing: str = ""              # set when there turned out to be nothing to do
+
+    @classmethod
+    def nothing_to_do(cls, reason: str) -> "Plan":
+        """No target, so no word is asked for and neither half is ever called."""
+        return cls(_no_plan, _no_plan, nothing=reason)
 
 
 class Destructive(MenuItem, abstract=True):
