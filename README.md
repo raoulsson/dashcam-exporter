@@ -411,7 +411,7 @@ backwards, that the owner's own worked example holds against the live items,
 and that `import-sd-card.sh` refuses to erase the card when its verify pass
 cannot run or reports files still pending.
 
-89 Python checks plus 7 shell ones, well under a second.
+94 Python checks plus 7 shell ones, well under a second.
 
 `python3 tests/print_step_graph.py` prints the graph from the live item
 objects, per strategy, with the start/end/destr columns and both neighbour

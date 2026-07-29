@@ -5457,21 +5457,16 @@ class Runner:
         try:
             return item.execute(capture_world(self.ctx, item.SCOPE))
         except Aborted:
-            print()
-            print(C.yellow("  Interrupted — %s stopped." % item.name()))
-            ctx_record(self.ctx, item, "interrupted")
-            return menu.stopped("interrupted")
+            return self._interrupted(item)
 
-
-def ctx_record(ctx, item, detail):
-    """An abort is recorded as one, and does NOT complete the item.
-
-    execute() never returned, so the item's own outcome is unset; the position
-    stays where it was, which is what "steps back by one" means for a move
-    that did not take effect.
-    """
-    ctx.results.append(StepResult(item.name(), FAILED, 0, detail))
-    item._outcome = menu.stopped(detail)
+    def _interrupted(self, item):
+        """An abort does NOT complete the item, so the position stays put —
+        which is what "steps back by one" means for a move that never took
+        effect."""
+        print()
+        print(C.yellow("  Interrupted — %s stopped." % item.name()))
+        self.ctx.results.append(StepResult(item.name(), FAILED, 0, "interrupted"))
+        return item.aborted("interrupted")
 
 
 def build_runner(ctx, classes=None):

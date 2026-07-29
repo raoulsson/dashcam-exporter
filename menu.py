@@ -354,6 +354,17 @@ class MenuItem(ABC):
     def outcome(self) -> Optional[Outcome]:
         return self._outcome
 
+    def aborted(self, note: str) -> Outcome:
+        """Record an interruption as this item's answer.
+
+        Ctrl-C and a bare q leave execute() part-way through, so the outcome
+        would otherwise stay unset and completed() would raise at the point the
+        runner asks it. An abort is simply not completing: the position stays
+        where it was, which is the same thing a declined prompt means.
+        """
+        self._outcome = stopped(note)
+        return self._outcome
+
     # -- doing it ----------------------------------------------------------
     def execute(self, world) -> Outcome:
         """Do the one job, once.
