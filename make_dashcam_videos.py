@@ -447,75 +447,59 @@ software = true
 # ============================================================================
 #
 # Nothing below is needed to use this repo. Unset (a fresh clone) the pipeline
-# is: import the card, render the trips, build a browsable site under <out>/site
-# and open it with file://. That path touches no network host and no account.
+# is: import the card, render the trips, build a browsable local page under
+# <out> and open it with file://. That path touches no network host and no
+# account.
 #
-# These four settings are read by pipeline.py, not by the renderer. They exist
-# because the publishing half of this pipeline — a bucket the videos live in and
-# a website that serves them — is one person's setup, and hardcoding it would
-# mean every clone reaching for a checkout it does not have and a host it has
-# never heard of. Set them and 7) Upload Website in the menu lights up.
-# Leave them and it stays in the menu, greyed out, with the key that would
-# enable it printed underneath. The item NUMBERS never move, so a note saying
-# "run 5" means the same thing on every machine.
+# There is exactly ONE setting about publishing, and it names an implementation
+# rather than describing a destination. Where the videos end up and what serves
+# them is that implementation's business, not this repo's. Set it and 6) Build
+# Website builds what YOUR target publishes and 7) Upload Website lights up.
+# Leave it and both stay as a fresh clone has them: item 6 writes the local
+# page, item 7 sits greyed out with the reason printed underneath. The item
+# NUMBERS never move, so a note saying "run 5" means the same thing on every
+# machine.
 
-# The second repo, holding what it takes to publish. pipeline.py runs three
-# things out of it and nothing else, so anything providing them works:
-#   build_manifest.py           indexes the render tree into public_html/trips.json
-#   deploy/upload-videos-s3.sh  syncs the mp4s to the bucket ($1 = source dir)
-#   deploy/deploy-site.sh       pushes public_html/ to wherever the site is served
-#   deploy/is-complete.py       (optional) prints a per-trip published/not table;
-#                               the delete guard reads it, see below
-# pipeline.py drives the first three from ONE menu item — 7) Upload Website —
-# because they are one job: getting the built site online. Setting this is half
-# of what enables it. --site-repo overrides it for one run.
-#site_repo = ~/dev/your-site
-
-# The bucket the videos end up in. Setting it (together with site_repo) enables
-# Upload. It is NOT how the sync is aimed — upload-videos-s3.sh picks its own
-# destination — it is what this CLI lists afterwards to prove the sync landed,
-# because `aws s3 sync` exits 0 even when individual objects fail. Name the same
-# bucket the script uploads to; if the two disagree, verification fails, which
-# is the intended way to discover it. Needs awscli configured.
-#s3_bucket = my-bucket
-
-# Only needed when the bucket is not in the credentials' default region — an
-# eu-central-1 bucket listed with a us-east-1 default fails.
-#s3_region = eu-central-1
-
-# The deployed site's manifest, read once at startup for one status line. Unset
-# means no request is made at all — not a request that quietly fails. This is
-# the only thing here that would otherwise touch the network on every launch,
-# which is why it is a setting rather than a constant.
-#live_trips_url = https://example.com/trips.json
+# The class that publishes, as "<path to a .py>:<ClassName>". It must subclass
+# uploader.WebsiteUploaderInterface: build, upload, why_not_build,
+# why_not_upload, owes, holds, published and carries.
+#
+# examples/uploader_folder.py is a complete working one in about eighty lines,
+# and the test suite drives the menu through it. Read that first, then copy it.
+#
+#   website_uploader = ~/dashcam-exporter/examples/uploader_folder.py:FolderTarget
+#
+# The value belongs in the gitignored .env as SET_WEBSITE_UPLOADER, not here:
+# this file is tracked, and a path to your own work written here gets
+# committed.
+#
+# A named implementation that will not load STOPS THE TOOL, loudly, before the
+# menu is drawn. It never falls back to the local edition — a menu that has
+# quietly stopped publishing looks exactly like a menu that is publishing fine.
+#website_uploader =
 
 # THE DELETE GUARD. 8) Clean Workspace erases the original clips and the
 # renders they produced, and what it can prove first depends on what is set
-# here. The rule: the site decides when it can be asked; otherwise every check
-# that can answer must say yes.
+# here. The rule: the target decides when it can be asked; otherwise every
+# check that can answer must say yes.
 #
-# It always checks that every renderable trip in the import has an mp4 on disk.
-# With s3_bucket it also checks every mp4 is in the bucket at a matching size;
-# with site_repo (and deploy/is-complete.py) it asks the site what it actually
-# serves, and that answer is the authority whenever it can be had. With neither,
-# those checks are not silently skipped — it says plainly that publication could
-# not be verified and that the renders under <out> are then the only copy of
-# that footage, and still makes you type CLEAN.
+# It always checks that every renderable trip in the import has an mp4 on disk,
+# and that check never leaves this machine — an implementation that answers yes
+# to everything still cannot get an import that produced no renders erased.
+# With a website_uploader it also asks whether the target HOLDS each mp4 at a
+# matching size, and whether it actually SERVES it; the serving answer is the
+# authority whenever it can be had. With none configured, those checks are not
+# silently skipped — it says plainly that publication could not be verified and
+# that the renders under <out> are then the only copy of that footage, and
+# still makes you type CLEAN.
+#
+# "Could not find out" is never permission. An implementation whose target is
+# unreachable answers UNKNOWN, which refuses; that is a different answer from
+# "the question does not arise here", which removes the check.
 #
 # The card is a different item with different evidence: 9) Delete SIM Data, which
 # refuses unless every clip on the card is accounted for somewhere you can go and
 # look, and asks for the word ERASE.
-
-# REPRODUCING THE FULL SETUP, if you want it. The shape is: an S3 bucket holding
-# the mp4s (private, fronted by CloudFront with signed URLs — deploy-site.sh
-# takes SIGNED_VIDEOS=1 for that), and a small static site on a host of your
-# choice whose pages point at those URLs. build_manifest.py turns the render
-# tree into the JSON the pages read; the deploy script rsyncs the result. None
-# of that is provided here — this repo produces the videos and their sidecars,
-# and <out>/site is a working example of a site built from them, with relative
-# links and no build step. Copy that directory plus the mp4s to any web root and
-# it is already a website; the S3 + CloudFront route only buys you private,
-# signed delivery and somewhere to keep tens of GB that is not your laptop.
 """
 
 # Parking detection / "Fast forwarding..." transition defaults
