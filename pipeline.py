@@ -3547,16 +3547,47 @@ RESULT_FILE = "dashcam_import_data_site.html"
 FINAL_PREFIX = "final_"
 
 
-def final_dir_for(root, days):
-    """<out>/final_<newest day in this batch>.
+def current_import_id(ctx):
+    """What identifies the import currently in the workspace, or None.
 
-    Dated so successive imports accumulate side by side instead of merging into
-    one heap. Named after the newest TRIP, not the render date: rebuilding the
-    page tomorrow must land in the same folder as today, and a render-date name
-    would quietly start a second one holding the same drives.
+    The ledger's high-water mark: it advances exactly once per import (when
+    the verified copy lands), survives every sweep, and is identical across
+    re-runs within one round — which is precisely the lifetime a final_
+    folder's identity needs. No new file to keep alive.
+    """
+    return read_ledger(ctx).get("through") or None
+
+
+def final_dir_for(root, days, import_id=None):
+    """<root>/final_<newest day>_<import id> — one folder PER IMPORT.
+
+    Keyed on the IMPORT, not only the newest trip day. Two rules meet here:
+    rebuilding the page tomorrow must land in the same folder as today (so
+    the name cannot come from the render date), and a SECOND import must get
+    a folder of its own even when it covers the same day (so the day alone
+    cannot be the whole name). The import id — the ledger mark, constant
+    across re-runs of one round and different for the next import — satisfies
+    both. The day stays in the name because it is what a person recognises;
+    the id's time-of-day suffix is what keeps two same-day imports apart.
+
+    With no id to key on (a workspace whose footage arrived without the
+    import step), a fresh folder is allocated rather than merging into some
+    other import's: final_<day>, then final_<day>_2, and so on.
     """
     tag = max(days) if days else time.strftime("%Y-%m-%d")
-    return root / (FINAL_PREFIX + tag)
+    if import_id:
+        sid = str(import_id)
+        # A 14-digit ledger stamp reads better as its time-of-day; the date
+        # half is already in the tag (or close enough to be noise).
+        if re.fullmatch(r"\d{14}", sid):
+            sid = sid[8:]
+        return root / (FINAL_PREFIX + "%s_%s" % (tag, sid))
+    cand = root / (FINAL_PREFIX + tag)
+    n = 1
+    while cand.exists():
+        n += 1
+        cand = root / (FINAL_PREFIX + "%s_%d" % (tag, n))
+    return cand
 
 
 def gather_into_final(ctx, out_dir):
@@ -3578,7 +3609,7 @@ def gather_into_final(ctx, out_dir):
                 and child.name not in ("logs", "previews"):
             days.update(d.name for d in child.iterdir()
                         if d.is_dir() and re.match(r"^\d{4}-\d{2}-\d{2}$", d.name))
-    final = final_dir_for(ctx.final_root, days)
+    final = final_dir_for(ctx.final_root, days, current_import_id(ctx))
     if ctx.site_ready:
         return final if final.is_dir() else None
     moved = 0
