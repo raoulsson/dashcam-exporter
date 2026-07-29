@@ -997,12 +997,12 @@ def print_status(ctx):
         else:
             print("  Prepared     %s  %s" % (C.yellow("none yet"), C.dim(tilde(manifest))))
 
-    if ctx.live_trips_url:
-        live = live_trip_count(ctx)
-        if live is None:
-            print("  Live site    %s" % C.dim("unknown (offline or unreachable)"))
-        else:
-            print("  Live site    %s" % C.bold("%s trips" % live))
+    # No answer, no row. live_trip_count already returns None when the URL is
+    # unset, when offline is set, and when the lookup did not come back, so the
+    # three ways of having nothing to report are one case here.
+    live = live_trip_count(ctx)
+    if live is not None:
+        print("  Live site    %s" % C.bold("%s trips" % live))
 
     if ctx.site is not None:
         print("  Repos        %s" % C.dim("%s | %s" % (tilde(ctx.exporter), tilde(ctx.site))))
