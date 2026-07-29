@@ -1232,6 +1232,60 @@ def import_is_expendable(ctx, root):
 
 
 OWNER_FILE = ".owned-by"
+LOCK_FILE = ".pipeline.lock"
+
+
+def _pid_alive(pid):
+    """Is a process with this pid running? Signal 0 probes without touching it.
+
+    PermissionError means the pid exists but belongs to someone else — alive.
+    Any other failure to find out counts as alive: the expensive mistake is
+    reclaiming a lock whose owner is still working.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def acquire_single_instance_lock(ctx):
+    """Take the workspace lock, or return False because someone holds it.
+
+    Two instances against one working area is two menus both believing their
+    cached scans and both willing to sweep — so only one runs. The lock is a
+    pid file rather than a flag file, because a flag left by a crash would
+    lock the owner out of his own tool forever: a lock whose recorded pid is
+    no longer running is stale by definition and is reclaimed silently. Not
+    being able to write the lock at all is not a reason to refuse either —
+    the lock is extra safety, not a gate the tool can die behind.
+    """
+    lock = ctx.out_dir / LOCK_FILE
+    try:
+        ctx.out_dir.mkdir(parents=True, exist_ok=True)
+        if lock.is_file():
+            try:
+                pid = int(lock.read_text().split()[0])
+            except (ValueError, IndexError, OSError):
+                pid = None          # unreadable/garbage: nobody provably owns it
+            if pid is not None and _pid_alive(pid):
+                return False
+        lock.write_text("%d\n" % os.getpid())
+        return True
+    except OSError:
+        return True
+
+
+def release_single_instance_lock(ctx):
+    """Remove the lock, but only if it is ours — never someone else's."""
+    lock = ctx.out_dir / LOCK_FILE
+    try:
+        if lock.is_file() and int(lock.read_text().split()[0]) == os.getpid():
+            lock.unlink()
+    except (ValueError, IndexError, OSError):
+        pass
 
 
 def claim_out_dir(ctx):
@@ -4662,6 +4716,17 @@ def main(argv=None):
 
     ctx = Ctx()
 
+    # One instance per working area. A second menu against the same tree
+    # trusts scans the first one may be invalidating right now, and the
+    # sweeps trust the scans. The lock self-clears when its pid is gone, so a
+    # crash cannot strand it.
+    if not acquire_single_instance_lock(ctx):
+        print()
+        print(C.red("  Another instance is already running against %s." % tilde(ctx.out_dir)))
+        print(C.dim("  Quit it first. (Lock: %s — a crashed instance's lock clears"
+                    % tilde(ctx.out_dir / LOCK_FILE)))
+        print(C.dim("  itself; this one's owner is still running.)"))
+        return 2
 
     print()
     # The subtitle states what this installation actually does, which is not the
@@ -4731,6 +4796,7 @@ def main(argv=None):
         print(C.yellow("  Interrupted."))
     finally:
         show_cursor()
+        release_single_instance_lock(ctx)
         print_summary(ctx)
 
     if any(r.status == FAILED for r in ctx.results):
