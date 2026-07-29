@@ -1111,6 +1111,7 @@ def record(ctx, name, status, started, detail=""):
 # ---------------------------------------------------------------------------
 
 LEDGER_FILE = ".imported.json"
+DEPLOYED_FILE = ".deployed.json"
 
 
 def read_ledger(ctx):
@@ -1393,11 +1394,20 @@ def working_area_is_expendable(ctx):
     unlinking it costs the hours it took to encode.
 
     A render is expendable when it is EITHER
-      - in the bucket at a matching size (only checkable with s3_bucket set), OR
+      - in the bucket at a matching size (only checkable with s3_bucket set) —
+        AND, when a site repo is also configured, recorded by a site deploy
+        that ran after it existed (see DEPLOYED_FILE), OR
       - inside a final_<date> folder, which is where step 6 moves the deliverable
         on an install that does not publish.
     Everything else in the working area — previews/, the caches, the stills — is
     derived from renders and costs seconds to rebuild, so it never blocks.
+
+    The deploy half is the owner's rule — no deleting the workspace without a
+    verified S3 upload AND the site deploy — and it binds only the configured
+    edition: a local-only install has no bucket and no site, and gathering
+    into final_ is what makes its workspace expendable. The evidence is the
+    record step_deploy writes on success, because a deploy that never ran
+    leaves exactly nothing to find.
 
     No renders at all is expendable: there is nothing to lose.
     """
@@ -1431,6 +1441,18 @@ def working_area_is_expendable(ctx):
     if ctx.cfg_opt("s3_bucket"):
         remote = s3_objects(ctx) or {}
 
+    # When BOTH halves of publishing are configured, "uploaded" alone does not
+    # settle it: the render must also be covered by a site deploy that
+    # actually happened. step_deploy records the render names it deployed
+    # with; absence of a name there means the site has never served it.
+    require_deploy = bool(ctx.cfg_opt("s3_bucket")) and getattr(ctx, "site", None) is not None
+    deployed = set()
+    if require_deploy:
+        try:
+            deployed = set(json.loads((out / DEPLOYED_FILE).read_text()).get("videos", []))
+        except Exception:
+            deployed = set()
+
     stragglers = []
     for f in loose:
         try:
@@ -1442,12 +1464,15 @@ def working_area_is_expendable(ctx):
         # endswith on a "/" boundary: a bare endswith let sometrip_X.mp4 in the
         # bucket satisfy trip_X.mp4 on disk.
         if any((k == f.name or k.endswith("/" + f.name)) and v == size
-               for k, v in remote.items()):
+               for k, v in remote.items()) \
+                and (not require_deploy or f.name in deployed):
             continue
         stragglers.append(f)
 
     if stragglers:
-        return False, "%d render(s) neither uploaded nor gathered" % len(stragglers), stragglers
+        what = ("not both uploaded and site-deployed" if require_deploy
+                else "neither uploaded nor gathered")
+        return False, "%d render(s) %s" % (len(stragglers), what), stragglers
     return True, "%d render(s), all uploaded or gathered" % len(loose), []
 
 
@@ -1485,7 +1510,7 @@ def purge_published_renders(ctx, root):
     # EXCLUDED_FILE survives for the same reason the ledger does: it is state
     # ("these clips were dropped on purpose"), unrecoverable once gone, and
     # the delta import and Clean SIM both read it after the footage is deleted.
-    keep_names = {"logs", LEDGER_FILE, OWNER_FILE, EXCLUDED_FILE, root.name}
+    keep_names = {"logs", LEDGER_FILE, OWNER_FILE, EXCLUDED_FILE, DEPLOYED_FILE, root.name}
     freed = n = 0
     for child in sorted(out.iterdir()):
         if child.name in keep_names or child.name.startswith(FINAL_PREFIX):
@@ -4012,6 +4037,32 @@ def step_upload(ctx):
                   "%d mp4 verified on S3, %s" % (len(local), human_bytes(total)))
 
 
+def record_deploy(ctx):
+    """Note which renders a successful site deploy covered.
+
+    The delete guard's other half: 'uploaded' is provable by listing the
+    bucket, but 'the site deploy happened' leaves no remote artefact this CLI
+    can interrogate per-render — so the fact is recorded at the only moment
+    it is known to be true, right after deploy-site.sh exits 0. Merged, not
+    replaced: a render deployed last round stays covered even if the deploy
+    re-runs after the working area changed.
+    """
+    names = {p.name for p in rendered_mp4s(ctx.out_dir)}
+    path = ctx.out_dir / DEPLOYED_FILE
+    try:
+        prev = set(json.loads(path.read_text()).get("videos", []))
+    except Exception:
+        prev = set()
+    try:
+        ctx.out_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(
+            {"videos": sorted(prev | names),
+             "at": time.strftime("%Y-%m-%d %H:%M")}, indent=1))
+    except OSError:
+        pass
+    return names
+
+
 def step_deploy(ctx):
     """Run the site repo's deploy script. SIGNED_VIDEOS=1 is not optional — see below."""
     started = time.time()
@@ -4036,6 +4087,7 @@ def step_deploy(ctx):
     if rc != 0:
         return record(ctx, "Update site", FAILED, started, "exit %d" % rc)
 
+    record_deploy(ctx)
     live = live_trip_count(ctx)
     return record(ctx, "Update site", RAN, started,
                   "live site reports %s trips" % (live if live is not None else "?"))
