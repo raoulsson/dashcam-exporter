@@ -76,7 +76,7 @@ place the missing config is mentioned.
 
 ## The Build Website item
 
-Builds `dashcam_import_data_site.html` from what the render already produced.
+Builds `dashcam_export_data_site.html` from what the render already produced.
 Under the local product it also GATHERS the render tree into `final_<day>_<import>`,
 which is what makes the workspace expendable — there is no separate gather item,
 so it lives here or nowhere. Which gatherer is installed is the constructor's

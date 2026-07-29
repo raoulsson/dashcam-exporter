@@ -46,7 +46,7 @@ deliberate — see [One source of truth](#one-source-of-truth).
   Source       present  /Volumes/NO NAME  (222 clips)
   Import       ~/dashcam-data/import/2026-07-28  612 clips, 116.6 GB
   Rendered     6 mp4  8.3 GB in ~/dashcam-data/output
-  Local site   ~/dashcam-data/output/dashcam_import_data_site.html  built 22 min ago
+  Local site   ~/dashcam-data/output/dashcam_export_data_site.html  built 22 min ago
   Prepared     29 trips  updated 2 h ago
   Live site    23 trips
   Repos        ~/dev/dashcam-exporter | ~/dev/goodnight-drives
@@ -255,7 +255,7 @@ what you have configured:
 
 | Configured | You get |
 |---|---|
-| nothing | Import, render, and `dashcam_import_data_site.html` — one self-contained page, every still embedded, every route drawn from its GPX. Opens from `file://` with no network. |
+| nothing | Import, render, and `dashcam_export_data_site.html` — one self-contained page, every still embedded, every route drawn from its GPX. Opens from `file://` with no network. |
 | `site_repo`, `s3_bucket` | Item 7, Upload Website, wakes up: the mp4s to your bucket, then the pages to your site. |
 
 Unconfigured, item 7 stays in the menu, greyed out, with the setting that
