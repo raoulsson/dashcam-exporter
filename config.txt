@@ -481,10 +481,12 @@ software = true
 # compiled-in default is the one that quietly wins.
 # ---------------------------------------------------------------------------
 
-# Where the card mounts. The DDPAI mounts as NO NAME unless you renamed it.
-# Read by the import step (status screen, passed to import-sd-card.sh as --src)
-# and by steps 9 and 10, which erase it. Nothing renders from here — that is
-# import_dir at the top.
+# The footage source: any directory holding a DCIM tree. The mounted SD card
+# is the common case (the DDPAI mounts as NO NAME unless you renamed it), but a
+# card copied onto an external disk, or a folder someone handed over, works the
+# same. Read by the import step (status screen, passed to import-sd-card.sh as
+# --src) and by steps 9 and 10, which erase it. Nothing renders from here —
+# that is import_dir at the top.
 #card = /Volumes/NO NAME
 
 # Skip the live-site lookup in the status screen. It is already skipped when

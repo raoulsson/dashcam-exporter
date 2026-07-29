@@ -450,7 +450,7 @@ class RenderVideos(Step):
     def blocked_because(self, ctx: Ctxish) -> Optional[str]:
         """Render reads the copied import, never the source itself."""
         reason = _nothing_imported(
-            ctx, "nothing imported — a mounted card is not a workspace; run %d) first"
+            ctx, "nothing imported — the source is not a workspace; run %d) first"
             % IMPORT)
         return reason or _sidecars_missing(ctx)
 

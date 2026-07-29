@@ -43,7 +43,7 @@ deliberate — see [One source of truth](#one-source-of-truth).
   dashcam pipeline   card -> render -> S3 -> site
 
 -- status ---------------------------------------------------------------------
-  SD card      mounted  /Volumes/NO NAME  (222 clips)
+  Source       present  /Volumes/NO NAME  (222 clips)
   Import       ~/dashcam-data/import/2026-07-28  612 clips, 116.6 GB
   Rendered     6 mp4  8.3 GB in ~/dashcam-data/output
   Local site   ~/dashcam-data/output/dashcam_import_data_site.html  built 22 min ago
@@ -165,8 +165,10 @@ Two settings decide all of it:
 
 - **`import_dir`** — the workspace. Imports land here; renders, scans and the
   drop step read from it. Defaults to `~/dashcam-data/import`.
-- **`card`** — where the SD card mounts. Read only by the import step. Defaults
-  to `/Volumes/NO NAME`.
+- **`card`** — the footage source: any directory holding a `DCIM` tree. The
+  mounted SD card is the common case, but a card copied onto an external disk
+  or a folder someone handed over works the same. Read only by the import step.
+  Defaults to `/Volumes/NO NAME`.
 
 `out` is derived from `import_dir` (`<parent>/output`) unless you set it. That
 matters more than it looks: two checkouts pointed at one output directory means
@@ -265,7 +267,7 @@ The handful most people touch:
 | Setting | Default | |
 |---|---|---|
 | `import_dir` | `~/dashcam-data/import` | the workspace |
-| `card` | `/Volumes/NO NAME` | where the SD card mounts |
+| `card` | `/Volumes/NO NAME` | the footage source — any folder with a `DCIM` tree |
 | `out` | next to `import_dir` | where renders land |
 | `output_height` | `1080` | 720 and 540 are much smaller files |
 | `x264_crf` | `26` | quality; lower is bigger and better |

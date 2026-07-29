@@ -908,15 +908,15 @@ def print_status(ctx):
     print()
     print(rule("status"))
 
-    # SD card
+    # The footage source: the mounted card, or any folder holding a DCIM tree.
     card_dcim = ctx.card / "DCIM"
     if card_dcim.is_dir():
         n = clip_count(ctx.card)
-        print("  SD card      %s  %s" % (
-            C.green("mounted"),
+        print("  Source       %s  %s" % (
+            C.green("present"),
             C.dim("%s  (%s clips)" % (tilde(ctx.card), n if n is not None else "?"))))
     else:
-        print("  SD card      %s  %s" % (C.dim("not mounted"), C.dim(tilde(ctx.card))))
+        print("  Source       %s  %s" % (C.dim("not found"), C.dim(tilde(ctx.card))))
 
     # Import sink
     cands = import_candidates(ctx)
@@ -1620,10 +1620,15 @@ def record_import(ctx, card):
 
 
 def step_import(ctx):
-    """Copy the card's DCIM tree into a dated import folder (import-sd-card.sh)."""
+    """Copy the source's DCIM tree into a dated import folder (import-sd-card.sh).
+
+    The source (`card` in config.txt) is any directory holding a DCIM tree —
+    the mounted SD card is the common case, but a card copied onto an external
+    disk or a folder someone handed over works the same.
+    """
     started = time.time()
     if not (ctx.card / "DCIM").is_dir():
-        # No card is not automatically a problem. The configured root may
+        # No source is not automatically a problem. The configured root may
         # already hold a copied card, in which case importing is simply not the
         # step he wants — saying "is the card mounted?" there sends him looking
         # for a fault that does not exist. Check the second location and answer
@@ -1639,15 +1644,17 @@ def step_import(ctx):
                         "or Render (5)."))
             return record(ctx, "Import from SIM", SKIPPED, started,
                           "import already present, %s clips" % n)
-        print(C.yellow("  No card at %s and no footage under %s — is the card mounted?"
-                       % (tilde(ctx.card), tilde(ctx.render_root))))
-        return record(ctx, "Import from SIM", SKIPPED, started, "no card, no import")
+        print(C.yellow("  No footage at %s and none under %s." % (
+            tilde(ctx.card), tilde(ctx.render_root))))
+        print(C.dim("  Mount the card, or point `card` in config.txt at any folder"))
+        print(C.dim("  holding a DCIM tree (a copied card works the same)."))
+        return record(ctx, "Import from SIM", SKIPPED, started, "no source, no import")
 
     clips = clip_count(ctx.card)
     size = tree_size(ctx.card / "DCIM")
     print("  Source: %s  (%s clips, %s)" % (tilde(ctx.card), clips, human_bytes(size)))
 
-    # A card is mounted AND there is still footage from a previous import. The
+    # The source is present AND there is still footage from a previous import. The
     # usual cycle is import -> render -> upload -> delete from local and card, so
     # this means the last round was not finished. Importing on top of it mixes
     # two cards in one place: trips get grouped across both, the renders land in
@@ -1791,10 +1798,10 @@ def step_import(ctx):
         n_new, n_old = card_split(ctx.card, after)
         print()
         print("  Already imported through %s" % C.bold(after))
-        print("  On the card: %s new, %s already here" % (
+        print("  At the source: %s new, %s already here" % (
             C.bold("%d clip(s)" % n_new), C.dim("%d" % n_old)))
         if not n_new:
-            print(C.green("  Nothing new on this card — it is already all imported."))
+            print(C.green("  Nothing new at the source — it is already all imported."))
             return record(ctx, "Import from SIM", SKIPPED, started, "no new clips")
         delta = confirm("  Copy only the %d new clip(s)?" % n_new, True)
     else:
@@ -1819,15 +1826,15 @@ def step_import(ctx):
         # by a run that finished days ago, a fact recorded in a ledger the shell
         # script cannot read. Erasing them here would be a delete on somebody
         # else's evidence.
-        print(C.dim("  Card kept. Erasing it would also remove the %d clip(s) this run" % n_old))
+        print(C.dim("  Source kept. Erasing it would also remove the %d clip(s) this run" % n_old))
         print(C.dim("  skipped, and this run checked nothing about those — they were"))
         print(C.dim("  verified by the earlier import, not by this one. Erase the card"))
         print(C.dim("  yourself once these have rendered and uploaded."))
         erase = False
     else:
-        print(C.dim("  The card is NOT erased by default; import-sd-card.sh only deletes"))
-        print(C.dim("  the card's files after the copy verifies file-for-file."))
-        erase = confirm("  Erase the card's files after a verified copy?", False)
+        print(C.dim("  The source is NOT erased by default; import-sd-card.sh only deletes"))
+        print(C.dim("  its files after the copy verifies file-for-file."))
+        erase = confirm("  Erase the source's files after a verified copy?", False)
 
     env = {"DASHCAM_IMPORT_ROOT": str(ctx.import_root)}
     if after and delta:
