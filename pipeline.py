@@ -446,7 +446,7 @@ class Aborted(Exception):
 def _reader(stream, q):
     """Split the child's output on BOTH \\n and \\r.
 
-    rsync --info=progress2 and aws s3 sync draw their progress by rewriting one
+    rsync --info=progress2 and many upload tools draw their progress by rewriting one
     line with a carriage return; reading by '\\n' alone would show nothing until
     the transfer finished. Reading raw bytes and splitting on either terminator
     gives us every intermediate update.
@@ -671,11 +671,6 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
 
 # rsync --info=progress2:  "  1,234,567,890  47%  120.55MB/s    0:01:23 (xfr#…)"
 RE_RSYNC_P2 = re.compile(r"^\s*([\d,]+)\s+(\d+)%\s+(\S+)\s+(\d+:\d{2}:\d{2})")
-# aws s3 sync byte form:   "Completed 3.5 MiB/~120.0 MiB (2.0 MiB/s) with ~5 file(s) remaining"
-RE_AWS_BYTES = re.compile(r"Completed\s+([\d.]+)\s+(\w+)/~?([\d.]+)\s+(\w+)")
-# aws s3 sync file form:   "Completed 3 file(s) with ~5 file(s) remaining"
-RE_AWS_FILES = re.compile(r"Completed\s+(\d+)\s+file\(s\)\s+with\s+~?(\d+)\s+file\(s\) remaining")
-RE_AWS_UPLOAD = re.compile(r"^upload:\s+(.+?)\s+to\s+s3://")
 # make_dashcam_videos:     "[Trip 2/5] 2026-07-19 12:46 -> 13:20  (87 clips, ~14:02)"
 # The scanner announces each clip as it reads it: "[scan   17/ 239] NAME.mp4".
 # That loop is the long silent stretch of a scan, so it is the only thing that
@@ -684,10 +679,6 @@ RE_SCAN = re.compile(r"^\[scan\s+(\d+)/(\d+)\]")
 RE_TRIP = re.compile(r"^\[Trip\s+(\d+)/(\d+)\]")
 #                          "  [ 12/ 87] 2026-07-19 12:46:03  encoding ..."
 RE_CLIP = re.compile(r"^\s*\[\s*(\d+)\s*/\s*(\d+)\s*\]")
-
-_AWS_UNIT = {"B": 1, "KiB": 1024, "MiB": 1024 ** 2, "GiB": 1024 ** 3, "TiB": 1024 ** 4,
-             "KB": 1000, "MB": 1000 ** 2, "GB": 1000 ** 3, "TB": 1000 ** 4}
-
 
 def rsync_parser(line):
     m = RE_RSYNC_P2.match(line)
@@ -774,36 +765,6 @@ def make_render_parser():
         if state["clips"]:
             note += " clip %d/%d" % (state["clip"], state["clips"])
         return min(frac, 1.0), note
-
-    return parse
-
-
-def make_upload_parser():
-    state = {"files": 0}
-
-    def parse(line):
-        m = RE_AWS_UPLOAD.match(line)
-        if m:
-            state["files"] += 1
-            return None
-        m = RE_AWS_BYTES.search(line)
-        if m:
-            try:
-                done = float(m.group(1)) * _AWS_UNIT.get(m.group(2), 1)
-                total = float(m.group(3)) * _AWS_UNIT.get(m.group(4), 1)
-            except ValueError:
-                return None
-            if total <= 0:
-                return None
-            return min(done / total, 1.0), "%s / %s, %d file(s) done" % (
-                human_bytes(done), human_bytes(total), state["files"])
-        m = RE_AWS_FILES.search(line)
-        if m:
-            done, remaining = int(m.group(1)), int(m.group(2))
-            if done + remaining <= 0:
-                return None
-            return done / float(done + remaining), "%d file(s) done" % done
-        return None
 
     return parse
 
@@ -5480,10 +5441,11 @@ if __name__ == "__main__":
 #   upload-videos-s3.sh deliberately does not upload them.
 #
 # * Progress can only be derived where the tool emits it: rsync's --info=progress2
-#   percentage (import), the renderer's [Trip a/b] + [clip/N] lines (render), and
-#   aws's "Completed X/Y" lines (upload). build_manifest.py and deploy-site.sh
-#   print nothing countable, so those show a spinner. rsync and aws draw with
-#   carriage returns, which is why the reader splits on \r as well as \n.
+#   percentage (import) and the renderer's [Trip a/b] + [clip/N] lines (render).
+#   A tool that prints nothing countable shows a spinner instead. Many draw with
+#   carriage returns, which is why the reader splits on \r as well as \n — and
+#   why Ui.run takes a parser: an uploader's output format is its own to parse,
+#   not a table this repo would have to maintain.
 #
 # * The renderer's "[Trip a/b]" a is the per-DAY publish number, so it repeats
 #   across days within one run. Only b is usable; the counter is our own.

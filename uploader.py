@@ -172,8 +172,14 @@ class Ui(ABC):
         """One line the operator should not skim past."""
 
     @abstractmethod
-    def run(self, cmd, cwd, label: str, env=None) -> int:
-        """Run a child process with a live progress line. Returns its exit code."""
+    def run(self, cmd, cwd, label: str, env=None, parser=None) -> int:
+        """Run a child process with a live progress line. Returns its exit code.
+
+        `parser` is a callable given each output line, returning either None or
+        (fraction_done, note) — that is what turns the spinner into a real bar.
+        Your tool's output format is yours to parse, which is why the hook is
+        here rather than a table of formats this repo would have to maintain.
+        """
 
 
 # ---------------------------------------------------------------------------

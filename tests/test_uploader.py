@@ -293,7 +293,7 @@ class SilentUi(U.Ui):
     def warn(self, line):
         pass
 
-    def run(self, cmd, cwd, label, env=None):        # pragma: no cover
+    def run(self, cmd, cwd, label, env=None, parser=None):   # pragma: no cover
         raise AssertionError("the example must not run a subprocess")
 
 

@@ -237,6 +237,14 @@ class TestTheUiHandedOverIsTheRealOne(unittest.TestCase):
     def test_run_accepts_what_the_interface_documents(self):
         inspect.signature(A_UI.run).bind(["true"], Path("/tmp"), "a label")
 
+    def test_the_progress_hook_the_console_offers_is_the_one_declared(self):
+        """Console has always taken a `parser`; the ABC did not declare it, so
+        an implementation reading the contract would never know it could turn
+        its spinner into a bar. Two shapes for one call is how undocumented
+        behaviour becomes load-bearing."""
+        self.assertEqual(list(inspect.signature(A_UI.run).parameters),
+                         list(inspect.signature(U.Ui.run).parameters)[1:])
+
 
 if __name__ == "__main__":
     unittest.main()
