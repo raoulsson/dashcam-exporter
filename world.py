@@ -115,6 +115,11 @@ class World:
     at: float = 0.0
     scope: Scope = Scope.LOCAL
     strategy: Strategy = Strategy.LOCAL_PAGE
+    # The operator says this machine is on a bad connection. Nothing in the
+    # exporter reads it — there is no networked code left here to skip. It is
+    # carried so a target can honour it without inventing its own setting name,
+    # which is how two spellings of one question end up disagreeing.
+    offline: bool = False
 
     # the workspace
     out_dir: Optional[Path] = None

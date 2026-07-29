@@ -87,6 +87,7 @@ class Workspace:
         self.ctx.import_root = self.root / "import"
         self.ctx.card = self.root / "card"
         self.ctx.uploader = None
+        self.ctx.offline = False
         self.ctx.selected_import = None
         self.ctx.last_scan = None
         self.ctx.last_groups = None

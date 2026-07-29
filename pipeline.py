@@ -4640,6 +4640,7 @@ def _world_of(ctx, scope, imports, root, metas, renders, target, expendable):
     settled, why, stragglers = expendable
     return W.World(
         at=time.time(), scope=scope, strategy=menu.Strategy.of(ctx.uploader),
+        offline=ctx.offline,
         # RESOLVED: an implementation may compare this against a symlink of its
         # own, and a symlink resolves to the real path. Comparing /var/...
         # against /private/var/... reports a mismatch on every macOS install.

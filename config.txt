@@ -504,9 +504,12 @@ software = true
 # that is import_dir at the top.
 #card = /Volumes/NO NAME
 
-# Skip the live-site lookup in the status screen. It is already skipped when
-# live_trips_url is unset, so this is for a configured install on a bad
-# connection — the lookup has a timeout, but a timeout still costs the wait.
+# Tell your implementation this machine is on a bad connection, so it should
+# skip anything optional that would go and look. It arrives as `world.offline`.
+# Nothing in this repo reads it — there is no networked code left here to skip
+# — so with no website_uploader configured it does nothing at all. It exists so
+# that "am I offline" has ONE name across every target, instead of each one
+# inventing its own and the two spellings disagreeing.
 #offline = false
 
 # Still frames: the preview sheet and the local result page both pull a frame

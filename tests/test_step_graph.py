@@ -107,6 +107,7 @@ class MockState:
         c.import_root = self.root / "import"
         c.card = self.root / "card"
         c.uploader = None
+        c.offline = False
         c.selected_import = None
         c.last_scan = None
         c.last_groups = None
