@@ -489,6 +489,14 @@ class DeleteSimData(Destructive):
     END = True
     DESTR = True
     WORD = "ERASE"
+    # FULL, for the ADVISORY rather than for the guard. Every card guard is
+    # local and would be answered identically at either scope; what needs the
+    # target is _card_advisory, which says whether the workspace copy — the one
+    # copy this erase is allowed on the strength of — is published yet. At
+    # LOCAL scope a configured target reads UNKNOWN, so that line fired on every
+    # card erase on every publishing install and told the operator nothing. A
+    # warning that is always on is a warning nobody reads.
+    SCOPE = Scope.FULL
     OUT = _both(StepBack())
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({IMPORT, META, PREVIEW, EXCLUDE, RENDER,

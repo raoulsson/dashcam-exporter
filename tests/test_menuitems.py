@@ -1157,6 +1157,15 @@ class TestDeleteSimData(unittest.TestCase):
         self.assertIs(verdict.ruling, M.Ruling.SATISFIED)
         self.assertIn("nothing to erase", verdict.reason)
 
+    def test_it_asks_the_target_before_it_warns(self):
+        """The card's own guards are all local, so this scope buys nothing for
+        them. It buys the ADVISORY: erasing the card is allowed on the strength
+        of the workspace copy, and whether that copy is published yet is the
+        target's answer. At LOCAL scope a configured target reads UNKNOWN, so
+        the line fired on every card erase on every publishing install and said
+        nothing — the same cry-wolf the empty-card case above was fixed for."""
+        self.assertIs(item_for(ERASE_CARD).SCOPE, M.Scope.FULL)
+
     def test_a_card_whose_every_clip_is_accounted_for_may_go(self):
         w = imported(ledger_mark="20260101130000",
                      card=full_card(new_stamps=frozenset(),
