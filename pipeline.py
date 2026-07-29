@@ -3929,22 +3929,30 @@ def _what_survives(ctx, world):
     unproven = guards.unproven_lines(world)
     if unproven:
         return _nothing_off_this_machine_was_checked(ctx, unproven)
-    return _on_the_targets_word(world.target)
+    return _on_the_targets_word(world.target, guards.destination_proof(world))
 
 
-def _on_the_targets_word(target):
-    """What survives, and whose answer says so.
+def _on_the_targets_word(target, proof):
+    """What survives, and which answer of whose says so.
 
     The second line names the implementation because the erase is proceeding
     on ITS answer, not on anything this repo checked. Not a warning: whoever
     configured it owns what it does, exactly as with any library. It is there
     so the decision stays attributable afterwards, when the footage is gone
     and the only question left is who said it was safe.
+
+    It names the GATE too, and that is not decoration. This line used to say
+    "published" whatever had been asked, including to a target that had
+    answered "the serving question does not arise here" — which the shipped
+    folder example does, and an archive disk does. Attribution to an answer
+    that was never given is worse than none: it is the last sentence before
+    the footage goes, and a reader checking it afterwards is checking a
+    sentence the target can truthfully deny.
     """
     return (C.dim("  The renders and the copies %s holds stay; the raw clips"
                   " do not come back." % target.name),
-            C.dim("  Proceeding on %s's answer that these renders are published."
-                  % target.origin))
+            C.dim("  Proceeding on %s's answer that these renders are %s."
+                  % (target.origin, proof)))
 
 
 def _nothing_off_this_machine_was_checked(ctx, unproven):

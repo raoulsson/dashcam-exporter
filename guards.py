@@ -197,6 +197,28 @@ def gate_readings(world) -> Tuple[Tuple[str, Evidence], ...]:
     return tuple((label, fn(world)) for label, fn in WORKSPACE_GATES)
 
 
+def destination_proof(world) -> str:
+    """Which of the target's answers a go rests on, or "" when neither applies.
+
+    The two destination gates are not interchangeable and the erase does not
+    always rest on the same one: with a serving answer available that one
+    decides, and without it the hold answer has to be yes for the unanimity
+    rule to pass. A target with no notion of serving — the shipped folder
+    example is one, and an archive disk is the general case — is therefore
+    erased against on its HOLD answer, and saying "published" over that names
+    an answer it never gave.
+
+    Read in the order the decision is made, so the label is the gate that
+    actually decided rather than the first one that could have.
+    """
+    answered = filter(_applicable, reversed(gate_readings(world)[1:]))
+    return next(map(_label_of, answered), "")
+
+
+def _label_of(reading) -> str:
+    return reading[0]
+
+
 def unproven_lines(world) -> Tuple[str, ...]:
     """What could NOT be checked here, stated rather than passed over.
 
@@ -204,12 +226,15 @@ def unproven_lines(world) -> Tuple[str, ...]:
     publication at all, so the renders under <out> are the only copy of that
     footage in the world. A guard that could not run says so.
 
-    One sentence where there used to be two — "no bucket" and "no site repo"
-    were one operator's two settings for one condition, and with one
-    implementation it is genuinely one condition. Narrower wording, not a
-    narrower check: the gates it describes are unchanged.
+    Two conditions, not the two this used to have. "No bucket" and "no site
+    repo" were one operator's two settings for one condition and collapsed
+    correctly. What did NOT exist before the interface is the second condition
+    below: a target that IS configured and answers "not applicable" to both
+    destination questions. It leaves exactly the same hole as having no target
+    at all — nothing off this machine was checked — and it used to say nothing,
+    which is the one state where silence reads as proof.
     """
-    return tuple(filter(None, (_no_target_line(world),)))
+    return tuple(filter(None, (_no_target_line(world), _declined_line(world))))
 
 
 def _no_target_line(world) -> str:
@@ -217,6 +242,26 @@ def _no_target_line(world) -> str:
         return ""
     return ("no website_uploader configured, so no copy off this machine was"
             " checked")
+
+
+def _declined_line(world) -> str:
+    """A configured target that answered NA to both destination questions.
+
+    Not a complaint about the target: declining a question it genuinely cannot
+    answer is what NA is for, and whoever configured it owns that. It is a
+    statement about what this erase then rests on, which is the local render
+    count and nothing else.
+    """
+    if destination_proof(world):
+        return ""
+    return _declined_by(world.target)
+
+
+def _declined_by(target) -> str:
+    if not target.configured:
+        return ""               # already said, by _no_target_line
+    return ("%s answered 'not applicable' to both destination questions, so no"
+            " copy off this machine was checked" % target.name)
 
 
 # ---------------------------------------------------------------------------
