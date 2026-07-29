@@ -4280,6 +4280,87 @@ def fast_enough(ctx, n):
         return False
 
 
+def _sidecars_missing(ctx):
+    """Reason when an import exists but no sidecars do, or None.
+
+    The sidecar pass (Preview) is where the trips are looked at before anything
+    slow or destructive happens to them. Every step that consumes the trips —
+    render, upload, deploy, delete, wipe — waits for it, so the decision about
+    what to keep is made from evidence rather than from memory.
+    """
+    if not import_candidates(ctx):
+        return None
+    try:
+        if ctx.out_dir.is_dir() and any(ctx.out_dir.rglob("*_meta.json")):
+            return None
+    except OSError:
+        pass
+    return "create sidecars first — run %d) %s" % (
+        step_num(step_preview), SHORT[step_num(step_preview)])
+
+
+def _noop_list(ctx):
+    """Nothing to list before anything is imported."""
+    if not import_candidates(ctx):
+        return "nothing imported — run %d) first" % step_num(step_import)
+    return None
+
+
+def _noop_preview(ctx):
+    """Sidecars are built from the GPS track; no track, nothing to build."""
+    cands = import_candidates(ctx)
+    if not cands:
+        return "nothing imported — run %d) first" % step_num(step_import)
+    # The track lives in DCIM/<NNN>gps/ as .gpx files, or as '*.git' tar
+    # archives the renderer harvests .gpx members from. Either counts; a card
+    # with neither has no track and the sidecar pass would produce nothing.
+    for cand in cands:
+        dcim = cand / "DCIM"
+        if not dcim.is_dir():
+            continue
+        for sub in dcim.iterdir():
+            if sub.is_dir() and "gps" in sub.name.lower():
+                for f in sub.iterdir():
+                    if f.suffix.lower() in (".gpx", ".git"):
+                        return None
+    return "no GPS track in the import (no .gpx under DCIM) — sidecars need it"
+
+
+def _noop_exclude(ctx):
+    """Nothing imported means nothing to exclude."""
+    if not import_candidates(ctx):
+        return "nothing imported — nothing to exclude"
+    return None
+
+
+def _noop_render(ctx):
+    """Render reads the copied import, never the card in the slot."""
+    if not import_candidates(ctx):
+        return "nothing imported — a mounted card is not a workspace; run %d) first" \
+            % step_num(step_import)
+    return _sidecars_missing(ctx)
+
+
+def _noop_site(ctx):
+    """The local site is built FROM the renders."""
+    if rendered_mp4s(ctx.out_dir):
+        return None
+    # A gathered final_ folder is renders too — the rebuild case.
+    froot = getattr(ctx, "final_root", ctx.out_dir)
+    try:
+        if froot.is_dir() and any(d.is_dir() for d in froot.glob(FINAL_PREFIX + "*")):
+            return None
+    except OSError:
+        pass
+    return "no renders to build from — run %d) first" % step_num(step_render)
+
+
+def _noop_delete_import(ctx):
+    """The delete has its own heavy gates; the menu-level one is only that the
+    trips were looked at (sidecars) before the footage is put beyond looking."""
+    return _sidecars_missing(ctx)
+
+
 def _noop_import(ctx):
     """Import has nothing to do when there is no card but footage is already in.
 
@@ -4289,6 +4370,16 @@ def _noop_import(ctx):
     meant renaming the import directory silently re-enabled this step and
     offered to import from a card that is not there.
     """
+    # An unfinished session blocks a new import outright. Importing over it
+    # mixes two cards into one grouping with no record of which clip came from
+    # which — step_import used to explain this and ask; the rule is now that it
+    # does not happen at all. working_area_is_expendable is the same proof the
+    # sweeps demand; it only reaches for S3 when loose renders exist AND a
+    # bucket is configured, so the common menu draw stays local and instant.
+    ok, why, _stragglers = working_area_is_expendable(ctx)
+    if not ok:
+        return "unfinished session (%s) — finish it (%d/%d) or delete it (%d) first" % (
+            why, step_num(step_site), step_num(step_upload), step_num(step_delete_import))
     if (ctx.card / "DCIM").is_dir():
         return None
     cands = import_candidates(ctx)
@@ -4314,7 +4405,10 @@ def deploy_blocked(ctx):
         return "site_repo not found: %s" % tilde(ctx.site)
     if not ctx.site_script("deploy", "deploy-site.sh"):
         return "no deploy/deploy-site.sh in %s" % tilde(ctx.site)
-    return None
+    # Deploy is allowed WITHOUT renders — it publishes curation — but not
+    # without sidecars when an import is sitting there unlooked-at: the deploy
+    # would carry a manifest that says nothing about the trips on disk.
+    return _sidecars_missing(ctx)
 
 
 def upload_blocked(ctx):
@@ -4334,7 +4428,11 @@ def upload_blocked(ctx):
         return "site_repo not found: %s" % tilde(ctx.site)
     if not ctx.site_script("deploy", "upload-videos-s3.sh"):
         return "no deploy/upload-videos-s3.sh in %s" % tilde(ctx.site)
-    return None
+    # Config alone is not enough: upload sends renders, so there have to BE
+    # renders, and they have to have been looked at (sidecars) first.
+    if not rendered_mp4s(ctx.out_dir):
+        return "nothing rendered to upload — run %d) first" % step_num(step_render)
+    return _sidecars_missing(ctx)
 
 
 # A step can declare that, right now, it would do nothing — either because there
@@ -4346,13 +4444,25 @@ def upload_blocked(ctx):
 def _noop_clean_card(ctx):
     """No card, nothing to clean. Same wording as the import step's check, since
     it is the same fact."""
-    if (ctx.card / "DCIM").is_dir():
-        return None
-    return "no card at %s" % tilde(ctx.card)
+    dcim = ctx.card / "DCIM"
+    if not dcim.is_dir():
+        return "no card at %s" % tilde(ctx.card)
+    try:
+        if not any(f.is_file() for f in dcim.rglob("*")):
+            return "card is already clean — nothing to wipe"
+    except OSError:
+        pass
+    return _sidecars_missing(ctx)
 
 
 NOOP_CHECK = {
     step_num(step_import): _noop_import,
+    step_num(step_list): _noop_list,
+    step_num(step_preview): _noop_preview,
+    step_num(step_drop_trip): _noop_exclude,
+    step_num(step_render): _noop_render,
+    step_num(step_site): _noop_site,
+    step_num(step_delete_import): _noop_delete_import,
     step_num(step_clean_card): _noop_clean_card,
     step_num(step_upload): upload_blocked,
     step_num(step_deploy): deploy_blocked,
