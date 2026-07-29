@@ -190,7 +190,7 @@ class World:
 
     at: float = 0.0
     scope: Scope = Scope.LOCAL
-    strategy: Strategy = Strategy.LOCAL_DEFAULT_WEBSITE
+    strategy: Strategy = Strategy.LOCAL_PAGE
 
     # the workspace
     out_dir: Optional[Path] = None

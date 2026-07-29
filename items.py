@@ -66,13 +66,13 @@ def _e(*numbers) -> Edges:
 
 
 def _both(neighbours):
-    return {Strategy.WEBSITE_REPO: neighbours,
-            Strategy.LOCAL_DEFAULT_WEBSITE: neighbours}
+    return {Strategy.UPLOADER: neighbours,
+            Strategy.LOCAL_PAGE: neighbours}
 
 
 def _both_sets(*numbers):
-    return {Strategy.WEBSITE_REPO: frozenset(numbers),
-            Strategy.LOCAL_DEFAULT_WEBSITE: frozenset(numbers)}
+    return {Strategy.UPLOADER: frozenset(numbers),
+            Strategy.LOCAL_PAGE: frozenset(numbers)}
 
 
 # ---------------------------------------------------------------------------
@@ -250,15 +250,15 @@ class RenderVideos(MenuItem):
     NAME = "Render Videos"
     DESCRIPTION = "Encode the chosen trips. The slow step: hours for a full card."
     # DEVIATION FROM THE OWNER'S TABLE: he gave item 5 an outbound edge to 7
-    # under website_repo. Removed. Item 7 uploads the BUILT site, and reaching
+    # under the uploader edition. Removed. Item 7 uploads the BUILT site, and reaching
     # it from Render skips the building — item 7's own inbound column says
     # {7,6}, so the edge was one-sided in his table too. Item 6 gained 7 in
     # exchange (see BuildWebsite), and the two changes only make sense
     # together: 5 was the sole route to 7 before them.
     OUT = _both(_e(RENDER, META, PREVIEW, EXCLUDE, BUILD, CLEAN_WS, ERASE_CARD))
     IN_AUTHORED = {
-        Strategy.WEBSITE_REPO: frozenset({RENDER, META, PREVIEW, EXCLUDE, BUILD, UPLOAD}),
-        Strategy.LOCAL_DEFAULT_WEBSITE: frozenset({RENDER, META, PREVIEW, EXCLUDE, BUILD}),
+        Strategy.UPLOADER: frozenset({RENDER, META, PREVIEW, EXCLUDE, BUILD, UPLOAD}),
+        Strategy.LOCAL_PAGE: frozenset({RENDER, META, PREVIEW, EXCLUDE, BUILD}),
     }
 
     def evaluate(self, world) -> Verdict:
@@ -287,7 +287,7 @@ class BuildWebsite(MenuItem):
     final_<day>_<import>, which is what makes the workspace expendable — there
     is no separate gather item, so it lives here or nowhere. Which gatherer is
     installed is settled by the constructor, not by an `if ctx.site_ready`
-    inside the body: under website_repo the trips.json uids embed the import
+    inside the body: under the uploader edition the trips.json uids embed the import
     folder name, so moving the tree would orphan every published trip.
     """
 
@@ -301,14 +301,14 @@ class BuildWebsite(MenuItem):
     # Website was unreachable by its own natural route. This is the edge that
     # makes publishing work.
     OUT = {
-        Strategy.WEBSITE_REPO: _e(BUILD, META, PREVIEW, EXCLUDE, RENDER, UPLOAD,
+        Strategy.UPLOADER: _e(BUILD, META, PREVIEW, EXCLUDE, RENDER, UPLOAD,
                                   CLEAN_WS, ERASE_CARD),
-        Strategy.LOCAL_DEFAULT_WEBSITE: _e(BUILD, META, PREVIEW, EXCLUDE, RENDER,
+        Strategy.LOCAL_PAGE: _e(BUILD, META, PREVIEW, EXCLUDE, RENDER,
                                            CLEAN_WS, ERASE_CARD),
     }
     IN_AUTHORED = {
-        Strategy.WEBSITE_REPO: frozenset({BUILD, META, PREVIEW, EXCLUDE, RENDER, UPLOAD}),
-        Strategy.LOCAL_DEFAULT_WEBSITE: frozenset({BUILD, META, PREVIEW, EXCLUDE, RENDER}),
+        Strategy.UPLOADER: frozenset({BUILD, META, PREVIEW, EXCLUDE, RENDER, UPLOAD}),
+        Strategy.LOCAL_PAGE: frozenset({BUILD, META, PREVIEW, EXCLUDE, RENDER}),
     }
 
     def __init__(self, strategy, work, inbound):
@@ -352,13 +352,13 @@ class UploadWebsite(MenuItem):
     # you fix a caption and rebuild — and left it out of item 7's outbound.
     # Deriving the inbound would have silently deleted an edge he authored.
     OUT = {
-        Strategy.WEBSITE_REPO: _e(UPLOAD, META, PREVIEW, EXCLUDE, RENDER, BUILD,
+        Strategy.UPLOADER: _e(UPLOAD, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                                   CLEAN_WS, ERASE_CARD),
-        Strategy.LOCAL_DEFAULT_WEBSITE: _e(),
+        Strategy.LOCAL_PAGE: _e(),
     }
     IN_AUTHORED = {
-        Strategy.WEBSITE_REPO: frozenset({UPLOAD, BUILD}),
-        Strategy.LOCAL_DEFAULT_WEBSITE: frozenset(),
+        Strategy.UPLOADER: frozenset({UPLOAD, BUILD}),
+        Strategy.LOCAL_PAGE: frozenset(),
     }
 
     def __init__(self, strategy, work, inbound):
@@ -418,9 +418,9 @@ class CleanWorkspace(Destructive):
     SCOPE = Scope.FULL
     OUT = _both(_e(IMPORT))
     IN_AUTHORED = {
-        Strategy.WEBSITE_REPO: frozenset({IMPORT, META, PREVIEW, EXCLUDE, RENDER,
+        Strategy.UPLOADER: frozenset({IMPORT, META, PREVIEW, EXCLUDE, RENDER,
                                           BUILD, UPLOAD}),
-        Strategy.LOCAL_DEFAULT_WEBSITE: frozenset({IMPORT, META, PREVIEW, EXCLUDE,
+        Strategy.LOCAL_PAGE: frozenset({IMPORT, META, PREVIEW, EXCLUDE,
                                                    RENDER, BUILD}),
     }
 
@@ -465,9 +465,9 @@ class DeleteSimData(Destructive):
     WORD = "ERASE"
     OUT = _both(StepBack())
     IN_AUTHORED = {
-        Strategy.WEBSITE_REPO: frozenset({IMPORT, META, PREVIEW, EXCLUDE, RENDER,
+        Strategy.UPLOADER: frozenset({IMPORT, META, PREVIEW, EXCLUDE, RENDER,
                                           BUILD, UPLOAD}),
-        Strategy.LOCAL_DEFAULT_WEBSITE: frozenset({IMPORT, META, PREVIEW, EXCLUDE,
+        Strategy.LOCAL_PAGE: frozenset({IMPORT, META, PREVIEW, EXCLUDE,
                                                    RENDER, BUILD}),
     }
 

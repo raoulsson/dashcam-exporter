@@ -64,6 +64,7 @@ from pathlib import Path
 import guards
 import items
 import menu
+import uploader
 import world as W
 from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                   UPLOAD, CLEAN_WS, ERASE_CARD)
@@ -209,8 +210,8 @@ def load_config(path):
 # which is exactly what happened, and why they now resolve from the gitignored
 # .env first. Same rule the home coordinates already followed: config.txt may
 # carry a commented EXAMPLE, the real value lives in .env or not at all.
-PRIVATE_KEYS = ("site_repo", "s3_bucket", "s3_region", "live_trips_url",
-                "home_lat", "home_lon")
+PRIVATE_KEYS = ("website_uploader", "site_repo", "s3_bucket", "s3_region",
+                "live_trips_url", "home_lat", "home_lon")
 
 
 def as_bool(v, default=False):
@@ -235,6 +236,23 @@ def load_env(path):
     return out
 
 
+def _loaded_uploader(spec, exporter_dir):
+    """The configured implementation, or None for the local edition.
+
+    UploaderNotLoaded is deliberately not caught here. It reaches main(), which
+    prints the reason and exits without drawing a menu.
+    """
+    if not spec:
+        return None
+    return uploader.load_uploader(spec, exporter_dir)
+
+
+def _uploader_origin(spec, instance):
+    if instance is None:
+        return ""
+    return uploader.origin_of(spec, instance)
+
+
 class Ctx:
     """Everything the steps need: resolved paths, config, and session state."""
 
@@ -251,6 +269,16 @@ class Ctx:
             val = os.environ.get(name) or env.get(name)
             if val:
                 self.cfg[key] = val
+
+        # Who publishes, if anybody. "<path to a .py>:<ClassName>", and the
+        # class implements uploader.WebsiteUploaderInterface. Absent means the
+        # local edition, exactly as an unconfigured install has always
+        # behaved; present and broken stops the tool rather than quietly
+        # becoming the local edition, because a menu that silently stops
+        # publishing looks exactly like a menu that is publishing fine.
+        spec = self.cfg_opt("website_uploader")
+        self.uploader = _loaded_uploader(spec, self.exporter)
+        self.uploader_origin = _uploader_origin(spec, self.uploader)
 
         # --- the optional, personal half. All three are unset by default.
         #
@@ -5021,7 +5049,7 @@ def _path_of(meta):
 def _world_of(ctx, scope, imports, root, metas, expendable):
     settled, why, stragglers = expendable
     return W.World(
-        at=time.time(), scope=scope, strategy=menu.Strategy.of(ctx),
+        at=time.time(), scope=scope, strategy=menu.Strategy.of(ctx.uploader),
         # RESOLVED, because the only thing that compares it is the videos
         # symlink check and a symlink resolves to the real path. Comparing
         # /var/... against /private/var/... would report a mismatch on every
@@ -5065,7 +5093,7 @@ class Gatherer:
 
     @staticmethod
     def for_strategy(strategy):
-        if strategy is menu.Strategy.WEBSITE_REPO:
+        if strategy is menu.Strategy.UPLOADER:
             return no_gather
         return gather_into_final
 
@@ -5175,7 +5203,7 @@ class Work:
         return Gatherer.for_strategy(strategy)
 
     def publisher(self, strategy):
-        if strategy is menu.Strategy.WEBSITE_REPO:
+        if strategy is menu.Strategy.UPLOADER:
             return Publisher(self.ctx)
         return NoPublisher()
 
@@ -5624,7 +5652,7 @@ def build_runner(ctx, classes=None):
     for it. `classes` lets a test drive the whole loop with mocks instead of
     the real ten.
     """
-    strategy = menu.Strategy.of(ctx)
+    strategy = menu.Strategy.of(ctx.uploader)
     menu_items = menu.build_menu(strategy, Work(ctx), classes)
     position = menu.position_for(menu_items)
     position.orient(capture_world(ctx, menu.Scope.LOCAL), items.COLD_START_RULES)
@@ -5657,7 +5685,7 @@ def _edition_line(ctx):
     job, and the shape of the machine around it is the session's to state.
     """
     return C.dim("  %s edition — README.md has the step graph and what each"
-                 " edition does." % menu.Strategy.of(ctx).value)
+                 " edition does." % menu.Strategy.of(ctx.uploader).value)
 
 
 def _chain(ctx):
@@ -5665,7 +5693,7 @@ def _chain(ctx):
     machine: with nothing configured the chain really does stop at a local
     page, and saying "-> S3 -> site" there would be a promise the greyed-out
     menu below then breaks."""
-    if menu.Strategy.of(ctx) is menu.Strategy.WEBSITE_REPO:
+    if menu.Strategy.of(ctx.uploader) is menu.Strategy.UPLOADER:
         return "card -> render -> S3 -> site"
     return _local_chain(ctx)
 
@@ -5716,7 +5744,10 @@ def main(argv=None):
     edits.
     """
     _no_colour()
-    ctx = Ctx()
+    try:
+        ctx = Ctx()
+    except uploader.UploaderNotLoaded as e:
+        return _uploader_broken(e)
     # One instance per working area. A second menu against the same tree
     # trusts scans the first one may be invalidating right now, and the erases
     # trust the scans. The lock self-clears when its pid is gone, so a crash
@@ -5724,6 +5755,22 @@ def main(argv=None):
     if not acquire_single_instance_lock(ctx):
         return _lock_taken(ctx)
     return _start(ctx)
+
+
+def _uploader_broken(error):
+    """A configured uploader that will not load stops the tool before the menu.
+
+    Not a fallback to the local edition. That fallback is silent by nature: the
+    menu would look normal, item 6 would write a local page, and item 8 would
+    go on refusing for a reason that reads like a network problem — while
+    nothing was being published at all.
+    """
+    print()
+    print(C.red("  website_uploader is configured and will not load:"))
+    print(C.red("    %s" % error))
+    print(C.dim("  Fix it, or remove website_uploader to run the local edition"
+                " on purpose."))
+    return 4
 
 
 def _start(ctx):

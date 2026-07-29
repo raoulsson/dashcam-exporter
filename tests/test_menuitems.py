@@ -46,8 +46,8 @@ import world as W                # noqa: E402
 from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                   UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
 
-WEBSITE = M.Strategy.WEBSITE_REPO
-LOCAL = M.Strategy.LOCAL_DEFAULT_WEBSITE
+UPLOADER = M.Strategy.UPLOADER
+LOCAL = M.Strategy.LOCAL_PAGE
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +156,7 @@ class FakeWork:
         return made
 
     def _publish_reason(self, strategy):
-        if strategy is WEBSITE:
+        if strategy is UPLOADER:
             return self.publish_reason
         return "needs site_repo and s3_bucket in config.txt"
 
@@ -206,12 +206,12 @@ def a_plan(guard=M.nothing_to_recheck, act=None, banner=("would erase two clips"
     return M.Plan(guard=guard, act=act or Act(), banner=banner)
 
 
-def menu_for(strategy=WEBSITE, work=None):
+def menu_for(strategy=UPLOADER, work=None):
     """The ten items as the pipeline builds them, sharing one `work`."""
     return M.build_menu(strategy, work or FakeWork())
 
 
-def item_for(number, strategy=WEBSITE, work=None):
+def item_for(number, strategy=UPLOADER, work=None):
     return menu_for(strategy, work)[number]
 
 
@@ -345,7 +345,7 @@ class TestWhatEachItemDeclares(unittest.TestCase):
 # inbound is derived from every other item's outbound. Items 0, 1 and 9 name a
 # KIND rather than a set of numbers and are asserted separately.
 OUTBOUND = {
-    WEBSITE: {
+    UPLOADER: {
         IMPORT:   {META, CLEAN_WS, ERASE_CARD},
         META:     {META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD},
         PREVIEW:  {META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD},
@@ -370,7 +370,7 @@ OUTBOUND = {
 }
 
 INBOUND = {
-    WEBSITE: {
+    UPLOADER: {
         META:     {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD},
         PREVIEW:  {META, PREVIEW, RENDER, BUILD, UPLOAD},
         EXCLUDE:  {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD},
@@ -475,20 +475,20 @@ class TestTheStrategyIsSettledWhenTheMenuIsBuilt(unittest.TestCase):
         collaborator in the constructor and are handed one; the choosing
         happens once per session, not once per keypress."""
         work = FakeWork()
-        menu_for(WEBSITE, work)
-        self.assertEqual(work.gatherer_asked, [WEBSITE])
-        self.assertEqual(work.publisher_asked, [WEBSITE])
+        menu_for(UPLOADER, work)
+        self.assertEqual(work.gatherer_asked, [UPLOADER])
+        self.assertEqual(work.publisher_asked, [UPLOADER])
 
     def test_executing_never_asks_which_product_this_is(self):
         """Running item 6 forty times must not re-decide which mover it uses:
         the constructor settled it, and asking again is the `if` this design
         removed coming back through the side door."""
         work = FakeWork()
-        item = menu_for(WEBSITE, work)[BUILD]
+        item = menu_for(UPLOADER, work)[BUILD]
         item.execute(imported(renders=(MP4,)))
         item.execute(imported(renders=(MP4,)))
-        self.assertEqual(work.gatherer_asked, [WEBSITE])
-        self.assertEqual(work.gather_used, [("gatherer", WEBSITE)] * 2)
+        self.assertEqual(work.gatherer_asked, [UPLOADER])
+        self.assertEqual(work.gather_used, [("gatherer", UPLOADER)] * 2)
 
     def test_the_local_product_installs_a_different_gatherer(self):
         """Under the local product the render tree is gathered into final_;
@@ -578,7 +578,7 @@ class TestImportSim(unittest.TestCase):
     def test_the_body_never_runs_when_the_session_is_unfinished(self):
         """A blocked verdict is not advice. Nothing behind it may run."""
         work = FakeWork()
-        item = menu_for(WEBSITE, work)[IMPORT]
+        item = menu_for(UPLOADER, work)[IMPORT]
         item.execute(world(card=full_card(), workspace_settled=False))
         self.assertEqual(work.times("import"), 0)
 
@@ -663,7 +663,7 @@ class TestExcludeTrip(unittest.TestCase):
         removed."""
         act = Act("dropped trip t1")
         work = FakeWork(plan=a_plan(act=act), word="DROP")
-        item = menu_for(WEBSITE, work)[EXCLUDE]
+        item = menu_for(UPLOADER, work)[EXCLUDE]
         outcome = item.execute(imported())
         self.assertTrue(outcome.completed)
         self.assertTrue(item.completed())
@@ -675,7 +675,7 @@ class TestExcludeTrip(unittest.TestCase):
         for a move that never took effect."""
         act = Act()
         work = FakeWork(plan=a_plan(act=act), word="drop please")
-        item = menu_for(WEBSITE, work)[EXCLUDE]
+        item = menu_for(UPLOADER, work)[EXCLUDE]
         outcome = item.execute(imported())
         self.assertFalse(outcome.completed)
         self.assertFalse(act.ran)
@@ -684,7 +684,7 @@ class TestExcludeTrip(unittest.TestCase):
         """A blank or unlisted index leaves the plan with no target, so no word
         is asked for and neither half of the plan is ever called."""
         work = FakeWork(plan=M.Plan.nothing_to_do("no trip selected"))
-        item = menu_for(WEBSITE, work)[EXCLUDE]
+        item = menu_for(UPLOADER, work)[EXCLUDE]
         outcome = item.execute(imported())
         self.assertFalse(outcome.completed)
         self.assertEqual(work.times("ask_word"), 0)
@@ -816,7 +816,7 @@ class TestUploadWebsite(unittest.TestCase):
         and the reason names the key that fixes it — this is where someone who
         cloned the repo finds out publishing exists at all."""
         work = FakeWork(publish_reason="needs s3_bucket in config.txt")
-        item = menu_for(WEBSITE, work)[UPLOAD]
+        item = menu_for(UPLOADER, work)[UPLOAD]
         verdict = evaluate(item, a_published_world())
         self.assertTrue(verdict.blocked)
         self.assertIn("s3_bucket", verdict.reason)
@@ -832,7 +832,7 @@ class TestUploadWebsite(unittest.TestCase):
 
     def test_it_never_publishes_behind_a_refusal(self):
         work = FakeWork(publish_reason="needs s3_bucket in config.txt")
-        item = menu_for(WEBSITE, work)[UPLOAD]
+        item = menu_for(UPLOADER, work)[UPLOAD]
         item.execute(a_published_world())
         self.assertFalse(work.publishers[0].ran)
 
@@ -866,7 +866,7 @@ def clean_with(guard, fresh, word="CLEAN"):
     guard is re-asked against after the word is typed."""
     act = Act("workspace erased")
     work = FakeWork(plan=a_plan(guard=guard, act=act), word=word, fresh=fresh)
-    item = menu_for(WEBSITE, work)[CLEAN_WS]
+    item = menu_for(UPLOADER, work)[CLEAN_WS]
     outcome = item.execute(imported())
     return work, act, outcome
 
@@ -1070,7 +1070,7 @@ class TestDeleteSimData(unittest.TestCase):
         for: a refusal is not a prompt with a discouraging message."""
         act = Act()
         work = FakeWork(plan=a_plan(act=act), word="ERASE")
-        item = menu_for(WEBSITE, work)[ERASE_CARD]
+        item = menu_for(UPLOADER, work)[ERASE_CARD]
         item.execute(imported(ledger_mark=None, card=full_card()))
         self.assertFalse(act.ran)
         self.assertEqual(work.times("erase_plan"), 0)
@@ -1127,7 +1127,7 @@ class TestIdempotence(unittest.TestCase):
 
     def _twice(self, number, before, after, expected):
         work = FakeWork(plan=a_plan(), word=_word_for(number))
-        item = menu_for(WEBSITE, work)[number]
+        item = menu_for(UPLOADER, work)[number]
         item.execute(before)
         self.assertIs(item.evaluate(after).ruling, expected)
 
@@ -1138,7 +1138,7 @@ class TestIdempotence(unittest.TestCase):
         something to lose."""
         act = Act()
         work = FakeWork(plan=a_plan(act=act), word="ERASE")
-        item = menu_for(WEBSITE, work)[ERASE_CARD]
+        item = menu_for(UPLOADER, work)[ERASE_CARD]
         item.execute(imported(ledger_mark="20260101130000", card=full_card()))
         item.execute(imported(card=a_card(dcim=True, stamps=frozenset())))
         self.assertEqual(len(act.worlds), 1)
@@ -1149,7 +1149,7 @@ class TestIdempotence(unittest.TestCase):
         of it is called."""
         act = Act()
         work = FakeWork(plan=a_plan(act=act), word="DROP")
-        item = menu_for(WEBSITE, work)[EXCLUDE]
+        item = menu_for(UPLOADER, work)[EXCLUDE]
         item.execute(imported())
         work.plan = M.Plan.nothing_to_do("that trip is already gone")
         second = item.execute(imported())
@@ -1161,7 +1161,7 @@ class TestIdempotence(unittest.TestCase):
         it stopped — and "nothing left to do" is the same question answered
         with an empty list."""
         work = FakeWork()
-        item = menu_for(WEBSITE, work)[UPLOAD]
+        item = menu_for(UPLOADER, work)[UPLOAD]
         item.execute(imported(renders=(MP4,), renders_here=(MP4,)))
         item.execute(a_published_world())
         self.assertEqual(len(work.publishers[0].worlds), 1)
@@ -1182,7 +1182,7 @@ class TestIdempotence(unittest.TestCase):
         """
         act = Act()
         work = FakeWork(plan=a_plan(act=act), word="CLEAN")
-        item = menu_for(WEBSITE, work)[CLEAN_WS]
+        item = menu_for(UPLOADER, work)[CLEAN_WS]
         item.execute(imported())
         second = item.execute(world())
         self.assertEqual(len(act.worlds), 1)
@@ -1211,7 +1211,7 @@ class TestCompleted(unittest.TestCase):
 
     def test_work_that_was_done_completes(self):
         work = FakeWork()
-        item = menu_for(WEBSITE, work)[META]
+        item = menu_for(UPLOADER, work)[META]
         self.assertTrue(item.execute(imported()).completed)
 
     def test_a_refusal_does_not_complete(self):
@@ -1232,7 +1232,7 @@ class TestCompleted(unittest.TestCase):
         finish. Completion is about the postcondition, not about permission."""
         work = FakeWork()
         work.generate_meta = lambda w: M.stopped("the sidecar pass exited 1")
-        item = menu_for(WEBSITE, work)[META]
+        item = menu_for(UPLOADER, work)[META]
         self.assertFalse(item.execute(imported()).completed)
 
     def test_a_blocked_verdict_always_says_why(self):

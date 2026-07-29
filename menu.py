@@ -34,15 +34,19 @@ from typing import Dict, FrozenSet, List, Optional, Tuple
 class Strategy(Enum):
     """Which of the two products this installation is."""
 
-    WEBSITE_REPO = "website_repo"
-    LOCAL_DEFAULT_WEBSITE = "local_default_website"
+    UPLOADER = "uploader"
+    LOCAL_PAGE = "local page"
 
     @classmethod
-    def of(cls, ctx) -> "Strategy":
-        """A configured site repo AND bucket is the publishing product."""
-        configured = (getattr(ctx, "site", None) is not None,
-                      bool(getattr(ctx, "s3_bucket", None)))
-        return cls.WEBSITE_REPO if all(configured) else cls.LOCAL_DEFAULT_WEBSITE
+    def of(cls, uploader) -> "Strategy":
+        """Was an implementation supplied. That is the whole question.
+
+        It takes the uploader itself, not the ctx it came from: asked of a ctx
+        this would read config keys, and the keys it read were one operator's
+        — a site repo and a bucket name. Which product this is has to be
+        answerable without knowing how anybody publishes.
+        """
+        return cls.UPLOADER if uploader is not None else cls.LOCAL_PAGE
 
 
 # Item numbers, named once so the graph reads as sentences rather than integers.

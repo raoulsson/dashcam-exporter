@@ -12,6 +12,7 @@ Run:  ./run-tests.sh          (or: python3 -m unittest tests.test_spec -v)
 
 import json
 import importlib.util
+import os
 import shutil
 import sys
 import tempfile
@@ -23,6 +24,7 @@ sys.path.insert(0, str(REPO))
 
 import items                     # noqa: E402,F401  (registers the ten)
 import menu as M                 # noqa: E402
+import uploader as U             # noqa: E402
 
 
 def load_pipeline():
@@ -58,6 +60,7 @@ class Bench:
         c.render_root = self.root / "import"
         c.import_root = self.root / "import"
         c.card = self.root / "card"
+        c.uploader = None
         c.site = None
         c.s3_bucket = None
         c.selected_import = None
@@ -117,6 +120,20 @@ class Bench:
         if not link.exists():
             link.symlink_to(self.ctx.out_dir)
         self.ctx.site = s
+        return self.publishes()
+
+    def publishes(self):
+        """A configured publishing target — which is what decides the edition.
+
+        The shipped example, loaded the way a real install loads one, rather
+        than a stub: these tests are about the wiring between the menu and
+        whatever was configured, and a stub lets that wiring drift from the
+        one implementation anybody reads.
+        """
+        os.environ["DASHCAM_FOLDER_TARGET"] = str(self.root / "published")
+        spec = "%s:FolderTarget" % (REPO / "examples" / "uploader_folder.py")
+        self.ctx.uploader = U.load_uploader(spec, REPO)
+        self.ctx.uploader_origin = U.origin_of(spec, self.ctx.uploader)
         return self
 
     def bucket(self, mapping):
@@ -133,7 +150,7 @@ class Bench:
         and looks.
         """
         world = P.capture_world(self.ctx, scope or M.Scope.FULL)
-        menu_items = M.build_menu(M.Strategy.of(self.ctx), P.Work(self.ctx))
+        menu_items = M.build_menu(M.Strategy.of(self.ctx.uploader), P.Work(self.ctx))
         return {n: item.evaluate(world) for n, item in menu_items.items()}
 
     def blocked(self):
@@ -192,7 +209,7 @@ class TestAvailability(SpecTest):
         cannot do that, and Clean Workspace's outbound of {1} means it can never
         even precede the other.
         """
-        built = M.build_menu(M.Strategy.of(self.b.ctx), P.Work(self.b.ctx))
+        built = M.build_menu(M.Strategy.of(self.b.ctx.uploader), P.Work(self.b.ctx))
         self.assertNotIn(ERASE_CARD,
                          built[CLEAN_WS].outbound().offers(frozenset(built)))
 
@@ -215,7 +232,7 @@ class TestAvailability(SpecTest):
         why this is asserted on the edges and not on a verdict.
         """
         self.b.imported().sidecars().site_repo().bucket({})
-        built = M.build_menu(M.Strategy.of(self.b.ctx), P.Work(self.b.ctx))
+        built = M.build_menu(M.Strategy.of(self.b.ctx.uploader), P.Work(self.b.ctx))
         self.assertNotIn(UPLOAD, built[META].outbound().offers(frozenset(built)))
         self.assertEqual(set(built[UPLOAD].inbound().edges()), {BUILD, UPLOAD})
 

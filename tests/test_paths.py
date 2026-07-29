@@ -53,7 +53,7 @@ def load_pipeline():
 
 P = load_pipeline()
 
-WEBSITE, LOCAL = M.Strategy.WEBSITE_REPO, M.Strategy.LOCAL_DEFAULT_WEBSITE
+UPLOADER, LOCAL = M.Strategy.UPLOADER, M.Strategy.LOCAL_PAGE
 
 
 @contextlib.contextmanager
@@ -75,7 +75,7 @@ SIDECAR = W.TripMeta("trip_2026-07-28_08-57_01", "20260728080000", "202607280930
 def _site(strategy):
     """A publishing install has a second repo and a live answer; a local one
     has neither, and NA is not the same answer as no."""
-    if strategy is WEBSITE:
+    if strategy is UPLOADER:
         return W.SiteFacts(configured=True, on_disk=True, published=M.Evidence.YES,
                            scripts=frozenset({"upload-videos-s3.sh", "deploy-site.sh"}),
                            videos_link=Path("/w/out"), page=True)
@@ -83,7 +83,7 @@ def _site(strategy):
 
 
 def _bucket(strategy):
-    if strategy is WEBSITE:
+    if strategy is UPLOADER:
         return W.Listed({"videos/" + RENDERED.name: RENDERED.size})
     return W.NoBucket()
 
@@ -229,7 +229,7 @@ class FakeCtx:
 class Bench:
     """A pipeline standing at a position, driven by a list of keystrokes."""
 
-    def __init__(self, strategy=WEBSITE, world=None, current=M.NOWHERE):
+    def __init__(self, strategy=UPLOADER, world=None, current=M.NOWHERE):
         self.strategy = strategy
         self.work = FakeWork(strategy)
         self.menu = M.build_menu(strategy, self.work)
@@ -299,7 +299,7 @@ class TestTheNormalCycle(unittest.TestCase):
         which neighbours everything. Cleaning the workspace ends the cycle:
         its outbound is {1}, so what is left is a new import and nothing else.
         """
-        b = Bench(WEBSITE)
+        b = Bench(UPLOADER)
         b.type("1", "2", "3", "5", "6", "7", "8")
         self.assertEqual(b.work.done,
                          [IMPORT, META, PREVIEW, RENDER, BUILD, UPLOAD, CLEAN_WS])
@@ -328,7 +328,7 @@ class TestTheNormalCycle(unittest.TestCase):
         sidecars now describe a trip that no longer exists, so the only way
         forward is to write them again.
         """
-        b = Bench(WEBSITE)
+        b = Bench(UPLOADER)
         b.type("1", "2", "6", "7", "0", "4", "2")
         self.assertEqual(b.work.done, [IMPORT, META, BUILD, UPLOAD, PROGRESS,
                                        EXCLUDE, META])
@@ -347,7 +347,7 @@ class TestTheNormalCycle(unittest.TestCase):
         a habit to change, and the decision is his. Pinned here so the answer
         is a decision rather than a discovery.
         """
-        b = Bench(WEBSITE)
+        b = Bench(UPLOADER)
         b.type("1", "2", "7")
         self.assertEqual(b.work.done, [IMPORT, META])
         self.assertNotIn(UPLOAD, b.offered_at[2])
@@ -359,7 +359,7 @@ class TestThePathsThatMustNotExist(unittest.TestCase):
     def test_a_number_the_position_does_not_offer_runs_nothing(self):
         """Rendering is not reachable with nothing imported. The refusal is
         the graph's, before any guard is asked."""
-        b = Bench(WEBSITE)
+        b = Bench(UPLOADER)
         out = b.type("5")
         self.assertEqual(b.work.done, [])
         self.assertEqual(b.offered_at, [START, START])
@@ -375,7 +375,7 @@ class TestThePathsThatMustNotExist(unittest.TestCase):
         self.assertEqual(_reachable(built), set(built) - {UPLOAD})
 
     def test_publishing_is_reachable_under_the_publishing_product(self):
-        built = M.build_menu(WEBSITE, FakeWork(WEBSITE))
+        built = M.build_menu(UPLOADER, FakeWork(UPLOADER))
         self.assertEqual(_reachable(built), set(built))
 
     def test_freeing_the_card_can_never_follow_erasing_the_workspace(self):
@@ -385,7 +385,7 @@ class TestThePathsThatMustNotExist(unittest.TestCase):
         after the irreversible half had run. Clean Workspace's outbound is {1},
         so there is no position from which that order can be typed.
         """
-        b = Bench(WEBSITE)
+        b = Bench(UPLOADER)
         b.type("1", "2", "8", "9")
         self.assertEqual(b.work.done, [IMPORT, META, CLEAN_WS])
         self.assertEqual(b.offered_at[3], START)
@@ -394,7 +394,7 @@ class TestThePathsThatMustNotExist(unittest.TestCase):
         """The safe order is the permitted one. Erasing the card steps back by
         one, so wherever we were is where we still are, and 8 is still on
         offer from there."""
-        b = Bench(WEBSITE)
+        b = Bench(UPLOADER)
         b.type("1", "2", "9", "8")
         self.assertEqual(b.work.done, [IMPORT, META, ERASE_CARD, CLEAN_WS])
         self.assertEqual(b.offered_at[2], b.offered_at[3],
@@ -408,12 +408,12 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
         """A clip that exists nowhere but the card refuses the erase, and the
         refusal comes BEFORE the banner and the word — an operator who has
         typed ERASE has been told the erase was going to happen."""
-        stranded = every_item_can_run(WEBSITE,
+        stranded = every_item_can_run(UPLOADER,
                                       card=W.Card(path=Path("/w/card"), dcim=True,
                                                   present=True,
                                                   stamps=frozenset({CLIP}),
                                                   owed_stamps=frozenset({CLIP})))
-        b = Bench(WEBSITE, world=stranded, current=RENDER)
+        b = Bench(UPLOADER, world=stranded, current=RENDER)
         b.type("9")
         self.assertEqual(b.work.done, [])
         self.assertEqual(b.work.shown, [])
@@ -422,7 +422,7 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
     def test_anything_but_the_word_erases_nothing_and_stays_put(self):
         """Rule 3: an aborted step does not complete, so the pipeline is
         exactly where it was and the wide offer survives."""
-        b = Bench(WEBSITE, current=PREVIEW)
+        b = Bench(UPLOADER, current=PREVIEW)
         b.work.answer = "yes"
         b.type("4")
         self.assertEqual(b.work.done, [])
@@ -435,9 +435,9 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
         let the item be selected — so a card swapped between the banner and
         the return key refuses, and nothing is touched.
         """
-        b = Bench(WEBSITE, current=RENDER)
+        b = Bench(UPLOADER, current=RENDER)
         b.work.fresh = every_item_can_run(
-            WEBSITE, card=W.Card(path=Path("/w/card"), dcim=True, present=True,
+            UPLOADER, card=W.Card(path=Path("/w/card"), dcim=True, present=True,
                                  stamps=frozenset({"20260729120000"}),
                                  new_stamps=frozenset({"20260729120000"})))
         b.type("9")
@@ -449,7 +449,7 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
     def test_the_three_destructive_items_ask_three_different_words(self):
         """Two identical prompts is how the second one gets typed from muscle
         memory, and 4, 8 and 9 are now three prompts on one path."""
-        b = Bench(WEBSITE, current=PREVIEW)
+        b = Bench(UPLOADER, current=PREVIEW)
         b.type("4", "2", "9", "8")
         self.assertEqual(b.work.asked, ["DROP", "ERASE", "CLEAN"])
 
@@ -463,7 +463,7 @@ class TestIdempotence(unittest.TestCase):
         the world it is handed and not by a remembered flag, so the third one
         is worth exactly what the first was and the position never drifts.
         """
-        b = Bench(WEBSITE)
+        b = Bench(UPLOADER)
         b.type("1", "2", "2", "2")
         self.assertEqual(b.work.done, [IMPORT, META, META, META])
         self.assertEqual(b.offered_at[2], b.offered_at[3])
@@ -475,9 +475,9 @@ class TestIdempotence(unittest.TestCase):
         ERASE to discover there is nothing behind it is teaching the operator
         to type it without reading.
         """
-        emptied = every_item_can_run(WEBSITE,
+        emptied = every_item_can_run(UPLOADER,
                                      card=W.Card(path=Path("/w/card"), dcim=True))
-        b = Bench(WEBSITE, world=emptied, current=RENDER)
+        b = Bench(UPLOADER, world=emptied, current=RENDER)
         b.type("9")
         self.assertEqual(b.work.asked, [])
         self.assertEqual(b.work.done, [])
@@ -521,11 +521,11 @@ class TestEveryShortPath(unittest.TestCase):
     def test_no_path_runs_an_item_that_was_not_on_offer(self):
         """The offer recorded at each prompt is what the operator saw. Every
         key pressed on every enumerated path has to have been in it."""
-        for path in _paths(M.build_menu(WEBSITE, FakeWork(WEBSITE)), self.DEPTH):
+        for path in _paths(M.build_menu(UPLOADER, FakeWork(UPLOADER)), self.DEPTH):
             self._all_were_offered(path)
 
     def _all_were_offered(self, path):
-        b = Bench(WEBSITE)
+        b = Bench(UPLOADER)
         b.type(*map(str, path))
         with self.subTest(path=path):
             self.assertEqual(_unoffered(path, b.offered_at), [])
@@ -558,7 +558,7 @@ class TestTheMenuSaysWhichProductItIs(unittest.TestCase):
     def test_the_publishing_product_says_it_of_nobody(self):
         """Every item exists there, so the sentence has no subject and must not
         be printed at all."""
-        self.assertNotIn("not available for", Bench(WEBSITE).type())
+        self.assertNotIn("not available for", Bench(UPLOADER).type())
 
     def test_the_switched_off_test_does_not_catch_a_start_node(self):
         """Import SIM also declares an empty inbound, because a cycle has to
@@ -862,7 +862,7 @@ class TestThePaintedMenuMatchesTheRealMachine(PainterTest):
     def test_the_menu_draws_one_entry_per_item_and_no_others(self):
         """Ten items, ten entries, in the machine's own order. A number the
         menu draws that no item holds is a number written into the painter."""
-        b = Bench(WEBSITE, current=RENDER)
+        b = Bench(UPLOADER, current=RENDER)
         out = self.paint(b.menu, b.position, b.world)
         self.assertEqual(_numbers_drawn(out), sorted(b.menu))
 

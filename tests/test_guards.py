@@ -67,6 +67,7 @@ class Workspace:
         self.ctx.render_root = self.root / "import"
         self.ctx.import_root = self.root / "import"
         self.ctx.card = self.root / "card"
+        self.ctx.uploader = None
         self.ctx.site = None
         self.ctx.s3_bucket = None
         self.ctx.selected_import = None
@@ -496,7 +497,7 @@ class TestTheDestructiveSequence(GuardTest):
         P.write_ledger(self.w.ctx, "20260728090000")
         self.clip = (self.w.ctx.card / "DCIM" / "200video" / "front"
                      / "20260728090000_0060.mp4")
-        self.item = M.build_menu(M.Strategy.of(self.w.ctx),
+        self.item = M.build_menu(M.Strategy.of(self.w.ctx.uploader),
                                  P.Work(self.w.ctx))[M.ERASE_CARD]
 
     def _run(self, answer):

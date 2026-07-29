@@ -11,6 +11,7 @@ graph can be exercised without a card, a bucket or a render.
 """
 
 import importlib.util
+import os
 import shutil
 import sys
 import tempfile
@@ -24,6 +25,7 @@ sys.path.insert(0, str(REPO / "tests"))
 
 import items                     # noqa: E402,F401  (registers the ten)
 import menu as M                 # noqa: E402
+import uploader as U             # noqa: E402
 from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                   UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
 from print_step_graph import NullWork                # noqa: E402
@@ -49,7 +51,7 @@ P = load_pipeline()
 # Items 0 and 1 are absent by definition rather than by exemption: their
 # inbound is a KIND (Anywhere, StartNode), not a set of numbers.
 AUTHORED_INBOUND = {
-    M.Strategy.WEBSITE_REPO: {
+    M.Strategy.UPLOADER: {
         META: {META, IMPORT, EXCLUDE},
         PREVIEW: {PREVIEW, META, EXCLUDE},
         EXCLUDE: {EXCLUDE, META, PREVIEW},
@@ -59,7 +61,7 @@ AUTHORED_INBOUND = {
         CLEAN_WS: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD},
         ERASE_CARD: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD},
     },
-    M.Strategy.LOCAL_DEFAULT_WEBSITE: {
+    M.Strategy.LOCAL_PAGE: {
         META: {META, IMPORT, EXCLUDE},
         PREVIEW: {PREVIEW, META, EXCLUDE},
         EXCLUDE: {EXCLUDE, META, PREVIEW},
@@ -92,7 +94,7 @@ class MockState:
     uploaded" in one line.
     """
 
-    def __init__(self, strategy=M.Strategy.LOCAL_DEFAULT_WEBSITE):
+    def __init__(self, strategy=M.Strategy.LOCAL_PAGE):
         self.root = Path(tempfile.mkdtemp(prefix="dashcam-graph-"))
         (self.root / "out").mkdir()
         (self.root / "import").mkdir()
@@ -104,6 +106,7 @@ class MockState:
         c.render_root = self.root / "import"
         c.import_root = self.root / "import"
         c.card = self.root / "card"
+        c.uploader = None
         c.site = None
         c.s3_bucket = None
         c.selected_import = None
@@ -112,8 +115,8 @@ class MockState:
         c.config_args = []
         c.scan_args = []
         self.ctx = c
-        if strategy is M.Strategy.WEBSITE_REPO:
-            self.with_site_repo().with_bucket()
+        if strategy is M.Strategy.UPLOADER:
+            self.with_site_repo().with_bucket().with_uploader()
 
     # -- milestones --------------------------------------------------------
     def with_card(self, stamps=("20260728090000",)):
@@ -168,9 +171,24 @@ class MockState:
         self._bucket = contents or {}
         return self
 
+    def with_uploader(self):
+        """A configured publishing target, loaded the way a real install loads
+        one.
+
+        The shipped example rather than a stub written here: what these tests
+        exercise is the wiring between the menu and whatever was configured,
+        and a stub would let that wiring drift from the one implementation
+        anybody actually reads.
+        """
+        os.environ["DASHCAM_FOLDER_TARGET"] = str(self.root / "published")
+        spec = "%s:FolderTarget" % (REPO / "examples" / "uploader_folder.py")
+        self.ctx.uploader = U.load_uploader(spec, REPO)
+        self.ctx.uploader_origin = U.origin_of(spec, self.ctx.uploader)
+        return self
+
     def menu(self):
         """The ten items, built for whatever this ctx configures."""
-        return M.build_menu(M.Strategy.of(self.ctx), P.Work(self.ctx))
+        return M.build_menu(M.Strategy.of(self.ctx.uploader), P.Work(self.ctx))
 
     def verdicts(self, scope=None):
         """{number: Verdict} — what each item says about this world."""
@@ -248,7 +266,7 @@ class TestGraphConsistency(GraphTest):
         incoming = item.inbound().edges()
         if number in (PROGRESS, IMPORT):
             self.assertIsNone(incoming, "a kind, not an edge set")
-        elif strategy is M.Strategy.LOCAL_DEFAULT_WEBSITE and number == UPLOAD:
+        elif strategy is M.Strategy.LOCAL_PAGE and number == UPLOAD:
             self.assertEqual(incoming, frozenset(),
                              "publishing has no place in the local product")
         else:
@@ -282,7 +300,7 @@ class TestGraphConsistency(GraphTest):
         Upload Website was unreachable by its own natural route. Item 5 offered
         it instead, which skips building the site item 7 uploads.
         """
-        built = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        built = M.build_menu(M.Strategy.UPLOADER, NullWork())
         universe = frozenset(built)
         self.assertIn(UPLOAD, built[BUILD].outbound().offers(universe))
         self.assertNotIn(UPLOAD, built[RENDER].outbound().offers(universe))
@@ -308,7 +326,7 @@ class TestTheUnfoldIsStructural(GraphTest):
     def test_erasing_the_card_hands_the_position_back(self):
         """Freeing the card does not interrupt the cycle, so Clean Workspace
         is still reachable afterwards — the safe order is the permitted one."""
-        built = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        built = M.build_menu(M.Strategy.UPLOADER, NullWork())
         position = M.position_for(built)
         position.current = RENDER
         self.assertEqual(built[ERASE_CARD].settles_at(RENDER), RENDER)
@@ -319,7 +337,7 @@ class TestTheOwnersWorkedExample(GraphTest):
     """Rule 6, asserted literally against the graph."""
 
     def test_after_a_preview_and_then_an_exclusion(self):
-        built = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        built = M.build_menu(M.Strategy.UPLOADER, NullWork())
         position = M.position_for(built)
         position.current = PREVIEW
         self.assertEqual(sorted(position.selectable(built)),
@@ -351,19 +369,19 @@ class TestInterfaceMatchesBehaviour(GraphTest):
                                  [PROGRESS, IMPORT])
 
     def test_destructive_items_are_the_ones_that_erase(self):
-        built = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        built = M.build_menu(M.Strategy.UPLOADER, NullWork())
         self.assertEqual({n for n, i in built.items() if i.destr()},
                          {EXCLUDE, CLEAN_WS, ERASE_CARD})
 
     def test_every_destructive_item_asks_for_a_distinct_word(self):
         """Two identical prompts is how the second one gets typed from muscle
         memory, and items 8 and 9 are now two prompts."""
-        built = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        built = M.build_menu(M.Strategy.UPLOADER, NullWork())
         words = [i.word() for i in built.values() if i.destr()]
         self.assertEqual(sorted(words), ["CLEAN", "DROP", "ERASE"])
 
     def test_the_items_that_end_the_cycle_say_so(self):
-        built = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        built = M.build_menu(M.Strategy.UPLOADER, NullWork())
         self.assertEqual({n for n, i in built.items() if i.end()},
                          {CLEAN_WS, ERASE_CARD})
 
@@ -385,7 +403,7 @@ class TestInterfaceMatchesBehaviour(GraphTest):
     def test_completed_is_an_error_before_the_item_has_run(self):
         """Never a default answer. A stale read here is the difference between
         a report saying the card was erased and one saying it was refused."""
-        built = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        built = M.build_menu(M.Strategy.UPLOADER, NullWork())
         with self.assertRaises(M.NotRun):
             built[ERASE_CARD].completed()
 
@@ -393,13 +411,21 @@ class TestInterfaceMatchesBehaviour(GraphTest):
 class TestStrategySplit(GraphTest):
     """The two products differ where they should and nowhere else."""
 
-    def test_strategy_is_decided_by_configuration(self):
+    def test_strategy_is_whether_an_implementation_was_supplied(self):
         local = MockState()
-        self.assertIs(M.Strategy.of(local.ctx), M.Strategy.LOCAL_DEFAULT_WEBSITE)
+        self.assertIs(M.Strategy.of(local.ctx.uploader), M.Strategy.LOCAL_PAGE)
         local.cleanup()
-        pub = MockState(M.Strategy.WEBSITE_REPO)
-        self.assertIs(M.Strategy.of(pub.ctx), M.Strategy.WEBSITE_REPO)
+        pub = MockState(M.Strategy.UPLOADER)
+        self.assertIs(M.Strategy.of(pub.ctx.uploader), M.Strategy.UPLOADER)
         pub.cleanup()
+
+    def test_the_strategy_cannot_see_a_ctx_to_read_config_keys_off(self):
+        """It used to resolve on one operator's two settings — a site repo and
+        a bucket name — which is the same question as "was an uploader
+        supplied" expressed in his terms. Taking the uploader itself is what
+        stops that coming back."""
+        self.assertIs(M.Strategy.of(None), M.Strategy.LOCAL_PAGE)
+        self.assertIs(M.Strategy.of(object()), M.Strategy.UPLOADER)
 
     def test_only_the_publishing_items_declare_different_edges(self):
         """The AUTHORED column — outbound — differs for exactly two items.
@@ -408,24 +434,24 @@ class TestStrategySplit(GraphTest):
         under the local product. Every other difference in the table is in the
         DERIVED inbound and follows from these two.
         """
-        a = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
-        b = M.build_menu(M.Strategy.LOCAL_DEFAULT_WEBSITE, NullWork())
+        a = M.build_menu(M.Strategy.UPLOADER, NullWork())
+        b = M.build_menu(M.Strategy.LOCAL_PAGE, NullWork())
         differing = {n for n in a
                      if a[n].outbound().edges() != b[n].outbound().edges()}
         self.assertEqual(differing, {BUILD, UPLOAD})
 
     def test_local_product_settles_the_workspace_by_gathering(self):
-        b = M.build_menu(M.Strategy.LOCAL_DEFAULT_WEBSITE, NullWork())
+        b = M.build_menu(M.Strategy.LOCAL_PAGE, NullWork())
         self.assertIn(CLEAN_WS, b[BUILD].outbound().offers(frozenset(b)))
 
     def test_publishing_product_settles_the_workspace_by_deploying(self):
-        a = M.build_menu(M.Strategy.WEBSITE_REPO, NullWork())
+        a = M.build_menu(M.Strategy.UPLOADER, NullWork())
         self.assertIn(CLEAN_WS, a[UPLOAD].outbound().offers(frozenset(a)))
 
     def test_publishing_is_unavailable_in_the_local_product(self):
         """Twice over, and neither is an `if` in a body: nothing offers it,
         and its own guard blocks it."""
-        m = MockState(M.Strategy.LOCAL_DEFAULT_WEBSITE)
+        m = MockState(M.Strategy.LOCAL_PAGE)
         try:
             m.with_import().with_sidecars().with_render()
             self._bucket_contents = {}
@@ -501,7 +527,7 @@ class TestMockedWork(GraphTest):
             m.cleanup()
 
     def test_a_mocked_upload_makes_the_workspace_expendable(self):
-        m = MockState(M.Strategy.WEBSITE_REPO)
+        m = MockState(M.Strategy.UPLOADER)
         try:
             m.with_import().with_sidecars().with_render(size=64)
             self._bucket_contents = {}

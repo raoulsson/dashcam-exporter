@@ -295,5 +295,27 @@ class SilentUi(U.Ui):
         raise AssertionError("the example must not run a subprocess")
 
 
+class TestTheToolStopsRatherThanDegrading(unittest.TestCase):
+    """A configured uploader that will not load must not become the local
+    edition by accident.
+
+    Silently becoming local is how someone's renders quietly stop being
+    published: the menu looks normal, item 6 writes a local page, and item 8
+    refuses for a reason that reads like a network problem.
+    """
+
+    def test_ctx_construction_raises_rather_than_returning_no_uploader(self):
+        import pipeline as P
+
+        with self.assertRaises(U.UploaderNotLoaded):
+            P._loaded_uploader("/no/such/file.py:Nope", REPO)
+
+    def test_an_unset_setting_is_the_local_edition_on_purpose(self):
+        import pipeline as P
+
+        self.assertIsNone(P._loaded_uploader("", REPO))
+        self.assertIsNone(P._loaded_uploader(None, REPO))
+
+
 if __name__ == "__main__":
     unittest.main()

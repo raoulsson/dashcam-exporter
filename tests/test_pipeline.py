@@ -61,8 +61,8 @@ def load_pipeline():
 P = load_pipeline()
 
 REAL = {cls.number: cls for cls in items.ALL_ITEMS}
-WEBSITE = M.Strategy.WEBSITE_REPO
-LOCAL = M.Strategy.LOCAL_DEFAULT_WEBSITE
+UPLOADER = M.Strategy.UPLOADER
+LOCAL = M.Strategy.LOCAL_PAGE
 
 # A position is somewhere the pipeline can actually stand. Progress is not one
 # of them — it is a view — and NOWHERE is the cold start.
@@ -80,7 +80,7 @@ def _aborted(item, note):
     return M.stopped(note)
 
 
-def fake_item(number, strategy=WEBSITE):
+def fake_item(number, strategy=UPLOADER):
     """A mock standing in for one real item, autospecced from its class.
 
     It carries the real class's number, name and declared edges — so a test
@@ -115,11 +115,11 @@ def fake_item(number, strategy=WEBSITE):
     return item
 
 
-def fake_menu(strategy=WEBSITE):
+def fake_menu(strategy=UPLOADER):
     return {n: fake_item(n, strategy) for n in sorted(REAL)}
 
 
-def machine(strategy=WEBSITE, at=M.NOWHERE):
+def machine(strategy=UPLOADER, at=M.NOWHERE):
     """A menu of mocks and a Position built from it by the production code.
 
     The mocks are reset afterwards: position_for() asks every item where it
@@ -200,7 +200,7 @@ class ARuntimeFailureIsOneItemsFailure(unittest.TestCase):
     """
 
     def raising(self, at, boom=RuntimeError("disk full")):
-        menu_items, position = machine(WEBSITE, at=at)
+        menu_items, position = machine(UPLOADER, at=at)
         menu_items[RENDER].execute.side_effect = boom
         return menu_items, position
 
@@ -800,7 +800,7 @@ class NoDeadEnds(unittest.TestCase):
         somewhere, so no step of the owner's table is dead code — including
         Upload Website, which the table as written could not reach at all
         until Build Website was given the edge to it."""
-        menu_items, position = machine(WEBSITE)
+        menu_items, position = machine(UPLOADER)
         reachable = offered_from(menu_items, position)
         for n in sorted(REAL):
             with self.subTest(item=n):
