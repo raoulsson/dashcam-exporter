@@ -757,7 +757,7 @@ def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
 #   * ROLLOVER (crossing `rollover_h`:00, default 04:00 not midnight) still
 #     force-closes a trip, bounding a ONE-WAY relocation (drive to a holiday
 #     base, sleep, drive back days later = two trips).
-#   * Without OpenCV/numpy it degrades to the old radius-entry boundary.
+#   * Without OpenCV/numpy it degrades to the radius-entry boundary.
 DEFAULT_TRIP_RETURN_M     = 100     # back within this of anchor => trip closes
 DEFAULT_TRIP_LEAVE_M      = 150     # must get this far out before a return counts
 DEFAULT_TRIP_DAY_ROLLOVER = 4       # trips/days roll over at 04:00, not midnight
@@ -1065,17 +1065,17 @@ def parse_clip_speeds(clip: "Clip", gps_dirs: tuple[Path | None, ...]) -> list[f
        0 km/h placeholder.
     2) Mid-clip GPS dropouts. GPS can lose lock briefly (tunnel, urban
        canyon, parking ceiling). Affected seconds get the previous-known
-       speed forward-filled, rather than the old behaviour of collapsing
-       the gap and shifting every subsequent speed earlier.
+       speed forward-filled — collapsing the gap instead would shift every
+       subsequent speed earlier.
     3) DDPAI dashcam clock drift. The wall-clock burned into the video can
        be offset from GPS UTC by a non-integer-hour amount, so mod-3600
        lag detection isn't enough. The `$GPSCAMTIME` header at the top of
        the GPX file gives the exact LOCAL↔UTC offset for the device.
 
-    The combination of all three was producing speeds that ran ~10+ seconds
-    AHEAD of the video — the visible "speed already 14 km/h while wheels
-    haven't moved yet" symptom. After this fix, speeds[i] is the GPS reading
-    at the SAME video-second the user sees burned-in on the timestamp watermark.
+    Mishandle any of the three and speeds run ~10+ seconds AHEAD of the video —
+    the visible "speed already 14 km/h while the wheels haven't moved yet"
+    symptom. Handled, speeds[i] is the GPS reading at the SAME video-second the
+    user sees burned-in on the timestamp watermark.
     """
     gpx = find_gpx_for(clip.timestamp, *gps_dirs)
     if gpx is None:
@@ -1089,7 +1089,7 @@ def parse_clip_speeds(clip: "Clip", gps_dirs: tuple[Path | None, ...]) -> list[f
         return [p[2] for p in points]
 
     # Prefer the exact `$GPSCAMTIME` offset when DDPAI writes it; fall back
-    # to the old mod-3600 lag-prepend behaviour for non-DDPAI files.
+    # to mod-3600 lag-prepend for non-DDPAI files.
     camtime_local = _parse_camtime_header(gpx)
     if camtime_local is not None:
         # offset = LOCAL_at_first_fix - UTC_at_first_fix
@@ -3087,12 +3087,12 @@ def _scan_cache_store(path, key, groups, trip_moved):
 class _LogTee:
     """Write to the terminal verbatim, and to a log file line-by-line.
 
-    The wrapper used to pipe everything through `tee`, which meant stdout was
-    never a terminal — so per-clip progress could not redraw one line with \r,
-    because doing that would also have written \r into the log and collapsed it
-    into a single unreadable line. Owning the log here separates the two: the
-    terminal keeps the carriage returns, and the file gets the newline the
-    carriage return was standing in for.
+    Owning the log here, instead of piping the process through `tee`, is what
+    lets per-clip progress redraw one line with \r: under a pipe stdout is
+    never a terminal, and writing \r anyway would land in the log too and
+    collapse the run into a single unreadable line. Separated, the terminal
+    keeps the carriage returns and the file gets the newline the carriage
+    return was standing in for.
     """
 
     def __init__(self, stream, path):
@@ -3431,12 +3431,12 @@ def main() -> int:
     # record of the run rather than whatever happened after setup.
     if getattr(args, "log_file", None):
         _tee = _LogTee(sys.stdout, args.log_file)
-        # stderr goes through the same tee, reproducing what `2>&1 | tee` did:
-        # errors belong in the log, and an OS-level 2>&1 would bypass this
-        # object entirely and never reach the file.
+        # stderr goes through the same tee: errors belong in the log, and an
+        # OS-level 2>&1 would bypass this object entirely and never reach the
+        # file.
         sys.stdout = sys.stderr = _tee
-        # First line of the log: exactly what was run. The CLI no longer asks
-        # you to confirm the command, so the log is where it is written down.
+        # First line of the log: exactly what was run. The log is the only
+        # place the full command is written down.
         import shlex
         print("$ " + " ".join(shlex.quote(a) for a in sys.argv))
     _t0 = time.time()
@@ -3757,8 +3757,8 @@ def main() -> int:
     # out_dir/2026-05-11/2026-05-11/ and out_dir/import-3904994/2026-05-11/,
     # separate subtrees that can never overwrite each other. (DDPAI cards hoard
     # old event clips, so a single import routinely spans many historical days —
-    # that is exactly how a "06-22" card once reset the day back to April and
-    # wiped a 2026-05-11 rendered from a different, already-deleted card.)
+    # without the namespace, rendering one card would sweep and overwrite days
+    # rendered from a different, already-deleted card.)
     import_ns = out_dir / root.name
 
     if args.print_groups:
@@ -4105,9 +4105,8 @@ def main() -> int:
 
         # Identify long parking runs we should skip past. A trip spans multiple
         # engine-on sessions (drive out, park, drive back), so interior parking
-        # is expected and gets a 'Fast forwarding…' slide — the same machinery
-        # the old --daily path used. (A trip whose entire body is one continuous
-        # drive simply yields no parking runs here.)
+        # is expected and gets a 'Fast forwarding…' slide. (A trip whose entire
+        # body is one continuous drive simply yields no parking runs here.)
         parking_runs: list[tuple[int, int, int]] = []
         if not args.no_skip_parking and with_speed:
             parking_runs = find_parking_runs(group, gps_dirs, args.parking_min_secs)
@@ -4442,8 +4441,8 @@ def main() -> int:
                     # seconds long. The static map panel must match that
                     # length exactly, otherwise hstack waits for the longer
                     # stream and the front/rear frame freezes for the
-                    # remainder. (The bug used to show as a ~minute pause
-                    # right after the GPS-fix transition.)
+                    # remainder — a mismatch shows as a long pause right
+                    # after the GPS-fix transition.
                     actual_dur = (trim_seconds if trim_seconds is not None
                                   else (clip.duration - trim_start))
                     ok = _render_static_panel_video(

@@ -982,10 +982,10 @@ def print_status(ctx):
     print(rule())
 
     # Disk goes below the rule, as a footnote rather than a status row.
-    # It used to print twice, once per directory, which read as two disks with
-    # suspiciously identical numbers — import and output are normally the same
-    # volume. Collapse when they are, and only say anything loud when the free
-    # space is actually worth worrying about next to what is waiting to render.
+    # Printed once per directory it would read as two disks with suspiciously
+    # identical numbers — import and output are normally the same volume.
+    # Collapse when they are, and only say anything loud when the free space is
+    # actually worth worrying about next to what is waiting to render.
     try:
         seen = {}
         for path in (ctx.out_dir, ctx.import_root):
@@ -1259,12 +1259,11 @@ def claim_out_dir(ctx):
 def working_area_is_expendable(ctx):
     """(ok, why, stragglers) — is everything in the working area a second copy?
 
-    The sweep at import time used to assert this rather than check it: its
-    comment said the contents "belong to the round that ended by being uploaded
-    or gathered into final_", and nothing anywhere verified either half. Render
-    for hours, have the upload fail or skip it, insert the next card, press 1 —
-    and the renders were unlinked with a line printed after the fact. The
-    premise is a good one; it just has to be true before it is acted on.
+    The sweeps act on the premise that the working area's contents belong to a
+    round that ended by being uploaded or gathered into final_. This function
+    exists because that premise has to be TRUE before it is acted on, not
+    assumed: a render whose upload failed or was skipped is the only copy, and
+    unlinking it costs the hours it took to encode.
 
     A render is expendable when it is EITHER
       - in the bucket at a matching size (only checkable with s3_bucket set), OR
@@ -1287,11 +1286,9 @@ def working_area_is_expendable(ctx):
 
     # Gathered: step 6 MOVES a render into final_<date>. Matched on name AND
     # SIZE, because trip filenames repeat exactly across re-renders at the same
-    # height — so a re-rendered trip collided by name with the stale copy in
-    # final_ and was declared expendable, deleting the very file
-    # gather_into_final had refused to overwrite so it could be looked at. Name
-    # equality was another asserted-not-checked premise, the shape this function
-    # exists to remove.
+    # height — on name alone, a re-rendered trip collides with the stale copy
+    # in final_ and is declared expendable, deleting the very file
+    # gather_into_final refuses to overwrite so it can be looked at.
     gathered = set()
     froot = getattr(ctx, "final_root", out)
     for base in (froot, out):
@@ -1481,11 +1478,10 @@ def step_import(ctx):
         print()
         print(C.yellow("  The working area still holds the previous round: %s"
                        % human_bytes(used)))
-        # No prompt — but the premise is CHECKED now. It used to be asserted: the
-        # comment said this belongs to a round that "ended by being uploaded or
-        # gathered into final_", and nothing verified either half, so a render
-        # whose upload failed was unlinked with a line printed after the fact.
-        # When the check passes, the sweep is silent as before. When it does not,
+        # No prompt — but the premise is CHECKED, not asserted: the contents
+        # only "belong to a round that ended" if every render is uploaded or
+        # gathered into final_, and a render whose upload failed is the only
+        # copy. When the check passes, the sweep is silent. When it does not,
         # nothing is deleted and it says which files and what would settle it.
         ok, why, stragglers = working_area_is_expendable(ctx)
         if ok:
@@ -1552,9 +1548,9 @@ def step_import(ctx):
             # was rendered (and uploaded, when a bucket is configured) — but in a
             # no-bucket install that proof requires no publication at all, and
             # purge_published_renders sweeps the WHOLE output tree, not one
-            # candidate's namespace. Unguarded, this deleted a straggler render
-            # the prior_files sweep had just refused to touch, and in the
-            # no-bucket case it erased footage and renders behind one y/n while
+            # candidate's namespace. Unguarded, it would delete a straggler
+            # render the prior_files sweep just refused to touch, and in the
+            # no-bucket case erase footage and renders behind one y/n while
             # step 9 in the same configuration deliberately keeps the renders.
             # Run ONCE, not per candidate: the purge is tree-wide either way.
             ok, why, stragglers = working_area_is_expendable(ctx)
@@ -1658,10 +1654,9 @@ def step_import(ctx):
     # Record the high-water mark HERE, not only at cleanup. import-sd-card.sh
     # exits 0 only after verifying the copy file-for-file, so a verified copy of
     # everything up to this stamp now exists on this disk — which is the fact
-    # the ledger holds. Writing it only after publishing had it backwards: right
-    # after an import nothing had recorded it, so Clean SIM refused to free the
-    # card, and the card stayed on the desk instead of going back in the car.
-    # That is the entire reason the delta import exists.
+    # the ledger holds. Recording it only after publishing would leave Clean SIM
+    # unable to free the card right after an import, and freeing the card while
+    # the slow half runs is the entire reason the delta import exists.
     #
     # Taken from the CARD, because the card is what the next delta compares
     # against. The same number by a shorter route than walking the import.
@@ -2136,13 +2131,13 @@ def write_contact_sheet(ctx, root, payload, previews_dir, stills):
         else:
             shot = '<div class="shot"><div class="none">no still<br>(ffmpeg could not read the first clip)</div></div>'
 
-        # The route, drawn inline. The card used to offer "map (.html)", the
-        # sidecar written by --sidecars-only — which pulls leaflet from unpkg and
-        # tiles from OSM, so on the machine doing the reviewing (often offline,
-        # always before publishing) it opened as an empty grey box. The same GPX
-        # rendered as an SVG needs nothing, and this page's whole premise is that
-        # it works from file:// with no network. The link stays, for when you do
-        # want the pannable version.
+        # The route, drawn inline, not the .html map sidecar. The sidecar pulls
+        # leaflet from unpkg and tiles from OSM, so on the machine doing the
+        # reviewing (often offline, always before publishing) it opens as an
+        # empty grey box. The same GPX rendered as an SVG needs nothing, and
+        # this page's whole premise is that it works from file:// with no
+        # network. The sidecar link stays, for when you do want the pannable
+        # version.
         gpx = Path(t["out_base"] + ".gpx") if t.get("out_base") else None
         pts = gpx_track(gpx) if (gpx and gpx.is_file()) else []
         if pts:
@@ -2449,12 +2444,11 @@ def step_drop_trip(ctx):
         if int(part) not in picked:
             picked.append(int(part))
 
-    # A trip that is already rendered used to be refused outright, to avoid
-    # leaving a render whose source had gone. But refusing is the wrong answer
-    # to "this trip is bad, remove it": the render is the thing you most want
-    # gone, and you only find out it is bad by watching it, which happens after
-    # rendering. So the render comes too — the mp4 and every sidecar beside it.
-    # That makes the operation whole rather than half of one.
+    # An already-rendered trip is not refused. Refusing would be the wrong
+    # answer to "this trip is bad, remove it": the render is the thing you most
+    # want gone, and you only find out it is bad by watching it, which happens
+    # after rendering. So the render comes too — the mp4 and every sidecar
+    # beside it. That makes the operation whole rather than half of one.
     render_files = []
     for i in picked:
         same, _other = trip_renders(ctx, payload, by_index[i])
@@ -2737,14 +2731,14 @@ def step_render(ctx):
             ctx.last_scan.total, ctx.last_scan.renderable,
             (", auto-skipped %s" % sorted(ctx.last_scan.skipped)) if ctx.last_scan.skipped else ""))
 
-    # Which trips already have a video. Blank used to mean "all renderable",
-    # which on an import that is already rendered means: clear the day folders
-    # (a full render does that, by design, so a re-group cannot leave stale
-    # trip_* behind), delete every finished mp4, and encode them all again.
-    # Hours, to arrive back where you started. Blank now means "the ones with no
-    # video", which is what re-running a render after a partial one is for, and
-    # passing explicit indices also makes the run resume-like so the day clean
-    # is skipped.
+    # Which trips already have a video. Blank means "the ones with no video" —
+    # NOT "all renderable", which on an import that is already rendered would
+    # mean: clear the day folders (a full render does that, by design, so a
+    # re-group cannot leave stale trip_* behind), delete every finished mp4, and
+    # encode them all again. Hours, to arrive back where you started.
+    # Re-running after a partial render is what blank is for, and passing
+    # explicit indices also makes the run resume-like so the day clean is
+    # skipped.
     done_idx, todo_idx = [], []
     for g in groups:
         if not g.get("renderable", True):
@@ -3279,9 +3273,8 @@ def gather_into_final(ctx, out_dir):
 
     NOT done when a site_repo is configured. That setup's trips.json records each
     trip by a uid containing its import folder name, so moving the tree renames
-    every published trip out from under the manifest — the same way renaming the
-    import folder orphaned six of them yesterday. A configured install keeps its
-    layout and just gets the page.
+    every published trip out from under the manifest and orphans them. A
+    configured install keeps its layout and just gets the page.
     """
     # Which days are in the tree right now — that names the folder.
     days = set()
@@ -3351,7 +3344,7 @@ def _trip_title(meta, t):
     it when the track passes somewhere it can name. Failing that, the trip's
     number on its day, which is how you would refer to it out loud. The internal
     label (2026-07-24_16-16_02) identifies a file, not a drive, and putting it in
-    the title told the reader about our storage rather than their afternoon.
+    the title would tell the reader about our storage rather than their afternoon.
     """
     lbl = (meta.get("route_label") or "").strip()
     if lbl:
@@ -3359,10 +3352,6 @@ def _trip_title(meta, t):
     # Drive N, per day. Several days each having a "Drive 1" is fine — the date
     # is on the line above, and this is a placeholder for a name a person gives
     # it later, not an attempt to invent one.
-    # trip_index restarts each day, so it produced five drives all called
-    # "Drive 1". Weekday and time of day is how you would refer to one of these
-    # out loud — "Friday afternoon" — and it comes from the data rather than a
-    # counter. The exact timestamp is on the line above, so this can be loose.
     n = meta.get("trip_index")
     return "Drive %d" % n if n else "Drive"
 
@@ -3994,21 +3983,20 @@ def copy_still_exists(ctx):
     decides whether that copy is still somewhere. Two kinds of evidence, best
     first; either is enough, and each is a thing you can go and look at.
 
-    Both are about THIS card, deliberately. There used to be a shortcut first —
-    import_is_expendable on the workspace — and it broke the rule the other two
-    exist to enforce: it proves the CURRENT import is rendered (and uploaded,
-    when a bucket is configured), which says nothing about the card in the slot.
-    A card whose own import was lost was approved on the strength of a different
-    round's renders — the exact case this guard exists for. Its message also
-    claimed "on the site", which nothing here checks. If the card's clips really
-    were rendered and published, their _meta.json survive every sweep and the
-    span check below is what says so.
+    Both are about THIS card, deliberately — never a shortcut through
+    import_is_expendable on the workspace. That proves the CURRENT import is
+    rendered (and uploaded, when a bucket is configured), which says nothing
+    about the card in the slot: on that evidence a card whose own import was
+    lost gets approved on the strength of a different round's renders — the
+    exact case this guard exists for. If the card's clips really were rendered
+    and published, their _meta.json survive every sweep and the span check
+    below is what says so.
     """
     # What is ON THE CARD, so the evidence can be about THIS card. Without this
-    # the two checks below became permanently true the moment any final_ folder
-    # existed — and final_ folders survive every sweep by design. A card whose
-    # import was lost would then be erased on the strength of last month's
-    # renders, which is the exact case the guard exists for.
+    # the two checks below would be permanently true the moment any final_
+    # folder existed — and final_ folders survive every sweep by design. A card
+    # whose import was lost would then be erased on the strength of last
+    # month's renders, which is the exact case the guard exists for.
     stamps, days = set(), set()
     front = ctx.card / "DCIM" / "200video" / "front"
     if front.is_dir():
@@ -4550,16 +4538,14 @@ def run_steps(ctx, numbers):
 def main(argv=None):
     """No command line. Everything this needs is in config.txt.
 
-    The flags that used to live here — --card, --config, --site-repo, --steps,
-    --offline, --no-color — each had a config equivalent or became one, and
-    having both meant the same question had two answers that could disagree.
-    The one that bit: a default compiled in here was inherited by a second
-    checkout that had configured its own paths, and the sweep followed the
-    compiled-in path into somebody else's data. One source, and it is the file
-    the person edits.
+    A flag with a config equivalent means the same question has two answers
+    that can disagree — and a default compiled in here gets inherited by a
+    fresh checkout that never set it, with the sweep following the compiled-in
+    path into somebody else's data. One source, and it is the file the person
+    edits.
 
-    NO_COLOR is still honoured, because that is the environment's convention
-    and not this tool's setting.
+    NO_COLOR is honoured, because that is the environment's convention and not
+    this tool's setting.
     """
     if os.environ.get("NO_COLOR"):
         C.enabled = False
@@ -4657,16 +4643,17 @@ if __name__ == "__main__":
 
 
 # ---------------------------------------------------------------------------
-# Notes on things that surprised me while wiring this up — kept here rather than
-# in a doc, because they are the reasons the code above is shaped the way it is.
+# Non-obvious facts the code above is shaped around — kept here rather than in
+# a doc, because they are the reasons for that shape.
 #
-# * Two import LAYOUTS still coexist — <root>/<YYYY-MM-DD>/DCIM from the import
+# * Two import LAYOUTS coexist — <root>/<YYYY-MM-DD>/DCIM from the import
 #   script, and a DCIM tree sitting directly in <root> from older imports — and
 #   import_candidates() accepts both, with every render/scan/delete passing an
-#   explicit --root. What no longer coexists is two import ROOTS. The script used
-#   to default to its own sink while config's `root` said somewhere else, so
-#   renaming `root` sent the copy to a folder nothing downstream read. The CLI
-#   now passes DASHCAM_IMPORT_ROOT, and there is one answer to "where did it go".
+#   explicit --root. There is only ONE import ROOT, though: the CLI passes
+#   DASHCAM_IMPORT_ROOT to the import script, so the script cannot default to a
+#   sink of its own while config's `root` says somewhere else — that split
+#   would send the copy to a folder nothing downstream reads. One answer to
+#   "where did it go".
 #
 # * `aws s3 sync` exits 0 even when individual objects fail to upload. The
 #   upload step therefore ignores the exit code as evidence and re-lists the

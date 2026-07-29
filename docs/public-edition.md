@@ -1,113 +1,90 @@
-# A public edition — design notes
+# The public edition — how the configured/unconfigured split works
 
-Goal: someone clones this, points it at their card, and gets rendered trips plus
-a browsable site on their own machine. No S3, no EC2, no second repo, nothing
-that assumes raoulsson.com exists.
+Someone clones this, points it at their card, and gets rendered trips plus a
+browsable page on their own machine. No S3, no EC2, no second repo, nothing
+that assumes a particular website exists. Publishing is the optional half, and
+this document describes where the seam is.
 
-## What was actually entangled
+## Where the private half lives
 
-This was the diagnosis, and it is now the changelog: every row below is
-configurable and unset by default. Kept because it is still the shortest
-description of where the private half lives.
+The renderer (`make_dashcam_videos.py`) is self-contained — it reads a card and
+writes trips into `--out`, and knows nothing about any website. All the
+coupling to a publishing setup is in `pipeline.py`, and every piece of it is a
+config value that is unset by default:
 
-Less than it looks. The renderer (`make_dashcam_videos.py`) is already
-self-contained — it reads a card and writes trips into `--out`, and knows nothing
-about any website. All the coupling is in `pipeline.py`:
+| Where | What it reaches for | Gated by |
+|---|---|---|
+| `ctx.site` | a sibling site checkout | `site_repo` |
+| Preview / Render | `build_manifest.py` in that repo, to refresh its index | `site_repo` |
+| Upload (7) | `deploy/upload-videos-s3.sh` | `s3_bucket` + `site_repo` |
+| Update site (8) | `deploy/deploy-site.sh` | `site_repo` |
+| Status | the live `trips.json` | `live_trips_url` |
+| Exclude-trip guard | `admin.json` and an S3 listing, to prove a trip was published | `site_repo` / `s3_bucket` |
 
-| Where | What it reaches for |
-|---|---|
-| `ctx.site` | the sibling `goodnight-drives` checkout |
-| Preview / Render | `build_manifest.py` in that repo, to refresh its index |
-| Upload | `deploy/upload-videos-s3.sh`, bucket `your-media-bucket` |
-| Deploy | `deploy/deploy-site.sh`, EC2, `SIGNED_VIDEOS=1` |
-| Status | `LIVE_TRIPS_URL`, a hardcoded raoulsson.com URL |
-| Drop guard | `admin.json` and an S3 listing, to prove a trip was published |
-
-So the private half is four steps and two constants. Everything before them —
-import, scan, preview, drop, render — is generic.
+So the private half is a handful of steps keyed off a few settings. Everything
+before them — import, scan, preview, exclude, render, local website — is
+generic and runs with nothing configured. `live_trips_url` is the only thing
+that makes the CLI touch the network at startup; unset, nothing is fetched.
 
 ## The shape
 
-**One codebase, not a fork.** A fork means every fix lands twice and drifts; and
-the public edition is not a different program, it is this one with the private
-tail absent. So the private half moved into config.txt, all of it unset by
-default:
+**One codebase, not a fork.** A fork means every fix lands twice and drifts.
+The public edition is not a different program; it is this one with the private
+tail absent. The private half lives in config (`site_repo`, `s3_bucket`,
+`s3_region`, `live_trips_url`, all optional — real values in the gitignored
+`.env`), and absence of the config is what makes an install "public".
 
-```
-# config.txt — the PUBLISHING section, all optional
-#site_repo      = ~/dev/your-site
-#s3_bucket      = my-bucket
-#s3_region      = eu-central-1
-#live_trips_url = https://example.com/trips.json
-```
-
-**Disabled, not hidden.** The first draft of this said the private steps would
-*appear* only when configured. They do not: every step is always in the menu at
-its own fixed number, and the ones whose config is absent are greyed out with
-the key that would enable them printed underneath —
+**Disabled, not hidden.** Every step is always in the menu at its own fixed
+number; the ones whose config is absent are greyed out with the key that would
+enable them printed underneath —
 
 ```
    7) needs s3_bucket in config.txt
    8) needs site_repo in config.txt
 ```
 
-Two reasons, and both were worth more than the tidiness of a shorter menu. The
+Two reasons, and both are worth more than the tidiness of a shorter menu. The
 numbering never shifts between setups, so anything anyone writes about "step 5"
 is true on every machine. And the greyed line is the discovery path: a stranger
 can see that publishing exists and exactly what turns it on, in the place they
-are already looking. The mechanism was already there — `NOOP_CHECK` /
-`unavailable_steps()`, which greys Import when the sink is already full.
+are already looking. The same mechanism (`NOOP_CHECK` / `unavailable_steps()`)
+greys Import when the sink is already full, and it is recomputed on every menu
+draw, so a step comes back the moment the world changes.
+
+An unconfigured install never sees a warning about a repo it has never heard
+of: a disabled step says for itself why it is disabled, and that is the only
+place the missing config is mentioned.
 
 - **nothing set** (the default, and what a clone gets): Import, List, Preview,
-  Drop, Render, Site run; Upload and Deploy are greyed. Everything lands under
-  `out`, and nothing contacts a network host.
-- **`site_repo` set**: Deploy lights up.
+  Exclude, Render and Create website run; Upload and Update site are greyed.
+  Everything lands under `out`, and nothing contacts a network host.
+- **`site_repo` set**: Update site lights up.
 - **`site_repo` + `s3_bucket`**: Upload lights up too, and the status screen
-  grows the Prepared row; `live_trips_url` adds the Live site row and is the
-  only thing that makes the CLI fetch anything at startup.
+  grows the Prepared row; `live_trips_url` adds the Live site row.
 
-That also fixes a smaller thing: the CLI used to print "goodnight-drives repo
-not found — steps 7-9 will not run" at anyone who did not have it, which is
-noise about a repo they have never heard of. It is gone; a disabled step says
-for itself why it is disabled.
+## The Create website step
 
-## The Site step
+Builds `dashcam_import_data_site.html` from what the render already produced.
+Nothing new is computed; every number, still and track already exists on disk
+as a sidecar next to the mp4, and this pass only arranges them into one page.
+That is deliberate: the page has to be buildable by someone who has no S3
+account, no second repo and no manifest — it reads the output tree and nothing
+else, and never calls `build_manifest`, lists a bucket, or opens `admin.json`.
 
-Builds `<out>/site/` from what the render already produced. Nothing new is
-computed; every input exists:
+The page is one self-contained file: every still is embedded, every route is
+drawn inline from its GPX as an SVG, and there are no external scripts, fonts
+or tiles — it opens from `file://` with no network. Videos are referenced in
+place, not copied: a full card is tens of gigabytes, and duplicating it would
+cost more disk than the footage is worth. The consequence is that the page is
+portable only together with the render tree around it — the `final_<date>/`
+folder that gathers page, videos and sidecars is the movable unit.
 
-```
-<out>/<import>/<day>/trip_*.mp4          the video
-                     trip_*.html         Leaflet map (needs the network for tiles)
-                     trip_*.gpx          the track
-                     trip_*_meta.json    distance, moving time, speeds, stops, bbox
-                     trip_*_links.txt    Google/Apple map links
-```
+The per-trip `.html` map sidecar is the one artefact that does need the
+network: it pulls Leaflet from unpkg and tiles from OSM, so offline it opens as
+an empty grey box. That is why the result page draws its routes inline instead
+of linking the sidecar as the primary map — the sidecar link stays, for when
+the pannable version is wanted.
 
-Output:
-
-```
-<out>/site/index.html      days -> trips, with a still and the numbers
-<out>/site/trip-<id>.html  the video, the map, the stats, the places
-<out>/site/still/*.jpg     one frame per trip (the poster technique)
-```
-
-Relative links throughout, so it works from `file://` and equally from any
-static host — which is the "savvy people take it from there" path: copy `site/`
-and the mp4s to a web server and it is a website, with no build step.
-
-Deliberately **not** in it: the invite gate, signed URLs, curation, S3. Those
-exist because that site is private and served from a bucket. A local site has no
-threat model.
-
-## Open questions
-
-1. **The map tiles are the one external dependency.** The sidecar links
-   `unpkg.com` for Leaflet and OSM for tiles, so a fully offline site would need
-   a static PNG map instead. The renderer already draws one for the video panel
-   (`staticmap`), so an offline fallback is available if wanted.
-2. **Do the videos get copied into `site/` or referenced in place?** Referencing
-   avoids doubling tens of GB; copying makes `site/` a single portable folder.
-   Referencing, with a note, seems right.
-3. **Naming.** `pipeline.py` is fine but generic; if this is the front door for
-   other people it may want to be `dashcam.py` or an entry point in the README.
+Deliberately **not** in the local page: the invite gate, signed URLs, curation,
+S3. Those exist because the published site is private and served from a bucket.
+A local page has no threat model.

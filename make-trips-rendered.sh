@@ -79,9 +79,10 @@ OUT="${OUT/#\~/$HOME}"   # expand a leading ~ (bash won't, inside a var)
 # NOTE: the fresh-output reset lives in make_dashcam_videos.py, NOT here. It
 # clears ONLY the day folders THIS run actually renders (e.g. rendering the
 # 2026-07-19 import clears its 2026-07-15..18 days and leaves an unrelated
-# 2026-05-11 from another import untouched). Doing it in the wrapper meant
-# blindly wiping every day folder in --out, which once deleted a different
-# import's output — never again. The wrapper only ensures --out exists.
+# 2026-05-11 from another import untouched). Only the renderer knows which days
+# it will write; clearing from the wrapper would mean blindly wiping every day
+# folder in --out, including another import's output. The wrapper only ensures
+# --out exists.
 echo ">>> Output dir: $OUT"
 mkdir -p "$OUT"
 
@@ -96,12 +97,12 @@ echo ">>> logging to $LOG_FILE"
 # -u forces unbuffered stdout so per-clip progress appears as it happens instead
 # of being held in Python's buffer until the run completes.
 #
-# NOT piped through tee any more. A pipe means stdout is not a terminal, so the
+# Not piped through tee. A pipe means stdout is not a terminal, so the
 # per-clip scan line cannot redraw itself in place — and emitting the carriage
-# return anyway would have written it into the log too, collapsing the whole run
-# into one unreadable line. --log-file moves the logging inside the renderer,
+# return anyway would write it into the log too, collapsing the whole run
+# into one unreadable line. --log-file puts the logging inside the renderer,
 # which can tell the two apart: carriage returns to the terminal, one line per
-# event to the file. stderr is folded in there as well, as 2>&1 used to do.
+# event to the file. stderr is folded into the log as well.
 "$PY" -u make_dashcam_videos.py --log-file "$LOG_FILE" ${OPTS[@]+"${OPTS[@]}"} "$@"
 RC="$?"
 

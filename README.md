@@ -170,9 +170,9 @@ Two settings decide all of it:
 
 `out` is derived from `import_dir` (`<parent>/output`) unless you set it. That
 matters more than it looks: two checkouts pointed at one output directory means
-step 1 in either sweeps the other's work. That is not hypothetical — it happened
-here, and it killed a render in progress. Hence `.owned-by`, which makes a
-checkout refuse to sweep a directory another one has claimed.
+step 1 in either sweeps the other's work — including a render in progress.
+`.owned-by` is the guard: a checkout refuses to sweep a directory another one
+has claimed.
 
 ### Only metadata is kept
 
@@ -240,9 +240,9 @@ SET_SITE_REPO      SET_S3_BUCKET      SET_S3_REGION      SET_LIVE_TRIPS_URL
 SET_HOME_LAT       SET_HOME_LON
 ```
 
-`config.txt` is tracked, so a value written there gets committed and pushed.
-Also not theoretical: it happened, and the history had to be rewritten to remove
-it. `.env.example` shows the shape.
+`config.txt` is tracked, so a value written there gets committed and pushed —
+and undoing that means rewriting history, not just deleting the line.
+`.env.example` shows the shape.
 
 ---
 
@@ -250,11 +250,11 @@ it. `.env.example` shows the shape.
 
 `pipeline.py` has no command line. Not one flag.
 
-It used to have six, and each was a second answer to a question `config.txt`
-already answered. They disagreed exactly once, and once was enough: a
-compiled-in default outlived the config meant to replace it, a fresh clone
-inherited another checkout's output directory believing it was its own, and the
-sweep followed the constant into a running render.
+A flag is a second answer to a question `config.txt` already answers, and when
+the two disagree the compiled-in default wins silently: a fresh clone inherits
+another checkout's output directory believing it is its own, and the sweep
+follows the constant into that checkout's renders. One place to set a value
+means one place for it to be wrong.
 
 Everything a person sets is in **[config.txt](config.txt)** — 71 settings, each
 documented where it lives. That is why this README does not list them: the file
@@ -334,8 +334,8 @@ not offer:
 ./make-trips-rendered.sh 8 --output-height 720  # one trip, smaller
 ```
 
-`make_dashcam_videos.py` is the renderer underneath; `--import-dir` (formerly
-`--root`) names the tree to render, and `--help` lists the rest.
+`make_dashcam_videos.py` is the renderer underneath; `--import-dir` (or its
+alias `--root`) names the tree to render, and `--help` lists the rest.
 
 Renders are restartable — a finished clip is not re-encoded, so an interrupted
 run picks up where it stopped. Every run logs to `<out>/logs/run-<stamp>.log`,

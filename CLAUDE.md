@@ -16,37 +16,34 @@ A **trip** is the publishing unit (NOT an engine-on session, NOT a calendar
 day). `group_into_trips` is a **park-to-park state machine**: a boundary is the
 car actually PARKING at the anchor, not a radius crossing.
 
-- **Anchor** = where the car last parked (carried forward; a configured `home`
-`home_lat` / `home_lon` / `home_radius_m` are read from config.txt; the
-gitignored .env still WINS for the coordinates (SET_HOME_LAT / SET_HOME_LON),
-which is where a real address belongs. config.txt ships a Zurich example.
+- **Anchor** = where the car last parked, carried forward. `home_lat` /
+`home_lon` / `home_radius_m` seed it from config.txt; the gitignored .env WINS
+for the coordinates (SET_HOME_LAT / SET_HOME_LON), which is where a real
+address belongs. config.txt ships a Zurich example.
 - **DEPART → drive → ARRIVE+PARK.** Departure found by `find_drive_away_by_video`
   (median optical flow rises), arrival by `find_park_second_by_video` (flow
   falls to baseline and stays). GPS position only gates WHICH clips get the
   video check (near the anchor). Between trips the car is IDLE at the anchor →
   those clips belong to no trip.
-- Boundaries land on the real pull-out / pull-in. The old radius-entry close
-  ended trips ~15 s early (still rolling in) and split near-home departure
-  maneuvering into skipped fragments; park-detection fixes both.
+- Boundaries land on the real pull-out / pull-in. A radius-entry close ends
+  trips ~15 s early (still rolling in) and splits near-home departure
+  maneuvering into skipped fragments; park-detection avoids both — which is
+  why the radius fallback below is a fallback, not an equal alternative.
 - An interior stop **elsewhere** (not the anchor) never closes → A→B→hangout→A
   is one trip, any duration. **ROLLOVER** (`trip_day_rollover`:00, default 04:00)
   force-closes, bounding one-way relocations.
-- Falls back to the old radius-entry boundary without OpenCV/numpy (or
+- Falls back to the radius-entry boundary without OpenCV/numpy (or
   `--no-video-drive-detect`): ~1.5 s vs ~70 s, useful for quick dry-runs.
 - `moved` flag: a group whose NOISE-PRUNED track never reaches `trip_min_m` from
   the anchor (puttering / parking-mode events / lone phantom fix) is auto-skipped.
 
 Every interior stop renders as a "Fast forwarding…" slide, so a trip spans
-multiple engine-on sessions and plays continuously. Trip rendering reuses the
-machinery the old `--daily` path had (parking-run detection + inter-clip gap
-slides), PLUS the old drive-mode head-trim at the trip's start. Both run now;
-they used to be mutually exclusive via `--daily`. A trip that ends parked uses
-`entry_end` (arrival slice, no trailing FF). `group_into_trips` also returns a
-`moved` flag; a group whose NOISE-PRUNED track never reaches `trip_min_m` from
-the anchor (near-home puttering, parking-mode events, or a lone phantom GPS
-jump that got pruned) is auto-skipped as stationary.
+multiple engine-on sessions and plays continuously. Trip rendering runs BOTH
+parking-run detection + inter-clip gap slides AND the drive-mode head-trim at
+the trip's start. A trip that ends parked uses `entry_end` (arrival slice, no
+trailing FF).
 
-"Day" is now only a **label** (the 04:00-rollover date) each trip carries, for a
+"Day" is only a **label** (the 04:00-rollover date) each trip carries, for a
 future publishing UI to group a day's trips side by side. Not a render mode.
 
 ### Tuning note
@@ -71,9 +68,9 @@ drive-away behaviour is eyeballed fast. Writes a separate `*_debugcutsNs*.mp4`
 (never clobbers a real render). Two impl subtleties: dropped middles still
 update `prev_emitted_clip` so gap detection stays honest, and `gap_pre_pause`
 (precomputed over the emitted sequence) supplies the "before FF" tail for
-inter-clip gaps. It surfaced — and then verified the fix for — the parking exit
-slice landing on still-parked footage (now anchored by `find_drive_away_by_video`
-optical flow; see below).
+inter-clip gaps. It is the fastest way to check that the parking exit slice
+lands on actual drive-away footage rather than still-parked frames (that cut is
+anchored by `find_drive_away_by_video` optical flow; see below).
 
 ### Parking-exit drive-away = video ego-motion, not GPS
 
@@ -110,12 +107,10 @@ the map-widget panel (prints a warning). `.venv/` and `.env` are gitignored.
   old event clips, so two different cards routinely contain the same calendar day
   — but they land in `<cardA>/<day>/` and `<cardB>/<day>/`, separate subtrees. The
   fresh-output reset only ever clears inside the running import's own namespace,
-  so rendering one card never touches another's output (rendering a "06-22" card
-  once reset the day back to April and wiped a `2026-05-11` from a deleted card —
-  the namespacing prevents exactly that). Each day folder still has its trips +
-  an `info.txt` naming the source import. `.gpx_cache/.intermediates` stay at the
-  `--out` root, shared. The goodnight-drives site walks this with `rglob` and
-  regroups by day for display. (`Dashcam_Videos_working/` was the old scratch dir.)
+  so rendering one card never touches another's output. Each day folder holds
+  its trips + an `info.txt` naming the source import. `.gpx_cache/.intermediates`
+  stay at the `--out` root, shared. The goodnight-drives site walks this with
+  `rglob` and regroups by day for display.
 
 Pass `--root <import-folder>` and `--out <output-dir>`. Do NOT bake these
 absolute personal paths into the tracked `config.txt` (shared template) — set
@@ -142,9 +137,9 @@ skipped clips were verified by an earlier run this script cannot see.
   `.gpx_cache`/`.geocode_cache.json` are always kept. The reset lives in
   `make_dashcam_videos.py` (it knows which days it'll write), is skipped for a
   `--drives` subset and `--sidecars-only`, and is disabled by `--no-clean-days`.
-  Logs to `run-<ts>.log` inside `--out/logs/`. The reset was moved out of the
-  wrapper after a blanket day-folder wipe there once deleted a different import's
-  output.
+  Logs to `run-<ts>.log` inside `--out/logs/`. Keep the reset in the renderer,
+  never the wrapper: a wrapper-level wipe cannot know which days a run writes,
+  so it would take other imports' output with it.
 - Direct: `python3 make_dashcam_videos.py --root … --out … [--dry-run|--sidecars-only|--force]`.
 - `--write-config PATH` dumps the fully-commented config template. The template
   is the `CONFIG_TEMPLATE` string near the top of the script — keep it in sync

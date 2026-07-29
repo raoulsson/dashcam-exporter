@@ -464,9 +464,8 @@ software = true
 # --- this machine's publishing setup ---------------------------------------
 #
 # It does not go here. This file is TRACKED, so a value written under this
-# heading gets committed and pushed — which is what used to happen, despite the
-# heading saying otherwise. The real values belong in `.env`, which .gitignore
-# excludes, under these names:
+# heading gets committed and pushed. The real values belong in `.env`, which
+# .gitignore excludes, under these names:
 #
 #   SET_SITE_REPO   SET_S3_BUCKET   SET_S3_REGION   SET_LIVE_TRIPS_URL
 #
@@ -477,16 +476,15 @@ software = true
 # ---------------------------------------------------------------------------
 # THE SD CARD AND THE INTERACTIVE CLI
 #
-# pipeline.py takes no command line arguments at all — every flag it used to
-# have is a setting here. Two answers to one question is how a compiled-in
-# default outlived the config that was meant to replace it.
+# pipeline.py takes no command line arguments at all — everything is a setting
+# here. A flag and a setting are two answers to one question, and the
+# compiled-in default is the one that quietly wins.
 # ---------------------------------------------------------------------------
 
 # Where the card mounts. The DDPAI mounts as NO NAME unless you renamed it.
 # Read by the import step (status screen, passed to import-sd-card.sh as --src)
-# and by steps 9 and 10, which erase it. Nothing renders from here.
-# (was: passed to import-sd-card.sh
-# as --src). Nothing renders from here — that is import_dir at the top.
+# and by steps 9 and 10, which erase it. Nothing renders from here — that is
+# import_dir at the top.
 #card = /Volumes/NO NAME
 
 # Skip the live-site lookup in the status screen. It is already skipped when
