@@ -40,6 +40,15 @@ class TestAnUnansweredNameIsUnknown(unittest.TestCase):
         self.assertIs(answers.about(A.name), M.Evidence.UNKNOWN)
         self.assertIs(answers.covers((A, B)), M.Evidence.UNKNOWN)
 
+    def test_unknown_carries_what_was_tried_so_a_refusal_can_be_checked(self):
+        """"could not find out" with no detail is a dead end for whoever has to
+        act on it. The reason comes first, the evidence after."""
+        answers = U.Answers.unknown("no route to the host",
+                                    ("tried 10.0.0.1:443", "timed out after 6s"))
+        self.assertEqual(answers.detail[0], "no route to the host")
+        self.assertIn("timed out after 6s", answers.detail)
+        self.assertIs(answers.about(A.name), M.Evidence.UNKNOWN)
+
     def test_a_name_the_target_did_not_mention_is_unknown_not_no(self):
         """The target answered about A and said nothing about B. B is not
         "absent" — nobody asked about it, and the difference is whether the

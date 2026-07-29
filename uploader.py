@@ -78,9 +78,15 @@ class Answers:
         return cls(dict(readings), True, tuple(detail))
 
     @classmethod
-    def unknown(cls, why: str) -> "Answers":
-        """The target could not be reached or could not say. Every name UNKNOWN."""
-        return cls({}, True, (why,))
+    def unknown(cls, why: str, detail=()) -> "Answers":
+        """The target could not be reached or could not say. Every name UNKNOWN.
+
+        `detail` is whatever makes the failure checkable — what was tried, what
+        came back. It is printed under a refusal, and an implementation that
+        fills it in is the difference between "published at the destination
+        answered unknown" and knowing which host did not respond.
+        """
+        return cls({}, True, (why,) + tuple(detail))
 
     @classmethod
     def not_applicable(cls, why: str = "") -> "Answers":
