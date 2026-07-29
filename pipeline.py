@@ -2731,12 +2731,77 @@ def step_drop_trip(ctx):
                       ", ".join(str(i) for i in picked), deleted, human_bytes(freed)))
 
 
+def _clear_intermediates(ctx):
+    """Empty <out>/.intermediates — per-clip scratch encodes, nothing else.
+
+    Only files inside that one dot-directory are touched: everything in it is
+    scratch a render writes and a finished render has consumed. The directory
+    itself stays, so the next render does not have to recreate it.
+    """
+    inter = ctx.out_dir / ".intermediates"
+    removed = 0
+    if inter.is_dir():
+        for f in sorted(inter.rglob("*")):
+            if f.is_file():
+                try:
+                    f.unlink()
+                    removed += 1
+                except OSError:
+                    pass
+        for d in sorted(inter.rglob("*"), reverse=True):
+            if d.is_dir():
+                try:
+                    d.rmdir()
+                except OSError:
+                    pass
+    return removed
+
+
+def recover_aborted_render(ctx):
+    """Detect an aborted render and clean up what it left behind.
+
+    Two kinds of debris, both provably not deliverables: *.mp4.part files
+    (an encode that never finished — the finished file has no .part suffix)
+    and the scratch frames in .intermediates/. Left in place, a .part sits in
+    the render tree looking like a video to anything globbing loosely, and
+    the scratch inflates the working area the sweeps have to reason about.
+    Says what it removed, like every other path here that deletes.
+    """
+    removed = []
+    if ctx.out_dir.is_dir():
+        for p in sorted(ctx.out_dir.rglob("*.part")):
+            if p.is_file():
+                try:
+                    p.unlink()
+                    removed.append(p)
+                except OSError:
+                    pass
+    scratch = _clear_intermediates(ctx)
+    if removed or scratch:
+        print(C.dim("  Aborted render cleaned up: %d partial file(s), %d scratch file(s)."
+                    % (len(removed), scratch)))
+        for p in removed[:6]:
+            print(C.dim("    removed %s" % tilde(p)))
+    return len(removed) + scratch
+
+
+def after_render(ctx):
+    """A finished render leaves renders and sidecars, not intermediates."""
+    n = _clear_intermediates(ctx)
+    if n:
+        print(C.dim("  Cleared %d scratch file(s) from .intermediates." % n))
+    return n
+
+
 def step_render(ctx):
     """Encode trips to mp4 + sidecars (make-trips-rendered.sh)."""
     started = time.time()
     root = pick_import(ctx, "rendering")
     if root is None:
         return record(ctx, "Render videos", SKIPPED, started, "no import folder")
+    # A previous render that died mid-encode leaves .part files and scratch
+    # frames; start clean so nothing half-written is mistaken for output.
+    recover_aborted_render(ctx)
 
     # Show the trips here rather than making him remember them from the listing or go
     # back for them. The grouping comes from --print-groups (cached, so this is
@@ -2928,6 +2993,8 @@ def step_render(ctx):
         return record(ctx, "Render videos", FAILED, started,
                       "exit %d (%d new mp4 before the failure)" % (rc, len(new)))
     detail = "%d new mp4, %s" % (len(new), human_bytes(sum(p.stat().st_size for p in new)))
+    # A finished render leaves renders and sidecars, not scratch.
+    after_render(ctx)
 
     # Rebuild the manifest here rather than leaving it to a separate step. A
     # render that does not update trips.json is a half-done job: the new clips
@@ -3640,6 +3707,34 @@ def verify_s3(ctx, quiet=False):
     return (not missing and not mismatched), missing, mismatched
 
 
+def uploads_outstanding(ctx):
+    """Local renders not yet in the bucket at a matching size.
+
+    This is what makes an interrupted upload resumable: the sync is judged by
+    what actually landed (key present, size equal — the same evidence
+    verify_s3 uses), so a re-run owes only what is missing. A listing that
+    fails, and trips flagged mode=delete, follow the established rules: a
+    failed listing proves nothing (everything stays outstanding), flagged
+    trips are deliberately absent and owe nothing.
+    """
+    skip = deleted_ids(ctx)
+    remote = s3_objects(ctx) or {}
+    todo = []
+    for p in rendered_mp4s(ctx.out_dir):
+        if any(i in p.name for i in skip):
+            continue
+        try:
+            size = p.stat().st_size
+        except OSError:
+            continue
+        # "/" boundary as everywhere: sometrip_X.mp4 must not vouch for trip_X.mp4.
+        if any((k == p.name or k.endswith("/" + p.name)) and v == size
+               for k, v in remote.items()):
+            continue
+        todo.append(p)
+    return todo
+
+
 def step_upload(ctx):
     """Sync the rendered mp4s to the configured S3 bucket, then verify."""
     started = time.time()
@@ -3669,6 +3764,13 @@ def step_upload(ctx):
         print(C.yellow("  No rendered mp4s under %s — nothing to upload." % ctx.out_dir))
         return record(ctx, "Upload to site", SKIPPED, started, "no renders")
     total = sum(p.stat().st_size for p in local)
+    # An interrupted or partial earlier upload resumes: say up front how much
+    # is genuinely outstanding, so a re-run after a dropped connection reads
+    # as the resume it is, not as re-sending everything.
+    todo = uploads_outstanding(ctx)
+    if len(todo) < len(local):
+        print(C.dim("  %d of %d already verified in the bucket — the sync sends only the"
+                    " %d outstanding." % (len(local) - len(todo), len(local), len(todo))))
     print("  %d local mp4 (%s) -> s3://%s%s" % (
         len(local), human_bytes(total), ctx.s3_bucket,
         " (%s)" % ctx.s3_region if ctx.s3_region else ""))
