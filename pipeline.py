@@ -5484,6 +5484,7 @@ class Runner:
         print(C.dim("     " + item.description()))
         hint_reset()
         outcome = self._execute(item)
+        _print_all(_nothing_to_do_lines(outcome))
         self.position.advance(item)
         _print_all(_stayed_lines(item, outcome, self.menu, self.position))
         return outcome
@@ -5531,6 +5532,19 @@ class Runner:
         print(C.yellow("  Interrupted — %s stopped." % item.name()))
         self.ctx.results.append(StepResult(item.name(), FAILED, 0, "interrupted"))
         return item.aborted("interrupted")
+
+
+def _nothing_to_do_lines(outcome):
+    """An item whose postcondition already held says so.
+
+    It completes and the position moves on, which is right -- nothing is owed.
+    But it prints nothing on the way, so the screen showed the heading, the
+    description and then the menu again, and "already done" was indis-
+    tinguishable from "did nothing and would not say why".
+    """
+    if outcome.performed or not outcome.completed:
+        return []
+    return [C.green("  Nothing to do: %s." % (outcome.note or "already done"))]
 
 
 def _stayed_lines(item, outcome, menu_items, position):

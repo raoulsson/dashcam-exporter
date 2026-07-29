@@ -98,6 +98,7 @@ class Outcome:
 
     completed: bool
     note: str
+    performed: bool = True      # False when the postcondition already held
 
 
 def did(note: str) -> Outcome:
@@ -122,7 +123,7 @@ def _not_doing(verdict: Verdict) -> Outcome:
     """
     if verdict.blocked:
         return stopped(verdict.reason)
-    return did(verdict.reason)
+    return Outcome(True, verdict.reason, performed=False)
 
 
 class NotRun(Exception):
