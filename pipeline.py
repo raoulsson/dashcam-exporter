@@ -2424,6 +2424,55 @@ def write_contact_sheet(ctx, root, payload, previews_dir, stills):
     return index
 
 
+def build_sidecars(ctx):
+    """Write the sidecars that are missing; touch nothing that exists.
+
+    The re-runnable form of the sidecar pass: safe to call again after an
+    interruption, and a no-op when there is nothing to do. 'Nothing to do' is
+    judged per import day — a day whose clips already have at least one
+    complete sidecar set (meta + .gpx + .html sharing a stem) in its output
+    folder counts as done. That is deliberately a cheaper test than
+    step_preview's per-trip check via the grouping scan: this gate decides
+    whether to WAKE the renderer, and waking it to discover 'nothing missing'
+    costs the minutes the check exists to save. When any day is missing, the
+    whole pass runs (--sidecars-only has no per-trip selection) and rewrites
+    the same bytes from the same clips — idempotent by construction.
+    """
+    ran = []
+    for cand in import_candidates(ctx):
+        front = cand / "DCIM" / "200video" / "front"
+        days = set()
+        if front.is_dir():
+            for f in front.glob("*.mp4"):
+                m = STAMP_RE.search(f.name)
+                if m:
+                    s = m.group(1)
+                    days.add("%s-%s-%s" % (s[0:4], s[4:6], s[6:8]))
+        ns = ctx.out_dir / cand.name
+        missing = []
+        for day in sorted(days):
+            d = ns / day
+            complete = False
+            if d.is_dir():
+                for meta in d.glob("trip_*_meta.json"):
+                    stem = meta.name[:-len("_meta.json")]
+                    if (d / (stem + ".gpx")).is_file() and (d / (stem + ".html")).is_file():
+                        complete = True
+                        break
+            if not complete:
+                missing.append(day)
+        if not missing:
+            continue
+        cmd = (["./make-trips-rendered.sh", "--sidecars-only",
+                "--root", str(cand), "--out", str(ctx.out_dir)]
+               + ctx.config_args + ctx.scan_args)
+        rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars", parser=make_scan_parser(),
+                                keep=lambda l: l.startswith("[Trip "))
+        if rc == 0:
+            ran.append(cand)
+    return ran
+
+
 def step_preview(ctx):
     """Sidecars + one still per trip + a local contact sheet. No encoding.
 
