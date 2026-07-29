@@ -1541,6 +1541,54 @@ def purge_published_renders(ctx, root):
             pass
     return n, freed
 
+def prepare_for_import(ctx):
+    """Drop the caches a new import would silently poison.
+
+    <out>/.gpx_cache holds tracks harvested from the PREVIOUS card's tar
+    archives, keyed by nothing but their filenames — so a new card's clip that
+    shares a name resolves to the old card's track, and nothing says so. The
+    boundary cache protects itself (its key covers every clip and gpx); this
+    one cannot, so a new import starts it empty. Everything in it is derived
+    (re-harvested from the import's own archives on the next scan), which is
+    what makes deleting it safe. Says what it removed.
+    """
+    removed = 0
+    cache = ctx.out_dir / ".gpx_cache"
+    if cache.is_dir():
+        for f in sorted(cache.iterdir()):
+            if f.is_file():
+                try:
+                    f.unlink()
+                    removed += 1
+                except OSError:
+                    pass
+    if removed:
+        print(C.dim("  Cleared %d cached gpx file(s) from %s — a new card must not"
+                    " inherit the old card's tracks." % (removed, tilde(cache))))
+    return removed
+
+
+def record_import(ctx, card):
+    """Advance the ledger to the newest clip on the card just imported.
+
+    Called only after import-sd-card.sh exits 0, which it does only after
+    verifying the copy file-for-file — so 'a verified copy of everything up to
+    this stamp exists on this disk' is a fact, and that fact is what the
+    ledger holds. Taken from the CARD because the card is what the next delta
+    compares against. write_ledger refuses to move backwards.
+    """
+    newest = ""
+    front = card / "DCIM" / "200video" / "front"
+    if front.is_dir():
+        for f in front.glob("*.mp4"):
+            m = STAMP_RE.search(f.name)
+            if m and m.group(1) > newest:
+                newest = m.group(1)
+    if newest:
+        write_ledger(ctx, newest, "imported and verified")
+    return newest or None
+
+
 def step_import(ctx):
     """Copy the card's DCIM tree into a dated import folder (import-sd-card.sh)."""
     started = time.time()
@@ -1764,6 +1812,7 @@ def step_import(ctx):
     # No "Run: ... ?" either. Copying only the new clips was already answered,
     # and so was erasing the card; the command line adds nothing you can act on.
     # It is echoed so it is on screen and in the log.
+    prepare_for_import(ctx)
     print(C.dim("  %s" % " ".join(cmd)))
 
     rc, lines = run_stream(cmd, ctx.exporter, "Import", parser=rsync_parser,
@@ -1782,24 +1831,11 @@ def step_import(ctx):
     ctx.last_scan = None
     ctx.last_groups = None
 
-    # Record the high-water mark HERE, not only at cleanup. import-sd-card.sh
-    # exits 0 only after verifying the copy file-for-file, so a verified copy of
-    # everything up to this stamp now exists on this disk — which is the fact
-    # the ledger holds. Recording it only after publishing would leave Clean SIM
-    # unable to free the card right after an import, and freeing the card while
-    # the slow half runs is the entire reason the delta import exists.
-    #
-    # Taken from the CARD, because the card is what the next delta compares
-    # against. The same number by a shorter route than walking the import.
-    newest = ""
-    front = ctx.card / "DCIM" / "200video" / "front"
-    if front.is_dir():
-        for f in front.glob("*.mp4"):
-            m = STAMP_RE.search(f.name)
-            if m and m.group(1) > newest:
-                newest = m.group(1)
-    if newest and newest > (read_ledger(ctx).get("through") or ""):
-        write_ledger(ctx, newest, "imported and verified")
+    # Record the high-water mark HERE, not only at cleanup. Recording it only
+    # after publishing would leave Clean SIM unable to free the card right
+    # after an import, and freeing the card while the slow half runs is the
+    # entire reason the delta import exists.
+    record_import(ctx, ctx.card)
 
     return record(ctx, "Import from SIM", RAN, started,
                   "%s clips, %s -> %s" % (clips, human_bytes(size), dest))
