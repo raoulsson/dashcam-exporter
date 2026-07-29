@@ -5278,18 +5278,45 @@ def _blocked_line(number, verdict):
 
 
 def _not_here_line(menu_items, offered):
+    """Two reasons an entry is not on the table, and they are not the same.
+
+    "Not from here" is where the pipeline stands and changes as it moves. An
+    item this product does not have never becomes selectable however far you
+    walk, so saying "not yet" of it is a lie that hides the one thing worth
+    knowing — which product you are running.
+    """
     elsewhere = sorted(set(menu_items) - set(offered))
-    if not elsewhere:
+    off = list(filter(lambda n: menu.switched_off(menu_items[n]), elsewhere))
+    return _off_line(menu_items, off) + _later_line(
+        list(filter(lambda n: n not in off, elsewhere)))
+
+
+def _off_line(menu_items, numbers):
+    if not numbers:
+        return []
+    return [C.dim("   %s) not available for %s"
+                  % (",".join(map(str, numbers)),
+                     menu_items[numbers[0]].strategy().value))]
+
+
+def _later_line(numbers):
+    if not numbers:
         return []
     return [C.dim("   %s) not from here — the graph does not offer them yet"
-                  % ",".join(map(str, elsewhere)))]
+                  % ",".join(map(str, numbers)))]
 
 
 def _why_not(item, verdict, offered):
     """Is this entry unpickable, and by which gate. "" means it is pickable."""
     if not offered:
-        return "does not follow where we are"
+        return _not_offered_reason(item)
     return _guard_reason(verdict)
+
+
+def _not_offered_reason(item):
+    if menu.switched_off(item):
+        return "not available for %s" % item.strategy().value
+    return "does not follow where we are"
 
 
 def _guard_reason(verdict):

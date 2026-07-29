@@ -645,6 +645,23 @@ def _is_view(item: MenuItem) -> bool:
     return isinstance(item.outbound(), Anywhere)
 
 
+def switched_off(item: MenuItem) -> bool:
+    """No way in and no way out: this strategy does not have this item at all.
+
+    Read off the edges rather than asked of the strategy, so there is no second
+    list of which items a product includes that could disagree with the graph
+    the tool actually walks. An item nothing leads to and which leads nowhere
+    is unreachable by construction, and that is the whole definition.
+
+    Both sides must be empty. A start node has an empty inbound because it is
+    where a cycle begins, and it still leads somewhere; a view declares None on
+    both sides rather than an empty set, which is not the same thing as having
+    no edges.
+    """
+    return (item.inbound().edges() == frozenset()
+            and item.outbound().edges() == frozenset())
+
+
 def position_for(menu: Dict[int, MenuItem]) -> Position:
     """A Position that knows this menu's universe, views and entry points."""
     views = frozenset(filter(lambda n: _is_view(menu[n]), menu))

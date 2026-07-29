@@ -531,6 +531,54 @@ class TestEveryShortPath(unittest.TestCase):
             self.assertEqual(_unoffered(path, b.offered_at), [])
 
 
+class TestTheMenuSaysWhichProductItIs(unittest.TestCase):
+    """An item this product does not have is a different sentence from an item
+    the pipeline has not reached yet.
+
+    Both are greyed and neither is selectable, so lumping them together reads
+    as "keep going and it will turn up". Upload Website never turns up on a
+    local install however far you walk, and the only useful thing the menu can
+    say about it is which product you are running. The distinction is read off
+    the edges — nothing leads in, nothing leads out — rather than from a list
+    of which items each product includes, because a second list is a second
+    place to disagree with the graph the tool actually walks.
+    """
+
+    def test_the_item_with_no_edges_names_the_strategy(self):
+        b = Bench(LOCAL)
+        out = b.type()
+        self.assertIn("not available for %s" % LOCAL.value, out)
+
+    def test_it_is_not_reported_as_merely_not_reached_yet(self):
+        b = Bench(LOCAL)
+        line = _line_holding(b.type(), "not from here")
+        self.assertNotIn(str(UPLOAD), _numbers_in(line),
+                         "the item this product lacks was filed under 'not yet'")
+
+    def test_the_publishing_product_says_it_of_nobody(self):
+        """Every item exists there, so the sentence has no subject and must not
+        be printed at all."""
+        self.assertNotIn("not available for", Bench(WEBSITE).type())
+
+    def test_the_switched_off_test_does_not_catch_a_start_node(self):
+        """Import SIM also declares an empty inbound, because a cycle has to
+        begin somewhere. It leads on, so it is not switched off."""
+        for strategy in M.Strategy:
+            built = M.build_menu(strategy, FakeWork(strategy))
+            with self.subTest(strategy=strategy.value):
+                self.assertFalse(M.switched_off(built[IMPORT]))
+                self.assertFalse(M.switched_off(built[PROGRESS]))
+
+
+def _line_holding(out, phrase):
+    found = filter(lambda l: phrase in l, out.splitlines())
+    return next(found, "")
+
+
+def _numbers_in(line):
+    return re.findall(r"\d+", line)
+
+
 def _offer_from(built, current):
     """What the machine itself offers from that position — never a set this
     file computed for itself."""
