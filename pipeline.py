@@ -4341,6 +4341,46 @@ def copy_still_exists(ctx):
     return False, ""
 
 
+def wipe_card(ctx):
+    """Erase the card's files, keeping its folder tree. Returns (gone, freed, reason).
+
+    The guarded core of Clean SIM, without the conversation: it re-checks the
+    same evidence the interactive step shows (a high-water mark exists, no
+    clip on the card is newer than it, and the copy the ledger claims is still
+    somewhere), refuses with a reason when any of it fails, and otherwise
+    deletes files only — the camera writes into DCIM/200video/{front,rear}
+    and expects those folders to exist, so erasing the tree makes the next
+    recording fail in the car. reason is "" on success; a non-empty reason
+    means nothing was deleted.
+    """
+    dcim = ctx.card / "DCIM"
+    if not dcim.is_dir():
+        return 0, 0, "no card at %s" % tilde(ctx.card)
+    after = last_imported_stamp(ctx)
+    if not after:
+        return 0, 0, "nothing ever imported — no record this footage exists anywhere else"
+    excluded_stamps(ctx)                 # refresh the cache card_split reads
+    n_new, _n_old = card_split(ctx.card, after)
+    if n_new:
+        return 0, 0, "%d clip(s) on the card were never imported" % n_new
+    have, _what = copy_still_exists(ctx)
+    if not have:
+        return 0, 0, "the ledger claims imported, but no copy is still on this machine"
+
+    files = [f for f in dcim.rglob("*") if f.is_file()]
+    gone = freed = 0
+    for f in files:
+        try:
+            freed += f.stat().st_size
+            f.unlink()
+            gone += 1
+        except OSError as e:
+            print(C.red("  %s: %s" % (f.name, e)))
+    print(C.green("  Erased %d file(s), %s freed. Folders kept so the camera can record."
+                  % (gone, human_bytes(freed))))
+    return gone, freed, ""
+
+
 def step_clean_card(ctx):
     """Erase the card's clips, keeping its folder structure.
 
@@ -4425,17 +4465,13 @@ def step_clean_card(ctx):
         print("  Cancelled.")
         return record(ctx, "Clean SIM", SKIPPED, started, "cancelled at the prompt")
 
-    gone = freed = 0
-    for f in files:
-        try:
-            freed += f.stat().st_size
-            f.unlink()
-            gone += 1
-        except OSError as e:
-            print(C.red("  %s: %s" % (f.name, e)))
-    left = sum(1 for f in dcim.rglob("*") if f.is_file())
-    print(C.green("  Erased %d file(s), %s freed. %d file(s) left, folders kept."
-                  % (gone, human_bytes(freed), left)))
+    # wipe_card re-checks the guards above (same answers, one code path for
+    # the deletion) and refuses rather than deleting if anything changed while
+    # the prompt was on screen.
+    gone, freed, reason = wipe_card(ctx)
+    if reason:
+        print(C.red("  Refused: %s." % reason))
+        return record(ctx, "Clean SIM", SKIPPED, started, "refused: %s" % reason)
     return record(ctx, "Clean SIM", RAN, started,
                   "%d file(s), %s" % (gone, human_bytes(freed)))
 
