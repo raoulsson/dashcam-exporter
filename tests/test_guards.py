@@ -429,17 +429,36 @@ class TestWorkspaceRefusesWhenNothingElseCanDecide(GuardTest):
             _world(renders_here=1, expected=3, held=M.Evidence.YES))
         self.assertTrue(verdict.blocked, verdict.reason)
 
-    def test_being_served_has_the_last_word_when_it_can_be_asked(self):
-        """What the destination actually SERVES is the only question that
-        matters — so a short local count is commentary once it can be
-        answered, and a NO is decisive even when everything else says yes."""
-        yes = guards.workspace_is_expendable(
-            _world(renders_here=1, expected=3, published=M.Evidence.YES))
-        self.assertFalse(yes.blocked, yes.reason)
+    def test_being_served_is_decisive_against_the_erase(self):
+        """A NO from the destination stops it even when everything else agrees.
+        That half of the rule is unchanged."""
         no = guards.workspace_is_expendable(
             _world(renders_here=3, expected=3, held=M.Evidence.YES,
                    published=M.Evidence.NO))
         self.assertTrue(no.blocked, no.reason)
+
+    def test_a_short_local_count_is_not_commentary_any_more(self):
+        """CHANGED RULE, AND IT NEEDS THE OWNER'S SIGN-OFF.
+
+        This used to assert the opposite: 1 render where 3 were expected was
+        allowed through on the destination's yes, because "what the destination
+        SERVES is the only question that matters".
+
+        That was true while the thing answering walked every local TRIP and so
+        could say no on a short count. Since the publishing side became an
+        interface it is asked published(renders) and holds(renders) — about
+        renders that EXIST. The two trips that were never encoded produced no
+        render, so no answer is about them, and their footage is only in the
+        import this step erases. The old assertion described a state where that
+        footage goes.
+
+        carries() could speak for them and is not wired into this gate. Until
+        it is, a short count refuses. If that is too strict, the fix is to wire
+        carries() in, not to let this through again.
+        """
+        verdict = guards.workspace_is_expendable(
+            _world(renders_here=1, expected=3, published=M.Evidence.YES))
+        self.assertTrue(verdict.blocked, verdict.reason)
 
     def test_a_target_that_could_not_answer_is_not_a_yes(self):
         """Fails closed: "could not find out" is not "it is there"."""

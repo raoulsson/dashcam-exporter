@@ -163,7 +163,39 @@ def workspace_is_expendable(world) -> Verdict:
     tests/test_guards.py enumerates all 48 combinations of the three gates
     against the branches this replaces.
     """
-    return nothing_was_rendered_here(world) or _decided_by_the_gates(world)
+    return _floor_refusal(world) or _decided_by_the_gates(world)
+
+
+def _floor_refusal(world) -> Optional[Verdict]:
+    """The refusals no answer from a destination can lift, first one wins."""
+    return next(filter(None, map(lambda ask: ask(world), _FLOORS)), None)
+
+
+def _local_count_unproven(world) -> Optional[Verdict]:
+    """A short or unreadable local render count is a floor too, not one vote.
+
+    The target is asked published(renders) and holds(renders) -- about renders
+    that EXIST. A trip that was never encoded produced no render, so no answer
+    from any destination is about it, and its footage lives only in the import
+    this step erases. Deferring a short count to the target therefore asks a
+    question that cannot reach the trips at risk.
+
+    It used to reach them: the arrangement that answered before this became an
+    interface walked every local TRIP and said no on a short count. Asked per
+    render, a target cannot, and carries() -- which could -- is not wired into
+    this gate. Until it is, short and unreadable both refuse here.
+
+    The cost is a refusal when the grouping is not cached this session, because
+    then the count cannot be compared against anything. That is a step to
+    re-run, not footage to lose.
+    """
+    reading = rendered_locally(world)
+    if reading is Evidence.YES:
+        return None
+    return _verdict_of(WORKSPACE_GATES[0][0], reading)
+
+
+_FLOORS = (nothing_was_rendered_here, _local_count_unproven)
 
 
 def _decided_by_the_gates(world) -> Verdict:

@@ -994,16 +994,24 @@ class TestTheWorkspaceIsExpendableRule(unittest.TestCase):
     that is what these tests pin.
     """
 
-    def test_the_target_has_the_last_word_when_it_can_be_asked(self):
-        """Whether the footage may go is settled by what is actually SERVED,
-        which is the only question that looks past the destination's storage.
-        A local shortfall does not override a yes to it."""
+    def test_a_local_shortfall_refuses_even_when_the_target_says_yes(self):
+        """CHANGED RULE, AND IT NEEDS THE OWNER'S SIGN-OFF.
+
+        This asserted the erase RAN with nine trips expected and only the
+        rendered ones present, on the strength of the destination's yes. The
+        destination is asked about renders that exist, so it never spoke for
+        the eight that do not, and their footage is only in the import this
+        step erases. Now it refuses and the act does not run.
+
+        See test_guards.test_a_short_local_count_is_not_commentary_any_more
+        for the full reasoning and the way to relax it properly.
+        """
         fresh = rendered_world(
             expected_trips=9,
             target=a_target(published=all_of(rendered_world())))
         _work, act, outcome = clean_with(guards.workspace_is_expendable, fresh)
-        self.assertTrue(act.ran)
-        self.assertTrue(outcome.completed)
+        self.assertFalse(act.ran)
+        self.assertFalse(outcome.completed)
 
     def test_a_target_that_says_no_refuses_however_good_the_local_evidence(self):
         fresh = rendered_world(
