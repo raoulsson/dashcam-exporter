@@ -1182,19 +1182,92 @@ def last_imported_stamp(ctx):
     return best or None
 
 
+EXCLUDED_FILE = ".excluded.json"
+
+# In-memory view of the workspace's excluded stamps, for the callers that have
+# no ctx (card_split's signature is (card, after)). It is a CACHE of the file,
+# not the record: excluded_stamps(ctx) refreshes it from disk, and every path
+# that acts on card_split's answer refreshes first. One process, one workspace
+# — the file is what survives a restart.
+_EXCLUDED = set()
+
+
+def excluded_stamps(ctx):
+    """The stamps of clips deliberately excluded, refreshed from disk.
+
+    An excluded clip is treated as if imported ever after: the delta import
+    does not re-copy it, and Clean SIM counts it as accounted for. The warning
+    happened once, at exclude time — that was the decision, and re-warning at
+    every later step would be asking the same question again.
+    """
+    global _EXCLUDED
+    try:
+        d = json.loads((ctx.out_dir / EXCLUDED_FILE).read_text())
+        _EXCLUDED = {str(s) for s in d.get("stamps", [])}
+    except Exception:
+        _EXCLUDED = set()
+    return set(_EXCLUDED)
+
+
+def record_excluded_stamps(ctx, stamps):
+    """Persist clip stamps whose footage was deliberately dropped."""
+    global _EXCLUDED
+    merged = excluded_stamps(ctx) | {str(s) for s in stamps}
+    try:
+        ctx.out_dir.mkdir(parents=True, exist_ok=True)
+        (ctx.out_dir / EXCLUDED_FILE).write_text(
+            json.dumps({"stamps": sorted(merged)}, indent=1))
+    except OSError:
+        pass
+    _EXCLUDED = merged
+    return merged
+
+
 def card_split(card, after):
-    """(new, already) counts of front clips on the card against a stamp."""
+    """(new, already) counts of front clips on the card against a stamp.
+
+    An excluded clip counts as already-imported regardless of the mark: its
+    footage was dropped on purpose, and 'new' here means 'would be copied by
+    the next import', which an excluded clip must never be.
+    """
     front = card / "DCIM" / "200video" / "front"
     if not front.is_dir():
         return 0, 0
     new = old = 0
     for f in front.glob("*.mp4"):
         m = STAMP_RE.search(f.name)
-        if m and after and m.group(1) <= after:
+        if m and ((after and m.group(1) <= after) or m.group(1) in _EXCLUDED):
             old += 1
         else:
             new += 1
     return new, old
+
+
+def listed_trips(ctx):
+    """The trips as a listing should show them, read from the sidecar metas.
+
+    A trip whose span covers an excluded clip is ABSENT, not flagged: exclusion
+    is 'this never happened as far as the pipeline is concerned', and a row
+    saying 'excluded' would keep asking the reader to re-decide something that
+    was decided when the footage was dropped.
+    """
+    ex = excluded_stamps(ctx)
+    out = []
+    if not ctx.out_dir.is_dir():
+        return out
+    for meta in sorted(ctx.out_dir.rglob("trip_*_meta.json")):
+        try:
+            m = json.loads(meta.read_text())
+        except Exception:
+            continue
+        start = re.sub(r"\D", "", str(m.get("start") or ""))[:14]
+        end = re.sub(r"\D", "", str(m.get("end") or ""))[:14]
+        if start and end and any(start <= s <= end for s in ex):
+            continue
+        out.append({"id": meta.name[:-len("_meta.json")],
+                    "day": m.get("day"), "start": m.get("start"),
+                    "end": m.get("end"), "meta": meta})
+    return out
 
 
 def import_is_expendable(ctx, root):
@@ -1409,7 +1482,10 @@ def purge_published_renders(ctx, root):
     out = ctx.out_dir
     if not out.is_dir():
         return 0, 0
-    keep_names = {"logs", LEDGER_FILE, OWNER_FILE, root.name}
+    # EXCLUDED_FILE survives for the same reason the ledger does: it is state
+    # ("these clips were dropped on purpose"), unrecoverable once gone, and
+    # the delta import and Clean SIM both read it after the footage is deleted.
+    keep_names = {"logs", LEDGER_FILE, OWNER_FILE, EXCLUDED_FILE, root.name}
     freed = n = 0
     for child in sorted(out.iterdir()):
         if child.name in keep_names or child.name.startswith(FINAL_PREFIX):
@@ -1632,6 +1708,7 @@ def step_import(ctx):
     # because it is read from the renders and the boundary cache, not the
     # footage.
     after = last_imported_stamp(ctx)
+    excluded_stamps(ctx)                 # refresh the cache card_split reads
     if after:
         n_new, n_old = card_split(ctx.card, after)
         print()
@@ -2621,6 +2698,17 @@ def step_drop_trip(ctx):
             errors.append("%s: %s" % (p, e))
     for e in errors[:10]:
         print(C.red("  could not delete %s" % e))
+
+    # Record the dropped clips' stamps as excluded. From here on they are
+    # treated as if imported: the next delta import does not re-copy them off
+    # the card, and Clean SIM counts them as accounted for — the warning above
+    # was the decision, made once, at the only moment it can matter.
+    dropped_stamps = {m.group(1) for p in files
+                      for m in [STAMP_RE.search(p.name)] if m}
+    if dropped_stamps:
+        record_excluded_stamps(ctx, dropped_stamps)
+        print(C.dim("  Recorded %d excluded clip stamp(s); the delta import will not"
+                    " re-copy them." % len(dropped_stamps)))
 
     # Any cached view of this import is now wrong: the grouping is computed from
     # the clips that just stopped existing, and the delete guard leans on the
@@ -4165,6 +4253,14 @@ def copy_still_exists(ctx):
     if not stamps:
         return False, ""
 
+    # Excluded clips are accounted for BY the exclusion: their footage was
+    # dropped on purpose, so no copy is supposed to exist and none is owed.
+    # The warning happened at exclude time, not here.
+    dropped = stamps & excluded_stamps(ctx)
+    stamps -= dropped
+    if not stamps:
+        return True, "%d clip(s) excluded on purpose — treated as imported" % len(dropped)
+
     # The final folder, read from its META rather than its filenames. Each
     # trip's _meta.json carries the wall-clock `start` and `end` it covers, and a
     # card clip's name IS its wall clock — so "is this clip inside a rendered
@@ -4236,6 +4332,7 @@ def step_clean_card(ctx):
     files = [f for f in dcim.rglob("*") if f.is_file()]
     size = sum(f.stat().st_size for f in files)
     after = last_imported_stamp(ctx)
+    excluded_stamps(ctx)                 # refresh the cache card_split reads
     n_new, n_old = card_split(ctx.card, after)
 
     print()
