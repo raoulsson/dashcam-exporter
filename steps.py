@@ -101,7 +101,14 @@ class _Machinery:
         self._ns = namespace
 
     def __getattr__(self, name):
-        return self._ns[name]
+        try:
+            return self._ns[name]
+        except KeyError:
+            # AttributeError, because that is the attribute-access contract:
+            # a KeyError escaping from getattr() bypasses hasattr/getattr
+            # defaults and reads as a dict bug rather than what it is — a
+            # helper name that does not exist in this pipeline's namespace.
+            raise AttributeError("pipeline namespace has no %r" % name) from None
 
 
 def _machinery(ctx: "Ctxish") -> _Machinery:
@@ -139,7 +146,7 @@ def _safe_glob(root, pattern):
 
 
 def _has_metas(ctx) -> bool:
-    """Has the sidecar pass (Preview) left its evidence in the working area?"""
+    """Has the sidecar pass (Generate meta) left its evidence in the working area?"""
     return bool(_safe_rglob(ctx.out_dir, "*_meta.json"))
 
 
@@ -149,10 +156,10 @@ _SIDECAR_REASON = "create sidecars first — run %d) %s"
 def _sidecars_missing(ctx) -> Optional[str]:
     """Reason when an import exists but no sidecars do, or None.
 
-    The sidecar pass (Preview) is where the trips are looked at before anything
-    slow or destructive happens to them. Every step that consumes the trips —
-    render, upload, delete, wipe — waits for it, so the decision about what to
-    keep is made from evidence rather than from memory.
+    The sidecar pass (Generate meta) is what makes the trips knowable before
+    anything slow or destructive happens to them. Every step that consumes the
+    trips — preview, render, upload, clean up — waits for it, so the decision
+    about what to keep is made from evidence rather than from memory.
     """
     if _sidecar_debt_settled(ctx):
         return None

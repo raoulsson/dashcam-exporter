@@ -1871,10 +1871,13 @@ def step_import(ctx):
     ctx.last_scan = None
     ctx.last_groups = None
 
-    # Record the high-water mark HERE, not only at cleanup. Recording it only
-    # after publishing would leave the clean-up unable to free the card right
-    # after an import, and freeing the card while the slow half runs is the
-    # entire reason the delta import exists.
+    # Record the high-water mark HERE, not only at cleanup. The next delta
+    # import reads it to know what is already in, and the clean-up's card half
+    # compares the card against it — recorded only after publishing, an
+    # interrupted cycle would leave every clip counting as "never imported".
+    # (Since the clean fold, the card half itself only runs at the END of the
+    # cycle; freeing the card at import time is the erase-after-verified-copy
+    # prompt above, and a delta import declines it.)
     record_import(ctx, ctx.card)
 
     return record(ctx, "Import from SIM", RAN, started,
@@ -2580,7 +2583,7 @@ def build_sidecars(ctx):
     judged per import day — a day whose clips already have at least one
     complete sidecar set (meta + .gpx + .html sharing a stem) in its output
     folder counts as done. That is deliberately a cheaper test than
-    step_preview's per-trip check via the grouping scan: this gate decides
+    step_generate_meta's per-trip check via the grouping scan: this gate decides
     whether to WAKE the renderer, and waking it to discover 'nothing missing'
     costs the minutes the check exists to save. When any day is missing, the
     whole pass runs (--sidecars-only has no per-trip selection) and rewrites
@@ -2933,7 +2936,7 @@ def step_drop_trip(ctx):
                     p.unlink()
                 except OSError as e:
                     print(C.red("  could not delete %s: %s" % (p, e)))
-            print(C.dim("  Removed. The next Preview or Render drops them from the site index."))
+            print(C.dim("  Removed. The next Generate meta or Render drops them from the site index."))
 
     # Exclude it from the site's curation. Deleting the files is NOT enough:
     # build_manifest deliberately carries a previously-published trip forward
@@ -3097,8 +3100,8 @@ def step_render(ctx):
             span = human_secs(secs)
             # The encoded length is not the span: parking is cut out. The real
             # figure lives in the sidecar _meta.json, so it is only known once
-            # Preview has run — show it when it is there and say nothing when it
-            # is not, rather than estimating.
+            # Generate meta has run — show it when it is there and say nothing
+            # when it is not, rather than estimating.
             meta = trip_meta(g) or {}
             move_min = meta.get("moving_min")
             if g.get("renderable", True):
@@ -3180,7 +3183,7 @@ def step_render(ctx):
             (720,  "still reads plates and signs"),
             (540,  "half size, fine on a laptop"),
             (360,  "phone only, plates unreadable")]
-    vid_secs = tot_move          # 0 until Preview has written the sidecars
+    vid_secs = tot_move          # 0 until Generate meta has written the sidecars
     print()
     print("  Output height:")
     for h, why in OPTS:
@@ -3278,10 +3281,11 @@ def step_render(ctx):
     # Rebuild the manifest here rather than leaving it to a separate step. A
     # render that does not update trips.json is a half-done job: the new clips
     # exist on disk but carry no duration, previews or poster until this runs,
-    # and the next thing anyone does is upload and deploy. Preview does the same
-    # for the same reason. (This is why there is no Manifest entry in the menu —
-    # it was a step you could forget, in a sequence where forgetting it looks
-    # exactly like success.)
+    # and the next thing anyone does is upload and deploy. The drop step does
+    # the same after deleting rendered files, and deploy-site.sh re-indexes as
+    # its own first act regardless. (This is why there is no Manifest entry in
+    # the menu — it was a step you could forget, in a sequence where forgetting
+    # it looks exactly like success.)
     if new and ctx.site_script("build_manifest.py"):
         rc2, _l = run_stream(["python3", "build_manifest.py"], ctx.site, "Indexing",
                              keep=lambda l: l.startswith("wrote trips.json"))
