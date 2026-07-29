@@ -577,13 +577,18 @@ class TheGraphRefusesFirst(unittest.TestCase):
         drive(menu_items, position, ["7", "q"])
         menu_items[UPLOAD].evaluate.assert_not_called()
 
-    def test_the_refusal_names_the_item_and_where_we_are(self):
-        """The operator is told which of the two gates refused, by name, so a
-        greyed item is never a mystery."""
+    def test_the_refusal_names_the_item_and_says_plainly_it_cannot_run(self):
+        """Named, and in the operator's terms rather than the machine's.
+
+        It used to also recite where we are -- "does not follow 1) Import SIM"
+        -- which described the graph to someone who only wanted to know whether
+        the key would work. The position is on the menu's own footer; the
+        refusal answers the question that was asked.
+        """
         menu_items, position = machine(at=IMPORT)
         run = drive(menu_items, position, ["7", "q"])
         self.assertIn("Upload Website", run.printed)
-        self.assertIn("Import SIM", run.printed)
+        self.assertIn("is not available", run.printed)
 
     def test_an_item_the_graph_offers_is_dispatched(self):
         """The other half of the same rule: what the position offers, runs."""

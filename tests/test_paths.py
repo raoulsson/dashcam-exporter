@@ -363,7 +363,7 @@ class TestThePathsThatMustNotExist(unittest.TestCase):
         out = b.type("5")
         self.assertEqual(b.work.done, [])
         self.assertEqual(b.offered_at, [START, START])
-        self.assertIn("does not follow", out)
+        self.assertIn("is not available", out)
 
     def test_publishing_is_on_no_path_at_all_under_the_local_product(self):
         """Not by an `if` in a body: nothing anywhere offers it.
@@ -551,7 +551,7 @@ class TestTheMenuSaysWhichProductItIs(unittest.TestCase):
 
     def test_it_is_not_reported_as_merely_not_reached_yet(self):
         b = Bench(LOCAL)
-        line = _line_holding(b.type(), "not from here")
+        line = _line_holding(b.type(), "not available from here")
         self.assertNotIn(str(UPLOAD), _numbers_in(line),
                          "the item this product lacks was filed under 'not yet'")
 
@@ -794,8 +794,8 @@ class TestTheMenuIsTheMachine(PainterTest):
         """
         built = invented_menu()
         out = self.paint(built, invented_position(built))
-        self.assertIn("%d,%d) not from here" % (ZETA, WHISKEY), out)
-        self.assertNotIn("%d) not from here" % YANKEE, out)
+        self.assertIn("%d,%d) not available from here" % (ZETA, WHISKEY), out)
+        self.assertNotIn("%d) not available from here" % YANKEE, out)
 
     def test_where_we_are_is_said_in_the_items_own_words(self):
         built = invented_menu()

@@ -662,6 +662,24 @@ def switched_off(item: MenuItem) -> bool:
             and item.outbound().edges() == frozenset())
 
 
+def leads_to(menu: Dict[int, MenuItem], number: int) -> List[int]:
+    """The entries that offer this one, asked of the entries themselves.
+
+    So the sentence the menu says about an unavailable entry is derived from
+    the same edges the machine walks. Written down anywhere else it would be a
+    second copy to fall out of date, and it would fall out of date silently,
+    because prose does not fail a test.
+
+    Views are not answers here: one neighbours everything by definition, so
+    naming it would tell the operator nothing about what to do next.
+    """
+    return sorted(filter(lambda a: _reaches(menu[a], number), menu))
+
+
+def _reaches(item: MenuItem, number: int) -> bool:
+    return _offers(item.outbound().edges(), number)
+
+
 def position_for(menu: Dict[int, MenuItem]) -> Position:
     """A Position that knows this menu's universe, views and entry points."""
     views = frozenset(filter(lambda n: _is_view(menu[n]), menu))
