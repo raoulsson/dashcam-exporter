@@ -47,6 +47,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+# The step graph: each step declares its own ordering, destructive flag and
+# availability rule (blocked_because). This module keeps the machinery — the
+# functions that DO the steps — and asks the graph everything else.
+import steps as step_graph
+
 # ---------------------------------------------------------------------------
 # Defaults — kept identical to the scripts we drive, so this CLI can never
 # disagree with what those scripts would do on their own.
@@ -3970,7 +3975,7 @@ def step_upload(ctx):
     # The menu greys this step out when the config is absent, so reaching here
     # without it means something bypassed the menu (--steps). Say the same thing
     # the greyed line says rather than crashing on a None.
-    reason = upload_blocked(ctx)
+    reason = step_graph.ALL_STEPS[step_graph.UPLOAD].blocked_because(ctx)
     if reason:
         print(C.red("  %s" % reason))
         return record(ctx, "Upload to site", SKIPPED, started, reason)
@@ -4066,7 +4071,7 @@ def record_deploy(ctx):
 def step_deploy(ctx):
     """Run the site repo's deploy script. SIGNED_VIDEOS=1 is not optional — see below."""
     started = time.time()
-    reason = deploy_blocked(ctx)
+    reason = step_graph.ALL_STEPS[step_graph.DEPLOY].blocked_because(ctx)
     if reason:
         print(C.red("  %s" % reason))
         return record(ctx, "Update site", SKIPPED, started, reason)
@@ -4626,7 +4631,7 @@ STEPS = [
 #
 # This table does NOT change with the configuration. When the publishing half is
 # unconfigured its steps are greyed out with the key that would enable them
-# (see NOOP_CHECK below), not removed — so every number means the same thing on
+# (each step's blocked_because in steps.py), not removed — so every number means the same thing on
 # every machine, and someone who has never set any of it up can see that the
 # publishing half exists and what turns it on. A menu that renumbers itself
 # would make every sentence anyone writes about "step 5" true only locally.
@@ -4737,193 +4742,16 @@ def fast_enough(ctx, n):
         return False
 
 
-def _sidecars_missing(ctx):
-    """Reason when an import exists but no sidecars do, or None.
-
-    The sidecar pass (Preview) is where the trips are looked at before anything
-    slow or destructive happens to them. Every step that consumes the trips —
-    render, upload, deploy, delete, wipe — waits for it, so the decision about
-    what to keep is made from evidence rather than from memory.
-    """
-    if not import_candidates(ctx):
-        return None
-    try:
-        if ctx.out_dir.is_dir() and any(ctx.out_dir.rglob("*_meta.json")):
-            return None
-    except OSError:
-        pass
-    return "create sidecars first — run %d) %s" % (
-        step_num(step_preview), SHORT[step_num(step_preview)])
-
-
-def _noop_list(ctx):
-    """Nothing to list before anything is imported."""
-    if not import_candidates(ctx):
-        return "nothing imported — run %d) first" % step_num(step_import)
-    return None
-
-
-def _noop_preview(ctx):
-    """Sidecars are built from the GPS track; no track, nothing to build."""
-    cands = import_candidates(ctx)
-    if not cands:
-        return "nothing imported — run %d) first" % step_num(step_import)
-    # The track lives in DCIM/<NNN>gps/ as .gpx files, or as '*.git' tar
-    # archives the renderer harvests .gpx members from. Either counts; a card
-    # with neither has no track and the sidecar pass would produce nothing.
-    for cand in cands:
-        dcim = cand / "DCIM"
-        if not dcim.is_dir():
-            continue
-        for sub in dcim.iterdir():
-            if sub.is_dir() and "gps" in sub.name.lower():
-                for f in sub.iterdir():
-                    if f.suffix.lower() in (".gpx", ".git"):
-                        return None
-    return "no GPS track in the import (no .gpx under DCIM) — sidecars need it"
-
-
-def _noop_exclude(ctx):
-    """Nothing imported means nothing to exclude."""
-    if not import_candidates(ctx):
-        return "nothing imported — nothing to exclude"
-    return None
-
-
-def _noop_render(ctx):
-    """Render reads the copied import, never the card in the slot."""
-    if not import_candidates(ctx):
-        return "nothing imported — a mounted card is not a workspace; run %d) first" \
-            % step_num(step_import)
-    return _sidecars_missing(ctx)
-
-
-def _noop_site(ctx):
-    """The local site is built FROM the renders."""
-    if rendered_mp4s(ctx.out_dir):
-        return None
-    # A gathered final_ folder is renders too — the rebuild case.
-    froot = getattr(ctx, "final_root", ctx.out_dir)
-    try:
-        if froot.is_dir() and any(d.is_dir() for d in froot.glob(FINAL_PREFIX + "*")):
-            return None
-    except OSError:
-        pass
-    return "no renders to build from — run %d) first" % step_num(step_render)
-
-
-def _noop_delete_import(ctx):
-    """The delete has its own heavy gates; the menu-level one is only that the
-    trips were looked at (sidecars) before the footage is put beyond looking."""
-    return _sidecars_missing(ctx)
-
-
-def _noop_import(ctx):
-    """Import has nothing to do when there is no card but footage is already in.
-
-    Resolve through import_candidates(), the same way every step does, rather
-    than looking only at import_root. import_root is a fixed default; the folder
-    actually in use comes from config.txt's `root`, so checking only the former
-    meant renaming the import directory silently re-enabled this step and
-    offered to import from a card that is not there.
-    """
-    # An unfinished session blocks a new import outright. Importing over it
-    # mixes two cards into one grouping with no record of which clip came from
-    # which — step_import used to explain this and ask; the rule is now that it
-    # does not happen at all. working_area_is_expendable is the same proof the
-    # sweeps demand; it only reaches for S3 when loose renders exist AND a
-    # bucket is configured, so the common menu draw stays local and instant.
-    ok, why, _stragglers = working_area_is_expendable(ctx)
-    if not ok:
-        return "unfinished session (%s) — finish it (%d/%d) or delete it (%d) first" % (
-            why, step_num(step_site), step_num(step_upload), step_num(step_delete_import))
-    if (ctx.card / "DCIM").is_dir():
-        return None
-    cands = import_candidates(ctx)
-    if cands:
-        n = clip_count(cands[0])
-        # Terse on purpose: this sits under the menu on every draw, so a long
-        # sentence there costs a line of a narrow screen every time.
-        return "already have %s clips — select %d or %d" % (
-            n, step_num(step_preview), step_num(step_render))
-    return None
-
-
-def deploy_blocked(ctx):
-    """Why Deploy cannot run, or None.
-
-    The reason names the config key, because this line is where someone who
-    cloned the repo finds out that publishing exists at all. "not configured"
-    would tell them nothing they can act on.
-    """
-    if ctx.site is None:
-        return "needs site_repo in config.txt"
-    if not ctx.site.is_dir():
-        return "site_repo not found: %s" % tilde(ctx.site)
-    if not ctx.site_script("deploy", "deploy-site.sh"):
-        return "no deploy/deploy-site.sh in %s" % tilde(ctx.site)
-    # Deploy is allowed WITHOUT renders — it publishes curation — but not
-    # without sidecars when an import is sitting there unlooked-at: the deploy
-    # would carry a manifest that says nothing about the trips on disk.
-    return _sidecars_missing(ctx)
-
-
-def upload_blocked(ctx):
-    """Why Upload cannot run, or None.
-
-    The bucket is named first when both are missing: it is the setting that
-    distinguishes this step from Deploy, and the site repo is asked for on the
-    line below anyway. Without the bucket the sync could still run, but its
-    result could not be verified — and `aws s3 sync` exits 0 on failed objects,
-    so an unverifiable upload is one this CLI has no business reporting on.
-    """
-    if not ctx.s3_bucket:
-        return "needs s3_bucket in config.txt"
-    if ctx.site is None:
-        return "needs site_repo in config.txt"
-    if not ctx.site.is_dir():
-        return "site_repo not found: %s" % tilde(ctx.site)
-    if not ctx.site_script("deploy", "upload-videos-s3.sh"):
-        return "no deploy/upload-videos-s3.sh in %s" % tilde(ctx.site)
-    # Config alone is not enough: upload sends renders, so there have to BE
-    # renders, and they have to have been looked at (sidecars) first.
-    if not rendered_mp4s(ctx.out_dir):
-        return "nothing rendered to upload — run %d) first" % step_num(step_render)
-    return _sidecars_missing(ctx)
-
-
-# A step can declare that, right now, it would do nothing — either because there
-# is nothing to do (Import with the sink already full) or because the config it
-# needs is absent (Upload, Deploy). Asking "Go?" for such a step is a
+# A step can declare that, right now, it would do nothing — either because
+# there is nothing to do (Import with the sink already full) or because the
+# config it needs is absent (Upload, Deploy). Asking "Go?" for such a step is a
 # confirmation guarding nothing, and worse it is practice at pressing enter —
 # the habit you least want by the time the delete step asks. Answer at selection
-# time instead, greyed in the menu with the reason underneath, and do not run it.
-def _noop_clean_card(ctx):
-    """No card, nothing to clean. Same wording as the import step's check, since
-    it is the same fact."""
-    dcim = ctx.card / "DCIM"
-    if not dcim.is_dir():
-        return "no card at %s" % tilde(ctx.card)
-    try:
-        if not any(f.is_file() for f in dcim.rglob("*")):
-            return "card is already clean — nothing to wipe"
-    except OSError:
-        pass
-    return _sidecars_missing(ctx)
+# time instead, greyed in the menu with the reason underneath, and do not run
+# it. The rules themselves live with the steps, in steps.py: each Step's
+# blocked_because(ctx) is the one place to ask "may I, and why not", and the
+# menu, the tests and the step bodies all read the same answer from it.
 
-
-NOOP_CHECK = {
-    step_num(step_import): _noop_import,
-    step_num(step_list): _noop_list,
-    step_num(step_preview): _noop_preview,
-    step_num(step_drop_trip): _noop_exclude,
-    step_num(step_render): _noop_render,
-    step_num(step_site): _noop_site,
-    step_num(step_delete_import): _noop_delete_import,
-    step_num(step_clean_card): _noop_clean_card,
-    step_num(step_upload): upload_blocked,
-    step_num(step_deploy): deploy_blocked,
-}
 DESC = {
     1: "Copy the SIM's DCIM tree into the workspace and verify it file-for-file.",
     2: "Scan the import and print the trip table. Reads nothing else, changes nothing.",
@@ -4949,13 +4777,13 @@ def unavailable_steps(ctx):
     if ctx is None:
         return {}
     out = {}
-    for n, check in NOOP_CHECK.items():
+    for step in step_graph.ALL_STEPS.values():
         try:
-            r = check(ctx)
+            r = step.blocked_because(ctx)
         except Exception:
             r = None
         if r:
-            out[n] = r
+            out[step.number] = r
     return out
 
 
@@ -4974,30 +4802,36 @@ def print_menu(ctx, blocked=None):
     # run-on line rather than a grid.
     cell = max(len(s) for s in SHORT.values()) + 9
     cols = max(1, min(4, w // cell))
-    rows = (len(STEPS) + cols - 1) // cols
-    ordered = sorted(STEPS, key=lambda s: s[0])
+    # The menu IS the graph: one loop over the steps, each asked about itself —
+    # enabled or not (via blocked_because, which is what filled `blocked`),
+    # destructive or not. pipeline.py's STEPS table only maps a picked number to
+    # the function that does the work.
+    ordered = [step_graph.ALL_STEPS[n] for n in sorted(step_graph.ALL_STEPS)]
+    rows = (len(ordered) + cols - 1) // cols
     for r in range(rows):
         line = ""
         for c in range(cols):
             i = r + c * rows                            # fill down, then across
             if i >= len(ordered):
                 continue
-            num, _name, _fn, in_all = ordered[i]
-            label = SHORT[num]
+            item = ordered[i]
+            num, label = item.number, SHORT[item.number]
+            # Red means destructive, and the step says so itself. It used to
+            # mean "not in the all-chain", which happened to select the same
+            # three steps for a different reason — and carried a "!" that only
+            # repeated in punctuation what the colour already said.
             if num in blocked:
-                mark = " "
                 body = C.dim(label)          # greyed: selecting it does nothing
-            elif in_all:
-                mark = " "
-                body = C.bold(label)
-            else:
-                mark = C.red("!")
+            elif item.is_destructive():
                 body = C.red(label)
-            txt = "%s %d) %s" % (mark, num, body)
+            else:
+                body = C.bold(label)
+            txt = "%d) %s" % (num, body)
             # Measure the prefix rather than assuming it: "! 9) " is five
             # characters and "! 10) " is six, so a fixed 5 put every column
             # after a two-digit step one character out of line.
-            pad = cell - (len(label) + len(str(num)) + 4)
+            # "N) label" — the two-character marker column went with the "!".
+            pad = cell - (len(label) + len(str(num)) + 2)
             line += txt + " " * max(1, pad)
         print("  " + line.rstrip())
     for num in sorted(blocked):
