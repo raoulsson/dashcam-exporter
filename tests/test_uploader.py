@@ -8,6 +8,7 @@ footage on the strength of these answers, so "could not ask" arriving as YES or
 NA is the one reading that must be unwritable rather than merely unwritten.
 """
 
+import os
 import sys
 import textwrap
 import unittest
@@ -232,6 +233,66 @@ class TestTheLoader(unittest.TestCase):
         origin = U.origin_of(spec, self.load(spec))
         self.assertIn("Target", origin)
         self.assertIn(spec, origin)
+
+
+class TestTheShippedExample(unittest.TestCase):
+    """The worked example is driven, not merely shipped.
+
+    An example nobody runs rots into a lie, and this one is the documentation
+    for how to implement the interface — the first thing anybody copies.
+    """
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(os.environ.pop, "DASHCAM_FOLDER_TARGET", None)
+        os.environ["DASHCAM_FOLDER_TARGET"] = str(self.dir / "published")
+        self.target = U.load_uploader(
+            "%s:FolderTarget" % (REPO / "examples" / "uploader_folder.py"), REPO)
+
+    def a_render(self, name="trip_A_h1080.mp4", size=10):
+        path = self.dir / name
+        path.write_bytes(b"x" * size)
+        return W.Render(name, size, path)
+
+    def test_it_owes_a_render_it_does_not_have_and_stops_owing_it_after_upload(self):
+        render = self.a_render()
+        self.assertTrue(self.target.owes((render,)).any)
+        self.target.upload(W.World(renders=(render,)), SilentUi())
+        self.assertFalse(self.target.owes((render,)).any)
+
+    def test_holds_is_yes_only_after_the_upload(self):
+        render = self.a_render()
+        self.assertIs(self.target.holds((render,)).covers((render,)), M.Evidence.NO)
+        self.target.upload(W.World(renders=(render,)), SilentUi())
+        self.assertIs(self.target.holds((render,)).covers((render,)), M.Evidence.YES)
+
+    def test_a_copy_at_a_different_size_does_not_vouch_for_the_local_one(self):
+        """The failure this rule was written for: a re-render at the same name
+        reading as already published while its only other copy was about to be
+        erased."""
+        render = self.a_render()
+        self.target.upload(W.World(renders=(render,)), SilentUi())
+        bigger = W.Render(render.name, render.size + 1, render.path)
+        self.assertIs(self.target.holds((bigger,)).about(render.name), M.Evidence.NO)
+
+    def test_a_folder_says_the_serving_question_does_not_arise(self):
+        """NA, not UNKNOWN: a folder genuinely does not serve anything. The
+        difference decides whether Clean Workspace's third gate is dropped or
+        failed."""
+        self.assertIs(self.target.published(()).covers(()), M.Evidence.NA)
+
+
+class SilentUi(U.Ui):
+    def say(self, line):
+        pass
+
+    def warn(self, line):
+        pass
+
+    def run(self, cmd, cwd, label, env=None):        # pragma: no cover
+        raise AssertionError("the example must not run a subprocess")
 
 
 if __name__ == "__main__":
