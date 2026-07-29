@@ -36,7 +36,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from itertools import chain
+from itertools import chain, filterfalse
 from typing import Dict, Iterable, Optional, Protocol, Set
 
 
@@ -71,15 +71,15 @@ class Ctxish(Protocol):
 
 # Step numbers, named once so the graph reads as sentences rather than integers.
 IMPORT = 1
-LIST = 2
-PREVIEW = 3
-EXCLUDE = 4
-RENDER = 5
-SITE = 6
-UPLOAD = 7
-DEPLOY = 8
-DELETE_WS = 9
-WIPE_SIM = 10
+PROGRESS = 2
+GENERATE_META = 3
+PREVIEW = 4
+EXCLUDE = 5
+RENDER = 6
+SITE = 7
+UPLOAD = 8
+DEPLOY = 9
+CLEANUP = 10
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +156,7 @@ def _sidecars_missing(ctx) -> Optional[str]:
     """
     if _sidecar_debt_settled(ctx):
         return None
-    return _SIDECAR_REASON % (PREVIEW, ALL_STEPS[PREVIEW].title)
+    return _SIDECAR_REASON % (GENERATE_META, ALL_STEPS[GENERATE_META].title)
 
 
 def _sidecar_debt_settled(ctx) -> bool:
@@ -175,7 +175,7 @@ def _sidecars_absent(ctx) -> Optional[str]:
     """
     if _has_metas(ctx):
         return None
-    return _SIDECAR_REASON % (PREVIEW, ALL_STEPS[PREVIEW].title)
+    return _SIDECAR_REASON % (GENERATE_META, ALL_STEPS[GENERATE_META].title)
 
 
 def _nothing_imported(ctx, reason: str) -> Optional[str]:
@@ -285,8 +285,18 @@ class Step(ABC):
 
         The menu paints these red from here, so "destructive" is a property the
         step states about itself rather than a marker someone remembers to put
-        in front of it. Steps 4, 9 and 10 are the same kind of thing and now say
-        so in the same way.
+        in front of it. Exclude and Clean up are the same kind of thing and now
+        say so in the same way.
+        """
+        return False
+
+    def is_view(self) -> bool:
+        """Is this an observation of the pipeline rather than a step in it?
+
+        A view (Progress) reads state and changes nothing, so it has no
+        ordering of its own to keep consistent: it declares every other step as
+        both neighbour sets, and the edge checker leaves its edges out — there
+        is no "before" or "after" for looking.
         """
         return False
 
@@ -316,7 +326,8 @@ class Step(ABC):
 
 
 # ---------------------------------------------------------------------------
-# The ten steps. Edges are declared from BOTH sides on purpose: stating each one
+# The ten steps (nine transitions and one view). Edges are declared from BOTH
+# sides on purpose: stating each one
 # twice is what makes the consistency check possible, and a graph that can only
 # be wrong in one place is worth the duplication.
 # ---------------------------------------------------------------------------
@@ -330,10 +341,12 @@ class ImportFromSim(Step):
 
     def reachable_from(self, s: Strategy) -> Set[int]:
         # An entry point, and also where you come back to after a cycle ends.
-        return {DELETE_WS, WIPE_SIM}
+        return {CLEANUP}
 
     def reaches_to(self, s: Strategy) -> Set[int]:
-        return {LIST, PREVIEW, WIPE_SIM}
+        # Everything goes through Generate meta first; clearing up comes at the
+        # END of the cycle, so the import unlocks nothing else directly.
+        return {GENERATE_META}
 
     def blocked_because(self, ctx: Ctxish) -> Optional[str]:
         """Import has nothing to do when there is no source but footage is in.
@@ -356,8 +369,8 @@ class ImportFromSim(Step):
         ok, why, _stragglers = _machinery(ctx).working_area_is_expendable(ctx)
         if ok:
             return None
-        return ("unfinished session (%s) — finish it (%d/%d) or delete it (%d) first"
-                % (why, SITE, UPLOAD, DELETE_WS))
+        return ("unfinished session (%s) — finish it (%d/%d) or clean up (%d) first"
+                % (why, SITE, UPLOAD, CLEANUP))
 
     def _already_imported(self, ctx) -> Optional[str]:
         if (ctx.card / "DCIM").is_dir():
@@ -375,35 +388,46 @@ class ImportFromSim(Step):
                 % (pl.clip_count(cands[0]), PREVIEW, RENDER))
 
 
-class ListTrips(Step):
-    number, title = LIST, "List trips"
+class Progress(Step):
+    """The read-only view: the files on disk and what has been done to them.
+
+    Not a transition in the flow — an observation of it. It generates nothing
+    and writes nothing, so it is never blocked: an empty workspace is a
+    legitimate thing for it to report, not a reason to grey it out.
+    """
+
+    number, title = PROGRESS, "Progress"
+
+    def is_view(self) -> bool:
+        return True
+
+    def is_start_node(self, ctx: "Ctxish") -> bool:
+        # You can look at an empty workspace; it reports "nothing imported yet."
+        return True
+
+    def reachable_from(self, s: Strategy) -> Set[int]:
+        return set(ALL_STEPS) - {PROGRESS}
+
+    def reaches_to(self, s: Strategy) -> Set[int]:
+        return set(ALL_STEPS) - {PROGRESS}
+
+
+class GenerateMeta(Step):
+    number, title = GENERATE_META, "Generate meta"
 
     def reachable_from(self, s: Strategy) -> Set[int]:
         return {IMPORT}
 
     def reaches_to(self, s: Strategy) -> Set[int]:
-        return {PREVIEW}
-
-    def blocked_because(self, ctx: Ctxish) -> Optional[str]:
-        """Nothing to list before anything is imported."""
-        return _nothing_imported(ctx, "nothing imported — run %d) first" % IMPORT)
-
-
-class PreviewTrips(Step):
-    number, title = PREVIEW, "Preview trips"
-
-    def reachable_from(self, s: Strategy) -> Set[int]:
-        return {IMPORT, LIST}
-
-    def reaches_to(self, s: Strategy) -> Set[int]:
-        # Preview writes the sidecars, which is what everything downstream
-        # reads. On a publishing install they also unlock Deploy directly:
+        # Generate meta writes the sidecars — the metadata everything
+        # downstream reads — so it is what unlocks looking (Preview), pruning
+        # (Exclude), encoding (Render) and, on a publishing install, Deploy:
         # publishing the page from sidecars alone exercises the real publish
         # path — curation pull, manifest rebuild, asset split — hours before a
         # render finishes, which is when a broken pipeline is cheap to catch.
         if s is Strategy.WEBSITE_REPO:
-            return {EXCLUDE, RENDER, DEPLOY}
-        return {EXCLUDE, RENDER}
+            return {PREVIEW, EXCLUDE, RENDER, DEPLOY}
+        return {PREVIEW, EXCLUDE, RENDER}
 
     def blocked_because(self, ctx: Ctxish) -> Optional[str]:
         """Sidecars are built from the GPS track; no track, nothing to build."""
@@ -419,6 +443,24 @@ class PreviewTrips(Step):
         return "no GPS track in the import (no .gpx under DCIM) — sidecars need it"
 
 
+class PreviewTrips(Step):
+    number, title = PREVIEW, "Preview trips"
+
+    def reachable_from(self, s: Strategy) -> Set[int]:
+        return {GENERATE_META}
+
+    def reaches_to(self, s: Strategy) -> Set[int]:
+        # Preview is the LOOKING: stills and a contact sheet built from the
+        # sidecars step 2 wrote. What it unlocks is the decision — keep and
+        # render, or exclude.
+        return {EXCLUDE, RENDER}
+
+    def blocked_because(self, ctx: Ctxish) -> Optional[str]:
+        """Preview reads the sidecars; without them there is nothing to show."""
+        reason = _nothing_imported(ctx, "nothing imported — run %d) first" % IMPORT)
+        return reason or _sidecars_missing(ctx)
+
+
 class ExcludeTrip(Step):
     number, title = EXCLUDE, "Exclude trip"
 
@@ -426,7 +468,7 @@ class ExcludeTrip(Step):
         return True
 
     def reachable_from(self, s: Strategy) -> Set[int]:
-        return {PREVIEW}
+        return {GENERATE_META, PREVIEW}
 
     def reaches_to(self, s: Strategy) -> Set[int]:
         return {RENDER}
@@ -440,7 +482,7 @@ class RenderVideos(Step):
     number, title = RENDER, "Render videos"
 
     def reachable_from(self, s: Strategy) -> Set[int]:
-        return {PREVIEW, EXCLUDE}
+        return {GENERATE_META, PREVIEW, EXCLUDE}
 
     def reaches_to(self, s: Strategy) -> Set[int]:
         if s is Strategy.WEBSITE_REPO:
@@ -465,7 +507,7 @@ class CreateWebsite(Step):
         # Local edition: gathering into final_<id> is what settles the workspace.
         # Publishing edition: the local page is a check, not a milestone.
         if s is Strategy.LOCAL_DEFAULT_WEBSITE:
-            return {DELETE_WS}
+            return {CLEANUP}
         return set()
 
     def blocked_because(self, ctx: Ctxish) -> Optional[str]:
@@ -523,13 +565,13 @@ class UpdateSite(Step):
     number, title = DEPLOY, "Update site"
 
     def reachable_from(self, s: Strategy) -> Set[int]:
-        # From Preview as well as Upload: the sidecars are what the manifest is
-        # built from, so deploy can (and should) run before any render — to the
-        # REAL site, to catch a broken publish path early. See PreviewTrips.
-        return {PREVIEW, UPLOAD} if s is Strategy.WEBSITE_REPO else set()
+        # From Generate meta as well as Upload: the sidecars are what the
+        # manifest is built from, so deploy can (and should) run before any
+        # render — to the REAL site, to catch a broken publish path early.
+        return {GENERATE_META, UPLOAD} if s is Strategy.WEBSITE_REPO else set()
 
     def reaches_to(self, s: Strategy) -> Set[int]:
-        return {DELETE_WS} if s is Strategy.WEBSITE_REPO else set()
+        return {CLEANUP} if s is Strategy.WEBSITE_REPO else set()
 
     def blocked_because(self, ctx: Ctxish) -> Optional[str]:
         """Why Deploy cannot run, or None.
@@ -546,8 +588,20 @@ class UpdateSite(Step):
         return _first_reason(ctx, checks)
 
 
-class DeleteSimData(Step):
-    number, title = DELETE_WS, "Delete SIM data"
+class CleanUp(Step):
+    """Clearing up after a completed cycle: the working area AND the card.
+
+    One step, both halves, and both guards must pass before anything is
+    erased — the workspace half on working_area_is_expendable (every render in
+    the bucket at matching size, or inside a final_ folder), the card half on
+    copy_still_exists (this card's clips inside rendered trips, or still in
+    the workspace). Either guard saying no refuses the WHOLE step, naming the
+    half and the reason: a partial clean that reports success is worse than a
+    refusal. A card that is simply not present is not a failure — the
+    workspace half proceeds and the report says the card was absent.
+    """
+
+    number, title = CLEANUP, "Clean up"
 
     def is_destructive(self) -> bool:
         return True
@@ -559,75 +613,53 @@ class DeleteSimData(Step):
         return {IMPORT}
 
     def blocked_because(self, ctx: Ctxish) -> Optional[str]:
-        """The delete has its own heavy gates; the menu-level ones are that
-        something exists to delete at all, and that the trips were looked at
-        (sidecars) before the footage is put beyond looking."""
-        return _first_reason(ctx, (self._nothing_to_delete, _sidecars_missing))
+        """The clean-up has its own heavy gates; the menu-level ones are that
+        something exists to clear at all, that the trips were looked at
+        (sidecars) first, and — when a card with footage is in — the same
+        guards wipe_card enforces at run time, asked up front so the menu
+        cannot offer a wipe the step would refuse."""
+        checks = (self._nothing_to_clear, _sidecars_missing, self._card_reason)
+        return _first_reason(ctx, checks)
 
-    def _nothing_to_delete(self, ctx) -> Optional[str]:
+    # -- the workspace half -------------------------------------------------
+    def _nothing_to_clear(self, ctx) -> Optional[str]:
         if self._holdings(ctx):
             return None
-        return "nothing imported — nothing to delete"
+        return "nothing imported — nothing to clean up"
 
     def _holdings(self, ctx):
         pl = _machinery(ctx)
         return pl.import_candidates(ctx) or pl.rendered_mp4s(ctx.out_dir)
 
+    # -- the card half, asked only when a card with footage is in ----------
+    def _card_reason(self, ctx) -> Optional[str]:
+        if not self._card_has_files(ctx):
+            return None            # absent or already clean: workspace-only run
+        return _first_reason(ctx, (self._never_imported, self._unimported_clips,
+                                   self._copy_lost))
 
-class CleanSim(Step):
-    number, title = WIPE_SIM, "Clean SIM"
-
-    def is_destructive(self) -> bool:
-        return True
-
-    def reachable_from(self, s: Strategy) -> Set[int]:
-        # As soon as the import has landed and verified, the card is free.
-        return {IMPORT}
-
-    def reaches_to(self, s: Strategy) -> Set[int]:
-        return {IMPORT}
-
-    def blocked_because(self, ctx: Ctxish) -> Optional[str]:
-        """The same guards wipe_card enforces at run time, asked up front.
-
-        This is the one step whose target may have no copy, so the menu must
-        not offer it on evidence the step itself would refuse: the ledger has
-        to show an import, no clip on the card may be newer than it, and the
-        copy the ledger claims has to still be findable on this machine.
-        """
-        checks = (self._no_source, self._already_clean, self._never_imported,
-                  self._unimported_clips, self._copy_lost, _sidecars_missing)
-        return _first_reason(ctx, checks)
-
-    def _no_source(self, ctx) -> Optional[str]:
-        if (ctx.card / "DCIM").is_dir():
-            return None
-        return "no card at %s" % _machinery(ctx).tilde(ctx.card)
-
-    def _already_clean(self, ctx) -> Optional[str]:
+    def _card_has_files(self, ctx) -> bool:
         files = filter(_is_file, _safe_rglob(ctx.card / "DCIM", "*"))
-        if next(iter(files), None) is None:
-            return "card is already clean — nothing to wipe"
-        return None
+        return next(iter(files), None) is not None
 
     def _never_imported(self, ctx) -> Optional[str]:
         if _machinery(ctx).last_imported_stamp(ctx):
             return None
-        return "nothing ever imported — no record this footage exists anywhere else"
+        return "card: nothing ever imported — no record this footage exists anywhere else"
 
     def _unimported_clips(self, ctx) -> Optional[str]:
         pl = _machinery(ctx)
         pl.excluded_stamps(ctx)          # refresh the cache card_split reads
         n_new, _n_old = pl.card_split(ctx.card, pl.last_imported_stamp(ctx))
         if n_new:
-            return "%d clip(s) on the card were never imported" % n_new
+            return "card: %d clip(s) were never imported" % n_new
         return None
 
     def _copy_lost(self, ctx) -> Optional[str]:
         have, _what = _machinery(ctx).copy_still_exists(ctx)
         if have:
             return None
-        return "the ledger claims imported, but no copy is still on this machine"
+        return "card: the ledger claims imported, but no copy is still on this machine"
 
 
 def _is_file(p) -> bool:
@@ -636,10 +668,15 @@ def _is_file(p) -> bool:
 
 ALL_STEPS: Dict[int, Step] = {
     s.number: s for s in (
-        ImportFromSim(), ListTrips(), PreviewTrips(), ExcludeTrip(), RenderVideos(),
-        CreateWebsite(), UploadToSite(), UpdateSite(), DeleteSimData(), CleanSim(),
+        ImportFromSim(), Progress(), GenerateMeta(), PreviewTrips(), ExcludeTrip(),
+        RenderVideos(), CreateWebsite(), UploadToSite(), UpdateSite(), CleanUp(),
     )
 }
+
+# The views, kept out of the edge-consistency check: a view's neighbour sets
+# are "everything", by definition rather than by declaration, so they are not
+# a place a rule can be changed on one side only.
+_VIEW_NUMBERS = {n for n, s in ALL_STEPS.items() if s.is_view()}
 
 
 def _out_of(step: Step, strategy: Strategy):
@@ -660,11 +697,18 @@ def _backward_edges(strategy: Strategy):
     return set().union(*(_into(s, strategy) for s in ALL_STEPS.values()))
 
 
+def _touches_view(edge) -> bool:
+    return bool(_VIEW_NUMBERS & set(edge))
+
+
 def inconsistent_edges(strategy: Strategy):
     """Edges declared from one side only.
 
     An edge a->b must appear in a.reaches_to AND b.reachable_from, so anything
     in the symmetric difference is a rule that was changed in one place and not
     the other. That is the entire reason both directions are written down.
+    Edges touching a view are exempt: a view neighbours everything by
+    definition, and the other steps do not (and should not) declare it back.
     """
-    return sorted(_forward_edges(strategy) ^ _backward_edges(strategy))
+    lopsided = _forward_edges(strategy) ^ _backward_edges(strategy)
+    return sorted(filterfalse(_touches_view, lopsided))

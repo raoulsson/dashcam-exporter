@@ -31,7 +31,7 @@ def load_pipeline():
 
 P = load_pipeline()
 
-IMPORT, LIST, PREVIEW, EXCLUDE, RENDER, SITE, UPLOAD, DEPLOY, DEL_WS, WIPE_SIM = range(1, 11)
+IMPORT, PROGRESS, GENERATE_META, PREVIEW, EXCLUDE, RENDER, SITE, UPLOAD, DEPLOY, CLEANUP = range(1, 11)
 
 
 class Bench:
@@ -138,17 +138,19 @@ class SpecTest(unittest.TestCase):
 
 class TestAvailability(SpecTest):
 
-    def test_cannot_wipe_a_sim_that_is_not_mounted(self):
-        """You cannot wipe a SIM that is not mounted."""
-        self.assertBlocked(WIPE_SIM)
+    def test_cannot_clean_up_before_anything_happened(self):
+        """The clean-up (workspace + SIM, folded into one step) has nothing to
+        do on an untouched bench — and with no card in, that includes the SIM
+        half."""
+        self.assertBlocked(CLEANUP)
 
-    def test_can_wipe_a_sim_that_is_mounted(self):
-        # Mounted AND accounted for: the wipe's own runtime guard refuses while
-        # nothing was ever imported, so the menu offering it on a bare card was
-        # the drift the step graph exists to catch. The rule this file already
-        # states — sidecars before wipe sim — applies here too.
+    def test_can_clean_up_once_the_card_is_accounted_for(self):
+        # Mounted AND accounted for: the clean-up's own runtime guard refuses
+        # while nothing was ever imported, so the menu offering it on a bare
+        # card was the drift the step graph exists to catch. The rule this file
+        # already states — sidecars before the clean-up — applies here too.
         self.b.card_in().imported().sidecars()
-        self.assertAvailable(WIPE_SIM)
+        self.assertAvailable(CLEANUP)
 
     def test_cannot_upload_without_the_render_step(self):
         """You cannot upload without the render step."""
@@ -176,13 +178,14 @@ class TestAvailability(SpecTest):
         upload / delete / wipe sim / wipe WS."""
         self.b.card_in().imported().site_repo().bucket({})
         blocked = self.b.blocked()
-        for step in (PREVIEW, RENDER, UPLOAD, DEPLOY, DEL_WS, WIPE_SIM):
+        for step in (PREVIEW, RENDER, UPLOAD, DEPLOY, CLEANUP):
             self.assertIn(step, blocked, "step %d must wait for sidecars" % step)
 
     def test_cannot_create_sidecars_without_gpx(self):
-        """You cannot create sidecars without gpx."""
+        """You cannot create sidecars without gpx. The step that CREATES them
+        is Generate meta now — Preview only looks at what it wrote."""
         self.b.imported()                                       # clips, no 203gps
-        self.assertBlocked(PREVIEW, "no GPX means no sidecars can be built")
+        self.assertBlocked(GENERATE_META, "no GPX means no sidecars can be built")
 
 
 # ---------------------------------------------------------------------------
@@ -304,13 +307,15 @@ class TestExcludedTrips(SpecTest):
 
 class TestStepOrder(SpecTest):
 
-    def test_list_needs_an_import(self):
-        """Nothing to list before anything is imported."""
-        self.assertBlocked(LIST)
+    def test_generate_meta_needs_an_import(self):
+        """Nothing to build sidecars from before anything is imported. (These
+        two were List trips' availability tests; the generative half of step 2
+        moved into Generate meta, and Progress — the view — is never blocked.)"""
+        self.assertBlocked(GENERATE_META)
 
-    def test_list_is_available_once_clips_are_in(self):
+    def test_generate_meta_is_available_once_clips_are_in(self):
         self.b.imported().gpx()
-        self.assertAvailable(LIST)
+        self.assertAvailable(GENERATE_META)
 
     def test_render_needs_an_import_not_just_a_card(self):
         """A mounted card is not a workspace: render reads the copy."""
@@ -382,7 +387,7 @@ class TestIdempotence(SpecTest):
     def test_a_second_wipe_of_an_empty_card_is_a_no_op(self):
         self.b.card_in()
         (self.b.ctx.card / "DCIM" / "200video" / "front" / "20260728090000_0060.mp4").unlink()
-        self.assertBlocked(WIPE_SIM, "an empty card offers nothing to wipe")
+        self.assertBlocked(CLEANUP, "an empty card and an empty workspace offer nothing to clean")
 
 
 if __name__ == "__main__":

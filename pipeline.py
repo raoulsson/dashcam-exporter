@@ -1202,7 +1202,7 @@ def excluded_stamps(ctx):
     """The stamps of clips deliberately excluded, refreshed from disk.
 
     An excluded clip is treated as if imported ever after: the delta import
-    does not re-copy it, and Clean SIM counts it as accounted for. The warning
+    does not re-copy it, and the clean-up counts it as accounted for. The warning
     happened once, at exclude time — that was the decision, and re-warning at
     every later step would be asking the same question again.
     """
@@ -1402,7 +1402,7 @@ def working_area_is_expendable(ctx):
       - in the bucket at a matching size (only checkable with s3_bucket set) —
         AND, when a site repo is also configured, recorded by a site deploy
         that ran after it existed (see DEPLOYED_FILE), OR
-      - inside a final_<date> folder, which is where step 6 moves the deliverable
+      - inside a final_<date> folder, which is where the site step moves the deliverable
         on an install that does not publish.
     Everything else in the working area — previews/, the caches, the stills — is
     derived from renders and costs seconds to rebuild, so it never blocks.
@@ -1426,7 +1426,7 @@ def working_area_is_expendable(ctx):
     if not loose:
         return True, "no unfinished renders in the working area", []
 
-    # Gathered: step 6 MOVES a render into final_<date>. Matched on name AND
+    # Gathered: the site step MOVES a render into final_<date>. Matched on name AND
     # SIZE, because trip filenames repeat exactly across re-renders at the same
     # height — on name alone, a re-rendered trip collides with the stale copy
     # in final_ and is declared expendable, deleting the very file
@@ -1498,7 +1498,7 @@ def purge_published_renders(ctx, root):
     trip against gigabytes released. It is what last_imported_stamp reads to
     answer "have I already imported this card" once the footage is gone, what
     build_manifest carries forward for a trip whose render was deleted after
-    publishing, and what Clean SIM's evidence check reads to decide whether a
+    publishing, and what the clean-up's card-half evidence check reads to decide whether a
     card's clips are inside a rendered trip. Earlier this swept them away while
     two printed messages claimed they survived — the messages were right about
     the intent and the code was wrong.
@@ -1514,7 +1514,7 @@ def purge_published_renders(ctx, root):
         return 0, 0
     # EXCLUDED_FILE survives for the same reason the ledger does: it is state
     # ("these clips were dropped on purpose"), unrecoverable once gone, and
-    # the delta import and Clean SIM both read it after the footage is deleted.
+    # the delta import and the clean-up both read it after the footage is deleted.
     keep_names = {"logs", LEDGER_FILE, OWNER_FILE, EXCLUDED_FILE, DEPLOYED_FILE, root.name}
     freed = n = 0
     for child in sorted(out.iterdir()):
@@ -1640,8 +1640,9 @@ def step_import(ctx):
             sz = human_bytes(tree_size(src / "DCIM"))
             print(C.green("  Nothing to import — %s already holds %s clips (%s)."
                           % (tilde(src), n, sz)))
-            print(C.dim("  That is the configured root from config.txt. Go to Preview (3) "
-                        "or Render (5)."))
+            print(C.dim("  That is the configured root from config.txt. Go to %d) %s"
+                        " or %d) %s." % (step_num(step_generate_meta), SHORT[step_num(step_generate_meta)],
+                                        step_num(step_render), SHORT[step_num(step_render)])))
             return record(ctx, "Import from SIM", SKIPPED, started,
                           "import already present, %s clips" % n)
         print(C.yellow("  No footage at %s and none under %s." % (
@@ -1663,7 +1664,7 @@ def step_import(ctx):
     # A previous cycle's output is the usual thing in the way, and it is in the
     # way even when the import dir is empty — deleting the source does not touch
     # the renders. Offer to clear it here, defaulting to yes, because the whole
-    # point of running the cleanup at import time is that step 9 is easy to skip.
+    # point of running the cleanup at import time is that step 10 is easy to skip.
     prior = [c for c in ctx.out_dir.iterdir()
              if c.name not in ("logs", LEDGER_FILE) and not c.name.startswith(FINAL_PREFIX)
              and not c.name.startswith(".")] if ctx.out_dir.is_dir() else []
@@ -1709,7 +1710,8 @@ def step_import(ctx):
                 print(C.dim("    %s  %s" % (tilde(f), human_bytes(f.stat().st_size))))
             if len(stragglers) > 6:
                 print(C.dim("    ... and %d more" % (len(stragglers) - 6)))
-            print(C.dim("  Upload them (7), or build the site (6) which moves them"))
+            print(C.dim("  Upload them (%d), or build the site (%d) which moves them"
+                        % (step_num(step_upload), step_num(step_site))))
             print(C.dim("  into final_<date>. Either one makes this sweep silent."))
             print(C.dim("  Importing anyway is fine — the new card lands beside them."))
 
@@ -1725,7 +1727,7 @@ def step_import(ctx):
         print(C.dim("  and there is no record afterwards of which clip came from which."))
         print(C.dim("  If the previous round is finished (rendered, and published if you"))
         print(C.dim("  publish), clear it with %d) %s first. If it is not, finish it first."
-                    % (step_num(step_delete_import), SHORT[step_num(step_delete_import)])))
+                    % (step_num(step_cleanup), SHORT[step_num(step_cleanup)])))
         print(C.dim("  Or clear it first, so this copy starts from an empty working dir."))
         if confirm("  Clear the old import before copying?", False):
             # Same proof the delete step demands. Clearing here is the same act,
@@ -1751,7 +1753,7 @@ def step_import(ctx):
             for src in leftovers:
                 # The DCIM tree, never the folder holding it. When a candidate IS
                 # the sink — the layout where a card was copied straight into it —
-                # rmtree(src) took every dated sibling import with it. Step 9
+                # rmtree(src) took every dated sibling import with it. The clean-up step
                 # narrows to DCIM for exactly this reason; this path did not.
                 dcim = src / "DCIM"
                 if dcim.is_dir():
@@ -1766,7 +1768,7 @@ def step_import(ctx):
             # candidate's namespace. Unguarded, it would delete a straggler
             # render the prior_files sweep just refused to touch, and in the
             # no-bucket case erase footage and renders behind one y/n while
-            # step 9 in the same configuration deliberately keeps the renders.
+            # the clean-up in the same configuration deliberately keeps the renders.
             # Run ONCE, not per candidate: the purge is tree-wide either way.
             ok, why, stragglers = working_area_is_expendable(ctx)
             if ok:
@@ -1779,7 +1781,8 @@ def step_import(ctx):
                 print(C.yellow("  Footage cleared; keeping the renders: %s." % why))
                 for f in stragglers[:6]:
                     print(C.dim("    %s" % tilde(f)))
-                print(C.dim("  Upload them (7) or gather them (6); the next import"))
+                print(C.dim("  Upload them (%d) or gather them (%d); the next import"
+                            % (step_num(step_upload), step_num(step_site))))
                 print(C.dim("  sweeps them without asking once they are safe."))
         elif not confirm("  Import anyway, on top of what is there?", False):
             return record(ctx, "Import from SIM", SKIPPED, started,
@@ -1869,7 +1872,7 @@ def step_import(ctx):
     ctx.last_groups = None
 
     # Record the high-water mark HERE, not only at cleanup. Recording it only
-    # after publishing would leave Clean SIM unable to free the card right
+    # after publishing would leave the clean-up unable to free the card right
     # after an import, and freeing the card while the slow half runs is the
     # entire reason the delta import exists.
     record_import(ctx, ctx.card)
@@ -1904,27 +1907,134 @@ def parse_scan(root, lines):
     return ScanResult(root, total, skipped, lines)
 
 
-def step_list(ctx):
-    """Dry-run scan: the trip table, with indices to feed the render step."""
-    started = time.time()
-    root = pick_import(ctx, "the trip scan")
-    if root is None:
-        return record(ctx, "List trips", SKIPPED, started, "no import folder")
+def step_progress(ctx):
+    """Progress: the files on disk and what has been done to them. Read-only.
 
-    print(C.dim("  Scanning %s (read-only, no encoding). This walks the video for" % root))
-    print(C.dim("  drive-away/park detection, so it takes a while on a full card."))
-    # Not passthrough. The trip table IS the result and must be printed verbatim,
-    # but it arrives after 239 "[scan i/n]" lines, and dumping those scrolls the
-    # table away before it can be read. So consume the scan lines into the
-    # progress display (which is what they exist for) and keep only the table.
-    rc, lines = run_stream(["./list-trips-data.sh", "--root", str(root), "--out", str(ctx.out_dir)] + ctx.config_args + ctx.scan_args,
-                           ctx.exporter, "Scan", parser=make_scan_parser(),
-                           keep=lambda l: not l.startswith("[scan ") and l.strip() != "")
+    An observation of state, not a transition in the flow: which trips exist,
+    which are excluded, which are rendered, uploaded and live. It generates
+    nothing and writes nothing — every fact here is read from the sidecars,
+    the renders, the bucket listing and the deploy record, so an empty
+    workspace is a legitimate answer, not an error.
+    """
+    started = time.time()
+    trips = listed_trips(ctx)
+    excluded = excluded_stamps(ctx)
+    if not trips:
+        cands = import_candidates(ctx)
+        if cands:
+            n = clip_count(cands[0])
+            print("  %s clips imported in %s — no sidecars yet." % (n, tilde(cands[0])))
+            print(C.dim("  Run %d) %s to write them." % (
+                step_num(step_generate_meta), SHORT[step_num(step_generate_meta)])))
+        else:
+            print("  Nothing imported yet.")
+            print(C.dim("  Run %d) %s to bring footage in." % (
+                step_num(step_import), SHORT[step_num(step_import)])))
+        return record(ctx, "Progress", RAN, started, "no trips yet")
+
+    renders = {}
+    for p in rendered_mp4s(ctx.out_dir):
+        try:
+            renders[p.name] = p.stat().st_size
+        except OSError:
+            continue
+    # The bucket listing is one network call and only when it can mean
+    # something; offline or unconfigured, the column honestly says unknown.
+    remote = None
+    if ctx.s3_bucket and not ctx.offline:
+        remote = s3_objects(ctx)
+    deployed = set()
+    try:
+        deployed = set(json.loads((ctx.out_dir / DEPLOYED_FILE).read_text()).get("videos", []))
+    except Exception:
+        pass
+
+    n_rendered = n_uploaded = n_live = 0
+    print("  %-38s %-9s %-9s %-9s %s" % ("trip", "sidecars", "rendered", "uploaded", "live"))
+    for t in trips:
+        mp4 = next((n for n in sorted(renders) if n.startswith(t["id"] + "_h")), None)
+        up = live = False
+        if mp4:
+            n_rendered += 1
+            size = renders[mp4]
+            if remote is not None:
+                up = any((k == mp4 or k.endswith("/" + mp4)) and v == size
+                         for k, v in remote.items())
+                n_uploaded += 1 if up else 0
+            live = mp4 in deployed
+            n_live += 1 if live else 0
+        yn = lambda b: "yes" if b else "-"
+        upcol = "?" if (mp4 and remote is None) else yn(up)
+        print("  %-38s %-9s %-9s %-9s %s"
+              % (t["id"], "yes", yn(bool(mp4)), upcol, yn(live)))
+    print()
+    line = "  %d trip(s): %d rendered, %d live" % (len(trips), n_rendered, n_live)
+    if remote is not None:
+        line = "  %d trip(s): %d rendered, %d uploaded, %d live" % (
+            len(trips), n_rendered, n_uploaded, n_live)
+    print(line)
+    if excluded:
+        print(C.dim("  %d clip stamp(s) excluded on purpose." % len(excluded)))
+    return record(ctx, "Progress", RAN, started,
+                  "%d trip(s), %d rendered, %d live" % (len(trips), n_rendered, n_live))
+
+
+def step_generate_meta(ctx):
+    """Write the sidecars: each trip's _meta.json, .gpx and .html map.
+
+    The generative half of what used to hide inside Preview: the metadata is
+    what every later step reads — the render's trip list, the site's manifest,
+    the delete and wipe guards' evidence — so making it exist is its own step,
+    sitting right after Import. No stills, no encoding, no table: looking at
+    the result is Preview's job.
+    """
+    started = time.time()
+    reason = step_graph.ALL_STEPS[step_graph.GENERATE_META].blocked_because(ctx)
+    if reason:
+        print(C.red("  %s" % reason))
+        return record(ctx, "Generate meta", SKIPPED, started, reason)
+    root = pick_import(ctx, "the sidecar pass")
+    if root is None:
+        return record(ctx, "Generate meta", SKIPPED, started, "no import folder")
+
+    # Only wake the renderer when a trip is missing its set. "Missing" is per
+    # trip, and a trip counts as done when all three files exist. A partial set
+    # means an interrupted pass, so that trip gets redone — and since
+    # --sidecars-only has no per-trip selection, one missing trip means the
+    # whole pass runs again. Correct and occasionally slow beats fast and
+    # subtly incomplete.
+    have = load_groups(ctx, root)
+    need = True
+    if have:
+        gs = [g for g in have.get("trips", []) if g.get("renderable", True)]
+        if gs:
+            done = 0
+            for g in gs:
+                base = g.get("out_base")
+                if base and all(Path(base + s).is_file()
+                                for s in (".gpx", ".html", "_meta.json")):
+                    done += 1
+            need = done < len(gs)
+            if not need:
+                print(C.dim("  Sidecars already written for all %d trip(s) — nothing to"
+                            " generate." % len(gs)))
+                return record(ctx, "Generate meta", SKIPPED, started,
+                              "sidecars already complete for %d trip(s)" % len(gs))
+            if done:
+                print(C.dim("  %d of %d trip(s) have sidecars; rewriting all (the"
+                            " renderer has no per-trip mode)." % (done, len(gs))))
+    # The renderer prints its usual "[Trip a/b]" headers here, so the real trip
+    # counter drives the bar; there are no per-clip lines in this mode.
+    cmd = (["./make-trips-rendered.sh", "--sidecars-only", "--root", str(root), "--out", str(ctx.out_dir)]
+           + ctx.config_args + ctx.scan_args)
+    rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars", parser=make_scan_parser(),
+                            keep=lambda l: l.startswith("[Trip "))
     if rc != 0:
-        return record(ctx, "List trips", FAILED, started, "exit %d" % rc)
-    ctx.last_scan = parse_scan(root, lines)
-    return record(ctx, "List trips", RAN, started,
-                  "%d trips found, %d renderable" % (ctx.last_scan.total, ctx.last_scan.renderable))
+        return record(ctx, "Generate meta", FAILED, started, "sidecars exit %d" % rc)
+    metas = len(list(ctx.out_dir.rglob("trip_*_meta.json")))
+    print(C.green("  Sidecars in place — %d trip meta file(s) under %s."
+                  % (metas, tilde(ctx.out_dir))))
+    return record(ctx, "Generate meta", RAN, started, "%d trip meta file(s)" % metas)
 
 
 # ---------------------------------------------------------------------------
@@ -2039,15 +2149,16 @@ def load_groups(ctx, root, refresh=False):
     """Run --print-groups against `root` and return its parsed JSON, or None.
 
     Cached per session per import folder: the scan decodes video to find the
-    pull-away and park moments, so it costs the same minutes as List trips.
+    pull-away and park moments, so it costs the same minutes as the sidecar
+    pass's own boundary scan.
     """
     if not refresh and ctx.last_groups and ctx.last_groups[0] == root:
         print(C.dim("  Using the trip grouping already scanned in this session."))
         return ctx.last_groups[1]
 
     print(C.dim("  Scanning %s for the authoritative trip grouping." % root))
-    print(C.dim("  This is the same work as %d) %s (it walks the video), so it takes"
-                % (step_num(step_list), SHORT[step_num(step_list)])))
+    print(C.dim("  This is the same boundary scan %d) %s runs (it walks the video), so it takes"
+                % (step_num(step_generate_meta), SHORT[step_num(step_generate_meta)])))
     print(C.dim("  a while; the result is reused for the rest of this session."))
     fd, tmp = tempfile.mkstemp(prefix="dashcam-groups-", suffix=".json")
     os.close(fd)
@@ -2511,22 +2622,28 @@ def build_sidecars(ctx):
 
 
 def step_preview(ctx):
-    """Sidecars + one still per trip + a local contact sheet. No encoding.
+    """One still per trip + a local contact sheet, from the sidecars. No encoding.
 
-    The cheap pass that makes pruning possible: encoding is hours and uploading
-    is days, so the decision about which trips to keep has to be makeable before
-    either. Nothing here writes video and nothing here publishes.
+    The LOOKING half: the sidecars were written by Generate meta, and this
+    builds what a human judges from — a frame per trip and a page to see them
+    on. The cheap pass that makes pruning possible: encoding is hours and
+    uploading is days, so the decision about which trips to keep has to be
+    makeable before either. If the sidecars are missing this step is blocked
+    and says which step writes them — it does not generate them on the side.
     """
     started = time.time()
+    reason = step_graph.ALL_STEPS[step_graph.PREVIEW].blocked_because(ctx)
+    if reason:
+        print(C.red("  %s" % reason))
+        return record(ctx, "Preview trips", SKIPPED, started, reason)
     root = pick_import(ctx, "the preview pass")
     if root is None:
         return record(ctx, "Preview trips", SKIPPED, started, "no import folder")
 
     previews_dir = ctx.out_dir / PREVIEW_DIRNAME
-    print(C.dim("  Three cheap things, no encoding:"))
-    print(C.dim("    1. each trip's .html map, .gpx and _meta.json — only the ones missing"))
-    print(C.dim("    2. one still per trip, a frame from its first front clip"))
-    print(C.dim("    3. %s/preview_<day>.html — a contact sheet to open locally"
+    print(C.dim("  Two cheap things, no encoding:"))
+    print(C.dim("    1. one still per trip, a frame from its first front clip"))
+    print(C.dim("    2. %s/preview_<day>.html — a contact sheet to open locally"
                 % previews_dir))
     print(C.dim("  Reviewing is entirely offline; deploying stays a separate choice."))
 
@@ -2535,49 +2652,8 @@ def step_preview(ctx):
     # on screen whose answer is already on screen — two prompts for one decision,
     # which is how you teach someone to stop reading them.
 
-    # 1. Sidecars — but only if they are missing. This step was written for the
-    #    pass BEFORE a render, where nothing exists yet. Run after a render it
-    #    regenerated every .gpx, .html and _meta.json that the render had just
-    #    written, from the same clips, to the same bytes: minutes of decoding for
-    #    a result already on disk. The render writes them itself, so what is
-    #    already there is not a stale copy, it is the copy.
-    #
-    #    "Missing" is per trip, and a trip counts as done when all three exist.
-    #    A partial set means an interrupted pass, so that trip gets redone — and
-    #    since --sidecars-only has no per-trip selection, one missing trip means
-    #    the whole pass runs again. That is the honest trade: correct and
-    #    occasionally slow beats fast and subtly incomplete.
-    have = load_groups(ctx, root)
-    need = True
-    if have:
-        gs = [g for g in have.get("trips", []) if g.get("renderable", True)]
-        if gs:
-            done = 0
-            for g in gs:
-                base = g.get("out_base")
-                if base and all(Path(base + s).is_file()
-                                for s in (".gpx", ".html", "_meta.json")):
-                    done += 1
-            need = done < len(gs)
-            if not need:
-                print(C.dim("  Sidecars already written for all %d trip(s) — skipping"
-                            " that pass." % len(gs)))
-            elif done:
-                print(C.dim("  %d of %d trip(s) have sidecars; rewriting all (the"
-                            " renderer has no per-trip mode)." % (done, len(gs))))
-    if need:
-        # The renderer prints its usual "[Trip a/b]" headers here, so the real
-        # trip counter drives the bar; there are no per-clip lines in this mode,
-        # and the parser simply shows no clip counter.
-        cmd = (["./make-trips-rendered.sh", "--sidecars-only", "--root", str(root), "--out", str(ctx.out_dir)]
-               + ctx.config_args + ctx.scan_args)
-        rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars", parser=make_scan_parser(),
-                                keep=lambda l: l.startswith("[Trip "))
-        if rc != 0:
-            return record(ctx, "Preview trips", FAILED, started, "sidecars exit %d" % rc)
-
-    # 2. The grouping — which is also the trip -> source clip mapping the stills
-    #    and the contact sheet's clip lists are built from.
+    # The grouping — which is also the trip -> source clip mapping the stills
+    # and the contact sheet's clip lists are built from.
     payload = load_groups(ctx, root)
     if payload is None:
         return record(ctx, "Preview trips", FAILED, started, "--print-groups failed")
@@ -2586,8 +2662,8 @@ def step_preview(ctx):
         print(C.yellow("  The scan found no trips in %s." % root))
         return record(ctx, "Preview trips", SKIPPED, started, "no trips")
 
-    # 3. Stills. Every trip gets one, including the auto-skipped fragments — he
-    #    is deciding what to keep, and a trip he cannot see is one he cannot judge.
+    # Stills. Every trip gets one, including the auto-skipped fragments — he
+    # is deciding what to keep, and a trip he cannot see is one he cannot judge.
     previews_dir.mkdir(parents=True, exist_ok=True)
     stills, failed = {}, []
     for i, t in enumerate(trips, 1):
@@ -2620,18 +2696,10 @@ def step_preview(ctx):
 
     index = write_contact_sheet(ctx, root, payload, previews_dir, stills)
 
-    # 4. Keep trips.json current, if there is a site repo to keep it current in.
-    #    The site is not deployed here — this only means a later deploy is not
-    #    carrying a stale manifest. With no site_repo there is no manifest and
-    #    nothing to say about it.
-    if ctx.site_script("build_manifest.py"):
-        rc, _lines = run_stream(["python3", "build_manifest.py"], ctx.site, "Indexing",
-                                keep=lambda l: l.startswith("wrote trips.json"))
-        if rc != 0:
-            return record(ctx, "Preview trips", FAILED, started, "build_manifest exit %d" % rc)
-    elif ctx.site is not None:
-        print(C.yellow("  No build_manifest.py under %s — the site index was not updated."
-                       % tilde(ctx.site)))
+    # No trips.json refresh here any more. Preview used to re-index the site
+    # manifest "while we're here", which made a looking-step write into the
+    # site repo; deploy-site.sh re-indexes as its own first act, so the deploy
+    # never carries a stale manifest anyway. One step, one job.
 
     print()
     print(C.green("  previews are in %s" % previews_dir))
@@ -2823,7 +2891,7 @@ def step_drop_trip(ctx):
 
     # Record the dropped clips' stamps as excluded. From here on they are
     # treated as if imported: the next delta import does not re-copy them off
-    # the card, and Clean SIM counts them as accounted for — the warning above
+    # the card, and the clean-up counts them as accounted for — the warning above
     # was the decision, made once, at the only moment it can matter.
     dropped_stamps = {m.group(1) for p in files
                       for m in [STAMP_RE.search(p.name)] if m}
@@ -3053,7 +3121,8 @@ def step_render(ctx):
             print(C.dim("      parking inside a trip is cut"))
         else:
             print(C.dim("  span is start->end. The encode is shorter — parking is cut — but by"))
-            print(C.dim("  how much is only known after Preview (3) writes the sidecars."))
+            print(C.dim("  how much is only known after %d) %s writes the sidecars."
+                        % (step_num(step_generate_meta), SHORT[step_num(step_generate_meta)])))
         print()
     elif ctx.last_scan and ctx.last_scan.root == root:
         print("  Last scan: %d trips, %d renderable%s" % (
@@ -4155,26 +4224,35 @@ def is_complete_summary(ctx):
     return None, None, lines
 
 
-def step_delete_import(ctx):
-    """Erase the original footage of one import. Unrecoverable — heavily gated.
+def step_cleanup(ctx):
+    """Clear up after a completed cycle: the working area AND the card. One
+    step, both halves, unrecoverable — heavily gated.
 
-    Up to three independent things must hold before the prompt even appears:
+    Up to three independent things must hold for the workspace half before the
+    prompt even appears:
       1. every renderable trip in that import has a rendered mp4 locally,
       2. every rendered mp4 is on S3 with a matching size,
       3. is-complete.py agrees every trip is fully published (S3 + live site).
-    Then the word DELETE has to be typed. A y/n here is too easy to fat-finger
+    The card half is gated on the same evidence the card wipe always demanded: an
+    import on record, nothing on the card newer than it, and the copy the
+    ledger claims still findable (copy_still_exists). BOTH halves' guards run
+    before anything is erased, and either saying no refuses the whole step —
+    a partial clean that reports success is worse than a refusal. A card that
+    is simply not in is not a failure: the workspace half proceeds and the
+    report says the card was absent.
+    Then the word CLEAN has to be typed. A y/n here is too easy to fat-finger
     for an action that destroys tens of GB of irreplaceable source footage.
 
     Guards 2 and 3 need a bucket and a site repo. Where those are not
     configured the proof does not exist, and the one thing this must not do is
     quietly count an unasked question as a pass — nothing was checked, so the
     renders under <out> are the only copy of that footage in the world. That is
-    stated in place of the missing guards, and the DELETE prompt still stands.
+    stated in place of the missing guards, and the CLEAN prompt still stands.
     """
     started = time.time()
-    root = pick_import(ctx, "deletion")
+    root = pick_import(ctx, "the clean-up")
     if root is None:
-        return record(ctx, "Delete SIM data", SKIPPED, started, "no import folder")
+        return record(ctx, "Clean up", SKIPPED, started, "no import folder")
 
     # What actually gets erased. If `root` is the sink itself it may also contain
     # OTHER imports as dated subfolders (<sink>/<day>/DCIM), and those have not
@@ -4193,7 +4271,7 @@ def step_delete_import(ctx):
         target = root
     if not target.is_dir():
         print(C.red("  Nothing to delete at %s" % target))
-        return record(ctx, "Delete SIM data", SKIPPED, started, "nothing at the target")
+        return record(ctx, "Clean up", SKIPPED, started, "nothing at the target")
 
     size = tree_size(target)
     files = count_files(target)
@@ -4228,7 +4306,7 @@ def step_delete_import(ctx):
     if not ns_mp4s:
         print(C.red("no"))
         print(C.red("        No mp4 under %s — nothing from this import was rendered." % ns))
-        return record(ctx, "Delete SIM data", SKIPPED, started, "refused: nothing rendered")
+        return record(ctx, "Clean up", SKIPPED, started, "refused: nothing rendered")
     # How many trips SHOULD be here. Prefer this session's scan, but fall back to
     # the grouping — which the boundary cache makes free, and which is keyed on
     # the clips and their GPX, so it cannot describe a different card. Demanding
@@ -4265,7 +4343,7 @@ def step_delete_import(ctx):
             print(C.red("unknown"))
             if not can_site:
                 print(C.red("        And there is no site to ask instead — refusing."))
-                return record(ctx, "Delete SIM data", SKIPPED, started,
+                return record(ctx, "Clean up", SKIPPED, started,
                               "refused: bucket unlistable and no site to verify against")
             print(C.dim("        Noted, not blocking — is-complete.py below is what decides."))
         elif not ok:
@@ -4278,7 +4356,7 @@ def step_delete_import(ctx):
             # just reported the renders are not in the bucket.
             if not can_site:
                 print(C.red("        And there is no site to ask instead — refusing."))
-                return record(ctx, "Delete SIM data", SKIPPED, started,
+                return record(ctx, "Clean up", SKIPPED, started,
                               "refused: %d missing / %d mismatched on S3, no site check"
                               % (len(missing), len(mismatched)))
             print(C.dim("        Noted, not blocking — is-complete.py below is what decides."))
@@ -4301,12 +4379,12 @@ def step_delete_import(ctx):
             print(C.red("unknown"))
             for l in out_lines[-15:]:
                 print(C.dim("        " + l))
-            return record(ctx, "Delete SIM data", SKIPPED, started, "refused: is-complete.py inconclusive")
+            return record(ctx, "Clean up", SKIPPED, started, "refused: is-complete.py inconclusive")
         if total == 0 or safe < total:
             print(C.red("no (%s/%s)" % (safe, total)))
             for l in out_lines:
                 print(C.dim("        " + l))
-            return record(ctx, "Delete SIM data", SKIPPED, started,
+            return record(ctx, "Clean up", SKIPPED, started,
                           "refused: %s/%s trips fully published" % (safe, total))
         print(C.green("yes (%d/%d)" % (safe, total)))
 
@@ -4328,22 +4406,52 @@ def step_delete_import(ctx):
         print(C.red("  copy of this footage that exists. Lose that disk and the drive is gone."))
         print(C.dim("  Back the renders up elsewhere first, or leave the import where it is —"))
         print(C.dim("  keeping it costs disk, not data."))
-    # The card is NOT touched here. Step 10 frees it right after the import, so
-    # by the time this runs it has been back in the car for hours — a block that
-    # erases "the card" at this point can only ever reach a DIFFERENT card than
-    # the one this round came from, guarded by nothing but a ledger comparison.
-    # One step owns the card, and it is 10, which proves the copy still exists
-    # before it erases anything.
-    answer = ask("  Type DELETE to erase it, anything else to cancel: ")
-    if answer != "DELETE":
+
+    # --- the card half's guards, BEFORE anything is erased. Either half
+    # refusing refuses the whole step: clearing the workspace and then
+    # discovering the card cannot follow would be exactly the partial clean
+    # this step exists to prevent. A card that is not in (or holds nothing) is
+    # not a refusal — the workspace half proceeds and the summary says so.
+    card_dcim = ctx.card / "DCIM"
+    card_in = card_dcim.is_dir() and any(f.is_file() for f in card_dcim.rglob("*"))
+    if card_in:
+        after = last_imported_stamp(ctx)
+        excluded_stamps(ctx)             # refresh the cache card_split reads
+        n_new, n_old = card_split(ctx.card, after)
+        if not after:
+            print(C.red("  Card: nothing has ever been imported on this machine — refusing."))
+            return record(ctx, "Clean up", SKIPPED, started,
+                          "refused: card in, nothing ever imported")
+        if n_new:
+            print(C.red("  Card: %d clip(s) are NEWER than anything imported." % n_new))
+            print(C.red("  Those exist here and nowhere else. Erasing them is final."))
+            print(C.dim("  Run %d) %s to copy them first — it only takes the new ones."
+                        % (step_num(step_import), SHORT[step_num(step_import)])))
+            return record(ctx, "Clean up", SKIPPED, started,
+                          "refused: %d card clip(s) not imported" % n_new)
+        have, what = copy_still_exists(ctx)
+        if not have:
+            print(C.red("  Card: the ledger says imported through %s — but nothing on" % after))
+            print(C.red("  this machine holds it now. Refusing; import again, or erase"))
+            print(C.red("  the card yourself."))
+            return record(ctx, "Clean up", SKIPPED, started,
+                          "refused: card ledger claims imported, no copy found")
+        print(C.green("  Card: all %d clip(s) were imported and verified (%s)."
+                      % (n_old, what)))
+        print(C.red("  The card's files go too; its folders stay so the camera can record."))
+    else:
+        print(C.dim("  No card present (or nothing on it) — cleaning the workspace only."))
+
+    answer = ask("  Type CLEAN to erase it, anything else to cancel: ")
+    if answer != "CLEAN":
         print("  Cancelled.")
-        return record(ctx, "Delete SIM data", SKIPPED, started, "cancelled at the prompt")
+        return record(ctx, "Clean up", SKIPPED, started, "cancelled at the prompt")
 
     try:
         shutil.rmtree(str(target))
     except OSError as e:
         print(C.red("  Delete failed: %s" % e))
-        return record(ctx, "Delete SIM data", FAILED, started, str(e))
+        return record(ctx, "Clean up", FAILED, started, str(e))
     if ctx.selected_import == root:
         ctx.selected_import = None
     ctx.last_scan = None
@@ -4370,17 +4478,31 @@ def step_delete_import(ctx):
         for f in stragglers[:6]:
             print(C.dim("    %s" % tilde(f)))
         print(C.dim("  The original footage is gone; these are now the only copy"))
-        print(C.dim("  of those trips. Upload them (7) or gather them (6), then"))
+        print(C.dim("  of those trips. Upload them (%d) or gather them (%d), then"
+                    % (step_num(step_upload), step_num(step_site))))
         print(C.dim("  the next import sweeps them without asking."))
     if n:
         size += freed
         files += n
 
-
     if ctx.selected_import == root:
         ctx.selected_import = None
-    return record(ctx, "Delete SIM data", RAN, started,
-                  "%d file(s), %s freed" % (files, human_bytes(size)))
+
+    # --- the card half. wipe_card re-checks the same guards approved above
+    # (same answers, one code path for the deletion) and refuses rather than
+    # deleting if anything changed while the prompt was on screen. A refusal
+    # here is reported loudly, never absorbed into a success line.
+    card_note = "card not present"
+    if card_in:
+        gone, freed_card, reason = wipe_card(ctx)
+        if reason:
+            print(C.red("  Card NOT cleaned: %s." % reason))
+            return record(ctx, "Clean up", FAILED, started,
+                          "workspace cleared (%d file(s), %s) but card refused: %s"
+                          % (files, human_bytes(size), reason))
+        card_note = "card: %d file(s), %s" % (gone, human_bytes(freed_card))
+    return record(ctx, "Clean up", RAN, started,
+                  "%d file(s), %s freed; %s" % (files, human_bytes(size), card_note))
 
 
 # The pipeline, in order. `in_all` is False for the destructive steps: "all" and
@@ -4400,7 +4522,7 @@ def copy_still_exists(ctx):
     The ledger records that a verified copy WAS made. It cannot notice that the
     copy was later deleted, moved to a disk that is not plugged in, or lost to a
     sweep — and "imported through X" reads identically in all those cases. On
-    its own it is a claim, and Clean SIM acting on a claim means erasing the
+    its own it is a claim, and the clean-up acting on a claim means erasing the
     last copy of a drive because a 154-byte JSON file said not to worry.
 
     So the ledger decides WHETHER the card's clips were ever copied, and this
@@ -4488,7 +4610,7 @@ def copy_still_exists(ctx):
 def wipe_card(ctx):
     """Erase the card's files, keeping its folder tree. Returns (gone, freed, reason).
 
-    The guarded core of Clean SIM, without the conversation: it re-checks the
+    The guarded core of the clean-up's card half, without the conversation: it re-checks the
     same evidence the interactive step shows (a high-water mark exists, no
     clip on the card is newer than it, and the copy the ledger claims is still
     somewhere), refuses with a reason when any of it fails, and otherwise
@@ -4525,116 +4647,21 @@ def wipe_card(ctx):
     return gone, freed, ""
 
 
-def step_clean_card(ctx):
-    """Erase the card's clips, keeping its folder structure.
-
-    Every other destructive step deletes something that exists elsewhere: the
-    drop step removes clips you decided not to keep, the delete step removes an
-    import already rendered and published. This one erases the original. Until
-    it has been copied, the card IS the footage.
-
-    So the guard is not "are you sure" but "is it somewhere else", and the
-    answer comes from the same high-water mark the delta import uses: a clip
-    stamped at or before it was copied by a run that verified file-for-file.
-    Anything newer has never been read by this machine, and no confirmation
-    makes deleting it recoverable — so that case refuses rather than asks.
-
-    Folders stay. The camera writes into DCIM/200video/{front,rear} and expects
-    them to exist; erasing the tree makes the next recording fail in the car,
-    which you would find out about later and far from a computer.
-    """
-    started = time.time()
-    dcim = ctx.card / "DCIM"
-    if not dcim.is_dir():
-        print(C.yellow("  No card at %s — nothing to clean." % ctx.card))
-        return record(ctx, "Clean SIM", SKIPPED, started, "no card")
-
-    files = [f for f in dcim.rglob("*") if f.is_file()]
-    size = sum(f.stat().st_size for f in files)
-    after = last_imported_stamp(ctx)
-    excluded_stamps(ctx)                 # refresh the cache card_split reads
-    n_new, n_old = card_split(ctx.card, after)
-
-    print()
-    print("  Card:  %s" % tilde(ctx.card))
-    print("  Holds: %d file(s), %s" % (len(files), human_bytes(size)))
-    if after:
-        print("  Imported through %s" % C.bold(after))
-    print()
-
-    if not after:
-        print(C.red("  Nothing has ever been imported on this machine."))
-        print(C.red("  There is no record that any of this exists anywhere else."))
-        print(C.dim("  Run 1) Import first. Refusing."))
-        return record(ctx, "Clean SIM", SKIPPED, started, "refused: nothing imported")
-
-    if n_new:
-        print(C.red("  %d clip(s) on the card are NEWER than anything imported." % n_new))
-        print(C.red("  Those exist here and nowhere else. Erasing them is final."))
-        print(C.dim("  Run 1) Import to copy them first — it only takes the new ones."))
-        return record(ctx, "Clean SIM", SKIPPED, started,
-                      "refused: %d clip(s) not imported" % n_new)
-
-    have, what = copy_still_exists(ctx)
-    if not have:
-        print(C.red("  The ledger says imported through %s — but nothing on this" % after))
-        print(C.red("  machine holds it now. No source clips in the workspace, no"))
-        print(C.red("  renders, nothing published."))
-        print()
-        print(C.dim("  The ledger records that a copy was MADE. It cannot see that the"))
-        print(C.dim("  copy was deleted afterwards, and both look the same from here."))
-        print(C.dim("  If the footage is on another disk, that is fine — but this"))
-        print(C.dim("  machine cannot confirm it, and the card is the copy it can see."))
-        print(C.dim("  Refusing. Import again, or erase the card yourself."))
-        return record(ctx, "Clean SIM", SKIPPED, started,
-                      "refused: ledger claims imported, no copy found")
-
-    print(C.green("  All %d clip(s) on the card were imported and verified." % n_old))
-    print(C.dim("  Still here: %s." % what))
-    # Rendered and published is NOT required here, and deliberately so. The
-    # import is a verified copy on a disk you control; requiring the whole
-    # pipeline to finish before the card can be reused would keep the car
-    # without a camera for as long as an encode and an upload take, which is the
-    # thing the delta import exists to avoid.
-    ok, why = import_is_expendable(ctx, ctx.render_root)
-    if not ok:
-        print(C.yellow("  Not yet published (%s)." % why))
-        print(C.dim("  Fine for the card — the copy above is verified — but it does"))
-        print(C.dim("  mean that copy is now the only one, so do not lose it."))
-    print()
-    print(C.red("  Erasing %s from %s. The folders stay so the camera can record."
-                % (human_bytes(size), tilde(ctx.card))))
-
-    if ask("  Type ERASE to clean the card, anything else to cancel: ") != "ERASE":
-        print("  Cancelled.")
-        return record(ctx, "Clean SIM", SKIPPED, started, "cancelled at the prompt")
-
-    # wipe_card re-checks the guards above (same answers, one code path for
-    # the deletion) and refuses rather than deleting if anything changed while
-    # the prompt was on screen.
-    gone, freed, reason = wipe_card(ctx)
-    if reason:
-        print(C.red("  Refused: %s." % reason))
-        return record(ctx, "Clean SIM", SKIPPED, started, "refused: %s" % reason)
-    return record(ctx, "Clean SIM", RAN, started,
-                  "%d file(s), %s" % (gone, human_bytes(freed)))
-
-
 STEPS = [
     (1, "Import from SIM", step_import, True),
-    (2, "List trips (dry-run scan)", step_list, True),
-    (3, "Preview trips (sidecars + stills, no encoding)", step_preview, True),
-    (4, "Exclude trip (DESTRUCTIVE)", step_drop_trip, False),
-    (5, "Render videos", step_render, True),
-    (6, "Create website", step_site, True),
-    (7, "Upload to site", step_upload, True),
-    (8, "Update site (SIGNED_VIDEOS=1)", step_deploy, True),
-    (9, "Delete SIM data (DESTRUCTIVE)", step_delete_import, False),
-    (10, "Clean SIM (DESTRUCTIVE)", step_clean_card, False),
+    (2, "Progress (read-only view)", step_progress, True),
+    (3, "Generate meta (sidecars, no encoding)", step_generate_meta, True),
+    (4, "Preview trips (stills + contact sheet)", step_preview, True),
+    (5, "Exclude trip (DESTRUCTIVE)", step_drop_trip, False),
+    (6, "Render videos", step_render, True),
+    (7, "Create website", step_site, True),
+    (8, "Upload to site", step_upload, True),
+    (9, "Update site (SIGNED_VIDEOS=1)", step_deploy, True),
+    (10, "Clean up (workspace + SIM, DESTRUCTIVE)", step_cleanup, False),
 ]
-# Site sits at 6 rather than at the end because that is where it belongs in the
+# Site sits at 7 rather than at the end because that is where it belongs in the
 # sequence: it is the last step that needs nothing but this machine. Everything
-# from 7 on reaches for a second repo, a bucket and a server.
+# from 8 on reaches for a second repo, a bucket and a server.
 #
 # This table does NOT change with the configuration. When the publishing half is
 # unconfigured its steps are greyed out with the key that would enable them
@@ -4680,20 +4707,21 @@ def solo_steps():
 # where there is room for it and where it is actually wanted. Keeping the long
 # names in the menu cost eleven lines every time round the loop.
 SHORT = {
-    1: "Import from SIM", 2: "List trips", 3: "Preview trips", 4: "Exclude trip",
-    5: "Render videos", 6: "Create website", 7: "Upload to site",
-    8: "Update site", 9: "Delete SIM data", 10: "Clean SIM",
+    1: "Import from SIM", 2: "Progress", 3: "Generate meta", 4: "Preview trips",
+    5: "Exclude trip", 6: "Render videos", 7: "Create website",
+    8: "Upload to site", 9: "Update site", 10: "Clean up",
 }
-# Steps safe to start without a "Go?". Not "read-only" — Preview writes sidecars,
-# stills and the contact sheet, and Site writes a folder of pages. The test is
-# that nothing leaves this machine and nothing is destroyed: everything they
-# produce is derived data that the next run regenerates. Upload, Deploy, Drop and
-# Delete are excluded because they publish or destroy; Render because it costs
-# hours.
+# Steps safe to start without a "Go?". Not "read-only" — Generate meta writes
+# the sidecars, Preview the stills and the contact sheet, and Site a folder of
+# pages. The test is that nothing leaves this machine and nothing is destroyed:
+# everything they produce is derived data that the next run regenerates.
+# Upload, Deploy, Drop and Delete are excluded because they publish or destroy;
+# Render because it costs hours.
 #
 # Necessary but not sufficient — see fast_enough(). A confirmation guarding
 # nothing is noise, but one guarding a two-minute wait earns its place.
-NO_CONFIRM = {step_num(step_list), step_num(step_preview), step_num(step_site)}
+NO_CONFIRM = {step_num(step_progress), step_num(step_generate_meta),
+              step_num(step_preview), step_num(step_site)}
 
 # Steps that ask their own questions once they have something to show. The menu's
 # "Go?" comes BEFORE any of that, so for these it asks you to commit to a
@@ -4704,13 +4732,13 @@ NO_CONFIRM = {step_num(step_list), step_num(step_preview), step_num(step_site)}
 # Upload and Deploy are deliberately NOT here: their inner prompt was removed, so
 # the menu is their only gate before something leaves this machine.
 SELF_CONFIRMS = {step_num(step_import), step_num(step_drop_trip),
-                 step_num(step_render), step_num(step_delete_import)}
+                 step_num(step_render), step_num(step_cleanup)}
 
 
 def fast_enough(ctx, n):
     """Will this step finish in a moment?
 
-    Both List trips and Preview are dominated by the ego-motion pass, which the
+    Generate meta and Preview are dominated by the ego-motion pass, which the
     scan cache removes entirely — 146 seconds becomes 1. So they are worth
     confirming on a cold cache and pure friction on a warm one, and the honest
     answer changes run to run rather than being a property of the step.
@@ -4723,13 +4751,12 @@ def fast_enough(ctx, n):
     """
     if n not in NO_CONFIRM:
         return False
-    if n == step_num(step_list):
-        # Never asked. It reads the import and prints a table — no file written,
-        # nothing deleted, nothing published — so the only thing a confirmation
-        # protects is a wait, and ctrl-C already does that better than a prompt
-        # answered before the wait exists. Guarding a read teaches you to hit
-        # Enter without looking, which is precisely the habit the delete step
-        # needs you not to have.
+    if n == step_num(step_progress):
+        # Never asked. It reads what is on disk and prints it — no file
+        # written, no scan, nothing deleted, nothing published — so the only
+        # thing a confirmation protects is nothing at all. Guarding a read
+        # teaches you to hit Enter without looking, which is precisely the
+        # habit the delete step needs you not to have.
         return True
     if n == step_num(step_site):
         # Site is instant on a rebuild and costs one ffmpeg seek per trip on the
@@ -4761,15 +4788,15 @@ def fast_enough(ctx, n):
 
 DESC = {
     1: "Copy the SIM's DCIM tree into the workspace and verify it file-for-file.",
-    2: "Scan the import and print the trip table. Reads nothing else, changes nothing.",
-    3: "Sidecars, a still per trip and a local contact sheet. No encoding, no deploy.",
-    4: "Delete a trip's source clips so it is never rendered, uploaded or published.",
-    5: "Encode the chosen trips. The slow step: hours for a full card.",
-    6: "Build <out>/site: a browsable local site from the renders. Nothing leaves this machine.",
-    7: "Sync the mp4s to the configured bucket, then verify. Slow on a home uplink; resumes.",
-    8: "Run the site repo's deploy script with SIGNED_VIDEOS=1, so clips load as signed URLs.",
-    9: "Erase the imported footage and the renders. Only once the site serves every trip.",
-    10: "Erase the SIM's clips, keeping its folders. Refuses while anything on it is unimported.",
+    2: "Show what exists and what has been done to it. Reads only; changes nothing.",
+    3: "Write each trip's sidecars: _meta.json, .gpx and .html map. No stills, no encoding.",
+    4: "A still per trip and a local contact sheet, from the sidecars. No encoding, no deploy.",
+    5: "Delete a trip's source clips so it is never rendered, uploaded or published.",
+    6: "Encode the chosen trips. The slow step: hours for a full card.",
+    7: "Build <out>/site: a browsable local site from the renders. Nothing leaves this machine.",
+    8: "Sync the mp4s to the configured bucket, then verify. Slow on a home uplink; resumes.",
+    9: "Run the site repo's deploy script with SIGNED_VIDEOS=1, so clips load as signed URLs.",
+    10: "Erase the published import, the renders and the card's clips. Both halves guarded.",
 }
 
 
@@ -4859,9 +4886,9 @@ def parse_selection(s):
 
     A step marked in_all=False (the drop, the delete) can only ever be run
     ALONE. Ranges skip it, 'all' skips it, and a list that mentions it alongside
-    anything else is rejected outright rather than quietly reordered — '9 8'
+    anything else is rejected outright rather than quietly reordered — '10 9'
     would otherwise have erased the footage before the deploy that proves it was
-    published, and '4 5' would have dropped a trip and then rendered from a
+    published, and '5 6' would have dropped a trip and then rendered from a
     grouping that no longer exists.
     """
     s = s.strip().lower()

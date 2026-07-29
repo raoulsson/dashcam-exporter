@@ -412,8 +412,8 @@ software = true
 # which is why it is a setting rather than a constant.
 #live_trips_url = https://example.com/trips.json
 
-# THE DELETE GUARD. "Delete SIM data" (9) erases the original clips, and what it
-# can prove first depends on what is set here.
+# THE DELETE GUARD. "Clean up" (10) erases the original clips (and the card's,
+# when one is in), and what it can prove first depends on what is set here.
 #
 # Two checks run and are ADVISORY: how many renderable trips have an mp4, and
 # whether those mp4s are in the bucket at a matching size. Neither refuses on its
@@ -485,7 +485,7 @@ software = true
 # is the common case (the DDPAI mounts as NO NAME unless you renamed it), but a
 # card copied onto an external disk, or a folder someone handed over, works the
 # same. Read by the import step (status screen, passed to import-sd-card.sh as
-# --src) and by steps 9 and 10, which erase it. Nothing renders from here —
+# --src) and by step 10's clean-up, which erases it. Nothing renders from here —
 # that is import_dir at the top.
 #card = /Volumes/NO NAME
 

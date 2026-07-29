@@ -167,8 +167,8 @@ class TestGraphConsistency(GraphTest):
                         continue
                     seen.add(n)
                     frontier |= S.ALL_STEPS[n].reaches_to(strategy)
-                self.assertIn(S.DELETE_WS, seen, "no route to clearing the workspace")
-                self.assertIn(S.IMPORT, S.ALL_STEPS[S.DELETE_WS].reaches_to(strategy))
+                self.assertIn(S.CLEANUP, seen, "no route to clearing the workspace")
+                self.assertIn(S.IMPORT, S.ALL_STEPS[S.CLEANUP].reaches_to(strategy))
 
 
 class TestInterfaceMatchesBehaviour(GraphTest):
@@ -195,25 +195,26 @@ class TestInterfaceMatchesBehaviour(GraphTest):
                 m.cleanup()
 
     def test_the_ways_in(self):
-        """Footage always enters through Import — the ONLY start node, under
-        both strategies. Deploy looked like a second way in on a publishing
-        install, but deploying with no sidecars publishes nothing: it needs the
-        sidecar pass first, so it cannot be the first thing you do."""
+        """Footage always enters through Import — the only ACTING start node
+        under both strategies. Deploy looked like a second way in on a
+        publishing install, but deploying with no sidecars publishes nothing.
+        Progress is a start node too, because looking at an empty workspace is
+        legitimate — it is a view, not a transition."""
         local = MockState(S.Strategy.LOCAL_DEFAULT_WEBSITE)
         pub = MockState(S.Strategy.WEBSITE_REPO)
         try:
             self.assertEqual(
                 [s.number for s in S.ALL_STEPS.values() if s.is_start_node(local.ctx)],
-                [S.IMPORT])
+                [S.IMPORT, S.PROGRESS])
             self.assertEqual(
                 [s.number for s in S.ALL_STEPS.values() if s.is_start_node(pub.ctx)],
-                [S.IMPORT])
+                [S.IMPORT, S.PROGRESS])
         finally:
             local.cleanup(); pub.cleanup()
 
     def test_destructive_steps_are_the_ones_that_erase(self):
         destructive = {s.number for s in S.ALL_STEPS.values() if s.is_destructive()}
-        self.assertEqual(destructive, {S.EXCLUDE, S.DELETE_WS, S.WIPE_SIM})
+        self.assertEqual(destructive, {S.EXCLUDE, S.CLEANUP})
 
     def test_is_enabled_is_the_negation_of_a_reason(self):
         """One answer, not two: enabled iff nothing is in the way."""
@@ -248,21 +249,21 @@ class TestStrategySplit(GraphTest):
                  step.reaches_to(S.Strategy.LOCAL_DEFAULT_WEBSITE))
             if a != b:
                 differing.add(step.number)
-        # PREVIEW is in the set because on a publishing install the sidecars
-        # unlock Deploy — publish early, catch a broken pipeline before the
-        # render — an edge the local product does not have.
+        # GENERATE_META is in the set because on a publishing install the
+        # sidecars unlock Deploy — publish early, catch a broken pipeline
+        # before the render — an edge the local product does not have.
         self.assertEqual(differing,
-                         {S.PREVIEW, S.RENDER, S.SITE, S.UPLOAD, S.DEPLOY, S.DELETE_WS},
+                         {S.GENERATE_META, S.RENDER, S.SITE, S.UPLOAD, S.DEPLOY, S.CLEANUP},
                          "the split should touch publishing and what settles the workspace")
 
     def test_local_product_settles_the_workspace_by_gathering(self):
         s = S.Strategy.LOCAL_DEFAULT_WEBSITE
-        self.assertIn(S.DELETE_WS, S.ALL_STEPS[S.SITE].reaches_to(s))
+        self.assertIn(S.CLEANUP, S.ALL_STEPS[S.SITE].reaches_to(s))
 
     def test_publishing_product_settles_the_workspace_by_deploying(self):
         s = S.Strategy.WEBSITE_REPO
-        self.assertIn(S.DELETE_WS, S.ALL_STEPS[S.DEPLOY].reaches_to(s))
-        self.assertNotIn(S.DELETE_WS, S.ALL_STEPS[S.SITE].reaches_to(s))
+        self.assertIn(S.CLEANUP, S.ALL_STEPS[S.DEPLOY].reaches_to(s))
+        self.assertNotIn(S.CLEANUP, S.ALL_STEPS[S.SITE].reaches_to(s))
 
 
 class TestAvailabilityMatchesTheGraph(GraphTest):
@@ -270,17 +271,19 @@ class TestAvailabilityMatchesTheGraph(GraphTest):
     and from an empty workspace it is not."""
 
     MILESTONES = {
-        S.LIST:    lambda m: m.with_import(),
-        S.PREVIEW: lambda m: m.with_import(),
-        S.EXCLUDE: lambda m: m.with_import().with_sidecars(),
-        S.RENDER:  lambda m: m.with_import().with_sidecars(),
-        S.SITE:    lambda m: m.with_import().with_sidecars().with_render(),
-        S.UPLOAD:  lambda m: m.with_import().with_sidecars().with_render(),
-        S.WIPE_SIM: lambda m: m.with_card().with_import().with_sidecars(),
+        S.GENERATE_META: lambda m: m.with_import(),
+        S.PREVIEW:  lambda m: m.with_import().with_sidecars(),
+        S.EXCLUDE:  lambda m: m.with_import().with_sidecars(),
+        S.RENDER:   lambda m: m.with_import().with_sidecars(),
+        S.SITE:     lambda m: m.with_import().with_sidecars().with_render(),
+        S.UPLOAD:   lambda m: m.with_import().with_sidecars().with_render(),
+        # No card: the clean-up's card half is only asked when a card with
+        # footage is in; the workspace half alone is a legitimate run.
+        S.CLEANUP:  lambda m: m.with_import().with_sidecars(),
     }
 
     def test_each_step_is_unavailable_from_an_empty_workspace(self):
-        for number in (S.LIST, S.PREVIEW, S.EXCLUDE, S.RENDER, S.SITE, S.WIPE_SIM):
+        for number in (S.GENERATE_META, S.PREVIEW, S.EXCLUDE, S.RENDER, S.SITE, S.CLEANUP):
             m = MockState()
             try:
                 self._bucket_contents = {}
