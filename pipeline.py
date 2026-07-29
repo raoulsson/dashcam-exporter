@@ -5170,7 +5170,11 @@ class Work:
 
     # -- the collaborators the constructor installs ------------------------
     def gatherer(self, strategy):
-        return functools.partial(Gatherer.for_strategy(strategy), self.ctx)
+        # Not a partial over ctx: build_result_page passes ctx itself, the same
+        # way it does to the gather_into_final default it falls back to. Binding
+        # it here as well made every call three arguments into a two-argument
+        # function, so item 6 raised TypeError before it wrote anything.
+        return Gatherer.for_strategy(strategy)
 
     def publisher(self, strategy):
         if strategy is menu.Strategy.WEBSITE_REPO:
