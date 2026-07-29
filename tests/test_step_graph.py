@@ -107,8 +107,6 @@ class MockState:
         c.import_root = self.root / "import"
         c.card = self.root / "card"
         c.uploader = None
-        c.site = None
-        c.s3_bucket = None
         c.selected_import = None
         c.last_scan = None
         c.last_groups = None
@@ -116,7 +114,7 @@ class MockState:
         c.scan_args = []
         self.ctx = c
         if strategy is M.Strategy.UPLOADER:
-            self.with_site_repo().with_bucket().with_uploader()
+            self.with_uploader()
 
     # -- milestones --------------------------------------------------------
     def with_card(self, stamps=("20260728090000",)):
@@ -150,25 +148,16 @@ class MockState:
         (d / (trip + "_h1080.mp4")).write_bytes(b"x" * size)
         return self
 
-    def with_site_repo(self):
-        s = self.root / "site"
-        (s / "deploy").mkdir(parents=True, exist_ok=True)
-        for name in ("deploy-site.sh", "upload-videos-s3.sh"):
-            (s / "deploy" / name).write_text("#!/bin/sh\n")
-        (s / "build_manifest.py").write_text("")
-        # The symlink upload-videos-s3.sh derives its object keys from. A
-        # publishing install has it; a bench without it is not one.
-        (s / "public_html").mkdir(parents=True, exist_ok=True)
-        link = s / "public_html" / "videos"
-        if not link.exists():
-            link.symlink_to(self.ctx.out_dir)
-        self.ctx.site = s
-        return self
+    def published(self, trip="trip_2026-07-28_08-57_01", size=64):
+        """This render is at the destination already, byte for byte.
 
-    def with_bucket(self, contents=None):
-        self.ctx.cfg["s3_bucket"] = "bucket"
-        self.ctx.s3_bucket = "bucket"
-        self._bucket = contents or {}
+        A folder target, so "already published" is a real file in a real
+        directory rather than a patched-out listing. What the guards then read
+        is a genuine answer from a genuine implementation.
+        """
+        d = self.root / "published"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / (trip + "_h1080.mp4")).write_bytes(b"x" * size)
         return self
 
     def with_uploader(self):
@@ -207,8 +196,6 @@ class GraphTest(unittest.TestCase):
     def setUp(self):
         # Nothing in these tests may reach the network or the renderer.
         self.patches = [
-            mock.patch.object(P, "s3_objects", side_effect=lambda ctx: getattr(
-                self, "_bucket_contents", {})),
             mock.patch.object(P, "run_stream", side_effect=AssertionError(
                 "a graph test must not run a subprocess")),
             mock.patch.object(P, "load_groups", side_effect=lambda *a, **k: None),
@@ -389,7 +376,6 @@ class TestInterfaceMatchesBehaviour(GraphTest):
         """One answer, not two: blocked iff there is something to say."""
         m = MockState()
         try:
-            self._bucket_contents = {}
             for number, verdict in m.verdicts().items():
                 with self.subTest(item=number):
                     self.assertEqual(verdict.blocked, bool(verdict.reason)
@@ -454,7 +440,6 @@ class TestStrategySplit(GraphTest):
         m = MockState(M.Strategy.LOCAL_PAGE)
         try:
             m.with_import().with_sidecars().with_render()
-            self._bucket_contents = {}
             self.assertIn(UPLOAD, m.blocked())
             built = m.menu()
             self.assertEqual(set(built[UPLOAD].outbound().offers(frozenset(built))),
@@ -481,7 +466,6 @@ class TestGuardsSeeTheWorld(GraphTest):
         for number in self.MILESTONES:
             m = MockState()
             try:
-                self._bucket_contents = {}
                 with self.subTest(item=number):
                     self.assertIn(number, m.blocked(),
                                   "item %d has no evidence to work from" % number)
@@ -493,7 +477,6 @@ class TestGuardsSeeTheWorld(GraphTest):
             m = MockState()
             try:
                 prepare(m)
-                self._bucket_contents = {}
                 blocked = m.blocked()
                 with self.subTest(item=number):
                     self.assertNotIn(number, blocked,
@@ -506,7 +489,6 @@ class TestGuardsSeeTheWorld(GraphTest):
         """An empty workspace is a legitimate thing to report."""
         m = MockState()
         try:
-            self._bucket_contents = {}
             self.assertNotIn(PROGRESS, m.blocked())
         finally:
             m.cleanup()
@@ -519,24 +501,25 @@ class TestMockedWork(GraphTest):
         m = MockState()
         try:
             m.with_import().with_sidecars()
-            self._bucket_contents = {}
             self.assertIn(BUILD, m.blocked(), "no renders yet")
             m.with_render()                       # as if Render Videos had run
             self.assertNotIn(BUILD, m.blocked())
         finally:
             m.cleanup()
 
-    def test_a_mocked_upload_makes_the_workspace_expendable(self):
+    def test_publishing_makes_the_workspace_expendable(self):
+        """Driven through a real implementation rather than a patched listing,
+        so what this proves is the whole path: the target is asked at capture,
+        its answer is frozen into the world, and the guard reads it there."""
         m = MockState(M.Strategy.UPLOADER)
         try:
             m.with_import().with_sidecars().with_render(size=64)
-            self._bucket_contents = {}
-            ok, why, _ = P.working_area_is_expendable(m.ctx)
-            self.assertFalse(ok, "nothing uploaded yet")
-            self._bucket_contents = {"v/trip_2026-07-28_08-57_01_h1080.mp4": 64}
-            (m.ctx.out_dir / P.DEPLOYED_FILE).write_text(
-                '{"videos":["trip_2026-07-28_08-57_01_h1080.mp4"]}')
-            ok, why, _ = P.working_area_is_expendable(m.ctx)
+            target = P.capture_world(m.ctx, M.Scope.FULL).target
+            ok, why, _ = P.working_area_is_expendable(m.ctx, target)
+            self.assertFalse(ok, "nothing published yet")
+            m.published(size=64)
+            target = P.capture_world(m.ctx, M.Scope.FULL).target
+            ok, why, _ = P.working_area_is_expendable(m.ctx, target)
             self.assertTrue(ok, why)
         finally:
             m.cleanup()

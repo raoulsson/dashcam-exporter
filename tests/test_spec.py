@@ -61,8 +61,6 @@ class Bench:
         c.import_root = self.root / "import"
         c.card = self.root / "card"
         c.uploader = None
-        c.site = None
-        c.s3_bucket = None
         c.selected_import = None
         c.last_scan = None
         c.last_groups = None
@@ -104,42 +102,26 @@ class Bench:
         (d / (trip + "_h1080.mp4")).write_bytes(b"x" * size)
         return self
 
-    def site_repo(self, with_deploy=True):
-        s = self.root / "site"
-        (s / "deploy").mkdir(parents=True, exist_ok=True)
-        if with_deploy:
-            (s / "deploy" / "deploy-site.sh").write_text("#!/bin/sh\n")
-            (s / "deploy" / "upload-videos-s3.sh").write_text("#!/bin/sh\n")
-            (s / "build_manifest.py").write_text("")
-        # A publishing install HAS this symlink: upload-videos-s3.sh derives
-        # its object keys from whatever it resolves to, so verifying a
-        # different tree than the one uploaded is worse than not verifying.
-        # A bench without it is not a configured install.
-        (s / "public_html").mkdir(parents=True, exist_ok=True)
-        link = s / "public_html" / "videos"
-        if not link.exists():
-            link.symlink_to(self.ctx.out_dir)
-        self.ctx.site = s
-        return self.publishes()
-
     def publishes(self):
         """A configured publishing target — which is what decides the edition.
 
         The shipped example, loaded the way a real install loads one, rather
         than a stub: these tests are about the wiring between the menu and
         whatever was configured, and a stub lets that wiring drift from the
-        one implementation anybody reads.
+        one implementation anybody reads. It is a folder, so "already
+        published" is a real file a test can put there.
         """
-        os.environ["DASHCAM_FOLDER_TARGET"] = str(self.root / "published")
+        self.published_dir = self.root / "published"
+        os.environ["DASHCAM_FOLDER_TARGET"] = str(self.published_dir)
         spec = "%s:FolderTarget" % (REPO / "examples" / "uploader_folder.py")
         self.ctx.uploader = U.load_uploader(spec, REPO)
         self.ctx.uploader_origin = U.origin_of(spec, self.ctx.uploader)
         return self
 
-    def bucket(self, mapping):
-        self.ctx.cfg["s3_bucket"] = "b"
-        self.ctx.s3_bucket = "b"
-        P.s3_objects = lambda ctx: mapping
+    def already_there(self, trip="trip_2026-07-28_08-57_01", size=1024):
+        """This render is at the destination already, byte for byte."""
+        self.published_dir.mkdir(parents=True, exist_ok=True)
+        (self.published_dir / (trip + "_h1080.mp4")).write_bytes(b"x" * size)
         return self
 
     def verdicts(self, scope=None):
@@ -162,11 +144,9 @@ class Bench:
 
 class SpecTest(unittest.TestCase):
     def setUp(self):
-        self._s3 = P.s3_objects
         self.b = Bench()
 
     def tearDown(self):
-        P.s3_objects = self._s3
         self.b.cleanup()
 
     def assertBlocked(self, item, msg=""):
@@ -215,11 +195,11 @@ class TestAvailability(SpecTest):
 
     def test_cannot_upload_without_the_render_step(self):
         """You cannot upload without a render to upload."""
-        self.b.site_repo().bucket({}).imported().sidecars()
+        self.b.publishes().imported().sidecars()
         self.assertBlocked(UPLOAD, "no renders exist, upload must be unavailable")
 
     def test_can_upload_once_rendered(self):
-        self.b.site_repo().bucket({}).imported().sidecars().render()
+        self.b.publishes().imported().sidecars().render()
         self.assertAvailable(UPLOAD)
 
     def test_publishing_is_no_longer_reachable_before_a_render(self):
@@ -231,14 +211,14 @@ class TestAvailability(SpecTest):
         is gone. Nothing about the world blocks it; the graph does, which is
         why this is asserted on the edges and not on a verdict.
         """
-        self.b.imported().sidecars().site_repo().bucket({})
+        self.b.imported().sidecars().publishes()
         built = M.build_menu(M.Strategy.of(self.b.ctx.uploader), P.Work(self.b.ctx))
         self.assertNotIn(UPLOAD, built[META].outbound().offers(frozenset(built)))
         self.assertEqual(set(built[UPLOAD].inbound().edges()), {BUILD, UPLOAD})
 
     def test_cannot_upload_without_sidecars(self):
         """You cannot upload a site without the sidecars created."""
-        self.b.site_repo().bucket({}).imported().render()      # render, no sidecars
+        self.b.publishes().imported().render()      # render, no sidecars
         self.assertBlocked(UPLOAD)
 
     def test_sidecars_are_required_before_the_items_that_consume_them(self):
@@ -246,7 +226,7 @@ class TestAvailability(SpecTest):
         clear the workspace. Upload Website carries the rule the folded-in
         deploy step used to: with no sidecar anywhere there is no metadata to
         put online."""
-        self.b.card_in().imported().site_repo().bucket({})
+        self.b.card_in().imported().publishes()
         blocked = self.b.blocked()
         for item in (PREVIEW, RENDER, UPLOAD, CLEAN_WS):
             self.assertIn(item, blocked, "item %d must wait for sidecars" % item)
@@ -264,14 +244,27 @@ class TestAvailability(SpecTest):
 
 class TestPreconditions(SpecTest):
 
-    def test_cannot_delete_the_workspace_without_upload_and_deploy(self):
-        """You cannot delete the WS without a verified upload of S3 AND site
-        deploy."""
-        self.b.imported().sidecars().render(size=99).site_repo()
-        self.b.bucket({"x/trip_2026-07-28_08-57_01_h1080.mp4": 99})   # uploaded...
-        ok, why, _ = P.working_area_is_expendable(self.b.ctx)
-        self.assertFalse(ok, "upload alone must not authorise deleting the workspace; "
-                             "the site deploy has to have happened too")
+    def test_cannot_delete_the_workspace_until_the_target_says_it_has_it(self):
+        """You cannot delete the WS without the copy being provably elsewhere.
+
+        The owner's rule was "a verified S3 upload AND the site deploy". Both
+        halves are one arrangement's definition of "at the destination" and
+        live with the arrangement now; what the exporter asks is the target,
+        and only a YES clears a render. Here the target has not been given the
+        file, so it says no and the workspace stays.
+        """
+        self.b.imported().sidecars().render(size=99).publishes()
+        world = P.capture_world(self.b.ctx, M.Scope.FULL)
+        ok, why, _ = P.working_area_is_expendable(self.b.ctx, world.target)
+        self.assertFalse(ok, "a render the target does not have must not authorise"
+                             " deleting the workspace")
+
+    def test_once_the_target_has_it_the_workspace_may_go(self):
+        self.b.imported().sidecars().render(size=99).publishes()
+        self.b.already_there(size=99)
+        world = P.capture_world(self.b.ctx, M.Scope.FULL)
+        ok, why, _ = P.working_area_is_expendable(self.b.ctx, world.target)
+        self.assertTrue(ok, why)
 
     def test_cannot_import_over_an_unfinished_session(self):
         """You cannot import over an unfinished session."""
@@ -315,11 +308,11 @@ class TestInterruptions(SpecTest):
 
     def test_an_interrupted_upload_resumes_rather_than_restarts(self):
         """Uploads can be interrupted, stopped, cancelled, resumed."""
-        self.b.site_repo().imported().sidecars()
+        self.b.publishes().imported().sidecars()
         self.b.render("trip_A", size=100).render("trip_B", size=100)
-        self.b.bucket({"x/trip_A_h1080.mp4": 100})        # A landed, B did not
-        todo = P.uploads_outstanding(self.b.ctx)          # expected entry point
-        self.assertEqual([p.name for p in todo], ["trip_B_h1080.mp4"],
+        self.b.already_there("trip_A", size=100)          # A landed, B did not
+        world = P.capture_world(self.b.ctx, M.Scope.FULL)
+        self.assertEqual(sorted(world.target.owed.names), ["trip_B_h1080.mp4"],
                          "an interrupted upload resumes with what is missing")
 
 

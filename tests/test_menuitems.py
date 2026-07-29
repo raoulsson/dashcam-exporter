@@ -42,6 +42,7 @@ sys.path.insert(0, str(REPO))
 import guards                    # noqa: E402
 import items                     # noqa: E402  (importing registers the ten)
 import menu as M                 # noqa: E402
+import uploader as U             # noqa: E402
 import world as W                # noqa: E402
 from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                   UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
@@ -76,6 +77,34 @@ class Act:
         return bool(self.worlds)
 
 
+class FakeBuilder:
+    """Item 6's collaborator: the one the constructor installs.
+
+    Item 6's WHOLE body is the strategy branch now, not merely its mover, so
+    what a test checks is that the item asks whichever builder it was given —
+    for its menu row, for its refusal, and for the work.
+    """
+
+    def __init__(self, strategy, reason=None):
+        self.strategy = strategy
+        self.reason = reason
+        self.worlds = []
+
+    def describe(self):
+        return "Build under %s." % self.strategy.value
+
+    def why_not(self, world):
+        return self.reason
+
+    def build(self, world):
+        self.worlds.append(world)
+        return M.did("built")
+
+    @property
+    def ran(self):
+        return bool(self.worlds)
+
+
 class FakePublisher:
     """Item 7's collaborator: the one the constructor installs.
 
@@ -104,18 +133,20 @@ class FakePublisher:
 class FakeWork:
     """Enough of pipeline.Work to drive all ten items with no filesystem."""
 
-    def __init__(self, plan=None, publish_reason=None, word="", fresh=None):
+    def __init__(self, plan=None, publish_reason=None, build_reason=None,
+                 word="", fresh=None):
         self.calls = []                 # (what was asked, the world it got)
         self.plan = plan
         self.publish_reason = publish_reason
+        self.build_reason = build_reason
         self.word_typed = word
         self.fresh = fresh              # what recapture() hands back
         self.banners = []
         self.refusals = []
         self.scopes = []
-        self.gatherer_asked = []
+        self.builder_asked = []
         self.publisher_asked = []
-        self.gather_used = []
+        self.builders = []
         self.publishers = []
         self.last_world = None
 
@@ -140,14 +171,17 @@ class FakeWork:
     def render(self, world):
         return self._body("render", world)
 
-    def build_website(self, world, gather):
-        self.gather_used.append(gather)
-        return self._body("website", world)
-
     # -- the collaborators the constructor installs ------------------------
-    def gatherer(self, strategy):
-        self.gatherer_asked.append(strategy)
-        return ("gatherer", strategy)
+    def builder(self, strategy):
+        self.builder_asked.append(strategy)
+        made = FakeBuilder(strategy, self._build_reason(strategy))
+        self.builders.append(made)
+        return made
+
+    def _build_reason(self, strategy):
+        if strategy is UPLOADER:
+            return self.build_reason
+        return None
 
     def publisher(self, strategy):
         self.publisher_asked.append(strategy)
@@ -158,7 +192,7 @@ class FakeWork:
     def _publish_reason(self, strategy):
         if strategy is UPLOADER:
             return self.publish_reason
-        return "needs site_repo and s3_bucket in config.txt"
+        return "not part of this edition"
 
     # -- the destructive plans ---------------------------------------------
     def exclude_plan(self, world):
@@ -249,8 +283,39 @@ def full_card(**kw):
     return a_card(**base)
 
 
-def a_site(**kw):
-    return W.SiteFacts(**kw)
+def said(spec):
+    """A test's shorthand for one of the target's answers.
+
+    A tuple of names means "these YES and nothing else known", which is the
+    shape almost every test wants. None means the question does not arise for
+    this target at all — an archive disk holds but does not serve — and is the
+    default, so a test that says nothing about `published` gets NA rather than
+    an accidental UNKNOWN that would refuse for a reason the test never wrote.
+    An Answers passes through, for the cases that need UNKNOWN or NO by name.
+    """
+    if isinstance(spec, U.Answers):
+        return spec
+    return _named(spec)
+
+
+def _named(spec):
+    if spec is None:
+        return U.Answers.not_applicable()
+    return U.Answers.of({n: M.Evidence.YES for n in spec})
+
+
+def a_target(holds=None, published=None, owed=(), carried=None,
+             configured=True, name="target"):
+    """What a publishing target said about this world, written down.
+
+    Frozen answers, because that is how the world carries them: the target is
+    asked once at capture and every guard reads the same reading, which is what
+    lets the destructive re-check compare two instants rather than two moods.
+    """
+    return W.TargetFacts(
+        configured=configured, name=name, origin="%s (a test)" % name,
+        holds=said(holds), published=said(published),
+        owed=U.Owed.just(owed), carried=said(carried))
 
 
 def evaluate(item, w):
@@ -470,33 +535,43 @@ class TestWhereEachItemSits(unittest.TestCase):
 class TestTheStrategyIsSettledWhenTheMenuIsBuilt(unittest.TestCase):
     """The website branch is resolved once, at construction."""
 
-    def test_the_gatherer_and_the_publisher_are_chosen_at_construction(self):
+    def test_the_builder_and_the_publisher_are_chosen_at_construction(self):
         """Items 6 and 7 differ between the two products. They ask for their
         collaborator in the constructor and are handed one; the choosing
         happens once per session, not once per keypress."""
         work = FakeWork()
         menu_for(UPLOADER, work)
-        self.assertEqual(work.gatherer_asked, [UPLOADER])
+        self.assertEqual(work.builder_asked, [UPLOADER])
         self.assertEqual(work.publisher_asked, [UPLOADER])
 
     def test_executing_never_asks_which_product_this_is(self):
-        """Running item 6 forty times must not re-decide which mover it uses:
-        the constructor settled it, and asking again is the `if` this design
-        removed coming back through the side door."""
+        """Running item 6 forty times must not re-decide which builder it
+        uses: the constructor settled it, and asking again is the `if` this
+        design removed coming back through the side door."""
         work = FakeWork()
         item = menu_for(UPLOADER, work)[BUILD]
         item.execute(imported(renders=(MP4,)))
         item.execute(imported(renders=(MP4,)))
-        self.assertEqual(work.gatherer_asked, [UPLOADER])
-        self.assertEqual(work.gather_used, [("gatherer", UPLOADER)] * 2)
+        self.assertEqual(work.builder_asked, [UPLOADER])
+        self.assertEqual(len(work.builders[0].worlds), 2)
 
-    def test_the_local_product_installs_a_different_gatherer(self):
-        """Under the local product the render tree is gathered into final_;
-        under the publishing one it must not move, because trips.json embeds
-        the import folder name in every uid."""
+    def test_the_local_product_installs_a_different_builder(self):
+        """Under the local product item 6 writes the one-file page and gathers
+        the render tree into final_; with an uploader configured neither
+        happens here, and the page is not written at all."""
         work = FakeWork()
         menu_for(LOCAL, work)
-        self.assertEqual(work.gatherer_asked, [LOCAL])
+        self.assertEqual(work.builder_asked, [LOCAL])
+
+    def test_the_menu_row_is_the_builders_own_words(self):
+        """What building means genuinely differs between the two products, and
+        an entry answers for its own job. How the tool is installed is the
+        session's to state, once, at startup."""
+        work = FakeWork()
+        self.assertEqual(menu_for(UPLOADER, work)[BUILD].description(),
+                         "Build under uploader.")
+        self.assertEqual(menu_for(LOCAL, work)[BUILD].description(),
+                         "Build under local page.")
 
     def test_no_item_body_reads_the_strategy(self):
         """The rule stated as a property of the source: the constructor is the
@@ -756,13 +831,25 @@ class TestBuildWebsite(unittest.TestCase):
         self.assertTrue(verdict.blocked)
         self.assertIn("no renders", verdict.reason)
 
-    def test_it_hands_the_body_the_gatherer_it_was_constructed_with(self):
-        """The mover is passed in, not chosen. That is the strategy branch
-        living in the constructor where it belongs."""
+    def test_it_hands_the_work_to_the_builder_it_was_constructed_with(self):
+        """The whole body is passed in, not chosen. That is the strategy
+        branch living in the constructor where it belongs — and it is the fix
+        for the local page being written under the publishing edition, which
+        happened because only the MOVER used to be the branch."""
         work = FakeWork()
         item = menu_for(LOCAL, work)[BUILD]
         item.execute(imported(renders=(MP4,)))
-        self.assertEqual(work.gather_used, [("gatherer", LOCAL)])
+        self.assertTrue(work.builders[0].ran)
+
+    def test_the_targets_refusal_comes_after_the_exporters_own_question(self):
+        """An empty tree is refused by the exporter itself, before the target
+        is asked anything. A target that answers yes to everything still
+        cannot get a page built out of nothing."""
+        work = FakeWork(build_reason="the target is not reachable")
+        item = menu_for(UPLOADER, work)[BUILD]
+        self.assertIn("no renders", evaluate(item, imported()).reason)
+        self.assertIn("not reachable",
+                      evaluate(item, imported(renders=(MP4,))).reason)
 
 
 # ---------------------------------------------------------------------------
@@ -770,10 +857,9 @@ class TestBuildWebsite(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 def a_published_world(**kw):
-    """Renders on disk, in the bucket at a matching size, and deployed."""
+    """Renders on disk, and the target says it has and serves all of them."""
     base = dict(renders=(MP4,), renders_here=(MP4,),
-                bucket=W.Listed({"videos/" + MP4.name: MP4.size}),
-                site=a_site(deployed=frozenset({MP4.name})))
+                target=a_target(holds=(MP4.name,), published=(MP4.name,)))
     base.update(kw)
     return imported(**base)
 
@@ -782,20 +868,21 @@ class TestUploadWebsite(unittest.TestCase):
     """Getting the built site online. One job, two transports."""
 
     def test_outstanding_uploads_are_work_to_do(self):
-        """Renders on disk that the bucket does not hold, or that no deploy
-        covers, are exactly what this item exists to settle."""
-        w = imported(renders=(MP4,), renders_here=(MP4,))
+        """What the target says it still owes is exactly what this item exists
+        to settle. A target that could not be asked owes everything, so the
+        offer stands and the upload is what discovers it is down."""
+        w = imported(renders=(MP4,), renders_here=(MP4,),
+                     target=a_target(owed=(MP4.name,)))
         self.assertIs(ruling(item_for(UPLOAD), w), M.Ruling.GO)
 
     def test_everything_already_online_is_settled_not_refused(self):
-        """The postcondition holds: every render is on the bucket at a matching
-        size and covered by a deploy. Nothing is owed, so the item completes
+        """The postcondition holds: the target owes nothing. The item completes
         without touching the network."""
         verdict = evaluate(item_for(UPLOAD), a_published_world())
         self.assertIs(verdict.ruling, M.Ruling.SATISFIED)
 
     def test_nothing_rendered_is_refused_rather_than_vacuously_settled(self):
-        """"Every render is on the bucket" is true of no renders at all, and it
+        """"The target has everything" is true of no renders at all, and it
         is the wrong sentence to put in front of someone who has published
         nothing. Evidence, not order: it survives the renders being deleted."""
         verdict = evaluate(item_for(UPLOAD), imported())
@@ -812,14 +899,14 @@ class TestUploadWebsite(unittest.TestCase):
         self.assertIn("empty index", verdict.reason)
 
     def test_the_collaborators_refusal_comes_first(self):
-        """A missing key in config.txt is not something the world can settle,
-        and the reason names the key that fixes it — this is where someone who
-        cloned the repo finds out publishing exists at all."""
-        work = FakeWork(publish_reason="needs s3_bucket in config.txt")
+        """The target's own reason, in the operator's terms, before anything
+        the world could settle. What it says is the implementation's to
+        choose — the exporter has no vocabulary for another machine."""
+        work = FakeWork(publish_reason="the destination is not writable")
         item = menu_for(UPLOADER, work)[UPLOAD]
         verdict = evaluate(item, a_published_world())
         self.assertTrue(verdict.blocked)
-        self.assertIn("s3_bucket", verdict.reason)
+        self.assertIn("not writable", verdict.reason)
 
     def test_the_local_product_refuses_through_its_installed_collaborator(self):
         """Item 7 is unreachable under the local product for two independent
@@ -828,10 +915,10 @@ class TestUploadWebsite(unittest.TestCase):
         item = item_for(UPLOAD, LOCAL)
         verdict = evaluate(item, a_published_world())
         self.assertTrue(verdict.blocked)
-        self.assertIn("site_repo", verdict.reason)
+        self.assertIn("not part of this edition", verdict.reason)
 
     def test_it_never_publishes_behind_a_refusal(self):
-        work = FakeWork(publish_reason="needs s3_bucket in config.txt")
+        work = FakeWork(publish_reason="the destination is not writable")
         item = menu_for(UPLOADER, work)[UPLOAD]
         item.execute(a_published_world())
         self.assertFalse(work.publishers[0].ran)
@@ -880,83 +967,131 @@ def rendered_world(**kw):
     return imported(**base)
 
 
+def all_of(w):
+    """Every render of this import, by name — what a target that has them all
+    would have answered about."""
+    return tuple(r.name for r in w.renders_here)
+
+
+def none_of(w, reading):
+    """The same names, all answered with one reading. For NO and for UNKNOWN,
+    which no shorthand should make as easy to write as YES."""
+    return U.Answers.of({name: reading for name in all_of(w)})
+
+
 class TestTheWorkspaceIsExpendableRule(unittest.TestCase):
     """What has to be true before the imported footage may be erased.
 
-    One sentence, applied through the item that acts on it: THE SITE DECIDES
+    One sentence, applied through the item that acts on it: THE TARGET DECIDES
     WHEN IT CAN BE ASKED; OTHERWISE EVERY CHECK THAT CAN ANSWER MUST SAY YES.
     Deliberately not "the last applicable check wins" — that reading approves
     the wipe when the local render count is short and the renders that DO exist
-    are in the bucket, and the trips that were never encoded exist nowhere.
+    are at the destination, and the trips that were never encoded exist nowhere.
+
+    Two of the three gates are now the configured target's answers rather than
+    a bucket listing and a script this repo shipped. Which destination it is is
+    the implementation's business; what a reading means here is unchanged, and
+    that is what these tests pin.
     """
 
-    def test_the_site_has_the_last_word_when_it_can_be_asked(self):
-        """is-complete.py is the authority on whether the raw footage may go:
-        it is the only check that looks at what the live site actually serves.
-        A local shortfall does not override a yes from it."""
-        fresh = rendered_world(expected_trips=9,
-                               site=a_site(published=M.Evidence.YES))
+    def test_the_target_has_the_last_word_when_it_can_be_asked(self):
+        """Whether the footage may go is settled by what is actually SERVED,
+        which is the only question that looks past the destination's storage.
+        A local shortfall does not override a yes to it."""
+        fresh = rendered_world(
+            expected_trips=9,
+            target=a_target(published=all_of(rendered_world())))
         _work, act, outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertTrue(act.ran)
         self.assertTrue(outcome.completed)
 
-    def test_a_site_that_says_no_refuses_however_good_the_local_evidence(self):
-        fresh = rendered_world(bucket=W.Listed(_bucket_of(rendered_world())),
-                               site=a_site(published=M.Evidence.NO))
+    def test_a_target_that_says_no_refuses_however_good_the_local_evidence(self):
+        fresh = rendered_world(
+            target=a_target(holds=all_of(rendered_world()),
+                            published=none_of(rendered_world(), M.Evidence.NO)))
         work, act, outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertFalse(act.ran)
         self.assertFalse(outcome.completed)
         self.assertTrue(work.refusals)
 
-    def test_a_full_bucket_does_not_excuse_an_under_rendered_import(self):
+    def test_a_full_destination_does_not_excuse_an_under_rendered_import(self):
         """The money path, and the exact defect a "last applicable check wins"
-        fold would open: five renderable trips, two encoded, no site to ask,
-        and those two are in the bucket. The three that were never encoded
-        exist in no render, no bucket, nowhere — and erasing the import would
-        take their only copy."""
+        fold would open: five renderable trips, two encoded, a target with no
+        notion of serving, and those two are at the destination. The three that
+        were never encoded exist in no render, at no destination, nowhere — and
+        erasing the import would take their only copy.
+
+        The gate that catches it is the one the exporter never delegates."""
         fresh = rendered_world(expected_trips=5,
-                               bucket=W.Listed(_bucket_of(rendered_world())),
-                               site=a_site(published=M.Evidence.NA))
+                               target=a_target(holds=all_of(rendered_world())))
         _work, act, outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertFalse(act.ran)
         self.assertFalse(outcome.completed)
 
     def test_a_grouping_that_could_not_be_read_refuses(self):
         """"Could not find out how many trips there should be" is not "the
-        count is fine". With no site to ask instead, the unknown is the
+        count is fine". With no serving answer to defer to, the unknown is the
         answer."""
         fresh = rendered_world(expected_trips=None,
-                               bucket=W.Listed(_bucket_of(rendered_world())))
+                               target=a_target(holds=all_of(rendered_world())))
         _work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertFalse(act.ran)
 
-    def test_a_bucket_that_could_not_be_listed_fails_closed(self):
-        """A listing that failed proves nothing. Turning "could not find out"
-        into "not there" is one negation away from turning it into "yes"."""
-        fresh = rendered_world(bucket=W.Unlistable())
+    def test_a_target_that_could_not_be_asked_fails_closed(self):
+        """The rule the whole interface is shaped around. An implementation
+        that cannot reach its destination says UNKNOWN, and unreachable is not
+        permission — turning "could not find out" into "yes" is what this
+        forbids, and one negation is all it would take."""
+        fresh = rendered_world(
+            target=a_target(holds=U.Answers.unknown("destination unreachable"),
+                            published=U.Answers.unknown("destination unreachable")))
+        _work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
+        self.assertFalse(act.ran)
+
+    def test_an_unknown_hold_is_not_rescued_by_the_serving_question_being_moot(self):
+        """The other way in: a target that does not serve at all, so gate 3 is
+        NA and the unanimity rule decides — and there UNKNOWN must still not
+        pass for yes. NA removes a gate; UNKNOWN fails it."""
+        fresh = rendered_world(
+            target=a_target(holds=U.Answers.unknown("destination unreachable")))
+        _work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
+        self.assertFalse(act.ran)
+
+    def test_a_render_nobody_answered_about_reads_unknown(self):
+        """The target answered — about the OTHER trip. A name absent from the
+        readings is the same as no answer, and no answer is not yes. This is
+        why Answers has no accessor a caller can hand a default to."""
+        fresh = rendered_world(
+            target=a_target(holds=(MP4.name,), published=(MP4.name,)))
         _work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertFalse(act.ran)
 
     def test_everything_proven_lets_the_workspace_go(self):
-        """Every trip encoded and every render in the bucket at a matching
-        size. This is the case the whole rule exists to permit."""
-        fresh = rendered_world(bucket=W.Listed(_bucket_of(rendered_world())))
+        """Every trip encoded, and the target says it holds and serves every
+        render. This is the case the whole rule exists to permit."""
+        fresh = rendered_world(
+            target=a_target(holds=all_of(rendered_world()),
+                            published=all_of(rendered_world())))
         _work, act, outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertTrue(act.ran)
         self.assertTrue(outcome.completed)
 
     def test_what_could_not_be_checked_is_stated_rather_than_passed_over(self):
-        """With neither bucket nor site there is no proof of publication at
-        all, so the renders are the only copy of that footage in the world. A
-        guard that could not run says so instead of staying quiet."""
+        """With nothing configured to publish to there is no proof of
+        publication at all, so the renders are the only copy of that footage in
+        the world. A guard that could not run says so instead of staying quiet.
+
+        One sentence where there used to be two. Not a weakened check — the
+        two lines were one operator's two config keys for one condition, and
+        with one implementation it is genuinely one condition."""
         lines = guards.unproven_lines(rendered_world())
-        self.assertEqual(len(lines), 2)
-        self.assertIn("s3_bucket", lines[0])
-        self.assertIn("site_repo", lines[1])
+        self.assertEqual(len(lines), 1)
+        self.assertIn("website_uploader", lines[0])
 
-
-def _bucket_of(w):
-    return {"videos/" + r.name: r.size for r in w.renders_here}
+    def test_a_configured_target_does_not_get_that_sentence(self):
+        lines = guards.unproven_lines(
+            rendered_world(target=a_target(holds=all_of(rendered_world()))))
+        self.assertEqual(lines, ())
 
 
 class TestTheRecheckHappensAfterTheWordIsTyped(unittest.TestCase):
@@ -966,7 +1101,8 @@ class TestTheRecheckHappensAfterTheWordIsTyped(unittest.TestCase):
         """The world the menu was drawn with is a prompt old, and a card can be
         swapped or a folder deleted while the prompt is on screen. The same
         callable is asked twice, against two worlds captured at two instants."""
-        fresh = rendered_world(site=a_site(published=M.Evidence.NO))
+        fresh = rendered_world(
+            target=a_target(published=none_of(rendered_world(), M.Evidence.NO)))
         work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertEqual(work.scopes, [M.Scope.FULL])
         self.assertFalse(act.ran)
@@ -975,12 +1111,12 @@ class TestTheRecheckHappensAfterTheWordIsTyped(unittest.TestCase):
         """Not "the trees do not overlap so the evidence must still hold" —
         that reasoning produced the defect this replaces. The act is handed the
         re-captured world by construction, so it cannot be handed a stale one."""
-        fresh = rendered_world(bucket=W.Listed(_bucket_of(rendered_world())))
+        fresh = rendered_world(target=a_target(holds=all_of(rendered_world())))
         _work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertEqual(act.worlds, [fresh])
 
     def test_the_wrong_word_stops_before_the_re_check(self):
-        fresh = rendered_world(bucket=W.Listed(_bucket_of(rendered_world())))
+        fresh = rendered_world(target=a_target(holds=all_of(rendered_world())))
         work, act, outcome = clean_with(guards.workspace_is_expendable, fresh,
                                         word="clean")
         self.assertFalse(act.ran)
@@ -1096,8 +1232,9 @@ SECOND_RUN = {
     PREVIEW: (imported(), imported(stills_current=True), M.Ruling.GO),
     RENDER: (imported(), imported(renders=(MP4,)), M.Ruling.GO),
     BUILD: (imported(renders=(MP4,)),
-            imported(renders=(MP4,), site=a_site(page=True)), M.Ruling.GO),
-    # Every render on the bucket at a matching size and covered by a deploy.
+            imported(renders=(MP4,), local_page=True), M.Ruling.GO),
+    # The target says it holds and serves every render, so there is nothing
+    # left for a second upload to do.
     UPLOAD: (imported(renders=(MP4,), renders_here=(MP4,)),
              a_published_world(), M.Ruling.SATISFIED),
     # The import tree is gone, which is this item's postcondition.
@@ -1162,7 +1299,8 @@ class TestIdempotence(unittest.TestCase):
         with an empty list."""
         work = FakeWork()
         item = menu_for(UPLOADER, work)[UPLOAD]
-        item.execute(imported(renders=(MP4,), renders_here=(MP4,)))
+        item.execute(imported(renders=(MP4,), renders_here=(MP4,),
+                              target=a_target(owed=(MP4.name,))))
         item.execute(a_published_world())
         self.assertEqual(len(work.publishers[0].worlds), 1)
 

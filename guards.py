@@ -17,7 +17,6 @@ The distinction that decides whether a check survives at all:
 
 from __future__ import annotations
 
-from itertools import filterfalse
 from typing import Optional, Tuple
 
 from menu import Evidence, Verdict, blocked, go
@@ -101,19 +100,24 @@ def _at_least(have: int, want: int) -> Evidence:
     return Evidence.YES if have >= want else Evidence.NO
 
 
-def on_the_bucket(world) -> Evidence:
-    """Are those renders in the bucket, at a matching size?"""
-    return world.bucket.covers(world.renders_here)
+def held_at_the_destination(world) -> Evidence:
+    """Is this exact render there, at this size — whatever "there" is.
+
+    The target's answer, frozen at capture. It used to be a bucket listing
+    read here; which destination it is and how it was asked is the
+    implementation's business, and the reading it produces is the guard's.
+    """
+    return world.target.holds.covers(world.renders_here)
 
 
-def published_on_the_site(world) -> Evidence:
-    """What is-complete.py says the live site actually serves."""
-    return world.site.published
+def published_at_the_destination(world) -> Evidence:
+    """Is the render actually being SERVED, not merely stored."""
+    return world.target.published.covers(world.renders_here)
 
 
 WORKSPACE_GATES = (("rendered locally", rendered_locally),
-                   ("present on the bucket", on_the_bucket),
-                   ("published on the site (is-complete.py)", published_on_the_site))
+                   ("held at the destination", held_at_the_destination),
+                   ("published at the destination", published_at_the_destination))
 
 WORKSPACE_GUARDS = tuple(fn for _label, fn in WORKSPACE_GATES)
 
@@ -121,18 +125,19 @@ WORKSPACE_GUARDS = tuple(fn for _label, fn in WORKSPACE_GATES)
 def nothing_was_rendered_here(world) -> Optional[Verdict]:
     """The floor under the whole rule: not ONE mp4 from this import exists.
 
-    is-complete.py is asked about the local trip metas under <out>, which
+    A target answers about the trips it knows, and the local metas under <out>
     outlive every sweep — so on a machine that published last month it answers
-    a confident yes about last month's trips while this import has not been
+    a confident yes about last month's trips while THIS import has not been
     encoded at all. Letting it decide alone in that state erases footage that
-    exists in no render, no bucket and on no site, and the gate table on
-    screen says "rendered locally .... no" one line above the CLEAN prompt.
+    exists in no render and at no destination, and the gate table on screen
+    says "rendered locally .... no" one line above the CLEAN prompt.
 
-    So this is asked BEFORE the site, and no answer overrides it. Short or
-    unreadable render counts still defer to is-complete.py, which is the case
-    the deferral was written for — a trip dropped after grouping, a size that
-    moved under a re-encode. Zero is not that case: it is the absence of the
-    thing every later gate reasons about.
+    So this is asked BEFORE the target, and no answer overrides it — including
+    an implementation that answers yes to everything, which is why this
+    question is never delegated. Short or unreadable render counts still defer
+    to the target, which is the case the deferral was written for: a trip
+    dropped after grouping, a size that moved under a re-encode. Zero is not
+    that case; it is the absence of the thing every later gate reasons about.
     """
     if world.renders_here:
         return None
@@ -141,28 +146,29 @@ def nothing_was_rendered_here(world) -> Optional[Verdict]:
 
 
 def workspace_is_expendable(world) -> Verdict:
-    """Nothing rendered refuses outright; otherwise the site decides when it
-    can be asked, and failing that every check that can answer must say yes.
+    """Nothing rendered refuses outright; otherwise the "is it served" answer
+    decides when it can be given at all, and failing that every check that can
+    answer must say yes.
 
-    Today this is three gates, each carrying a hand-written "and there is no
-    site to ask instead — refusing" branch. That shape says two things at
-    once: is-complete.py is the authority on whether the raw footage may go,
-    and without it nothing may be waved through as commentary. Written as one
-    sentence it cannot be applied to two gates and forgotten on the third.
+    The first gate never leaves this machine, and that is the point: an
+    implementation that answers yes to everything still cannot talk this into
+    erasing an import that produced no renders, because the exporter does not
+    delegate a question it already knows the answer to.
 
     Deliberately NOT "the last applicable check wins". That reading approves
-    the wipe when the local render count is short or unreadable, there is no
-    site_repo, and the renders that DO exist are on the bucket — and the trips
-    that were never encoded exist in no render, no bucket, nowhere. Their
-    footage would go. tests/test_guards.py enumerates all 48 combinations of
-    the three gates against the branches this replaces.
+    the wipe when the local render count is short or unreadable, the target
+    cannot say whether anything is served, and the renders that DO exist are
+    at the destination — and the trips that were never encoded exist in no
+    render, at no destination, nowhere. Their footage would go.
+    tests/test_guards.py enumerates all 48 combinations of the three gates
+    against the branches this replaces.
     """
     return nothing_was_rendered_here(world) or _decided_by_the_gates(world)
 
 
 def _decided_by_the_gates(world) -> Verdict:
-    if world.site.published.applicable:
-        return _verdict_of(WORKSPACE_GATES[2][0], world.site.published)
+    if world.target.published.applicable:
+        return _verdict_of(WORKSPACE_GATES[2][0], published_at_the_destination(world))
     return _unanimous(world)
 
 
@@ -194,23 +200,23 @@ def gate_readings(world) -> Tuple[Tuple[str, Evidence], ...]:
 def unproven_lines(world) -> Tuple[str, ...]:
     """What could NOT be checked here, stated rather than passed over.
 
-    Not decoration: with neither bucket nor site there is no proof of
+    Not decoration: with nothing configured to publish to, there is no proof of
     publication at all, so the renders under <out> are the only copy of that
     footage in the world. A guard that could not run says so.
+
+    One sentence where there used to be two — "no bucket" and "no site repo"
+    were one operator's two settings for one condition, and with one
+    implementation it is genuinely one condition. Narrower wording, not a
+    narrower check: the gates it describes are unchanged.
     """
-    return tuple(filter(None, (_no_bucket_line(world), _no_site_line(world))))
+    return tuple(filter(None, (_no_target_line(world),)))
 
 
-def _no_bucket_line(world) -> str:
-    if world.bucket.covers(()) is not Evidence.NA:
+def _no_target_line(world) -> str:
+    if world.target.configured:
         return ""
-    return "no s3_bucket in config.txt, so no copy off this machine was checked"
-
-
-def _no_site_line(world) -> str:
-    if world.site.published.applicable:
-        return ""
-    return "no site_repo in config.txt, so no published copy was checked"
+    return ("no website_uploader configured, so no copy off this machine was"
+            " checked")
 
 
 # ---------------------------------------------------------------------------
@@ -267,39 +273,15 @@ def renders_exist(world) -> bool:
     return bool(world.renders or world.final_folders)
 
 
-def videos_link_wrong(world) -> Optional[str]:
-    """public_html/videos must resolve to the tree we are about to verify.
+def nothing_to_build_from(world) -> Optional[str]:
+    """The exporter's OWN question in front of item 6's delegation.
 
-    upload-videos-s3.sh derives its object keys from whatever that symlink
-    points at, so verifying a different tree than the one uploaded is worse
-    than not verifying.
+    A gathered final_ folder counts — the rebuild case, where the loose
+    renders are gone because an earlier build moved them. Asked here rather
+    than of the target because it is a fact about this machine: a target that
+    answers yes to everything still cannot get a page built out of an empty
+    tree.
     """
-    if world.site.videos_link == world.out_dir:
+    if renders_exist(world):
         return None
-    return ("public_html/videos -> %s but the render output is %s"
-            % (world.site.videos_link, world.out_dir))
-
-
-def uploads_outstanding(world):
-    """Renders not yet in the bucket at a matching size.
-
-    What makes an interrupted upload resumable, and what says whether item 7
-    would do anything at all. A listing that failed proves nothing, so
-    everything stays outstanding; trips the curation flagged mode=delete are
-    deliberately absent and owe nothing.
-    """
-    owed = filterfalse(lambda r: _curation_deleted(world, r), world.renders)
-    return tuple(filterfalse(lambda r: _in_bucket(world, r), owed))
-
-
-def _curation_deleted(world, render) -> bool:
-    return any(map(lambda i: i in render.name, world.site.curation_deleted))
-
-
-def _in_bucket(world, render) -> bool:
-    return world.bucket.holds(render.name, render.size) is Evidence.YES
-
-
-def deploy_outstanding(world):
-    """Renders the deploy record does not cover yet."""
-    return tuple(filterfalse(lambda r: r.name in world.site.deployed, world.renders))
+    return "no renders and no gathered folder to build a page from"

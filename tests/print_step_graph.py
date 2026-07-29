@@ -43,11 +43,19 @@ class NullWork:
     edges the items declare.
     """
 
-    def gatherer(self, strategy):
-        return None
+    def builder(self, strategy):
+        return NullBuilder()
 
     def publisher(self, strategy):
         return None
+
+
+class NullBuilder:
+    """Item 6 asks its builder for the menu row's wording in description(),
+    which IS read here — this module prints the table."""
+
+    def describe(self):
+        return "build"
 
 
 def nums(neighbours):

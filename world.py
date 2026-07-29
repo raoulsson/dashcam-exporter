@@ -12,26 +12,27 @@ answer could have changed, and always immediately before anything irreversible.
 
 Three shapes here carry weight and must not be simplified:
 
-  * `Listing` is a TYPE, not Optional[dict]. `Unlistable` has no .get(), so
-    `s3_objects(ctx) or {}` — the idiom that turns "could not find out" into
-    "not there" — is unwritable against it.
+  * `TargetFacts` holds FROZEN ANSWERS, not a live handle on the configured
+    uploader. A guard that could call out to the network answers differently
+    on two reads of the same World, and the destructive re-check is built on
+    exactly that not happening.
   * `Card.new_stamps` and `Card.owed_stamps` are FIELDS, derived once at
     capture. They used to be a function reading a module global that four call
     sites remembered to refresh first; a global four places remember is a
     global the fifth forgets.
-  * `expected_trips` stays Optional[int] and `SiteFacts.published` stays
+  * `expected_trips` stays Optional[int] and the target's answers stay
     three-valued-plus-NA. Collapsing either to a bool weakens a guard without
     the diff looking like it.
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, FrozenSet, Optional, Tuple
+from typing import FrozenSet, Optional, Tuple
 
-from menu import Evidence, Scope, Strategy
+from menu import Scope, Strategy
+from uploader import Answers, Owed
 
 
 @dataclass(frozen=True)
@@ -78,105 +79,28 @@ class Card:
     note: str = ""                                # how the accounting was met
 
 
-class Listing(ABC):
-    """What the bucket said, including that it did not say."""
+@dataclass(frozen=True)
+class TargetFacts:
+    """What the configured publishing target said about these renders, as of
+    world.at.
 
-    @abstractmethod
-    def holds(self, name: str, size: int) -> Evidence:
-        """Is this exact object there at this exact size?"""
+    Answers, not a handle: nothing downstream may ask the target a NEW question
+    while judging a world. The whole point of freezing them is that the
+    destructive re-check captures a second world and gets a second set of
+    answers, and the two can then be compared by the same guard.
 
-    @abstractmethod
-    def covers(self, renders) -> Evidence:
-        """Is every one of these there? UNKNOWN is not NO."""
-
-
-def _same_object(key: str, name: str) -> bool:
-    """Key match on a "/" boundary.
-
-    A bare endswith let sometrip_X.mp4 in the bucket vouch for trip_X.mp4 on
-    disk, which is how a render read as published while its only other copy
-    was the workspace about to be erased.
-
-    This is the version the ITEMS judge. pipeline.py still hand-writes the same
-    comparison in four more places (working_area_is_expendable,
-    import_is_expendable, uploads_outstanding's disk walk and the progress
-    count), so the rule holds in five places and is enforced in one. Folding
-    those onto this function is worth doing; until it happens, changing the
-    rule here changes it for the guards only.
+    The defaults are the local edition: nothing configured, so every question
+    about a destination is NA rather than unanswered. An unreachable CONFIGURED
+    target is a different thing entirely and says UNKNOWN, which fails closed.
     """
-    return key == name or key.endswith("/" + name)
 
-
-def _yes_no(ok: bool) -> Evidence:
-    return Evidence.YES if ok else Evidence.NO
-
-
-@dataclass(frozen=True)
-class Listed(Listing):
-    objects: Dict[str, int] = field(default_factory=dict)
-
-    def holds(self, name, size) -> Evidence:
-        return _yes_no(self.size_of(name) == size)
-
-    def size_of(self, name) -> Optional[int]:
-        """The size of the object with this name, or None if it is not there."""
-        hits = filter(lambda kv: _same_object(kv[0], name), self.objects.items())
-        return next(map(lambda kv: kv[1], hits), None)
-
-    def covers(self, renders) -> Evidence:
-        return _yes_no(all(map(self._holds_render, renders)))
-
-    def _holds_render(self, render) -> bool:
-        return self.holds(render.name, render.size) is Evidence.YES
-
-    def names(self) -> FrozenSet[str]:
-        return frozenset(self.objects)
-
-
-class Unlistable(Listing):
-    """A bucket is configured and could not be read. Fails closed, always."""
-
-    def holds(self, name, size) -> Evidence:
-        return Evidence.UNKNOWN
-
-    def covers(self, renders) -> Evidence:
-        return Evidence.UNKNOWN
-
-    def names(self) -> FrozenSet[str]:
-        return frozenset()
-
-
-class NoBucket(Listing):
-    """No bucket is configured, so the question does not arise here."""
-
-    def holds(self, name, size) -> Evidence:
-        return Evidence.NA
-
-    def covers(self, renders) -> Evidence:
-        return Evidence.NA
-
-    def names(self) -> FrozenSet[str]:
-        return frozenset()
-
-
-@dataclass(frozen=True)
-class SiteFacts:
-    """The second repo, the deploy record, and what the live site serves."""
-
-    configured: bool = False            # site_repo is set in config.txt
-    on_disk: bool = False               # and the directory is actually there
-    scripts: FrozenSet[str] = frozenset()          # deploy/ scripts found
-    has_manifest_builder: bool = False
-    videos_link: Optional[Path] = None  # what public_html/videos resolves to
-    curation_deleted: FrozenSet[str] = frozenset()  # admin.json mode=delete ids
-    deployed: FrozenSet[str] = frozenset()          # render names a deploy covered
-    published: Evidence = Evidence.NA   # is-complete.py's verdict, FULL scope only
-    published_counts: Tuple[Optional[int], Optional[int]] = (None, None)
-    published_lines: Tuple[str, ...] = ()
-    page: bool = False                  # a built local result page exists
-
-    def has(self, script: str) -> bool:
-        return script in self.scripts
+    configured: bool = False
+    name: str = ""
+    origin: str = ""                    # who answered, composed by the loader
+    holds: Answers = field(default_factory=Answers.not_applicable)
+    published: Answers = field(default_factory=Answers.not_applicable)
+    owed: Owed = field(default_factory=Owed.nothing)
+    carried: Answers = field(default_factory=Answers.not_applicable)
 
 
 @dataclass(frozen=True)
@@ -204,6 +128,7 @@ class World:
     expected_trips: Optional[int] = None         # None = grouping unreadable
     has_track: bool = False
     stills_current: bool = False
+    local_page: bool = False                     # a built local result page exists
     ledger_mark: Optional[str] = None
     excluded: FrozenSet[str] = frozenset()
     excluded_at: float = 0.0
@@ -216,6 +141,4 @@ class World:
 
     # the outside
     card: Card = field(default_factory=Card)
-    bucket: Listing = field(default_factory=NoBucket)
-    site: SiteFacts = field(default_factory=SiteFacts)
-    awscli: bool = False
+    target: TargetFacts = field(default_factory=TargetFacts)

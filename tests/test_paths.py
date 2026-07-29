@@ -38,6 +38,7 @@ sys.path.insert(0, str(REPO))
 import guards                    # noqa: E402
 import items                     # noqa: E402  (registers the ten)
 import menu as M                 # noqa: E402
+import uploader as U             # noqa: E402
 import world as W                # noqa: E402
 from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                   UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
@@ -72,20 +73,22 @@ RENDERED = W.Render("trip_2026-07-28_08-57_01_h1080.mp4", 64)
 SIDECAR = W.TripMeta("trip_2026-07-28_08-57_01", "20260728080000", "20260728093000")
 
 
-def _site(strategy):
-    """A publishing install has a second repo and a live answer; a local one
-    has neither, and NA is not the same answer as no."""
-    if strategy is UPLOADER:
-        return W.SiteFacts(configured=True, on_disk=True, published=M.Evidence.YES,
-                           scripts=frozenset({"upload-videos-s3.sh", "deploy-site.sh"}),
-                           videos_link=Path("/w/out"), page=True)
-    return W.SiteFacts(page=True)
+def _target(strategy):
+    """A publishing install has an uploader that answers; a local one has no
+    uploader at all, and NA is not the same answer as no.
 
-
-def _bucket(strategy):
+    Which destination it is stopped being this file's business when the second
+    repo became an implementation: what a path test needs is a target that
+    answers everything yes, so nothing here refuses for a reason about
+    evidence when the subject is order.
+    """
     if strategy is UPLOADER:
-        return W.Listed({"videos/" + RENDERED.name: RENDERED.size})
-    return W.NoBucket()
+        return W.TargetFacts(
+            configured=True, name="a target", origin="a target (a test)",
+            holds=U.Answers.of({RENDERED.name: M.Evidence.YES}),
+            published=U.Answers.of({RENDERED.name: M.Evidence.YES}),
+            owed=U.Owed.just((RENDERED.name,)))
+    return W.TargetFacts()
 
 
 def every_item_can_run(strategy, **override):
@@ -101,12 +104,30 @@ def every_item_can_run(strategy, **override):
         imports=(Path("/w/import"),), selected_import=Path("/w/import"),
         metas=(SIDECAR,), renders=(RENDERED,), renders_here=(RENDERED,),
         expected_trips=1, has_track=True, stills_current=True,
-        ledger_mark=CLIP, workspace_settled=True, awscli=True,
+        ledger_mark=CLIP, workspace_settled=True, local_page=True,
         card=W.Card(path=Path("/w/card"), dcim=True, present=True,
                     stamps=frozenset({CLIP})),
-        bucket=_bucket(strategy), site=_site(strategy))
+        target=_target(strategy))
     facts.update(override)
     return W.World(**facts)
+
+
+class FakeBuilder:
+    """Item 6's collaborator. Both products build; what differs is what gets
+    built, which is the implementation's business and not this file's."""
+
+    def __init__(self, done):
+        self._done = done
+
+    def describe(self):
+        return "Build whatever this product publishes."
+
+    def why_not(self, world):
+        return None
+
+    def build(self, world):
+        self._done.append(BUILD)
+        return M.did("built")
 
 
 class FakePublisher:
@@ -119,7 +140,7 @@ class FakePublisher:
 
     def why_not(self, world):
         if self._local:
-            return "needs site_repo and s3_bucket in config.txt"
+            return "no website_uploader is configured"
         return None
 
     def run(self, world):
@@ -160,16 +181,13 @@ class FakeWork:
     def render(self, world):
         return self._ran(RENDER)
 
-    def build_website(self, world, gather):
-        return self._ran(BUILD)
-
     def _ran(self, number):
         self.done.append(number)
         return M.did("mocked")
 
     # -- the collaborators the constructor installs ------------------------
-    def gatherer(self, strategy):
-        return "gather-under-%s" % strategy.value
+    def builder(self, strategy):
+        return FakeBuilder(self.done)
 
     def publisher(self, strategy):
         return FakePublisher(strategy, self.done)

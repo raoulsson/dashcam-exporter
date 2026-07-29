@@ -205,13 +205,12 @@ def load_config(path):
     return out
 
 
-# The publishing settings point at a specific person's bucket, website and
-# checkout. config.txt is tracked, so putting real values there commits them —
-# which is exactly what happened, and why they now resolve from the gitignored
-# .env first. Same rule the home coordinates already followed: config.txt may
-# carry a commented EXAMPLE, the real value lives in .env or not at all.
-PRIVATE_KEYS = ("website_uploader", "site_repo", "s3_bucket", "s3_region",
-                "live_trips_url", "home_lat", "home_lon")
+# Settings that name a place belonging to one person. config.txt is tracked,
+# so putting real values there commits them — which is exactly what happened,
+# and why they resolve from the gitignored .env first. Same rule the home
+# coordinates already followed: config.txt may carry a commented EXAMPLE, the
+# real value lives in .env or not at all.
+PRIVATE_KEYS = ("website_uploader", "home_lat", "home_lon")
 
 
 def as_bool(v, default=False):
@@ -279,32 +278,6 @@ class Ctx:
         spec = self.cfg_opt("website_uploader")
         self.uploader = _loaded_uploader(spec, self.exporter)
         self.uploader_origin = _uploader_origin(spec, self.uploader)
-
-        # --- the optional, personal half. All three are unset by default.
-        #
-        # The site repo holds the publishing scripts (build_manifest.py,
-        # deploy/upload-videos-s3.sh, deploy/deploy-site.sh). Unset means this
-        # CLI is import -> render -> local site and nothing else; the steps that
-        # need it are greyed out rather than removed, so the numbering is the
-        # same for everyone and the greyed line says which key turns them on.
-        # A flag or an env var wins over the file: both exist to point one run
-        # somewhere other than the configured place.
-        site = (os.environ.get("GOODNIGHT_DRIVES_DIR")
-                or self.cfg_opt("site_repo"))
-        self.site = Path(site).expanduser().resolve() if site else None
-
-        # The bucket the Upload step verifies against once the sync has run.
-        # aws s3 sync exits 0 even when objects fail, so this name is what makes
-        # "uploaded" provable; without it Upload cannot be trusted and stays off.
-        # The region is only needed when the credentials' default is a different
-        # one — an eu-central-1 bucket listed with a us-east-1 default fails.
-        self.s3_bucket = self.cfg_opt("s3_bucket")
-        self.s3_region = self.cfg_opt("s3_region")
-
-        # The deployed site's manifest, read for one line of the status screen.
-        # Unset means no request is made at all — not a request that fails. A
-        # clone must not phone a host its owner has never heard of.
-        self.live_trips_url = self.cfg_opt("live_trips_url")
 
         # The workspace holding the footage to work on. `root` is the old name
         # and still read, because configs carrying it exist; import_dir wins.
@@ -394,35 +367,13 @@ class Ctx:
     def cfg_opt(self, key):
         """A configured value, or None when the setting is absent.
 
-        Empty counts as absent: `s3_bucket =` with nothing after it is someone
-        clearing the setting, and the alternative — an empty string that still
-        gets used — produces `s3://` and a listing of the whole account.
+        Empty counts as absent: `website_uploader =` with nothing after it is
+        someone clearing the setting, and the alternative — an empty string
+        that still gets used — is a spec that cannot be parsed and a tool that
+        refuses to start over a line the operator thought he had removed.
         """
         v = (self.cfg.get(key) or "").strip()
         return v or None
-
-    @property
-    def site_ready(self):
-        """Configured AND actually on disk.
-
-        Only the second failure reaches an item's answer: unset means the
-        publishing edition was never resolved, so the menu says the entry is
-        not part of this edition and the startup line says which edition that
-        is. Set but absent is a wrong path, which is this world's problem and
-        so is the item's to report."""
-        return self.site is not None and self.site.is_dir()
-
-    def site_script(self, *parts):
-        """Path to a script inside the site repo, or None if it is not there.
-
-        The site repo is whatever the user pointed at, so its scripts are a
-        claim rather than a guarantee — checking is what lets the menu say which
-        one is missing instead of failing halfway through a step.
-        """
-        if not self.site_ready:
-            return None
-        p = self.site.joinpath(*parts)
-        return p if p.is_file() else None
 
 
 # ---------------------------------------------------------------------------
@@ -929,31 +880,23 @@ def rendered_mp4s(out_dir):
                   if p.is_file() and not any(part.startswith(".") for part in p.relative_to(out_dir).parts))
 
 
-def live_trip_count(ctx):
-    """Trips the deployed site is currently serving, or None.
+def _target_status(ctx):
+    """The configured target's own status rows, or none at all.
 
-    Returns None WITHOUT touching the network when live_trips_url is unset —
-    that is the whole point of the setting. This runs on every launch, so a
-    hardcoded URL here would mean every clone of this repo pinging one person's
-    host every time anyone opened the menu.
+    Wrapped so a badly-behaved implementation costs the operator a dim line
+    rather than the launch. This is not distrust — it is that a status screen
+    is the wrong place to die, and the answer here decides nothing.
     """
-    if ctx.offline or not ctx.live_trips_url:
-        return None
+    if ctx.uploader is None:
+        return ()
+    return _asked_for_status(ctx.uploader)
+
+
+def _asked_for_status(target):
     try:
-        with urllib.request.urlopen(ctx.live_trips_url, timeout=6) as r:
-            data = json.load(r)
-        # Count the days array, not the top-level trip_count. That field is
-        # denormalised and can go stale if anything edits trips.json without
-        # recomputing it — which has already happened once, and made this
-        # status screen confidently report a trip that was not there.
-        # The array IS the manifest; the count is a summary of it.
-        n = sum(len(d.get("trips", [])) for d in data.get("days", []))
-        declared = data.get("trip_count")
-        if declared is not None and declared != n:
-            n = "%d (manifest says %d — stale trip_count)" % (n, declared)
-        return n
-    except Exception:
-        return None
+        return tuple(target.status_lines())
+    except Exception as e:                    # pragma: no cover - defensive
+        return (C.dim("  %s could not report its status: %s" % (target.name(), e)),)
 
 
 def print_status(ctx):
@@ -1005,37 +948,14 @@ def print_status(ctx):
     else:
         print("  Local site   %s  %s" % (C.yellow("not built"), C.dim(tilde(site_index))))
 
-    # Everything below is the publishing half, and each row appears only when
-    # the thing behind it is configured. A "Live site: unknown" row on a machine
-    # that has no live site is not status, it is a permanent question mark — and
-    # a row naming a repo the reader has never heard of is worse.
-    if ctx.site is not None:
-        manifest = ctx.site / "public_html" / "trips.json"
-        if manifest.is_file():
-            try:
-                local_trips = json.loads(manifest.read_text()).get("trip_count", "?")
-            except Exception:
-                local_trips = "?"
-            age = human_age(time.time() - manifest.stat().st_mtime)
-            print("  Prepared     %s  %s" % (C.bold("%s trips" % local_trips),
-                                             # "just now" already reads as a time;
-                                             # appending "ago" gives "just now ago"
-                                             C.dim("updated %s" % age if age == "just now"
-                                                   else "updated %s ago" % age)))
-        else:
-            print("  Prepared     %s  %s" % (C.yellow("none yet"), C.dim(tilde(manifest))))
+    # The publishing half, in the target's own words. Which rows those are, and
+    # whether asking for them touches the network, is the implementation's
+    # business — this is the one place it is asked, once per launch, never in
+    # the menu loop. Nothing to say is a target with nothing to report, not an
+    # empty row: a permanent "unknown" line is a question mark, not status.
+    _print_all(_target_status(ctx))
 
-    # No answer, no row. live_trip_count already returns None when the URL is
-    # unset, when offline is set, and when the lookup did not come back, so the
-    # three ways of having nothing to report are one case here.
-    live = live_trip_count(ctx)
-    if live is not None:
-        print("  Live site    %s" % C.bold("%s trips" % live))
-
-    if ctx.site is not None:
-        print("  Repos        %s" % C.dim("%s | %s" % (tilde(ctx.exporter), tilde(ctx.site))))
-    else:
-        print("  Repo         %s" % C.dim(tilde(ctx.exporter)))
+    print("  Repo         %s" % C.dim(tilde(ctx.exporter)))
     print(rule())
 
     # Disk goes below the rule, as a footnote rather than a status row.
@@ -1185,7 +1105,6 @@ def record(ctx, name, status, started, detail=""):
 # ---------------------------------------------------------------------------
 
 LEDGER_FILE = ".imported.json"
-DEPLOYED_FILE = ".deployed.json"
 
 
 def read_ledger(ctx):
@@ -1345,10 +1264,17 @@ def listed_trips(ctx):
     return out
 
 
-def import_is_expendable(ctx, root):
-    """(ok, reason) — is everything from `root` rendered, and published if this
-    install publishes? The delete step's proof, factored out so clearing the
-    working dir before a copy cannot become a softer version of the same act."""
+def import_is_expendable(ctx, root, target):
+    """(ok, reason) — is everything from `root` rendered, and at the destination
+    if this install publishes? The delete step's proof, factored out so
+    clearing the working dir before a copy cannot become a softer version of
+    the same act.
+
+    `target` is the frozen TargetFacts from the world being judged, not a live
+    handle: this is asked while a destructive prompt is on screen, and a second
+    question to the network here would answer about a different instant than
+    the gates the operator just read.
+    """
     ns = ctx.out_dir / root.name
     mp4s = rendered_mp4s(ns) if ns.is_dir() else []
     if not mp4s:
@@ -1356,26 +1282,19 @@ def import_is_expendable(ctx, root):
     # Only ask the scanner how many trips there SHOULD be when the source is
     # still there to scan. Once the import is deleted the question is
     # unanswerable and asking it makes the renderer error out on a missing DCIM
-    # folder — which is not the same as "these renders are incomplete". The S3
-    # check below still has to pass either way.
+    # folder — which is not the same as "these renders are incomplete". The
+    # destination check below still has to pass either way.
     if (root / "DCIM").is_dir():
         payload = load_groups(ctx, root)
         gs = (payload or {}).get("trips") or []
         want = sum(1 for g in gs if g.get("renderable", True)) if gs else None
         if want is not None and len(mp4s) < want:
             return False, "%d of %d trip(s) rendered" % (len(mp4s), want)
-    if ctx.cfg_opt("s3_bucket"):
-        remote = s3_objects(ctx)
-        if remote is None:
-            return False, "could not list the bucket to confirm the uploads"
-        missing = [p.name for p in mp4s
-                   # "/" boundary — a bare endswith let sometrip_X.mp4 in the
-                   # bucket vouch for trip_X.mp4 on disk.
-                   if not any((k == p.name or k.endswith("/" + p.name))
-                              and v == p.stat().st_size
-                              for k, v in remote.items())]
-        if missing:
-            return False, "%d render(s) not on S3" % len(missing)
+    unheld = [p.name for p in mp4s
+              if target.holds.about(p.name) not in (menu.Evidence.YES,
+                                                    menu.Evidence.NA)]
+    if unheld:
+        return False, "%d render(s) not confirmed at %s" % (len(unheld), target.name)
     return True, ""
 
 
@@ -1458,30 +1377,28 @@ def claim_out_dir(ctx):
     return None       # carry on without the extra proof
 
 
-def working_area_is_expendable(ctx):
+def working_area_is_expendable(ctx, target):
     """(ok, why, stragglers) — is everything in the working area a second copy?
 
     The sweeps act on the premise that the working area's contents belong to a
-    round that ended by being uploaded or gathered into final_. This function
+    round that ended by being published or gathered into final_. This function
     exists because that premise has to be TRUE before it is acted on, not
     assumed: a render whose upload failed or was skipped is the only copy, and
     unlinking it costs the hours it took to encode.
 
     A render is expendable when it is EITHER
-      - in the bucket at a matching size (only checkable with s3_bucket set) —
-        AND, when a site repo is also configured, recorded by a site deploy
-        that ran after it existed (see DEPLOYED_FILE), OR
-      - inside a final_<date> folder, which is where Build Website moves the deliverable
-        on an install that does not publish.
-    Everything else in the working area — previews/, the caches, the stills — is
-    derived from renders and costs seconds to rebuild, so it never blocks.
+      - held at the configured destination, which is the TARGET's answer and
+        the target's definition of "there" — one arrangement meant an object in
+        a bucket at a matching size AND a deploy record naming it, and that
+        two-part rule now lives with the arrangement instead of here, OR
+      - inside a final_<date> folder, which is where Build Website moves the
+        deliverable on an install that does not publish.
+    Everything else in the working area — previews/, the caches, the stills —
+    is derived from renders and costs seconds to rebuild, so it never blocks.
 
-    The deploy half is the owner's rule — no deleting the workspace without a
-    verified S3 upload AND the site deploy — and it binds only the configured
-    edition: a local-only install has no bucket and no site, and gathering
-    into final_ is what makes its workspace expendable. The evidence is the
-    record Upload Website writes on a successful deploy, because one that never ran
-    leaves exactly nothing to find.
+    Only YES clears a render. UNKNOWN does not, so a target that could not be
+    reached keeps the renders rather than having them swept on the strength of
+    a question nobody could answer.
 
     No renders at all is expendable: there is nothing to lose.
     """
@@ -1511,22 +1428,6 @@ def working_area_is_expendable(ctx):
                     except OSError:
                         pass
 
-    remote = {}
-    if ctx.cfg_opt("s3_bucket"):
-        remote = s3_objects(ctx) or {}
-
-    # When BOTH halves of publishing are configured, "uploaded" alone does not
-    # settle it: the render must also be covered by a site deploy that
-    # actually happened. Upload Website records the render names it deployed
-    # with; absence of a name there means the site has never served it.
-    require_deploy = bool(ctx.cfg_opt("s3_bucket")) and getattr(ctx, "site", None) is not None
-    deployed = set()
-    if require_deploy:
-        try:
-            deployed = set(json.loads((out / DEPLOYED_FILE).read_text()).get("videos", []))
-        except Exception:
-            deployed = set()
-
     stragglers = []
     for f in loose:
         try:
@@ -1535,25 +1436,21 @@ def working_area_is_expendable(ctx):
             continue
         if (f.name, size) in gathered:
             continue
-        # endswith on a "/" boundary: a bare endswith let sometrip_X.mp4 in the
-        # bucket satisfy trip_X.mp4 on disk.
-        if any((k == f.name or k.endswith("/" + f.name)) and v == size
-               for k, v in remote.items()) \
-                and (not require_deploy or f.name in deployed):
+        if target.holds.about(f.name) is menu.Evidence.YES:
             continue
         stragglers.append(f)
 
     if stragglers:
-        what = ("not both uploaded and site-deployed" if require_deploy
-                else "neither uploaded nor gathered")
+        what = ("not held by %s and not gathered" % target.name if target.configured
+                else "neither published nor gathered")
         return False, "%d render(s) %s" % (len(stragglers), what), stragglers
-    return True, "%d render(s), all uploaded or gathered" % len(loose), []
+    return True, "%d render(s), all published or gathered" % len(loose), []
 
 
 def purge_published_renders(ctx, root):
     """Empty the working area. Everything goes except a short keep-list.
 
-    Once the trips are on S3 and on the site, every file here is a third copy or
+    Once the trips are at the destination, every file here is a third copy or
     a cache of something that no longer exists: the renders, their sidecars,
     previews/ from the review pass, the extracted GPX cache, the boundary cache
     that names clips already deleted. Keeping any of it leaves exactly the files
@@ -1584,7 +1481,7 @@ def purge_published_renders(ctx, root):
     # EXCLUDED_FILE survives for the same reason the ledger does: it is state
     # ("these clips were dropped on purpose"), unrecoverable once gone, and
     # the delta import and the clean-up both read it after the footage is deleted.
-    keep_names = {"logs", LEDGER_FILE, OWNER_FILE, EXCLUDED_FILE, DEPLOYED_FILE, root.name}
+    keep_names = {"logs", LEDGER_FILE, OWNER_FILE, EXCLUDED_FILE, root.name}
     freed = n = 0
     for child in sorted(out.iterdir()):
         if child.name in keep_names or child.name.startswith(FINAL_PREFIX):
@@ -1882,14 +1779,18 @@ def parse_scan(root, lines):
     return ScanResult(root, total, skipped, lines)
 
 
-def step_progress(ctx):
+def step_progress(ctx, world):
     """Progress: the files on disk and what has been done to them. Read-only.
 
     An observation of state, not a transition in the flow: which trips exist,
-    which are excluded, which are rendered, uploaded and live. It generates
-    nothing and writes nothing — every fact here is read from the sidecars,
-    the renders, the bucket listing and the deploy record, so an empty
-    workspace is a legitimate answer, not an error.
+    which are excluded, which are rendered, held and served. It generates
+    nothing and writes nothing.
+
+    The last two columns are the TARGET's answers, read off the world that was
+    already captured for this dispatch rather than asked again here — a report
+    that goes and looks a second time can disagree with the gates the operator
+    just read, and then two screens of the same session say different things
+    about the same file.
     """
     started = time.time()
     trips = listed_trips(ctx)
@@ -1911,45 +1812,40 @@ def step_progress(ctx):
             renders[p.name] = p.stat().st_size
         except OSError:
             continue
-    # The bucket listing is one network call and only when it can mean
-    # something; offline or unconfigured, the column honestly says unknown.
-    remote = None
-    if ctx.s3_bucket and not ctx.offline:
-        remote = s3_objects(ctx)
-    deployed = set()
-    try:
-        deployed = set(json.loads((ctx.out_dir / DEPLOYED_FILE).read_text()).get("videos", []))
-    except Exception:
-        pass
-
-    n_rendered = n_uploaded = n_live = 0
-    print("  %-38s %-9s %-9s %-9s %s" % ("trip", "sidecars", "rendered", "uploaded", "live"))
+    n_rendered = n_held = n_served = 0
+    print("  %-38s %-9s %-9s %-9s %s"
+          % ("trip", "sidecars", "rendered", "held", "served"))
     for t in trips:
         mp4 = next((n for n in sorted(renders) if n.startswith(t["id"] + "_h")), None)
-        up = live = False
+        held = served = menu.Evidence.NA
         if mp4:
             n_rendered += 1
-            size = renders[mp4]
-            if remote is not None:
-                up = any((k == mp4 or k.endswith("/" + mp4)) and v == size
-                         for k, v in remote.items())
-                n_uploaded += 1 if up else 0
-            live = mp4 in deployed
-            n_live += 1 if live else 0
-        yn = lambda b: "yes" if b else "-"
-        upcol = "?" if (mp4 and remote is None) else yn(up)
+            held = world.target.holds.about(mp4)
+            served = world.target.published.about(mp4)
+            n_held += 1 if held is menu.Evidence.YES else 0
+            n_served += 1 if served is menu.Evidence.YES else 0
         print("  %-38s %-9s %-9s %-9s %s"
-              % (t["id"], "yes", yn(bool(mp4)), upcol, yn(live)))
+              % (t["id"], "yes", "yes" if mp4 else "-",
+                 _column(mp4, held), _column(mp4, served)))
     print()
-    line = "  %d trip(s): %d rendered, %d live" % (len(trips), n_rendered, n_live)
-    if remote is not None:
-        line = "  %d trip(s): %d rendered, %d uploaded, %d live" % (
-            len(trips), n_rendered, n_uploaded, n_live)
-    print(line)
+    print("  %d trip(s): %d rendered, %d held, %d served"
+          % (len(trips), n_rendered, n_held, n_served))
     if excluded:
         print(C.dim("  %d clip stamp(s) excluded on purpose." % len(excluded)))
     return record(ctx, NAME[PROGRESS], RAN, started,
-                  "%d trip(s), %d rendered, %d live" % (len(trips), n_rendered, n_live))
+                  "%d trip(s), %d rendered, %d served" % (len(trips), n_rendered,
+                                                          n_served))
+
+
+_COLUMN = {menu.Evidence.YES: "yes", menu.Evidence.NO: "-",
+           menu.Evidence.UNKNOWN: "?", menu.Evidence.NA: "-"}
+
+
+def _column(mp4, evidence):
+    """A cell in the progress table. No render, no question."""
+    if not mp4:
+        return "-"
+    return _COLUMN[evidence]
 
 
 def step_generate_meta(ctx):
@@ -2738,39 +2634,61 @@ def _renders_of(ctx, payload, by_index, picked):
     return out
 
 
-def _note_renders_on_s3(world, render_files):
+def _note_renders_published(world, render_files):
     """Local deletion is not unpublishing. Say so rather than letting a clean
     local result imply the trip is gone from the world."""
-    names = world.bucket.names()
     up = [f.name for f in render_files if f.suffix == ".mp4"
-          and any(f.name in k for k in names)]
+          and world.target.holds.about(f.name) is menu.Evidence.YES]
     if not up:
         return
-    print(C.red("  NOTE: %d of these are already on S3 and stay there." % len(up)))
-    print(C.dim("  Deleting locally does not remove them from the bucket or"))
-    print(C.dim("  from the site. Rebuild and redeploy (%d, %d) after this, and"
+    print(C.red("  NOTE: %d of these are already at %s and stay there."
+                % (len(up), world.target.name)))
+    print(C.dim("  Deleting locally does not remove them from the destination."))
+    print(C.dim("  Rebuild and republish (%d, %d) after this, and remove them"
                 % (BUILD, UPLOAD)))
-    print(C.dim("  remove the object from the bucket if you want it truly gone."))
+    print(C.dim("  there by hand if you want them truly gone."))
+
+
+class Consulted:
+    """Whether the target was asked about these trips, and what came back.
+
+    A list-of-one bool used to carry the first half of this. The second half —
+    "asked, and it could not say" — has to be recorded per trip as the answers
+    are read, because it cannot be recovered afterwards: a target that answered
+    fully and a target that answered nothing both leave an Answers object, and
+    the difference between them is the difference between "not published" and
+    "nobody knows", in a delete prompt.
+    """
+
+    def __init__(self):
+        self.asked = False
+        self.unknown = False
+
+    def saw(self, evidence):
+        self.asked = True
+        self.unknown = self.unknown or evidence is menu.Evidence.UNKNOWN
+        return evidence is menu.Evidence.YES
 
 
 def _only_copy_lines(ctx, world, payload, by_index, picked):
     """The last-copy warning, and an honest account of what was checked.
 
-    Three states, three sentences: the bucket was never asked (those trips have
-    no render name to look for), the bucket could not be read, or there is no
-    bucket. Saying "not consulted" when the listing actually failed is a lie in
-    a delete prompt.
+    Three states, three sentences: the target was never asked (those trips have
+    no render name to look for), the target could not answer, or there is no
+    target at all. Saying "not consulted" when the question actually failed is
+    a lie in a delete prompt.
     """
-    only_copy, elsewhere, consulted = [], [], [False]
+    only_copy, elsewhere, consulted = [], [], Consulted()
     for i in picked:
         (elsewhere if _exists_elsewhere(ctx, world, payload, by_index[i], consulted)
          else only_copy).append(i)
     lines = []
     if elsewhere:
-        lines.append(C.dim("  Trip(s) %s also exist as a render elsewhere or on S3."
-                           % ", ".join(str(i) for i in elsewhere)))
+        lines.append(C.dim("  Trip(s) %s also exist as a render elsewhere or at %s."
+                           % (", ".join(str(i) for i in elsewhere),
+                              world.target.name or "the destination")))
     if only_copy:
-        lines.extend(_last_copy_banner(world, only_copy, consulted[0]))
+        lines.extend(_last_copy_banner(world, only_copy, consulted))
     return tuple(lines)
 
 
@@ -2778,21 +2696,29 @@ def _exists_elsewhere(ctx, world, payload, trip, consulted):
     _same, other = trip_renders(ctx, payload, trip)
     if other:
         return True
-    return _on_the_bucket(world, trip, consulted)
+    return _at_the_destination(world, trip, consulted)
 
 
-def _on_the_bucket(world, trip, consulted):
+def _at_the_destination(world, trip, consulted):
+    """Does the target carry this trip, keyed on its id?
+
+    Asked through carries() rather than holds(): this trip may have no local
+    render at all — the published-then-cleaned-up case — so there is no Render
+    to key on and no size to compare. Answered through holds() it would read
+    UNKNOWN and the full "ONLY copy of that footage" panel would fire over a
+    trip that is safely published, which is how an operator learns to stop
+    reading warnings.
+    """
     base = trip.get("out_base")
     if not base:
         return False            # no render name to look for; nothing to ask
-    consulted[0] = True
-    return any(Path(base).name in k for k in world.bucket.names())
+    return consulted.saw(world.target.carried.about(Path(base).name))
 
 
 def _last_copy_banner(world, only_copy, consulted):
     bar = C.red("  " + "!" * (term_width() - 4))
     lines = [bar,
-             C.red("  Trip(s) %s are NOT rendered anywhere and NOT on S3."
+             C.red("  Trip(s) %s are NOT rendered anywhere and NOT published."
                    % ", ".join(str(i) for i in only_copy)),
              C.red("  These files are the ONLY copy of that footage. Deleting them"),
              C.red("  ends it — there is nothing to restore from, here or online.")]
@@ -2802,20 +2728,32 @@ def _last_copy_banner(world, only_copy, consulted):
 
 
 def _why_unchecked(world, consulted):
-    if not consulted:
-        return [C.red("  (The S3 bucket was not consulted: those trips have no render"),
-                C.red("   name to look for, so no object could exist for them.)")]
-    return _bucket_caveat(world)
+    if not consulted.asked:
+        return [C.red("  (The destination was not consulted: those trips have no"),
+                C.red("   render name to look for, so nothing could exist for them.)")]
+    return _target_caveat(world, consulted)
 
 
-def _bucket_caveat(world):
-    if isinstance(world.bucket, W.Unlistable):
-        return [C.red("  (The bucket listing FAILED, so 'not on S3' is unverified —"),
-                C.red("   an unknown is not evidence of a copy.)")]
-    if isinstance(world.bucket, W.NoBucket):
-        return [C.red("  (No s3_bucket is configured, so nothing of this is off"),
-                C.red("   this machine.)")]
-    return []
+def _target_caveat(world, consulted):
+    """Which of the three "nothing came back" states this was.
+
+    The distinction survives the move onto the interface: no target at all is
+    NA, and a target that was asked and could not say is UNKNOWN. Collapsing
+    them would print "nothing of this is off this machine" over a destination
+    that simply timed out.
+    """
+    if not world.target.configured:
+        return [C.red("  (No website_uploader is configured, so nothing of this is"),
+                C.red("   off this machine.)")]
+    return _unreachable_caveat(world, consulted)
+
+
+def _unreachable_caveat(world, consulted):
+    if not consulted.unknown:
+        return []
+    return [C.red("  (%s could not answer, so 'not published' is unverified —"
+                  % world.target.name),
+            C.red("   an unknown is not evidence of a copy.)")]
 
 
 def drop_plan(ctx, world):
@@ -2849,7 +2787,7 @@ def _drop_plan_for(ctx, world, payload, by_index, picked, started):
         print()
         print(C.yellow("  Already rendered. The render goes too, %d file(s):"
                        % len(render_files)))
-        _note_renders_on_s3(world, render_files)
+        _note_renders_published(world, render_files)
         for f in render_files[:8]:
             print(C.dim("      %s" % tilde(f)))
         if len(render_files) > 8:
@@ -2909,8 +2847,7 @@ def _drop_commit(ctx, picked, by_index, files, render_files, started):
     ctx.last_scan = None
 
     _drop_orphan_sidecars(by_index, picked)
-    _record_curation(ctx, by_index, picked, render_files)
-    _rebuild_manifest(ctx, render_files)
+    _tell_the_target(ctx, by_index, picked, render_files)
 
     if errors:
         return _outcome(record(ctx, NAME[EXCLUDE], FAILED, started,
@@ -2969,88 +2906,29 @@ def _existing_sidecars(base):
     return [p for p in paths if p.is_file()]
 
 
-def _record_curation(ctx, by_index, picked, render_files):
-    """Exclude the trip from the site's curation.
+def _tell_the_target(ctx, by_index, picked, render_files):
+    """Tell the configured target these trips were dropped ON PURPOSE.
 
-    Deleting the files is NOT enough: build_manifest deliberately carries a
-    previously-published trip forward when its local output is gone, because
-    that is what makes "delete local after publish" safe. A dropped trip and a
-    cleaned-up published trip look identical to it — uid in the previous
-    manifest, nothing on disk — so no rebuild can tell them apart. The excluded
-    list is the one place that says which of the two this is.
+    Deleting the files is NOT enough, and the reason is a fact about every
+    index-rebuilding target rather than about one of them: a rebuild
+    deliberately carries a previously-published trip forward when its local
+    output is gone, because that is what makes "delete local after publish"
+    safe. A dropped trip and a cleaned-up published trip look identical to it —
+    id in the previous index, nothing on disk — so nothing downstream can tell
+    them apart. Only the moment of dropping knows which this is, so it is said
+    here or never.
 
-    Written to the LOCAL admin.json. It is not the last word: deploy-site.sh
-    pulls the live server's state over this file first, so the live site keeps
-    showing the trip until the same exclusion is made there.
+    What the target does with it is its own business, and a target that does
+    not curate implements nothing: dropped() has a no-op default.
     """
-    if not (render_files and ctx.site):
+    if not (render_files and ctx.uploader):
         return
-    admin = ctx.site / "admin.json"
-    # The BASE name, not the uid path: build_manifest matches the excluded list
-    # against the trip's id in two places, and the path-style uid matches
-    # neither, so an exclusion written that way is silently ignored.
-    uids = [Path(by_index[i]["out_base"]).name for i in picked
-            if by_index[i].get("out_base")]
-    added = _add_exclusions(admin, uids)
-    if not added:
+    ids = [Path(by_index[i]["out_base"]).name for i in picked
+           if by_index[i].get("out_base")]
+    if not ids:
         return
     print()
-    print(C.dim("  Excluded %d trip(s) in %s, so the next build omits them."
-                % (added, tilde(admin))))
-    print(C.yellow("  The LIVE site still shows them: deploy pulls the server's"))
-    print(C.yellow("  curation over this file. Exclude them in the site's admin"))
-    print(C.yellow("  view too, or this is undone on the next deploy."))
-    for uid in uids:
-        print(C.dim("    %s" % uid))
-
-
-def _add_exclusions(admin, uids):
-    try:
-        state = json.loads(admin.read_text()) if admin.is_file() else {}
-    except Exception:
-        state = {}
-    ex = state.setdefault("excluded", [])
-    added = 0
-    for uid in uids:
-        if not any(x.get("id") == uid for x in ex):
-            ex.append({"id": uid, "title": "", "day": "",
-                       "mode": "delete", "at": int(time.time())})
-            added += 1
-    if added:
-        admin.write_text(json.dumps(state, indent=1), encoding="utf-8")
-    return added
-
-
-def _rebuild_manifest(ctx, render_files):
-    """Rebuild trips.json so the drop reaches the thing that publishes.
-
-    This is the one place outside Upload Website that touches the site repo,
-    and it stays here on purpose: build_manifest cannot otherwise distinguish
-    "dropped" from "cleaned up after publishing", so recording the drop where
-    the manifest can see it is part of dropping the trip, not a second job.
-    """
-    if not render_files:
-        return
-    if not ctx.site_script("build_manifest.py"):
-        _warn_no_manifest_builder(ctx)
-        return
-    print()
-    rc, _lines = run_stream(["python3", "build_manifest.py"], ctx.site, "Indexing",
-                            keep=lambda l: l.startswith("wrote trips.json"))
-    if rc != 0:
-        print(C.red("  build_manifest.py exited %d — trips.json still lists the"
-                    " dropped trip." % rc))
-        return
-    print(C.dim("  trips.json rebuilt without it. Run %d) %s to put that live —"
-                % (UPLOAD, NAME[UPLOAD])))
-    print(C.dim("  until then the site still serves the old index."))
-
-
-def _warn_no_manifest_builder(ctx):
-    if ctx.site is None:
-        return
-    print(C.yellow("  No build_manifest.py under %s — trips.json was NOT updated."
-                   % tilde(ctx.site)))
+    ctx.uploader.dropped(ids, Console(ctx))
 
 
 def _clear_intermediates(ctx):
@@ -3759,21 +3637,6 @@ def _final_dir_now(ctx, out_dir):
     return final_dir_for(ctx.final_root, days, current_import_id(ctx))
 
 
-def no_gather(ctx, out_dir):
-    """The publishing edition's gatherer: it does not gather.
-
-    trips.json records each trip by a uid containing its import folder name, so
-    moving the tree renames every published trip out from under the manifest
-    and orphans them. This used to be an `if ctx.site_ready` in the middle of
-    the mover; it is now which collaborator item 6's constructor installs, so
-    the branch is settled once when the menu is built.
-    """
-    final = _final_dir_now(ctx, out_dir)
-    if final.is_dir():
-        return final
-    return None
-
-
 def gather_into_final(ctx, out_dir):
     """Move the rendered trips into final_<day>_<import> so the result is one
     folder.
@@ -3857,18 +3720,18 @@ def _cell(n, k):
     return '<div class="cell"><div class="n">%s</div><div class="k">%s</div></div>' % (n, k)
 
 
-def build_result_page(ctx, out_dir=None, gather=None):
+def build_result_page(ctx, out_dir, gather):
     """Write RESULT_FILE into the output dir. Returns a summary dict.
 
     One file, no folder: it exists to be opened, and to be sent to someone who
     will open it once. A folder of assets is the wrong shape for that.
 
-    `gather` is supplied by item 6's constructor and decides whether the
-    deliverable MOVES. Defaulting to the mover keeps the local behaviour for
-    anything calling this directly.
+    `gather` has no default. It used to fall back to the mover for "anything
+    calling this directly", and there is nothing calling it directly any more:
+    this is the local edition's deliverable and LocalPage is its one caller.
+    A default here would be a second place the gathering decision is made.
     """
-    out_dir = Path(out_dir or ctx.out_dir)
-    gather = gather or gather_into_final
+    out_dir = Path(out_dir)
     # Gather first, so the trips are found where the page will link to them.
     final = gather(ctx, out_dir)
     base = final if final else out_dir
@@ -3981,12 +3844,17 @@ def build_result_page(ctx, out_dir=None, gather=None):
     return made
 
 
-def step_site(ctx, gather=None):
-    """Write the one-file result page into the output dir.
+def step_site(ctx, gather):
+    """Write the one-file result page into the output dir. THE LOCAL EDITION.
 
-    Under the local product `gather` also MOVES the render tree into
-    final_<day>_<import>: there is no separate gather item, and gathering is
-    what makes the workspace expendable, so it lives here or nowhere.
+    `gather` also MOVES the render tree into final_<day>_<import>: there is no
+    separate gather item, and gathering is what makes the workspace
+    expendable, so it lives here or nowhere.
+
+    Nothing calls this when an uploader is configured. The page and the
+    sentence below it — nothing leaves this machine — are the local edition's
+    deliverable and its promise, and printing either on an install that is
+    about to publish everything was the bug that started this.
     """
     started = time.time()
     print(C.dim("  Writes %s into %s." % (RESULT_FILE, tilde(ctx.out_dir))))
@@ -4014,298 +3882,6 @@ def step_site(ctx, gather=None):
     print("    open %s" % info["path"])
     return record(ctx, NAME[BUILD], RAN, started,
                   "%d trip(s), %s" % (info["trips"], human_bytes(info.get("bytes", 0))))
-
-def s3_objects(ctx):
-    """{key: size} for every .mp4 in the configured bucket, or None.
-
-    None means "could not find out" — no bucket configured, aws missing, no
-    credentials, network down. Every caller treats that as unproven rather than
-    as an empty bucket, which is why there is no default bucket name here: a
-    wrong-but-plausible one would answer the question with someone else's data.
-    """
-    if not ctx.s3_bucket:
-        return None
-    cmd = ["aws", "s3", "ls", "s3://%s/" % ctx.s3_bucket, "--recursive"]
-    if ctx.s3_region:
-        cmd += ["--region", ctx.s3_region]
-    try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if p.returncode != 0:
-        return None
-    out = {}
-    for line in p.stdout.splitlines():
-        parts = line.split(maxsplit=3)
-        if len(parts) == 4 and parts[3].endswith(".mp4"):
-            try:
-                out[parts[3]] = int(parts[2])
-            except ValueError:
-                pass
-    return out
-
-
-def deleted_ids(ctx):
-    """Trip ids the admin flagged mode=delete — upload-videos-s3.sh skips these,
-    so they must not count as 'missing from S3' when we verify the sync.
-
-    No site repo means no curation file and so no exclusions: everything local
-    is expected on S3.
-    """
-    if ctx.site is None:
-        return set()
-    p = ctx.site / "admin.json"
-    if not p.is_file():
-        return set()
-    try:
-        data = json.loads(p.read_text())
-    except Exception:
-        return set()
-    return {e["id"] for e in data.get("excluded", []) if e.get("mode") == "delete" and e.get("id")}
-
-
-def verify_s3(ctx, quiet=False):
-    """Compare local mp4s against the bucket. Returns (ok, missing, mismatched).
-
-    This exists because `aws s3 sync` exits 0 even when individual objects fail
-    to upload — the exit code alone is not evidence that anything landed. The
-    only trustworthy check is comparing keys and sizes afterwards.
-    """
-    local = rendered_mp4s(ctx.out_dir)
-    skip = deleted_ids(ctx)
-    objs = s3_objects(ctx)
-    if objs is None:
-        if not quiet:
-            print(C.red("  Could not list %s (no s3_bucket configured, aws missing, "
-                        "no credentials, or network)."
-                        % ("s3://%s" % ctx.s3_bucket if ctx.s3_bucket else "the bucket")))
-        return None, [], []
-    missing, mismatched = [], []
-    for p in local:
-        key = p.relative_to(ctx.out_dir).as_posix()
-        if any(i in key for i in skip):
-            continue
-        if key not in objs:
-            missing.append(key)
-        elif objs[key] != p.stat().st_size:
-            mismatched.append("%s (local %s, S3 %s)" % (
-                key, human_bytes(p.stat().st_size), human_bytes(objs[key])))
-    return (not missing and not mismatched), missing, mismatched
-
-
-def uploads_outstanding(ctx):
-    """Local renders not yet in the bucket at a matching size.
-
-    This is what makes an interrupted upload resumable: the sync is judged by
-    what actually landed (key present, size equal — the same evidence
-    verify_s3 uses), so a re-run owes only what is missing. A listing that
-    fails, and trips flagged mode=delete, follow the established rules: a
-    failed listing proves nothing (everything stays outstanding), flagged
-    trips are deliberately absent and owe nothing.
-    """
-    skip = deleted_ids(ctx)
-    remote = s3_objects(ctx) or {}
-    todo = []
-    for p in rendered_mp4s(ctx.out_dir):
-        if any(i in p.name for i in skip):
-            continue
-        try:
-            size = p.stat().st_size
-        except OSError:
-            continue
-        # "/" boundary as everywhere: sometrip_X.mp4 must not vouch for trip_X.mp4.
-        if any((k == p.name or k.endswith("/" + p.name)) and v == size
-               for k, v in remote.items()):
-            continue
-        todo.append(p)
-    return todo
-
-
-def _upload_assets(ctx):
-    """Transport one of two: sync the rendered mp4s to the bucket, then verify."""
-    started = time.time()
-    if not shutil.which("aws"):
-        print(C.red("  awscli not found. brew install awscli && aws configure"))
-        return record(ctx, NAME[UPLOAD], FAILED, started, "awscli missing")
-
-    # upload-videos-s3.sh syncs whatever public_html/videos resolves to, and the
-    # object keys are paths relative to THAT. If it points somewhere other than
-    # our out_dir, the keys we verify against would not be the keys it wrote.
-    link = ctx.site / "public_html" / "videos"
-    target = link.resolve() if link.exists() else None
-    if target != ctx.out_dir.resolve():
-        print(C.red("  public_html/videos -> %s but config out is %s" % (target, ctx.out_dir)))
-        print(C.red("  Point the symlink at the render output before uploading."))
-        return record(ctx, NAME[UPLOAD], FAILED, started, "videos symlink mismatch")
-
-    local = rendered_mp4s(ctx.out_dir)
-    if not local:
-        print(C.yellow("  No rendered mp4s under %s — nothing to upload." % ctx.out_dir))
-        return record(ctx, NAME[UPLOAD], SKIPPED, started, "no renders")
-    total = sum(p.stat().st_size for p in local)
-    # An interrupted or partial earlier upload resumes: say up front how much
-    # is genuinely outstanding, so a re-run after a dropped connection reads
-    # as the resume it is, not as re-sending everything.
-    todo = uploads_outstanding(ctx)
-    if len(todo) < len(local):
-        print(C.dim("  %d of %d already verified in the bucket — the sync sends only the"
-                    " %d outstanding." % (len(local) - len(todo), len(local), len(todo))))
-    print("  %d local mp4 (%s) -> s3://%s%s" % (
-        len(local), human_bytes(total), ctx.s3_bucket,
-        " (%s)" % ctx.s3_region if ctx.s3_region else ""))
-    print(C.dim("  The script decides the destination; s3_bucket is what this CLI"))
-    print(C.dim("  verifies against afterwards. If they name different buckets the"))
-    print(C.dim("  verification fails, which is the intended way to find that out."))
-    # No second confirmation: the menu already asked, and the line above states
-    # the size and the destination. Two prompts for one decision is how you
-    # teach someone to stop reading them.
-
-    # Pass the source explicitly. Left to itself the script syncs whatever
-    # public_html/videos resolves to, which is not necessarily the tree we just
-    # counted and are about to verify — and verifying a different tree than the
-    # one uploaded is worse than not verifying at all.
-    rc, _lines = run_stream(["./deploy/upload-videos-s3.sh", str(ctx.out_dir)], ctx.site, "Upload",
-                            parser=make_upload_parser(),
-                            keep=lambda l: l.startswith(("Skipping ", "Creating bucket")))
-    if rc != 0:
-        return record(ctx, NAME[UPLOAD], FAILED, started, "exit %d" % rc)
-
-    # aws s3 sync returns 0 even when some objects failed. Verify by comparison.
-    print(C.dim("  Verifying against the bucket listing (sync's exit code is not proof)..."))
-    ok, missing, mismatched = verify_s3(ctx)
-    if ok is None:
-        return record(ctx, NAME[UPLOAD], FAILED, started, "could not verify (no bucket listing)")
-    if not ok:
-        for k in missing[:10]:
-            print(C.red("    missing on S3: %s" % k))
-        for k in mismatched[:10]:
-            print(C.red("    size mismatch: %s" % k))
-        return record(ctx, NAME[UPLOAD], FAILED, started,
-                      "%d missing, %d size mismatch" % (len(missing), len(mismatched)))
-    return record(ctx, NAME[UPLOAD], RAN, started,
-                  "%d mp4 verified on S3, %s" % (len(local), human_bytes(total)))
-
-
-def record_deploy(ctx):
-    """Note which renders a successful site deploy covered.
-
-    The delete guard's other half: 'uploaded' is provable by listing the
-    bucket, but 'the site deploy happened' leaves no remote artefact this CLI
-    can interrogate per-render — so the fact is recorded at the only moment
-    it is known to be true, right after deploy-site.sh exits 0. Merged, not
-    replaced: a render deployed last round stays covered even if the deploy
-    re-runs after the working area changed.
-
-    Without this file item 8 is permanently unreachable on a publishing
-    install: working_area_is_expendable requires a render to be in the bucket
-    AND named here before it will call it a second copy.
-    """
-    names = {p.name for p in rendered_mp4s(ctx.out_dir)}
-    path = ctx.out_dir / DEPLOYED_FILE
-    try:
-        prev = set(json.loads(path.read_text()).get("videos", []))
-    except Exception:
-        prev = set()
-    try:
-        ctx.out_dir.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(
-            {"videos": sorted(prev | names),
-             "at": time.strftime("%Y-%m-%d %H:%M")}, indent=1))
-    except OSError:
-        pass
-    return names
-
-
-def _deploy_pages(ctx):
-    """Transport two of two: run the site repo's deploy script."""
-    started = time.time()
-    print(C.dim("  deploy-site.sh pulls the live curation + trips.json first (the live"))
-    print(C.dim("  site is the merge base), re-indexes, then rsyncs public_html/."))
-    print(C.yellow("  SIGNED_VIDEOS=1 is set for this run."))
-    print(C.dim("  It is set unconditionally because the alternative is a silent failure:"))
-    print(C.dim("  against a private bucket, deploying without it writes a config.js"))
-    print(C.dim("  pointing the page at raw S3 URLs, which 403 — the site comes up and no"))
-    print(C.dim("  video plays. A deploy script that ignores the variable is unaffected."))
-
-    rc, _lines = run_stream(["./deploy/deploy-site.sh"], ctx.site, "Deploy",
-                            env_extra={"SIGNED_VIDEOS": "1"},
-                            keep=lambda l: l.startswith("=== ") or l.startswith("Done."))
-    if rc != 0:
-        return record(ctx, NAME[UPLOAD], FAILED, started, "deploy exit %d" % rc)
-
-    record_deploy(ctx)
-    live = live_trip_count(ctx)
-    return record(ctx, NAME[UPLOAD], RAN, started,
-                  "live site reports %s trips" % (live if live is not None else "?"))
-
-
-def publish_website(ctx, world):
-    """Item 7: one job, two transports, in this order.
-
-    The assets have to land before the deploy record is written, because
-    working_area_is_expendable wants both facts about the same file — the
-    object in the bucket at a matching size AND its name in .deployed.json —
-    before it will let item 8 erase anything. Uploading without deploying
-    publishes nothing visible; deploying without uploading publishes a page
-    whose videos 403.
-    """
-    assets = _upload_assets(ctx)
-    if assets.status not in COMPLETING:
-        return _outcome(assets)
-    print()
-    print(rule("deploy the pages"))
-    return _outcome(_deploy_pages(ctx))
-
-
-def is_complete_summary(ctx):
-    """Run deploy/is-complete.py and return (safe, total, output_lines).
-
-    We shell out rather than re-implement it: that script is the definition of
-    'fully published' (on S3 with a matching size, in the live trips.json, and
-    its map sidecar reachable on the site), and having two copies of that rule
-    is how they drift apart.
-
-    Its own N/M summary line is NOT usable directly, though: it walks every
-    local trip, including ones the admin flagged mode=delete. Those are off S3
-    and off the site deliberately, so they can never be 'complete' and would
-    pin the guard shut forever after the first deletion. We re-count from its
-    table instead, skipping the flagged trips.
-    """
-    if not ctx.site_script("deploy", "is-complete.py"):
-        return None, None, ["no deploy/is-complete.py to run"]
-    try:
-        p = subprocess.run(["python3", "deploy/is-complete.py", str(ctx.out_dir)],
-                           cwd=str(ctx.site), capture_output=True, text=True, timeout=900)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return None, None, ["is-complete.py could not run: %s" % e]
-    lines = p.stdout.splitlines()
-    if p.returncode != 0:
-        return None, None, lines + p.stderr.splitlines()
-
-    # Table rows are "<trip base>   local  S3  json  site  YES|no".
-    skip = deleted_ids(ctx)
-    safe = total = 0
-    seen_row = False
-    for l in lines:
-        m = re.match(r"^(trip_\S+)\s+.*\s(YES|no)\s*$", l)
-        if not m:
-            continue
-        seen_row = True
-        base = m.group(1)
-        if any(i in base for i in skip):
-            continue
-        total += 1
-        if m.group(2) == "YES":
-            safe += 1
-    if seen_row:
-        return safe, total, lines
-    # No rows parsed — fall back to the script's own summary rather than guess.
-    for l in lines:
-        m = re.search(r"(\d+)/(\d+) trip\(s\) fully published", l)
-        if m:
-            return int(m.group(1)), int(m.group(2)), lines
-    return None, None, lines
-
 
 # ---------------------------------------------------------------------------
 # Item 8 — Clean Workspace. Erase the imported footage and the renders it
@@ -4363,13 +3939,13 @@ def _clean_banner(ctx, world, target, size):
                    % (target, human_bytes(size)))]
     unproven = guards.unproven_lines(world)
     if not unproven:
-        lines.append(C.dim("  The renders and their S3 copies stay; the raw clips do not"
-                           " come back."))
+        lines.append(C.dim("  The renders and the copies %s holds stay; the raw clips"
+                           " do not come back." % world.target.name))
         return tuple(lines)
     # Not a warning about missing setup — a statement of what survives this,
-    # which is strictly less than it would be with a bucket and a site behind
-    # it. The check that could not run is named, so it is obvious this passed
-    # unexamined rather than passed.
+    # which is strictly less than it would be with something to publish to. The
+    # check that could not run is named, so it is obvious this passed unexamined
+    # rather than passed.
     lines.append(C.red("  Publication was NOT verified — it could not be:"))
     lines.extend(C.red("    " + line) for line in unproven)
     lines.append(C.red("  The renders under %s are therefore the only" % tilde(ctx.out_dir)))
@@ -4412,19 +3988,30 @@ def clean_workspace_plan(ctx, world):
         return _nothing(ctx, CLEAN_WS, started, "refused: %s" % verdict.reason)
 
     return menu.Plan(guards.workspace_is_expendable,
-                     lambda fresh: _clean_workspace_commit(ctx, root, target,
+                     lambda fresh: _clean_workspace_commit(ctx, fresh, root, target,
                                                            size, files, started),
                      banner=_clean_banner(ctx, world, target, size))
 
 
 def _print_gate_detail(world):
-    """What the deciding gate actually saw, under the refusal."""
-    for line in world.site.published_lines[-15:]:
+    """What the deciding gate actually saw, under the refusal.
+
+    The target's own words, carried through Answers.detail. It used to be one
+    script's raw table; an implementation says whatever makes its answer
+    checkable — when it looked, what it found, why it could not.
+    """
+    for line in (world.target.published.detail + world.target.holds.detail)[-15:]:
         print(C.dim("        " + line))
 
 
-def _clean_workspace_commit(ctx, root, target, size, files, started):
-    """The irreversible half of item 8."""
+def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
+    """The irreversible half of item 8.
+
+    `fresh` is the world captured AFTER the word was typed — the same one the
+    guard just approved. The render sweep below re-asks a second question of
+    it, and asking that of the world the menu was drawn with would judge the
+    renders by an answer from before the prompt.
+    """
     try:
         shutil.rmtree(str(target))
     except OSError as e:
@@ -4442,7 +4029,7 @@ def _clean_workspace_commit(ctx, root, target, size, files, started):
     # and deleting them anyway would contradict the sentence above it. What
     # survives either way: the ledger's high-water mark, written before any of
     # this runs, and every _meta.json.
-    ok, why, stragglers = working_area_is_expendable(ctx)
+    ok, why, stragglers = working_area_is_expendable(ctx, fresh.target)
     n = freed = 0
     if ok:
         n, freed = purge_published_renders(ctx, root)
@@ -4475,7 +4062,7 @@ def _keeping_the_renders(why, stragglers):
 # never precede this; the window is closed by the graph, not by discipline.
 # ---------------------------------------------------------------------------
 
-def _card_advisory(ctx):
+def _card_advisory(ctx, world):
     """Whether the workspace copy is published yet — a note, not a gate.
 
     Erasing the card is allowed on the strength of a copy existing here. If
@@ -4484,7 +4071,7 @@ def _card_advisory(ctx):
     """
     lines = []
     for cand in import_candidates(ctx):
-        ok, why = import_is_expendable(ctx, cand)
+        ok, why = import_is_expendable(ctx, cand, world.target)
         if not ok:
             lines.append(C.yellow("  Not yet published (%s: %s) — after this the copy"
                                   % (tilde(cand), why)))
@@ -4498,7 +4085,7 @@ def erase_card_plan(ctx, world):
     lines = [C.red("  The card's %d clip(s) go; its folders stay so the camera can"
                    " record." % len(world.card.stamps)),
              C.green("  Every clip is accounted for: %s." % world.card.note)]
-    lines.extend(_card_advisory(ctx))
+    lines.extend(_card_advisory(ctx, world))
     return menu.Plan(guards.card_is_expendable,
                      lambda fresh: _erase_card_commit(ctx, started),
                      banner=tuple(lines))
@@ -4881,47 +4468,6 @@ def _is_file(path):
     return path.is_file()
 
 
-def _bucket_listing(ctx, scope):
-    """Listed, Unlistable or NoBucket — three answers, never collapsed.
-
-    "Could not read the bucket" is not "not in the bucket". The type is what
-    makes `s3_objects(ctx) or {}` — the idiom that used to turn one into the
-    other — unwritable downstream.
-    """
-    if not ctx.cfg_opt("s3_bucket"):
-        return W.NoBucket()
-    return _listing_or_unknown(_listed_at(ctx, scope))
-
-
-def _listed_at(ctx, scope):
-    """Only FULL scope pays for the listing; it is a subprocess and a network
-    round trip, and the menu is drawn on every keystroke."""
-    if scope is not menu.Scope.FULL:
-        return None
-    return s3_objects(ctx)
-
-
-def _listing_or_unknown(objs):
-    if objs is None:
-        return W.Unlistable()
-    return W.Listed(dict(objs))
-
-
-def _deployed_names(ctx):
-    try:
-        return frozenset(json.loads((ctx.out_dir / DEPLOYED_FILE).read_text())
-                         .get("videos", []))
-    except Exception:
-        return frozenset()
-
-
-_DEPLOY_SCRIPTS = ("deploy-site.sh", "upload-videos-s3.sh", "is-complete.py")
-
-
-def _site_scripts(ctx):
-    return frozenset(filter(lambda n: ctx.site_script("deploy", n), _DEPLOY_SCRIPTS))
-
-
 def _resolved(path):
     try:
         return path.resolve()
@@ -4929,66 +4475,86 @@ def _resolved(path):
         return path
 
 
-def _videos_link(ctx):
-    if ctx.site is None:
-        return None
-    return _existing(ctx.site / "public_html" / "videos")
+# ---------------------------------------------------------------------------
+# What the configured target says. Asked HERE, at capture, and frozen into the
+# world — never from inside a guard.
+#
+# Two things follow from that and both matter. A guard stays a pure function
+# over data a test can write down, and the destructive re-check gets a fresh
+# set of answers for nothing: Destructive._commit calls recapture(), which
+# calls capture_world(), which asks the target again. There is no second
+# refresh mechanism to keep in step with the first.
+# ---------------------------------------------------------------------------
+
+def _target_facts(ctx, scope, renders, trip_ids):
+    """What the target says, or the null answer for the local edition."""
+    if ctx.uploader is None:
+        return W.TargetFacts()
+    return _asked(ctx, scope, renders, trip_ids)
 
 
-def _existing(link):
-    if link.exists():
-        return _resolved(link)
-    return None
+def _asked(ctx, scope, renders, trip_ids):
+    """Only FULL scope pays for the questions that leave this machine.
 
-
-def _can_ask_the_site(ctx, scope):
-    return scope is menu.Scope.FULL and bool(ctx.site_script("deploy", "is-complete.py"))
-
-
-def _published(ctx, scope):
-    """(evidence, counts, lines) from is-complete.py, the deciding gate.
-
-    NA when it cannot be asked at all, which is what makes the workspace rule
-    fall back to unanimity among whatever else can answer.
+    The menu is redrawn on every keystroke. At LOCAL scope a configured target
+    reads UNKNOWN everywhere, which every guard already treats as not proven —
+    the same shape the bucket listing had, for the same reason.
     """
-    if not _can_ask_the_site(ctx, scope):
-        return menu.Evidence.NA, (None, None), ()
-    safe, total, lines = is_complete_summary(ctx)
-    return _published_evidence(safe, total), (safe, total), tuple(lines)
+    if scope is not menu.Scope.FULL:
+        return _not_at_this_scope(ctx, renders)
+    return _answered(ctx, renders, trip_ids)
 
 
-def _published_evidence(safe, total):
-    """UNKNOWN when the script could not answer, which is not NO and not YES."""
-    if None in (safe, total):
-        return menu.Evidence.UNKNOWN
-    return _all_published(safe, total)
+def _not_at_this_scope(ctx, renders):
+    why = "not asked: the menu redraws too often to go and look"
+    return W.TargetFacts(
+        configured=True, name=ctx.uploader.name(), origin=ctx.uploader_origin,
+        holds=uploader.Answers.unknown(why),
+        published=uploader.Answers.unknown(why),
+        owed=uploader.Owed.everything(renders, why),
+        carried=uploader.Answers.unknown(why))
 
 
-def _all_published(safe, total):
-    # total == 0 is NO, not YES: is-complete.py finding nothing to report is
-    # not the same as it reporting that everything is live.
-    if not total:
-        return menu.Evidence.NO
-    return _covers_all(safe, total)
+def _answered(ctx, renders, trip_ids):
+    """Ask, and let a raising implementation read as unreachable.
+
+    An implementation is trusted about what it SAYS; an exception is not a
+    thing it said. Fail closed: UNKNOWN everywhere and everything owed, which
+    is exactly the reading a target that could not be reached produces, and it
+    permits nothing.
+    """
+    target = ctx.uploader
+    try:
+        return W.TargetFacts(
+            configured=True, name=target.name(), origin=ctx.uploader_origin,
+            holds=target.holds(renders), published=target.published(renders),
+            owed=target.owes(renders), carried=target.carries(trip_ids))
+    except Exception as e:
+        return _target_raised(ctx, renders, e)
 
 
-def _covers_all(safe, total):
-    if safe >= total:
-        return menu.Evidence.YES
-    return menu.Evidence.NO
+def _target_raised(ctx, renders, error):
+    why = "%s raised while being asked: %s" % (ctx.uploader.name(), error)
+    return W.TargetFacts(
+        configured=True, name=ctx.uploader.name(), origin=ctx.uploader_origin,
+        holds=uploader.Answers.unknown(why),
+        published=uploader.Answers.unknown(why),
+        owed=uploader.Owed.everything(renders, why),
+        carried=uploader.Answers.unknown(why))
 
 
-def _site_facts(ctx, scope):
-    if ctx.site is None:
-        return W.SiteFacts(page=_page_exists(ctx))
-    published, counts, lines = _published(ctx, scope)
-    return W.SiteFacts(
-        configured=True, on_disk=ctx.site.is_dir(), scripts=_site_scripts(ctx),
-        has_manifest_builder=bool(ctx.site_script("build_manifest.py")),
-        videos_link=_videos_link(ctx),
-        curation_deleted=frozenset(deleted_ids(ctx)),
-        deployed=_deployed_names(ctx), published=published,
-        published_counts=counts, published_lines=lines, page=_page_exists(ctx))
+def _trip_ids(metas):
+    """The trip ids a target is asked about by name, e.g. trip_2026-07-24_16-16_02.
+
+    Read off the sidecars rather than the renders, because the question they
+    answer is about trips whose render may be gone — the published-then-
+    cleaned-up case, which is the whole reason carries() exists.
+    """
+    return tuple(sorted(set(map(_trip_id_of, metas))))
+
+
+def _trip_id_of(meta):
+    return meta.id[:-len("_meta")] if meta.id.endswith("_meta") else meta.id
 
 
 def _has_result_file(base):
@@ -5034,8 +4600,12 @@ def capture_world(ctx, scope=menu.Scope.LOCAL):
     imports = tuple(import_candidates(ctx))
     root = _chosen_import(ctx, imports)
     metas = _metas_of(ctx)
-    return _world_of(ctx, scope, imports, root, metas,
-                     working_area_is_expendable(ctx))
+    renders = _renders_of_tree(ctx.out_dir)
+    # The target is asked BEFORE the expendability check, because that check is
+    # now half local (a render in a final_ folder) and half the target's answer.
+    target = _target_facts(ctx, scope, renders, _trip_ids(metas))
+    return _world_of(ctx, scope, imports, root, metas, renders, target,
+                     working_area_is_expendable(ctx, target))
 
 
 def _meta_paths(metas):
@@ -5046,26 +4616,23 @@ def _path_of(meta):
     return meta.path
 
 
-def _world_of(ctx, scope, imports, root, metas, expendable):
+def _world_of(ctx, scope, imports, root, metas, renders, target, expendable):
     settled, why, stragglers = expendable
     return W.World(
         at=time.time(), scope=scope, strategy=menu.Strategy.of(ctx.uploader),
-        # RESOLVED, because the only thing that compares it is the videos
-        # symlink check and a symlink resolves to the real path. Comparing
-        # /var/... against /private/var/... would report a mismatch on every
-        # macOS install and grey publishing out permanently.
+        # RESOLVED: an implementation may compare this against a symlink of its
+        # own, and a symlink resolves to the real path. Comparing /var/...
+        # against /private/var/... reports a mismatch on every macOS install.
         out_dir=_resolved(ctx.out_dir), out_dir_owner=claim_out_dir(ctx),
         imports=imports, selected_import=root, metas=metas,
-        renders=_renders_of_tree(ctx.out_dir), renders_here=_renders_here(ctx, root),
+        renders=renders, renders_here=_renders_here(ctx, root),
         final_folders=_final_folders(ctx), expected_trips=_expected_trips(ctx, root),
         has_track=_has_track(imports), stills_current=_stills_current(ctx),
-        ledger_mark=last_imported_stamp(ctx),
+        local_page=_page_exists(ctx), ledger_mark=last_imported_stamp(ctx),
         excluded=frozenset(excluded_stamps(ctx)), excluded_at=_excluded_at(ctx),
         newest_meta_at=_newest_mtime(_meta_paths(metas)),
         workspace_settled=settled, workspace_note=why,
-        stragglers=tuple(stragglers), card=_card_facts(ctx),
-        bucket=_bucket_listing(ctx, scope), site=_site_facts(ctx, scope),
-        awscli=bool(shutil.which("aws")))
+        stragglers=tuple(stragglers), card=_card_facts(ctx), target=target)
 
 
 # ---------------------------------------------------------------------------
@@ -5088,21 +4655,80 @@ def _outcome(result):
     return menu.Outcome(result.status in COMPLETING, result.detail)
 
 
-class Gatherer:
-    """Which mover item 6 installs. The strategy decides, once."""
+class Console(uploader.Ui):
+    """The exporter's output, lent to an implementation while it works.
 
-    @staticmethod
-    def for_strategy(strategy):
-        if strategy is menu.Strategy.UPLOADER:
-            return no_gather
-        return gather_into_final
-
-
-class Publisher:
-    """Item 7 under the publishing product: two transports, one job."""
+    So a target's build and upload look like the rest of the tool — same
+    progress bar, same colours — without it importing pipeline internals that
+    will move. Nothing here is a restriction: an implementation is free to
+    print() and to run its own subprocesses, and several do. This exists to
+    make the nice thing the easy thing.
+    """
 
     def __init__(self, ctx):
         self._ctx = ctx
+
+    def say(self, line):
+        print(C.dim(line))
+
+    def warn(self, line):
+        print(C.yellow(line))
+
+    def run(self, cmd, cwd, label, env=None, parser=None):
+        rc, _lines = run_stream(cmd, cwd, label, parser=parser, env_extra=env)
+        return rc
+
+
+class LocalPage:
+    """Item 6 under the local edition: write the page, and gather.
+
+    Gathering is what makes the local edition's workspace expendable, so the
+    two belong to one job. Under an uploader neither happens here.
+    """
+
+    def __init__(self, ctx):
+        self._ctx = ctx
+
+    def describe(self):
+        return ("Build the local result page from the renders. Nothing leaves "
+                "this machine.")
+
+    def why_not(self, world):
+        return None
+
+    def build(self, world):
+        return _outcome(step_site(self._ctx, gather_into_final))
+
+
+class TargetBuild:
+    """Item 6 with an uploader configured: whatever the target builds.
+
+    The local page is not written and gather_into_final does not run. Moving
+    the render tree would rename every published trip out from under whatever
+    index the target keeps, and the page is the other product's deliverable.
+    """
+
+    def __init__(self, ctx, target):
+        self._ctx = ctx
+        self._target = target
+
+    def describe(self):
+        return self._target.describe()
+
+    def why_not(self, world):
+        return self._target.why_not_build(world)
+
+    def build(self, world):
+        return _reported(self._ctx, BUILD, self._target.build(world,
+                                                              Console(self._ctx)))
+
+
+class TargetPublish:
+    """Item 7 with an uploader configured: one job, however many transports."""
+
+    def __init__(self, ctx, target):
+        self._ctx = ctx
+        self._target = target
 
     def why_not(self, world):
         """What is missing from THIS world, in the world's own terms.
@@ -5112,14 +4738,15 @@ class Publisher:
         README; an item that answered it would be describing the machine it
         runs in rather than the job it does.
         """
-        return _first_reason(_publish_reasons(self._ctx, world))
+        return self._target.why_not_upload(world)
 
     def run(self, world):
-        return publish_website(self._ctx, world)
+        return _reported(self._ctx, UPLOAD, self._target.upload(world,
+                                                                Console(self._ctx)))
 
 
 class NoPublisher:
-    """Item 7 under the local product: no edges, and nothing to run.
+    """Item 7 under the local edition: no edges, and nothing to run.
 
     Constructed rather than omitted so that every number means the same thing
     on every installation — a menu that renumbers itself makes every sentence
@@ -5133,40 +4760,15 @@ class NoPublisher:
         return menu.stopped("publishing is not configured")
 
 
-def _first_reason(reasons):
-    return next(filter(None, reasons), None)
+def _reported(ctx, number, report):
+    """An implementation's Report becomes this session's logged step.
 
-
-def _publish_reasons(ctx, world):
-    return (_no_site_reason(ctx, world), _no_script_reason(world),
-            _no_awscli_reason(world), guards.videos_link_wrong(world))
-
-
-def _no_site_reason(ctx, world):
-    """A configured path that is not there. Which is a fact about this world,
-    unlike "set site_repo in config.txt", which was a fact about the
-    installation and could not be true here anyway: this publisher is only
-    built when the strategy resolved, and the strategy resolves on both keys
-    being set."""
-    if world.site.on_disk:
-        return None
-    return "site_repo not found: %s" % tilde(ctx.site)
-
-
-_PUBLISH_SCRIPTS = ("upload-videos-s3.sh", "deploy-site.sh")
-
-
-def _no_script_reason(world):
-    missing = next(itertools.filterfalse(world.site.has, _PUBLISH_SCRIPTS), None)
-    if not missing:
-        return None
-    return "no deploy/%s in the site repo" % missing
-
-
-def _no_awscli_reason(world):
-    if world.awscli:
-        return None
-    return "awscli not found — brew install awscli && aws configure"
+    The log is the exporter's, not the target's: a StepResult carries a
+    duration and a status the summary and the crash log read, and an
+    implementation must not have to construct one. `ok` is all the menu reads.
+    """
+    status = RAN if report.ok else FAILED
+    return _outcome(record(ctx, NAME[number], status, time.time(), report.note))
 
 
 class Work:
@@ -5177,7 +4779,7 @@ class Work:
 
     # -- the bodies --------------------------------------------------------
     def progress(self, world):
-        return _outcome(step_progress(self.ctx))
+        return _outcome(step_progress(self.ctx, world))
 
     def import_footage(self, world):
         return _outcome(step_import(self.ctx))
@@ -5191,20 +4793,22 @@ class Work:
     def render(self, world):
         return _outcome(step_render(self.ctx))
 
-    def build_website(self, world, gather):
-        return _outcome(step_site(self.ctx, gather))
-
     # -- the collaborators the constructor installs ------------------------
-    def gatherer(self, strategy):
-        # Not a partial over ctx: build_result_page passes ctx itself, the same
-        # way it does to the gather_into_final default it falls back to. Binding
-        # it here as well made every call three arguments into a two-argument
-        # function, so item 6 raised TypeError before it wrote anything.
-        return Gatherer.for_strategy(strategy)
+    def builder(self, strategy):
+        """Item 6's whole body, not merely its mover.
+
+        Only the MOVER used to be the branch, so the page writer ran under
+        both editions and a publishing install got a local page announcing
+        that nothing had left the machine. Making the whole body the branch is
+        what fixes that, and it is why there is no gatherer() any more.
+        """
+        if strategy is menu.Strategy.UPLOADER:
+            return TargetBuild(self.ctx, self.ctx.uploader)
+        return LocalPage(self.ctx)
 
     def publisher(self, strategy):
         if strategy is menu.Strategy.UPLOADER:
-            return Publisher(self.ctx)
+            return TargetPublish(self.ctx, self.ctx.uploader)
         return NoPublisher()
 
     # -- the destructive plans ---------------------------------------------
@@ -5691,17 +5295,14 @@ def _edition_line(ctx):
 def _chain(ctx):
     """What THIS installation actually does, which is not the same on every
     machine: with nothing configured the chain really does stop at a local
-    page, and saying "-> S3 -> site" there would be a promise the greyed-out
-    menu below then breaks."""
-    if menu.Strategy.of(ctx.uploader) is menu.Strategy.UPLOADER:
-        return "card -> render -> S3 -> site"
-    return _local_chain(ctx)
+    page, and naming a destination there would be a promise the greyed-out
+    menu below then breaks.
 
-
-def _local_chain(ctx):
-    if ctx.site:
-        return "card -> render -> site"
-    return "card -> render -> local site"
+    The configured half is named by whoever publishes, because the exporter no
+    longer knows where anything goes."""
+    if ctx.uploader is None:
+        return "card -> render -> local page"
+    return "card -> render -> %s" % ctx.uploader.name()
 
 
 def _exit_code(ctx):

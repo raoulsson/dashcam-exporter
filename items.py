@@ -281,20 +281,26 @@ class RenderVideos(MenuItem):
 # ---------------------------------------------------------------------------
 
 class BuildWebsite(MenuItem):
-    """Build the page from the renders.
+    """Build what this installation publishes, from the renders.
 
-    Under the local product this also GATHERS the render tree into
-    final_<day>_<import>, which is what makes the workspace expendable — there
-    is no separate gather item, so it lives here or nowhere. Which gatherer is
-    installed is settled by the constructor, not by an `if ctx.site_ready`
-    inside the body: under the uploader edition the trips.json uids embed the import
-    folder name, so moving the tree would orphan every published trip.
+    Which builder is installed is settled by the constructor, not by an `if`
+    in the body. Under the local edition it writes the one-file page AND
+    GATHERS the render tree into final_<day>_<import> — there is no separate
+    gather item, and gathering is what makes the workspace expendable, so it
+    lives here or nowhere. With an uploader configured it is the uploader's
+    build, and the local page is not written at all: that page is the local
+    edition's deliverable, and "Nothing leaves this machine" is a sentence
+    about the other product.
+
+    That last part is the bug this shape fixes. Only the MOVER used to be the
+    strategy branch; the page writer ran either way, so a publishing install
+    got a local page it never asked for, announcing that nothing had left the
+    machine while item 7 was about to send it all.
     """
 
     number = BUILD
     NAME = "Build Website"
-    DESCRIPTION = ("Build the local result page from the renders. Nothing leaves "
-                   "this machine.")
+    DESCRIPTION = ("Build what this installation publishes, from the renders.")
     # DEVIATION FROM THE OWNER'S TABLE: 7 added to the outbound under
     # website_repo. His inbound column for item 7 says {7,6} — build the site,
     # then put it online — but no outbound set anywhere offered 7, so Upload
@@ -315,18 +321,29 @@ class BuildWebsite(MenuItem):
         super().__init__(strategy, work, inbound)
         # The strategy branch, resolved once. It must not reappear as an `if`
         # in _perform.
-        self._gather = work.gatherer(strategy)
+        self._builder = work.builder(strategy)
+
+    def description(self) -> str:
+        """What THIS installation's build does, asked of the thing that does it.
+
+        Not a statement about how the tool is installed — that is the session's
+        to say, once, at startup. It is this entry answering for its own job,
+        which genuinely differs between the two products.
+        """
+        return self._builder.describe()
 
     def evaluate(self, world) -> Verdict:
-        """Built FROM the renders. A gathered final_ folder counts — the
-        rebuild case, where the loose renders are gone because this item moved
-        them and the page must still be rebuildable."""
-        if guards.renders_exist(world):
-            return go()
-        return blocked("no renders and no gathered folder to build a page from")
+        """The exporter's own question first, then the target's.
+
+        The renders check never leaves home and can block on its own: a target
+        that answers yes to everything still cannot get a page built out of an
+        empty tree.
+        """
+        return _first_block(guards.nothing_to_build_from(world),
+                            self._builder.why_not(world))
 
     def _perform(self, world):
-        return self._work.build_website(world, self._gather)
+        return self._builder.build(world)
 
 
 # ---------------------------------------------------------------------------
@@ -334,18 +351,18 @@ class BuildWebsite(MenuItem):
 # ---------------------------------------------------------------------------
 
 class UploadWebsite(MenuItem):
-    """Getting the built site online. One job, two transports.
+    """Getting what was built online. One job.
 
-    The assets go to the bucket and the pages go to the server; they were two
-    menu items and are one now, in that order, because the deploy record and
-    the bucket listing are two halves of the same proof — Clean Workspace
-    needs both facts about the same file before it will erase anything.
+    How many transports that takes — a bucket and then a server, one rsync, a
+    copy into a folder — is the implementation's business. It was two menu
+    items once and folding them was right: what Clean Workspace needs is one
+    answer about one file, and an item that can leave half of that true is an
+    item that publishes nothing while reporting success.
     """
 
     number = UPLOAD
     NAME = "Upload Website"
-    DESCRIPTION = ("Sync the renders to the bucket, then deploy the site with "
-                   "SIGNED_VIDEOS=1. Resumes where it left off.")
+    DESCRIPTION = "Put what was built online. Resumes where it left off."
     SCOPE = Scope.FULL
     # DEVIATION FROM THE OWNER'S TABLE: 6 added to the outbound under
     # website_repo. He wrote 7 into item 6's INBOUND column — after uploading
@@ -380,10 +397,17 @@ class UploadWebsite(MenuItem):
         return self._outstanding(world)
 
     def _outstanding(self, world) -> Verdict:
-        todo = guards.uploads_outstanding(world) + guards.deploy_outstanding(world)
-        if todo:
+        """Would this do anything, asked of the target.
+
+        A target that could not be reached answers "everything is owed", so
+        the offer stands and the UPLOAD is what discovers it is down. That is
+        the same rule as before — a failed listing proved nothing and left
+        everything outstanding — stated once on the interface instead of at
+        each call site.
+        """
+        if world.target.owed.any:
             return go()
-        return satisfied("every render is on the bucket and covered by a deploy")
+        return satisfied("%s has everything" % world.target.name)
 
     def _perform(self, world):
         return self._publish.run(world)
@@ -499,10 +523,17 @@ class DeleteSimData(Destructive):
 # the sidecars describe trips that no longer exist, so Exclude Trip's narrow
 # outbound is restored across a session boundary and a restart cannot render
 # stale meta.
+#
+# There is no row for Upload Website any more. It read a local deploy record
+# that only one publishing arrangement wrote, and orientation runs at LOCAL
+# scope precisely so a cold start never reaches the network — so the fact is
+# now the target's and cannot be had here. The cost is one keypress: a restart
+# mid-round on a publishing install lands on Build Website, whose outbound
+# offers Upload Website. Position.orient says correctness does not depend on
+# it, and it does not.
 COLD_START_RULES = (
     (EXCLUDE, lambda w: bool(w.excluded) and w.excluded_at > w.newest_meta_at),
-    (UPLOAD, lambda w: bool(w.site.deployed)),
-    (BUILD, lambda w: w.site.page or bool(w.final_folders)),
+    (BUILD, lambda w: w.local_page or bool(w.final_folders)),
     (RENDER, lambda w: bool(w.renders)),
     (PREVIEW, lambda w: w.stills_current),
     (META, lambda w: bool(w.metas)),
