@@ -109,7 +109,7 @@ the map-widget panel (prints a warning). `.venv/` and `.env` are gitignored.
   fresh-output reset only ever clears inside the running import's own namespace,
   so rendering one card never touches another's output. Each day folder holds
   its trips + an `info.txt` naming the source import. `.gpx_cache/.intermediates`
-  stay at the `--out` root, shared. The goodnight-drives site walks this with
+  stay at the `--out` root, shared. A publishing target walks this with
   `rglob` and regroups by day for display.
 
 Pass `--root <import-folder>` and `--out <output-dir>`. Do NOT bake these
