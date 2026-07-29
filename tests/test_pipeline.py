@@ -619,6 +619,52 @@ class TheRunner(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# What a step body's answer becomes
+# ---------------------------------------------------------------------------
+
+class WhatCountsAsHavingDoneIt(unittest.TestCase):
+    """The bodies still answer in the four words they always did; the Work
+    facade turns that answer into `completed`, and which words count is the
+    owner's rule 3 — "completed means the step was not aborted".
+
+    This is the seam where a body that declined to do anything could start
+    looking like one that did. It is asserted on `_outcome` directly because
+    every non-destructive item reaches it and none of them can see it.
+    """
+
+    def outcome_of(self, status):
+        return P._outcome(P.StepResult("a step", status, 0, "detail"))
+
+    def test_a_step_that_ran_completes(self):
+        self.assertTrue(self.outcome_of(P.RAN).completed)
+
+    def test_a_step_whose_postcondition_already_held_completes(self):
+        """SATISFIED is not GO and it is not failure either: nothing was owed,
+        so the pipeline may move on. That is what makes re-running an item
+        harmless rather than merely tolerated."""
+        self.assertTrue(self.outcome_of(P.SATISFIED).completed)
+
+    def test_a_step_that_failed_does_not_complete(self):
+        self.assertFalse(self.outcome_of(P.FAILED).completed)
+
+    def test_a_step_that_skipped_does_not_complete(self):
+        """The one that is easy to get wrong, because SKIPPED is not an error.
+
+        A render where the operator answered no to "delete and re-render?"
+        reports SKIPPED, and so does one given a bad height. Nothing was
+        encoded in either case, so treating them as completing would advance
+        the position past Render Videos on the strength of a declined prompt —
+        and the old `status != FAILED` convention did exactly that.
+        """
+        self.assertFalse(self.outcome_of(P.SKIPPED).completed)
+
+    def test_the_bodys_own_words_survive_into_the_outcome(self):
+        """Whatever the step said about itself is what the report prints; the
+        facade decides completion, not wording."""
+        self.assertEqual(self.outcome_of(P.SKIPPED).note, "detail")
+
+
+# ---------------------------------------------------------------------------
 # No dead ends
 # ---------------------------------------------------------------------------
 

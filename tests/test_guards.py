@@ -517,5 +517,103 @@ class TestTheDestructiveSequence(GuardTest):
         self.assertTrue(callable(plan.act))
 
 
+# ---------------------------------------------------------------------------
+# The bucket listing, as a type. Everything above reaches it through
+# working_area_is_expendable, which has its own copy of the matching rule in
+# pipeline.py; these ask world.Listed directly, because it is what the ITEMS
+# judge and a rule that holds in one implementation and not the other is the
+# gap that lets a wipe through.
+# ---------------------------------------------------------------------------
+
+class TestWhatTheBucketVouchesFor(unittest.TestCase):
+    """An object in the bucket stands in for footage on disk, so what counts
+    as "the same object" is the whole strength of that promise."""
+
+    def test_a_key_only_matches_on_a_path_boundary(self):
+        """sometrip_A.mp4 must not vouch for trip_A.mp4.
+
+        A bare endswith let a longer name satisfy a shorter one, and the
+        render whose only other copy was the workspace then read as published.
+        """
+        listed = W.Listed({"videos/sometrip_A.mp4": 500})
+        self.assertIs(listed.holds("trip_A.mp4", 500), M.Evidence.NO)
+
+    def test_the_same_name_under_a_prefix_does_match(self):
+        """The other half of the rule: a real key is prefixed by its folder,
+        so the boundary must admit videos/trip_A.mp4 for trip_A.mp4."""
+        listed = W.Listed({"videos/trip_A.mp4": 500})
+        self.assertIs(listed.holds("trip_A.mp4", 500), M.Evidence.YES)
+
+    def test_a_copy_of_a_different_size_is_not_the_same_object(self):
+        """Size is part of identity here. A truncated or half-uploaded object
+        carries the right name and not the right footage, and name alone would
+        declare the local copy expendable."""
+        listed = W.Listed({"videos/trip_A.mp4": 499})
+        self.assertIs(listed.holds("trip_A.mp4", 500), M.Evidence.NO)
+
+    def test_covering_a_set_of_renders_needs_every_one_of_them(self):
+        listed = W.Listed({"videos/trip_A.mp4": 1})
+        both = (W.Render("trip_A.mp4", 1), W.Render("trip_B.mp4", 1))
+        self.assertIs(listed.covers(both), M.Evidence.NO)
+        self.assertIs(listed.covers(both[:1]), M.Evidence.YES)
+
+
+class TestWhatIsStillOwedToTheBucket(unittest.TestCase):
+    """uploads_outstanding is what makes an interrupted upload resumable, and
+    what decides whether 7) Upload Website has anything left to do."""
+
+    def test_a_render_the_bucket_holds_at_the_wrong_size_is_still_owed(self):
+        """The resume case. An upload cut off half way leaves a short object
+        under the right key; calling that done strands the rest of the file
+        and leaves 8) Clean Workspace looking at proof that is not there.
+        """
+        world = W.World(renders=(W.Render("trip_A.mp4", 500),),
+                        bucket=W.Listed({"videos/trip_A.mp4": 250}))
+        self.assertEqual(len(guards.uploads_outstanding(world)), 1)
+
+    def test_a_render_the_bucket_holds_whole_is_settled(self):
+        world = W.World(renders=(W.Render("trip_A.mp4", 500),),
+                        bucket=W.Listed({"videos/trip_A.mp4": 500}))
+        self.assertEqual(guards.uploads_outstanding(world), ())
+
+    def test_a_bucket_that_could_not_be_listed_owes_everything(self):
+        """Fails closed: "could not find out" is not "it is already there"."""
+        world = W.World(renders=(W.Render("trip_A.mp4", 500),),
+                        bucket=W.Unlistable())
+        self.assertEqual(len(guards.uploads_outstanding(world)), 1)
+
+
+class TestTheLocalRenderGateHasNoWayToAbstain(unittest.TestCase):
+    """rendered_locally is the hard floor under the unanimity rule.
+
+    workspace_is_expendable defers to the site when the site can answer, and
+    otherwise every gate that CAN answer must say yes. That sentence is only
+    total because this gate never answers "not applicable" — if it could
+    abstain, an import with nothing rendered would leave the bucket gate
+    talking about the renders that exist while saying nothing about the trips
+    that were never encoded, whose footage is in the workspace and nowhere
+    else.
+    """
+
+    def test_an_import_with_no_renders_at_all_answers_no(self):
+        self.assertIs(guards.rendered_locally(_world(renders_here=0)),
+                      M.Evidence.NO)
+
+    def test_a_grouping_that_could_not_be_read_answers_unknown_not_yes(self):
+        self.assertIs(guards.rendered_locally(_world(renders_here=1, expected=None)),
+                      M.Evidence.UNKNOWN)
+
+    def test_it_never_answers_not_applicable(self):
+        """Asserted over every shape of world the capture can produce, because
+        one abstention is all the unanimity rule needs to be waved through."""
+        for renders_here in (0, 1, 3):
+            for expected in (None, 0, 3):
+                with self.subTest(renders=renders_here, expected=expected):
+                    reading = guards.rendered_locally(
+                        _world(renders_here=renders_here, expected=expected))
+                    self.assertTrue(reading.applicable,
+                                    "the floor abstained, so nothing holds the rule up")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
