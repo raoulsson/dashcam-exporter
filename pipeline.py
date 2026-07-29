@@ -4568,7 +4568,6 @@ def copy_still_exists(ctx):
     # card clip's name IS its wall clock — so "is this clip inside a rendered
     # trip" is a real containment test. Matching filename days instead would
     # accept any render that happens to share a date.
-    covered = 0
     metas = []
     froot = getattr(ctx, "final_root", ctx.out_dir)
     for base in (froot, ctx.out_dir):
@@ -4586,25 +4585,32 @@ def copy_still_exists(ctx):
                               e.replace("-", "").replace(":", "").replace(" ", "")[:14]))
         except Exception:
             continue
-    for st in stamps:
-        if any(a <= st <= b for a, b in spans):
-            covered += 1
-    if covered:
-        return True, "%d of this card's clip(s) are inside rendered trips" % covered
+    covered = {st for st in stamps if any(a <= st <= b for a, b in spans)}
 
     # Source clips carrying THIS card's stamps — filenames are the stamp, so
     # this is an identity check rather than a headcount of whatever is around.
-    clips = 0
+    in_workspace = set()
     for cand in import_candidates(ctx):
         cfront = cand / "DCIM" / "200video" / "front"
         if cfront.is_dir():
             for f in cfront.glob("*.mp4"):
                 m = STAMP_RE.search(f.name)
                 if m and m.group(1) in stamps:
-                    clips += 1
-    if clips:
-        return True, "%d of this card's clip(s) in the workspace" % clips
-    return False, ""
+                    in_workspace.add(m.group(1))
+
+    # EVERY clip must be accounted for, by whichever mix of evidence. Approving
+    # on any single accounted clip — which this did — let one rendered trip
+    # vouch for a whole card: the wipe then erased clips whose only copy was
+    # the card itself. Per-clip is the only honest reading of "is it somewhere
+    # else"; the kinds of evidence may mix, the accounting may not have gaps.
+    if stamps - covered - in_workspace:
+        return False, ""
+    bits = []
+    if covered:
+        bits.append("%d inside rendered trips" % len(covered))
+    if in_workspace - covered:
+        bits.append("%d in the workspace" % len(in_workspace - covered))
+    return True, "every clip accounted for: " + ", ".join(bits)
 
 
 def wipe_card(ctx):

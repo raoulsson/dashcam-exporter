@@ -302,6 +302,25 @@ class TestCleanSimEvidence(GuardTest):
         ok, _ = P.copy_still_exists(self.w.ctx)
         self.assertFalse(ok)
 
+    def test_one_covered_clip_does_not_vouch_for_the_whole_card(self):
+        """The guard is per clip. One clip inside a rendered trip used to
+        return True for the card as a whole, and the wipe then erased clips
+        whose only copy WAS the card."""
+        self.w.clips(["20260728090000", "20260728100000"])
+        self.w.render("trip_A", day="2026-07-28",
+                      start="2026-07-28 08:55:00", end="2026-07-28 09:05:00")
+        ok, _ = P.copy_still_exists(self.w.ctx)
+        self.assertFalse(ok, "the 10:00 clip is accounted for by nothing")
+
+    def test_mixed_evidence_covering_every_clip_counts(self):
+        """The kinds of evidence may mix; the accounting may not have gaps."""
+        self.w.clips(["20260728090000", "20260728100000"])
+        self.w.render("trip_A", day="2026-07-28",
+                      start="2026-07-28 08:55:00", end="2026-07-28 09:05:00")
+        self.w.clips(["20260728100000"], where="import")       # the other clip
+        ok, why = P.copy_still_exists(self.w.ctx)
+        self.assertTrue(ok, why)
+
 
 # ---------------------------------------------------------------------------
 # import_is_expendable — the proof the delete step demands
