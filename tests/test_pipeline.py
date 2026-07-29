@@ -185,6 +185,64 @@ def drive(menu_items, position, keys):
 
 
 # ---------------------------------------------------------------------------
+# When an item raises instead of answering
+# ---------------------------------------------------------------------------
+
+class ARuntimeFailureIsOneItemsFailure(unittest.TestCase):
+    """"runtime can always happen, should throw exception and pipeline catches
+    it and does step -1, no complete."
+
+    A disk fills, the source is unplugged mid-copy, a call is wired wrong.
+    Before this, the exception reached the top and took the session with it —
+    and the position went too, which is the worst moment to lose both. An item
+    that raises is an item that did not complete, and not completing already
+    has a defined meaning: the position does not move.
+    """
+
+    def raising(self, at, boom=RuntimeError("disk full")):
+        menu_items, position = machine(WEBSITE, at=at)
+        menu_items[RENDER].execute.side_effect = boom
+        return menu_items, position
+
+    def test_the_session_survives_it(self):
+        """The menu comes back. Proven by the prompt being answered again
+        after the failure rather than the loop unwinding."""
+        menu_items, position = self.raising(META)
+        run = drive(menu_items, position, [str(RENDER), "q"])
+        self.assertEqual(run.painter.call_count, 2)
+
+    def test_the_position_does_not_move(self):
+        menu_items, position = self.raising(META)
+        drive(menu_items, position, [str(RENDER), "q"])
+        self.assertEqual(position.current, META)
+
+    def test_the_item_did_not_complete(self):
+        """And says so through the same channel an abort uses, because they
+        mean the same thing to the machine."""
+        menu_items, position = self.raising(META)
+        drive(menu_items, position, [str(RENDER), "q"])
+        menu_items[RENDER].aborted.assert_called_once()
+
+    def test_the_operator_is_told_what_raised(self):
+        menu_items, position = self.raising(META)
+        run = drive(menu_items, position, [str(RENDER), "q"])
+        self.assertIn("RuntimeError", run.printed)
+        self.assertIn("disk full", run.printed)
+
+    def test_the_failure_is_recorded_for_the_summary(self):
+        menu_items, position = self.raising(META)
+        run = drive(menu_items, position, [str(RENDER), "q"])
+        self.assertTrue(run.ctx.results, "a crash left no trace in the results")
+
+    def test_deciding_to_leave_still_leaves(self):
+        """Ctrl-C is the operator deciding, not the tool failing. It must not
+        be swallowed by the catch that keeps the session alive."""
+        menu_items, position = self.raising(META, boom=KeyboardInterrupt())
+        with self.assertRaises(KeyboardInterrupt):
+            drive(menu_items, position, [str(RENDER), "q"])
+
+
+# ---------------------------------------------------------------------------
 # Where the position goes when an item completes
 # ---------------------------------------------------------------------------
 

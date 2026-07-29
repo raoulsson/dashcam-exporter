@@ -52,6 +52,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -5479,13 +5480,43 @@ class Runner:
         hint_reset()
         outcome = self._execute(item)
         self.position.advance(item)
+        _print_all(_stayed_lines(item, outcome, self.menu, self.position))
         return outcome
 
     def _execute(self, item):
         try:
             return item.execute(capture_world(self.ctx, item.SCOPE))
-        except Aborted:
+        except Exception as exc:
+            return self._after_exception(item, exc)
+
+    def _after_exception(self, item, exc):
+        """Which kind of not-completing this was. Both leave the position where
+        it is; only the wording and the log differ."""
+        if isinstance(exc, Aborted):
             return self._interrupted(item)
+        return self._crashed(item, exc)
+
+    def _crashed(self, item, exc):
+        """A runtime failure is one item's failure, not the session's.
+
+        Anything can raise mid-run: a disk fills, the source is unplugged while
+        a copy is in flight, a call is wired wrong. Letting it reach the top
+        killed the menu and took the position with it, which is the worst
+        moment to lose both -- the operator is left with no tool and no record
+        of where the cycle had got to. So it lands here instead: the item did
+        not complete, the position therefore does not move, and the next menu
+        comes back offering the same choices.
+
+        Not BaseException. Ctrl-C and a quit are the operator deciding, and
+        they must still leave.
+        """
+        print()
+        print(C.red("  %s failed: %s: %s"
+                    % (item.name(), type(exc).__name__, exc)))
+        _print_all(_crash_log_line(_log_crash(self.ctx, item)))
+        self.ctx.results.append(StepResult(
+            item.name(), FAILED, 0, "%s: %s" % (type(exc).__name__, exc)))
+        return item.aborted("failed: %s" % exc)
 
     def _interrupted(self, item):
         """An abort does NOT complete the item, so the position stays put —
@@ -5495,6 +5526,56 @@ class Runner:
         print(C.yellow("  Interrupted — %s stopped." % item.name()))
         self.ctx.results.append(StepResult(item.name(), FAILED, 0, "interrupted"))
         return item.aborted("interrupted")
+
+
+def _stayed_lines(item, outcome, menu_items, position):
+    """One line when a run did not complete.
+
+    The body says what went wrong; this says what it meant for where we are.
+    Those are different facts and the second one is the machine's: the
+    position did not move, so the next menu is the same menu, and without
+    saying so a failure looks like it might have half-advanced.
+    """
+    if item.completed():
+        return []
+    return [C.dim("  Did not complete%s — still at %s."
+                  % (_because(outcome), _where(menu_items, position)))]
+
+
+def _because(outcome):
+    if not getattr(outcome, "note", ""):
+        return ""
+    return " (%s)" % outcome.note
+
+
+def _where(menu_items, position):
+    if position.current not in menu_items:
+        return "the start"
+    return "%d) %s" % (position.current, menu_items[position.current].name())
+
+
+def _crash_log_line(path):
+    if not path:
+        return []
+    return [C.dim("  Traceback written to %s" % tilde(path))]
+
+
+def _log_crash(ctx, item):
+    try:
+        return _write_crash(ctx, item)
+    except Exception:
+        # Best effort and deliberately silent. The operator is already looking
+        # at one error; a second one about the log file helps nobody.
+        return None
+
+
+def _write_crash(ctx, item):
+    path = ctx.out_dir / "logs" / "crashes.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as fh:
+        fh.write("%s  %s\n%s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    item.name(), traceback.format_exc()))
+    return path
 
 
 def build_runner(ctx, classes=None):
