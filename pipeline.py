@@ -5246,26 +5246,41 @@ def _menu_line(item, verdict, offered, cell):
 
 
 def _why_lines(menu_items, verdicts, offered):
-    """One line per entry that cannot be picked, saying which gate refused.
+    """Why the greyed entries are greyed, one gate at a time.
 
-    Two gates, two different sentences: the graph answers "may this follow
-    where we are", the guard answers "would it do anything". Collapsing them
-    into one greyed-out label would hide which of the two to fix.
+    Two gates, and they are different problems, so they get different
+    sentences. The GUARD's refusal is about this world and is actionable —
+    "no GPS track in the import", "no card at <path>" — so it gets a line
+    each. The GRAPH's is about where the pipeline is, is the same sentence
+    for every entry it applies to, and gets one line naming them together;
+    printing it eight times taught the eye to skip the block that also holds
+    the actionable ones.
     """
-    said = map(lambda n: _why_line(n, menu_items[n], verdicts[n], n in offered),
-               sorted(menu_items))
+    return _blocked_lines(menu_items, verdicts, offered) + _not_here_line(
+        menu_items, offered)
+
+
+def _blocked_lines(menu_items, verdicts, offered):
+    said = map(lambda n: _blocked_line(n, verdicts[n]), sorted(offered))
     return list(filter(None, said))
 
 
-def _why_line(number, item, verdict, offered):
-    reason = _why_not(item, verdict, offered)
-    if not reason:
+def _blocked_line(number, verdict):
+    if not verdict.blocked:
         return ""
-    return C.dim("   %d) %s" % (number, reason))
+    return C.dim("   %d) %s" % (number, verdict.reason))
+
+
+def _not_here_line(menu_items, offered):
+    elsewhere = sorted(set(menu_items) - set(offered))
+    if not elsewhere:
+        return []
+    return [C.dim("   %s) not from here — the graph does not offer them yet"
+                  % ",".join(map(str, elsewhere)))]
 
 
 def _why_not(item, verdict, offered):
-    """Which of the two gates refused, in its own words, or "" for neither."""
+    """Is this entry unpickable, and by which gate. "" means it is pickable."""
     if not offered:
         return "does not follow where we are"
     return _guard_reason(verdict)
