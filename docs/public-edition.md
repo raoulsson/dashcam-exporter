@@ -15,15 +15,17 @@ config value that is unset by default:
 | Where | What it reaches for | Gated by |
 |---|---|---|
 | `ctx.site` | a sibling site checkout | `site_repo` |
-| Preview / Render | `build_manifest.py` in that repo, to refresh its index | `site_repo` |
-| Upload (7) | `deploy/upload-videos-s3.sh` | `s3_bucket` + `site_repo` |
-| Update site (8) | `deploy/deploy-site.sh` | `site_repo` |
+| Render / Exclude Trip | `build_manifest.py` in that repo, to refresh its index | `site_repo` |
+| Upload Website (7) | `deploy/upload-videos-s3.sh`, then `deploy/deploy-site.sh` | `s3_bucket` + `site_repo` |
+| Clean Workspace (8) | `deploy/is-complete.py`, to prove the footage may go | `site_repo` |
 | Status | the live `trips.json` | `live_trips_url` |
-| Exclude-trip guard | `admin.json` and an S3 listing, to prove a trip was published | `site_repo` / `s3_bucket` |
+| Exclude Trip's last-copy warning | `admin.json` and an S3 listing, to prove a trip was published | `site_repo` / `s3_bucket` |
 
-So the private half is a handful of steps keyed off a few settings. Everything
-before them — import, scan, preview, exclude, render, local website — is
-generic and runs with nothing configured. `live_trips_url` is the only thing
+So the private half is ONE menu item keyed off two settings. Item 7 drives both
+transports because they are one job — assets to the bucket, pages to the server
+— and splitting them was how a deploy could go out over videos that had not
+landed. Everything before it — import, sidecars, preview, exclude, render,
+local website — is generic and runs with nothing configured. `live_trips_url` is the only thing
 that makes the CLI touch the network at startup; unset, nothing is fetched.
 
 ## The shape
@@ -34,37 +36,53 @@ tail absent. The private half lives in config (`site_repo`, `s3_bucket`,
 `s3_region`, `live_trips_url`, all optional — real values in the gitignored
 `.env`), and absence of the config is what makes an install "public".
 
-**Disabled, not hidden.** Every step is always in the menu at its own fixed
-number; the ones whose config is absent are greyed out with the key that would
-enable them printed underneath —
+**Disabled, not hidden.** All ten items are always in the menu at their own
+fixed numbers; the ones whose config is absent are greyed out with the key that
+would enable them printed underneath —
 
 ```
    7) needs s3_bucket in config.txt
-   8) needs site_repo in config.txt
 ```
 
 Two reasons, and both are worth more than the tidiness of a shorter menu. The
-numbering never shifts between setups, so anything anyone writes about "step 5"
+numbering never shifts between setups, so anything anyone writes about "item 5"
 is true on every machine. And the greyed line is the discovery path: a stranger
 can see that publishing exists and exactly what turns it on, in the place they
-are already looking. The same mechanism (`NOOP_CHECK` / `unavailable_steps()`)
-greys Import when the sink is already full, and it is recomputed on every menu
-draw, so a step comes back the moment the world changes.
+are already looking.
+
+Under the local product item 7 is unreachable for two independent reasons, and
+neither is a conditional inside a method: nothing offers it — no item's outbound
+set contains 7 — and its own `evaluate` blocks. The strategy is a constructor
+argument, resolved once when the menu is built, so which edges an item reports
+and which collaborator it runs are settled there rather than re-tested on every
+draw.
+
+The same mechanism greys any item whose evidence is missing — Import when there
+is no source and nothing imported, Delete SIM Data when there is no card — and
+it is recomputed from a freshly captured world on every menu draw, so an item
+comes back the moment the world changes.
 
 An unconfigured install never sees a warning about a repo it has never heard
-of: a disabled step says for itself why it is disabled, and that is the only
+of: a disabled item says for itself why it is disabled, and that is the only
 place the missing config is mentioned.
 
-- **nothing set** (the default, and what a clone gets): Import, List, Preview,
-  Exclude, Render and Create website run; Upload and Update site are greyed.
+- **nothing set** (the default, and what a clone gets): Progress, Import SIM,
+  Generate Meta, Build Preview, Exclude Trip, Render Videos, Build Website,
+  Clean Workspace and Delete SIM Data run; Upload Website is greyed.
   Everything lands under `out`, and nothing contacts a network host.
-- **`site_repo` set**: Update site lights up.
-- **`site_repo` + `s3_bucket`**: Upload lights up too, and the status screen
-  grows the Prepared row; `live_trips_url` adds the Live site row.
+- **`site_repo` + `s3_bucket`**: Upload Website lights up — both settings, because
+  it is one job with two transports and half of it publishes nothing usable. The
+  status screen grows the Prepared row; `live_trips_url` adds the Live site row.
 
-## The Create website step
+## The Build Website item
 
 Builds `dashcam_import_data_site.html` from what the render already produced.
+Under the local product it also GATHERS the render tree into `final_<day>_<import>`,
+which is what makes the workspace expendable — there is no separate gather item,
+so it lives here or nowhere. Which gatherer is installed is the constructor's
+business: under the publishing product it moves nothing, because `trips.json`
+records each trip by a uid containing its import folder name and moving the tree
+would orphan every published trip.
 Nothing new is computed; every number, still and track already exists on disk
 as a sidecar next to the mp4, and this pass only arranges them into one page.
 That is deliberate: the page has to be buildable by someone who has no S3

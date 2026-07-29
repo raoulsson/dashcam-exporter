@@ -197,7 +197,7 @@ class TestAvailability(SpecTest):
                          built[CLEAN_WS].outbound().offers(frozenset(built)))
 
     def test_cannot_upload_without_the_render_step(self):
-        """You cannot upload without the render step."""
+        """You cannot upload without a render to upload."""
         self.b.site_repo().bucket({}).imported().sidecars()
         self.assertBlocked(UPLOAD, "no renders exist, upload must be unavailable")
 
@@ -235,8 +235,8 @@ class TestAvailability(SpecTest):
             self.assertIn(item, blocked, "item %d must wait for sidecars" % item)
 
     def test_cannot_create_sidecars_without_gpx(self):
-        """You cannot create sidecars without gpx. The step that CREATES them
-        is Generate meta now — Preview only looks at what it wrote."""
+        """You cannot create sidecars without gpx. Generate Meta is what
+        CREATES them; Build Preview only looks at what it wrote."""
         self.b.imported()                                       # clips, no 203gps
         self.assertBlocked(META, "no GPX means no sidecars can be built")
 

@@ -396,12 +396,16 @@ class UploadWebsite(MenuItem):
 class CleanWorkspace(Destructive):
     """Erase the imported footage and the renders it produced.
 
-    The WORKING AREA half of what used to be one folded "Clean up". Its
-    outbound is {1}: once the workspace is gone only a new cycle remains — so
-    it can never precede Delete SIM Data, and the folded step's defect (gather
-    the card's evidence from the workspace, erase the workspace, then refuse
-    the card half after the irreversible half has already run and printed that
-    the card was verified) cannot be expressed in this graph at all.
+    Separate from Delete SIM Data because the two erase different things on
+    different evidence, and because folding them is a defect rather than a
+    tidy-up: the card's evidence is partly "the clips are in the workspace",
+    so one step that gathers that evidence, erases the workspace and then
+    checks the card refuses AFTER the irreversible half has run, having
+    already printed that the card was verified.
+
+    Its outbound is {1}: once the workspace is gone only a new cycle remains,
+    so it can never precede Delete SIM Data and that sequence cannot be
+    expressed in this graph at all.
     """
 
     number = CLEAN_WS
@@ -444,12 +448,12 @@ class CleanWorkspace(Destructive):
 class DeleteSimData(Destructive):
     """Erase the card's clips, keeping its folders so the camera can record.
 
-    The CARD half, unfolded back out of "Clean up". Its outbound is StepBack:
-    freeing the card does not interrupt the cycle, so completing hands the
-    position back to whoever offered it — from which Clean Workspace is still
-    reachable. The graph therefore permits the safe order (erase the card
-    while its clips are provably in the workspace, clean the workspace once
-    the renders are published) and forbids the dangerous one.
+    Its outbound is StepBack: freeing the card does not interrupt the cycle,
+    so completing hands the position back to whoever offered it — from which
+    Clean Workspace is still reachable. The graph therefore permits the safe
+    order (erase the card while its clips are provably in the workspace, clean
+    the workspace once the renders are published) and forbids the dangerous
+    one.
     """
 
     number = ERASE_CARD

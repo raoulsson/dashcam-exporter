@@ -437,15 +437,6 @@ class TestStrategySplit(GraphTest):
             m.cleanup()
 
 
-class TestAvailabilityMatchesTheWorld:
-    """Left as a name only: what an item may do is now two separate answers.
-
-    The graph says whether it may follow where we are (TestTheOwnersWorkedExample)
-    and the guard says whether it would do anything (below). They used to be one
-    function, unavailable_steps(), which is why this class has no tests of its own.
-    """
-
-
 class TestGuardsSeeTheWorld(GraphTest):
     """With its evidence absent an item blocks; with it present it does not."""
 

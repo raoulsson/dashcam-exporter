@@ -18,8 +18,8 @@
 # all read from it. It must contain (or contain a day folder containing)
 # DCIM/200video/{front,rear} and optionally DCIM/203gps.
 #
-# The card is NOT this. It is `card`, further down, and it is only read by the
-# import step. Keeping them apart is what lets the card go back in the car while
+# The card is NOT this. It is `card`, further down, and it is only read by
+# 1) Import SIM. Keeping them apart is what lets the card go back in the car while
 # a render runs for hours off the copy — and it removes a real ambiguity: when
 # one setting meant both, "where does this render from" had two answers, and an
 # install that had configured neither read from a mount that might not be there.
@@ -37,7 +37,7 @@ import_dir = ~/dashcam-data/import
 # ~/dashcam-data/output only when neither is set.
 #
 # This matters more than it looks. Two checkouts sharing one output directory
-# means step 1 in either sweeps the other's working area, and it did: a clone
+# means 8) Clean Workspace in either erases the other's working area, and it did: a clone
 # that had set `root` but not `out` inherited the first one's output and deleted
 # a render in progress. The tool now writes .owned-by into the directory and
 # refuses to sweep one another checkout claims, but the setting is the fix.
@@ -377,12 +377,13 @@ software = true
 # because the publishing half of this pipeline — a bucket the videos live in and
 # a website that serves them — is one person's setup, and hardcoding it would
 # mean every clone reaching for a checkout it does not have and a host it has
-# never heard of. Set them and the Upload and Deploy steps in the menu light up.
-# Leave them and those steps stay in the menu, greyed out, with the key that
-# would enable them printed underneath. Set them in the gitignored `.env` as
+# never heard of. Set them and 7) Upload Website in the menu lights up.
+# Leave them and it stays in the menu, greyed out, with the key that
+# would enable it printed underneath. Set them in the gitignored `.env` as
 # SET_SITE_REPO / SET_S3_BUCKET / SET_S3_REGION / SET_LIVE_TRIPS_URL, not
-# here — the examples below show the shape, .env holds the values. The step NUMBERS never move, so a note
-# saying "run 5" means the same thing on every machine.
+# here — the examples below show the shape, .env holds the values. The item
+# NUMBERS never move, so a note saying "run 5" means the same thing on every
+# machine.
 
 # The second repo, holding what it takes to publish. pipeline.py runs three
 # things out of it and nothing else, so anything providing them works:
@@ -391,11 +392,13 @@ software = true
 #   deploy/deploy-site.sh       pushes public_html/ to wherever the site is served
 #   deploy/is-complete.py       (optional) prints a per-trip published/not table;
 #                               the delete guard reads it, see below
-# Setting this enables Deploy. --site-repo overrides it for one run.
+# pipeline.py drives the first three from ONE menu item — 7) Upload Website —
+# because they are one job: getting the built site online. Setting this is half
+# of what enables it. --site-repo overrides it for one run.
 #site_repo = ~/dev/your-site
 
 # The bucket the videos end up in. Setting it (together with site_repo) enables
-# Upload. It is NOT how the sync is aimed — upload-videos-s3.sh picks its own
+# 7) Upload Website. It is NOT how the sync is aimed — upload-videos-s3.sh picks its own
 # destination — it is what this CLI lists afterwards to prove the sync landed,
 # because `aws s3 sync` exits 0 even when individual objects fail. Name the same
 # bucket the script uploads to; if the two disagree, verification fails, which
@@ -412,21 +415,33 @@ software = true
 # which is why it is a setting rather than a constant.
 #live_trips_url = https://example.com/trips.json
 
-# THE DELETE GUARD. "Clean up" (10) erases the original clips (and the card's,
-# when one is in), and what it can prove first depends on what is set here.
+# THE DELETE GUARD. 8) Clean Workspace erases the original clips and the renders
+# they produced, and what it can prove first depends on what is set here. (The
+# card is not this item's business — that is 9) Delete SIM Data, with its own
+# evidence and its own word.)
 #
-# Two checks run and are ADVISORY: how many renderable trips have an mp4, and
-# whether those mp4s are in the bucket at a matching size. Neither refuses on its
-# own — a mismatch there is usually bookkeeping (a trip you dropped, a re-encode
-# changing a size), and refusing on it stranded gigabytes over something the site
-# had already settled.
+# THE RULE, in one sentence: the site decides when it can be asked; otherwise
+# every check that can answer must say yes.
 #
-# What decides is deploy/is-complete.py in the site repo: green deletes, anything
-# else refuses. With s3_bucket set but NO site_repo there is no site to ask, so
-# the bucket check becomes the decider rather than deferring to something that
-# will never run. With neither configured nothing can be verified: it says so in
-# red, keeps the renders instead of purging them, and still makes you type
-# DELETE.
+# Three gates. How many renderable trips have an mp4; whether those mp4s are in
+# the bucket at a matching size; and what deploy/is-complete.py says the live
+# site actually serves. The third is the authority whenever it can run, because
+# it asks what is really being served rather than what ought to be — so with a
+# site_repo set, a short local count is commentary and a green from the script
+# deletes.
+#
+# Without a site_repo there is nothing to defer TO, and this is where the rule
+# earns its keep. It is NOT "the last check that can answer wins": with three
+# trips grouped, one encoded, no site repo, and that one mp4 sitting in the
+# bucket at a matching size, the bucket would be the last word and would say
+# yes — while the two trips that were never encoded exist in no render, in no
+# bucket, nowhere. Their footage would go. So every gate that CAN answer has to
+# say yes, and a gate that cannot read the grouping answers "unknown", which is
+# not a yes.
+#
+# With neither configured nothing can be verified: it says so in red, names the
+# check that could not run, keeps the renders instead of purging them, and
+# still makes you type CLEAN.
 
 # REPRODUCING THE FULL SETUP, if you want it. The shape is: an S3 bucket holding
 # the mp4s (private, fronted by CloudFront with signed URLs — deploy-site.sh
@@ -484,8 +499,8 @@ software = true
 # The footage source: any directory holding a DCIM tree. The mounted SD card
 # is the common case (the DDPAI mounts as NO NAME unless you renamed it), but a
 # card copied onto an external disk, or a folder someone handed over, works the
-# same. Read by the import step (status screen, passed to import-sd-card.sh as
-# --src) and by step 10's clean-up, which erases it. Nothing renders from here —
+# same. Read by 1) Import SIM (status screen, passed to import-sd-card.sh as
+# --src) and by 9) Delete SIM Data, which erases it. Nothing renders from here —
 # that is import_dir at the top.
 #card = /Volumes/NO NAME
 

@@ -288,7 +288,7 @@ class Ctx:
         # `out` defaults NEXT TO the workspace, not to a global constant.
         # A second checkout that sets import_dir and leaves `out` alone otherwise
         # inherits ~/dashcam-data/output — the first checkout's live working area
-        # — and step 1 sweeps that without asking. A clone set up to be
+        # — and Clean Workspace erases that. A clone set up to be
         # independent has to actually be independent, and the setting the person
         # did supply is the best evidence of where their data lives.
         if self.cfg.get("out"):
@@ -325,9 +325,9 @@ class Ctx:
 
         # Session state carried between steps.
         self.selected_import = None     # the folder passed as --root to the renderer
-        self.last_scan = None           # ScanResult from the most recent list-trips
+        self.last_scan = None           # ScanResult from the most recent scan
         # (root, payload) from the most recent --print-groups. The scan behind it
-        # is expensive, and both the preview sheet and the drop step need the same
+        # is expensive, and both the preview sheet and Exclude Trip need the same
         # answer, so it is cached per import folder — and invalidated the moment
         # anything changes what is on disk.
         self.last_groups = None
@@ -521,7 +521,7 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
             # terminal, so anything that insists on prompting at /dev/tty (an ssh
             # host-key confirmation on a first-ever deploy, a passphrase-protected
             # key) fails loudly instead of hanging. Loud is the right failure mode
-            # here; accept the host key once by hand and the deploy step works
+            # here; accept the host key once by hand and the deploy works
             # from then on.
             start_new_session=True,
         )
@@ -1438,7 +1438,7 @@ def working_area_is_expendable(ctx):
       - in the bucket at a matching size (only checkable with s3_bucket set) —
         AND, when a site repo is also configured, recorded by a site deploy
         that ran after it existed (see DEPLOYED_FILE), OR
-      - inside a final_<date> folder, which is where the site step moves the deliverable
+      - inside a final_<date> folder, which is where Build Website moves the deliverable
         on an install that does not publish.
     Everything else in the working area — previews/, the caches, the stills — is
     derived from renders and costs seconds to rebuild, so it never blocks.
@@ -1447,7 +1447,7 @@ def working_area_is_expendable(ctx):
     verified S3 upload AND the site deploy — and it binds only the configured
     edition: a local-only install has no bucket and no site, and gathering
     into final_ is what makes its workspace expendable. The evidence is the
-    record step_deploy writes on success, because a deploy that never ran
+    record Upload Website writes on a successful deploy, because one that never ran
     leaves exactly nothing to find.
 
     No renders at all is expendable: there is nothing to lose.
@@ -1462,7 +1462,7 @@ def working_area_is_expendable(ctx):
     if not loose:
         return True, "no unfinished renders in the working area", []
 
-    # Gathered: the site step MOVES a render into final_<date>. Matched on name AND
+    # Gathered: Build Website MOVES a render into final_<date>. Matched on name AND
     # SIZE, because trip filenames repeat exactly across re-renders at the same
     # height — on name alone, a re-rendered trip collides with the stale copy
     # in final_ and is declared expendable, deleting the very file
@@ -1484,7 +1484,7 @@ def working_area_is_expendable(ctx):
 
     # When BOTH halves of publishing are configured, "uploaded" alone does not
     # settle it: the render must also be covered by a site deploy that
-    # actually happened. step_deploy records the render names it deployed
+    # actually happened. Upload Website records the render names it deployed
     # with; absence of a name there means the site has never served it.
     require_deploy = bool(ctx.cfg_opt("s3_bucket")) and getattr(ctx, "site", None) is not None
     deployed = set()
@@ -1534,7 +1534,7 @@ def purge_published_renders(ctx, root):
     trip against gigabytes released. It is what last_imported_stamp reads to
     answer "have I already imported this card" once the footage is gone, what
     build_manifest carries forward for a trip whose render was deleted after
-    publishing, and what the clean-up's card-half evidence check reads to decide whether a
+    publishing, and what Delete SIM Data's evidence check reads to decide whether a
     card's clips are inside a rendered trip. Earlier this swept them away while
     two printed messages claimed they survived — the messages were right about
     the intent and the code was wrong.
@@ -1982,7 +1982,7 @@ def step_generate_meta(ctx):
 # The trip -> source clip mapping.
 #
 # Everything below that names a file of original footage — the preview contact
-# sheet, and the drop step that DELETES — reads this one mapping, straight from
+# sheet, and Exclude Trip which DELETES — reads this one mapping, straight from
 # the scanner's own grouping (make_dashcam_videos --print-groups, which
 # serialises what group_into_trips returned). Nothing here reconstructs a trip
 # boundary from filename timestamps: the boundaries come from video ego-motion
@@ -1997,7 +1997,7 @@ def renderer_python(ctx):
     when it exists, and that is not cosmetic: the venv has numpy + opencv, so
     trip boundaries are found by video ego-motion there and degrade to the
     GPS-radius fallback under a bare python3. The two can group the same card
-    differently. Since the drop step deletes by this mapping, it has to be the
+    differently. Since Exclude Trip deletes by this mapping, it has to be the
     mapping the renders were made from.
     """
     venv = ctx.exporter / ".venv" / "bin" / "python"
@@ -2012,7 +2012,7 @@ def require_ego_motion(ctx):
     fallback found 9 trips over 15h12m where ego-motion finds 6 over 10h48m,
     inventing a 3-second trip and folding 4.5 hours of parked recording into a
     'drive'. Everything downstream inherits that: the previews you judge from,
-    the render, and the mapping the drop step deletes by.
+    the render, and the mapping Exclude Trip deletes by.
 
     A silently worse answer is the failure mode worth refusing outright.
     """
@@ -2067,7 +2067,7 @@ def require_ego_motion(ctx):
     print()
     print("  Trip boundaries would fall back to a GPS radius, which groups this")
     print("  card differently: it merges parked hours into drives and invents")
-    print("  trips that are not there. Previews, renders and the drop step would")
+    print("  trips that are not there. Previews, renders and Exclude Trip would")
     print("  all be built on the wrong grouping.")
     print()
     print("  Interpreter checked: %s" % py)
@@ -2372,7 +2372,7 @@ def write_contact_sheet(ctx, root, payload, previews_dir, stills):
     # Chronological, earliest first. --print-groups returns them in discovery
     # order, which is index order and only accidentally the order they were
     # driven — a card review reads as a day, so the page should too. The trip
-    # INDEX on each card stays what it was, because that is what the drop step
+    # INDEX on each card stays what it was, because that is what Exclude Trip
     # takes and renumbering it here would be a trap.
     trips = sorted(payload.get("trips", []), key=lambda x: (x.get("start") or "", x["index"]))
     cards = []
@@ -2565,7 +2565,7 @@ def build_sidecars(ctx):
 def step_preview(ctx):
     """One still per trip + a local contact sheet, from the sidecars. No encoding.
 
-    The LOOKING half: the sidecars were written by Generate meta, and this
+    The LOOKING half: the sidecars were written by Generate Meta, and this
     builds what a human judges from — a frame per trip and a page to see them
     on. The cheap pass that makes pruning possible: encoding is hours and
     uploading is days, so the decision about which trips to keep has to be
@@ -3052,7 +3052,7 @@ def recover_aborted_render(ctx):
     (an encode that never finished — the finished file has no .part suffix)
     and the scratch frames in .intermediates/. Left in place, a .part sits in
     the render tree looking like a video to anything globbing loosely, and
-    the scratch inflates the working area the sweeps have to reason about.
+    the scratch inflates the working area Clean Workspace has to reason about.
     Says what it removed, like every other path here that deletes.
     """
     removed = []
@@ -3093,7 +3093,7 @@ def step_render(ctx):
 
     # Show the trips here rather than making him remember them from the listing or go
     # back for them. The grouping comes from --print-groups (cached, so this is
-    # instant once the boundaries are known) — the same source the drop step
+    # instant once the boundaries are known) — the same source Exclude Trip
     # deletes by, so what is listed is exactly what would be rendered.
     payload = load_groups(ctx, root)
     groups = (payload or {}).get("trips") or []
@@ -3107,7 +3107,7 @@ def step_render(ctx):
             span = human_secs(secs)
             # The encoded length is not the span: parking is cut out. The real
             # figure lives in the sidecar _meta.json, so it is only known once
-            # Generate meta has run — show it when it is there and say nothing
+            # Generate Meta has run — show it when it is there and say nothing
             # when it is not, rather than estimating.
             meta = trip_meta(g) or {}
             move_min = meta.get("moving_min")
@@ -3191,7 +3191,7 @@ def step_render(ctx):
             (720,  "still reads plates and signs"),
             (540,  "half size, fine on a laptop"),
             (360,  "phone only, plates unreadable")]
-    vid_secs = tot_move          # 0 until Generate meta has written the sidecars
+    vid_secs = tot_move          # 0 until Generate Meta has written the sidecars
     print()
     print("  Output height:")
     for h, why in OPTS:
@@ -5553,14 +5553,14 @@ def main(argv=None):
 
     A flag with a config equivalent means the same question has two answers
     that can disagree — and a default compiled in here gets inherited by a
-    fresh checkout that never set it, with the sweep following the compiled-in
+    fresh checkout that never set it, with the erase following the compiled-in
     path into somebody else's data. One source, and it is the file the person
     edits.
     """
     _no_colour()
     ctx = Ctx()
     # One instance per working area. A second menu against the same tree
-    # trusts scans the first one may be invalidating right now, and the sweeps
+    # trusts scans the first one may be invalidating right now, and the erases
     # trust the scans. The lock self-clears when its pid is gone, so a crash
     # cannot strand it.
     if not acquire_single_instance_lock(ctx):

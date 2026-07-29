@@ -53,74 +53,87 @@ deliberate — see [One source of truth](#one-source-of-truth).
 --------------------------------------------------------------------------------
   disk: 238.8 GB free of 917.0 GB
 --------------------------------------------------------------------------------
-    1) Import from SIM      4) Preview trips        7) Create website       10) Clean up
-    2) Progress             5) Exclude trip         8) Upload to site
-    3) Generate meta        6) Render videos        9) Update site
-   0) status    all = 1-4,6-9    q = quit    (5,10 destructive, alone only)
+  0) Progress             3) Build Preview        6) Build Website        9) Delete SIM Data
+  1) Import SIM           4) Exclude Trip         7) Upload Website
+  2) Generate Meta        5) Render Videos        8) Clean Workspace
+   9) no card at ~/dashcam-data/card
+   1,7) not from here — the graph does not offer them yet
+   at: 5) Render Videos   s = status   q = quit    (4,8,9 destroy footage)
 
 Select>
 ```
 
-Steps you have not configured are greyed out with the reason underneath, rather
-than hidden. The numbering never moves, so "run 5" means the same thing on every
-machine.
+The menu is drawn from the state machine, so everything on it is an answer
+rather than a label. An item you cannot pick is greyed out with the reason
+underneath, and the reason says which of the two gates refused: the **graph**
+("not from here" — this does not follow where the pipeline is) or the item's
+own **guard** ("no card at ...", "no GPS track in the import"). The numbering
+never moves, so "run 5" means the same thing on every machine.
 
-### The ten steps
+### The ten items
 
-| | Step | What it does |
+| | Item | What it does |
 |---|---|---|
-| 1 | **Import from SIM** | Copies the source's `DCIM` tree into the workspace and verifies it file-for-file. Takes only clips newer than the last import. |
-| 2 | **Progress** | The read-only view: which trips exist and what has been done to them. Changes nothing, never greyed out. |
-| 3 | **Generate meta** | Writes each trip's sidecars — `_meta.json`, `.gpx`, `.html` map. The metadata everything downstream reads. |
-| 4 | **Preview trips** | One still per trip and a local contact sheet, from the sidecars. No encoding. |
-| 5 | **Exclude trip** &#9888; | Deletes one trip's source clips, its render and its site entry. |
-| 6 | **Render videos** | Encodes the chosen trips. The slow step — hours for a full card. |
-| 7 | **Create website** | One self-contained HTML page built from the renders. Nothing leaves the machine. |
-| 8 | **Upload to site** | Syncs the mp4s to your bucket, then verifies they arrived. |
-| 9 | **Update site** | Runs the site repo's deploy. Works from the sidecars alone — before any render, to catch a broken publish path early. |
-| 10 | **Clean up** &#9888; | Clears up after a completed cycle: the workspace AND the card, both guarded, or nothing at all. |
+| 0 | **Progress** | The read-only view: which trips exist and what has been done to them. Changes nothing, reachable from anywhere, never greyed out. |
+| 1 | **Import SIM** | Copies the source's `DCIM` tree into the workspace and verifies it file-for-file. Takes only clips newer than the last import. |
+| 2 | **Generate Meta** | Writes each trip's sidecars — `_meta.json`, `.gpx`, `.html` map. The metadata everything downstream reads. |
+| 3 | **Build Preview** | One still per trip and a local contact sheet, from the sidecars. No encoding. |
+| 4 | **Exclude Trip** &#9888; | Deletes one trip's source clips, its render and its site entry. |
+| 5 | **Render Videos** | Encodes the chosen trips. The slow step — hours for a full card. |
+| 6 | **Build Website** | One self-contained HTML page built from the renders. Nothing leaves the machine. |
+| 7 | **Upload Website** | Puts the built site online: the mp4s to your bucket, verified object by object, then the pages to your server. |
+| 8 | **Clean Workspace** &#9888; | Erases the imported footage and the renders it produced, once the site says they are published. |
+| 9 | **Delete SIM Data** &#9888; | Erases the card's clips, keeping its folders so the camera can record, once every clip is accounted for elsewhere. |
 
-Steps 5 and 10 destroy footage. They run alone, never in a batch, and each
-needs a word typed — `DROP`, `CLEAN` — not an Enter pressed.
+Items 4, 8 and 9 destroy footage, and each needs a distinct word typed —
+`DROP`, `CLEAN`, `ERASE` — not an Enter pressed. Three different words on
+purpose: two identical prompts is how the second one gets typed from muscle
+memory.
+
+One item runs at a time. There is no batch selection, because what may follow
+depends on what the last item actually did — an Exclude Trip that the operator
+cancelled leaves the pipeline exactly where it was.
 
 ---
 
 ## The normal cycle
 
 ```
-1   import          card -> workspace, only the new clips
-3   generate meta   sidecars: the map, the stats, the places
-4   preview         look at each trip before spending hours encoding
-5   exclude         drop the ones not worth keeping          (optional)
-6   render          the long one
-7   create website  a local page you can open and check
-8   upload          mp4s to the bucket
-9   update site     publish
-10  clean up        workspace AND card, both guarded — the cycle is closed
+1   import sim        card -> workspace, only the new clips
+2   generate meta     sidecars: the map, the stats, the places
+3   build preview     look at each trip before spending hours encoding
+4   exclude trip      drop the ones not worth keeping          (optional)
+5   render videos     the long one
+6   build website     a local page you can open and check
+7   upload website    mp4s to the bucket, then the pages to the server
+8   clean workspace   erase the footage and the renders — the cycle is closed
+9   delete sim data   free the card, at any point once its clips are safe
 ```
 
-Progress (2) is not in the sequence because it is not a transition — it is the
+Progress (0) is not in the sequence because it is not a transition — it is the
 view you run at any point to see where things stand, including on an empty
-workspace.
+workspace. It neighbours everything and never becomes the position.
 
-**Deploy can come right after generate meta** on a publishing install: the page,
-the manifest and the curation are built from the sidecars, so publishing before
-the render exercises the real publish path while a broken one is still cheap to
-catch. The trips say "video not available" until the uploads land — that is
-expected.
-
-Steps 3 and 4 exist because encoding is hours and uploading is days. Deciding
+Items 2 and 3 exist because encoding is hours and uploading is days. Deciding
 what to keep has to be possible before either, and a still plus a map is enough
 to make the call.
 
-Clean up (10) closes the cycle: it erases the imported footage, the renders and
-the card's clips in one guarded step — the workspace half only once every
-render is published or gathered, the card half only once the ledger's claim is
-backed by a copy it can still find. If the card is not in, the workspace half
-runs alone and says so.
+**Clean Workspace (8) and Delete SIM Data (9) are two items, not one.** They
+erase two different things and the evidence for each is different: 8 wants the
+renders published, 9 wants every clip on the card accounted for somewhere you
+can go and look. Folded together they were a real defect — the card's evidence
+was gathered from the workspace, the workspace was then erased, and the card
+half refused afterwards, having already printed that the card was verified.
+Split, that cannot happen: 8's only outbound is 1, so it can never precede 9.
 
-You will not always run all of them. With nothing configured the cycle is 1→7:
-import, generate meta, render, and a local website. See
+9 hands the position back to wherever you were, because freeing the card does
+not interrupt the cycle. So the safe order — erase the card while its clips are
+provably in the workspace, then clean the workspace once the renders are
+published — is the one the graph permits, and the dangerous order is the one it
+forbids.
+
+You will not always run all of them. With nothing configured the cycle is 1→6
+plus 8 and 9: import, generate meta, render, and a local website. See
 [Two editions](#two-editions).
 
 ---
@@ -173,28 +186,34 @@ contiguous driving segment, so each engine-on leg is its own polyline:
 Two settings decide all of it:
 
 - **`import_dir`** — the workspace. Imports land here; renders, scans and the
-  drop step read from it. Defaults to `~/dashcam-data/import`.
+  Exclude Trip read from it. Defaults to `~/dashcam-data/import`.
 - **`card`** — the footage source: any directory holding a `DCIM` tree. The
   mounted SD card is the common case, but a card copied onto an external disk
-  or a folder someone handed over works the same. Read only by the import step.
+  or a folder someone handed over works the same. Read only by Import SIM.
   Defaults to `/Volumes/NO NAME`.
 
 `out` is derived from `import_dir` (`<parent>/output`) unless you set it. That
 matters more than it looks: two checkouts pointed at one output directory means
-step 1 in either sweeps the other's work — including a render in progress.
-`.owned-by` is the guard: a checkout refuses to sweep a directory another one
-has claimed.
+Clean Workspace in either erases the other's work — including a render in
+progress. `.owned-by` is the guard: a checkout refuses to sweep a directory
+another one has claimed.
 
 ### Only metadata is kept
 
-The working area is swept on every import: everything that is not `logs/`, the
-ledger, the owner marker, a `_meta.json`, or a `final_*` folder. Renders are
-~1.4 GB each and live on S3 once uploaded; source clips are ~400 MB each and
-live on the card until you erase it. What survives is a few KB of metadata —
-and that is the point. `_meta.json` and `.imported.json` answer "have I already
-imported this card" long after the footage is gone, and they are what the
-clean-up's card half reads to decide whether a card's clips are inside a
-rendered trip.
+Clean Workspace erases everything that is not `logs/`, the ledger, the owner
+marker, a `_meta.json`, or a `final_*` folder. Renders are ~1.4 GB each and
+live on S3 once uploaded; source clips are ~400 MB each and live on the card
+until you erase it. What survives is a few KB of metadata — and that is the
+point. `_meta.json` and `.imported.json` answer "have I already imported this
+card" long after the footage is gone, and they are what Delete SIM Data reads
+to decide whether a card's clips are inside a rendered trip. That is also why
+it is a separate item: the evidence it needs must not be erased by the item
+that would otherwise have run first.
+
+Importing no longer sweeps anything. It used to offer to clear the previous
+round — Clean Workspace's job, run from inside Import SIM — and under this
+graph Import SIM reaches Clean Workspace directly, so the offer had nowhere to
+earn its place.
 
 The sweep only runs when the round is **finished**, and finished means one of
 two things: every render is inside a `final_<date>` folder, or every render is
@@ -222,7 +241,7 @@ ego-motion found 6 over 10h48m — inventing a 3-second trip and folding 4.5 hou
 of parked recording into a "drive".
 
 Everything downstream inherits that grouping: the previews you judge from, the
-renders, and which files the delete step removes. So the tool **refuses to
+renders, and which files Exclude Trip removes. So the tool **refuses to
 start** without numpy and opencv rather than quietly producing a different
 answer. That is what `RUN-DASHCAM-EXPORTER.sh` checks before handing over — on a
 machine with four Pythons on PATH, only one of them has opencv.
@@ -237,9 +256,9 @@ what you have configured:
 | Configured | You get |
 |---|---|
 | nothing | Import, render, and `dashcam_import_data_site.html` — one self-contained page, every still embedded, every route drawn from its GPX. Opens from `file://` with no network. |
-| `site_repo`, `s3_bucket` | Steps 7 and 8 wake up: upload to your bucket, deploy to your site. |
+| `site_repo`, `s3_bucket` | Item 7, Upload Website, wakes up: the mp4s to your bucket, then the pages to your site. |
 
-Unconfigured, steps 7 and 8 stay in the menu, greyed out, with the setting that
+Unconfigured, item 7 stays in the menu, greyed out, with the setting that
 would enable them printed underneath. Run the cycle and the result is gathered
 into `final_<date>/` — page, videos and sidecars together, ready to move
 wherever you keep things.
@@ -297,9 +316,10 @@ ledger and the rendered metadata — both of which survive deleting the footage 
 and takes the clips stamped after it. 612 new clips out of 1039 means copying
 116 GB instead of 198.
 
-The card itself is freed by the clean-up (10) at the end of the cycle, in the
-same guarded step that clears the workspace. Its card half refuses in two
-cases, and refuses rather than asks:
+The card itself is freed by Delete SIM Data (9), which is its own item and can
+run at any point in the cycle — freeing the card does not interrupt anything,
+so completing it hands the position straight back. It refuses in two cases,
+and refuses rather than asks:
 
 - the card holds clips newer than anything imported — those exist nowhere else
 - the ledger claims an import that nothing on this machine still holds
@@ -309,8 +329,14 @@ The second one is subtle and worth stating. A ledger records that a copy was
 identical from where it sits. So the guard demands evidence the copy still
 exists: published, or rendered, or the source clips present. No confirmation
 prompt makes deleting the only copy recoverable, which is why that case is a
-refusal and not a question. A card that is not in the slot is not a refusal:
-the workspace half proceeds and the summary says the card was absent.
+refusal and not a question. The accounting is per clip, with no gaps — one
+rendered trip vouching for a whole card is how a wipe once erased clips whose
+only copy was the card.
+
+A card that is already empty is not a refusal either. It answers "the card
+holds no clips — nothing to erase" and completes, because saying "no copy is
+still on this machine" at a card that is simply empty is a guard crying wolf,
+and that is how an operator learns to stop reading guards.
 
 ---
 
@@ -335,7 +361,7 @@ Renders are restartable — a finished clip is not re-encoded, so an interrupted
 run picks up where it stopped. Every run logs to `<out>/logs/run-<stamp>.log`,
 and a copy lands beside each finished mp4.
 
-Re-running step 6 renders only the trips that have no video. Naming trips
+Re-running Render Videos (5) renders only the trips that have no video. Naming trips
 explicitly re-encodes those, and only those.
 
 ---
@@ -364,7 +390,7 @@ If your card came formatted so macOS will not mount it, see
 The other half is [goodnight-drives](https://github.com/raoulsson/goodnight-drives):
 a private website with invite-only access, videos in a private S3 bucket served
 through CloudFront as short-lived signed URLs. Point `site_repo` at it in `.env`
-and steps 7 and 8 wake up.
+and Upload Website (7) wakes up.
 
 You do not need it. The local website is a real deliverable on its own.
 
@@ -377,13 +403,20 @@ You do not need it. The local website is a real deliverable on its own.
 ```
 
 Fixtures only — it never reads the card, the workspace or the output tree, so it
-is safe to run mid-render. It covers the predicates the destructive steps obey:
+is safe to run mid-render. It covers the graph the menu is built from and the
+predicates the destructive items obey:
 what makes the working area expendable, what counts as evidence a copy of the
 card survives, what the sweep keeps when it runs, that the ledger never moves
-backwards, and that `import-sd-card.sh` refuses to erase the card when its
-verify pass cannot run or reports files still pending.
+backwards, that the owner's own worked example holds against the live items,
+and that `import-sd-card.sh` refuses to erase the card when its verify pass
+cannot run or reports files still pending.
 
-32 checks, well under a second.
+89 Python checks plus 7 shell ones, well under a second.
+
+`python3 tests/print_step_graph.py` prints the graph from the live item
+objects, per strategy, with the start/end/destr columns and both neighbour
+sets — and diffs the hand-written inbound column against the one derived from
+the outbounds, reporting every difference rather than reconciling it.
 
 ---
 
@@ -392,7 +425,7 @@ verify pass cannot run or reports files still pending.
 - **ffmpeg** and **ffprobe** — every render, still and duration goes through them
 - **Python 3.9+** with numpy, opencv, staticmap, Pillow — `INSTALLER.sh` handles these
 - **rsync** — for the import; macOS ships `openrsync`, which works
-- optional: **awscli**, configured, for the upload step
+- optional: **awscli**, configured, for Upload Website
 
 ---
 

@@ -195,7 +195,7 @@ class TestWorkingAreaIsExpendable(GuardTest):
 
 
 # ---------------------------------------------------------------------------
-# purge_published_renders — what the sweep keeps when it is allowed to run
+# purge_published_renders — what Clean Workspace keeps when it is allowed to run
 # ---------------------------------------------------------------------------
 
 class TestPurgeKeepsState(GuardTest):

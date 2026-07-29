@@ -3,9 +3,11 @@
 # workspace or the output tree, so it is safe to run at any time, mid-render
 # included.
 #
-# What it covers: the predicates the destructive steps obey. Not the renderer,
-# not the site — the four paths that erase things (steps 4, 9, 10 and the
-# import-time sweep) and the guards that decide whether they may.
+# What it covers: the graph the menu is built from, and the predicates the
+# destructive items obey. Not the renderer, not the site — the three paths that
+# erase things (4) Exclude Trip, 8) Clean Workspace, 9) Delete SIM Data) and the
+# guards that decide whether they may. It used to be four: importing swept the
+# previous round from inside itself, and that arc is gone.
 
 set -uo pipefail
 cd "$(dirname "$0")"

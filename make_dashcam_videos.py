@@ -454,10 +454,10 @@ software = true
 # because the publishing half of this pipeline — a bucket the videos live in and
 # a website that serves them — is one person's setup, and hardcoding it would
 # mean every clone reaching for a checkout it does not have and a host it has
-# never heard of. Set them and the Upload and Deploy steps in the menu light up.
-# Leave them and those steps stay in the menu, greyed out, with the key that
-# would enable them printed underneath. The step NUMBERS never move, so a note
-# saying "run 5" means the same thing on every machine.
+# never heard of. Set them and 7) Upload Website in the menu lights up.
+# Leave them and it stays in the menu, greyed out, with the key that would
+# enable it printed underneath. The item NUMBERS never move, so a note saying
+# "run 5" means the same thing on every machine.
 
 # The second repo, holding what it takes to publish. pipeline.py runs three
 # things out of it and nothing else, so anything providing them works:
@@ -466,7 +466,9 @@ software = true
 #   deploy/deploy-site.sh       pushes public_html/ to wherever the site is served
 #   deploy/is-complete.py       (optional) prints a per-trip published/not table;
 #                               the delete guard reads it, see below
-# Setting this enables Deploy. --site-repo overrides it for one run.
+# pipeline.py drives the first three from ONE menu item — 7) Upload Website —
+# because they are one job: getting the built site online. Setting this is half
+# of what enables it. --site-repo overrides it for one run.
 #site_repo = ~/dev/your-site
 
 # The bucket the videos end up in. Setting it (together with site_repo) enables
@@ -487,14 +489,22 @@ software = true
 # which is why it is a setting rather than a constant.
 #live_trips_url = https://example.com/trips.json
 
-# THE DELETE GUARD. "Delete import source" erases the original clips, and what
-# it can prove first depends on what is set here. It always checks that every
-# renderable trip in the import has an mp4 on disk. With s3_bucket it also
-# checks every mp4 is in the bucket at a matching size; with site_repo (and
-# deploy/is-complete.py) it also checks the site actually serves them. With
-# neither, those checks are not silently skipped — it says plainly that
-# publication could not be verified and that the renders under <out> are then
-# the only copy of that footage, and still makes you type DELETE.
+# THE DELETE GUARD. 8) Clean Workspace erases the original clips and the
+# renders they produced, and what it can prove first depends on what is set
+# here. The rule: the site decides when it can be asked; otherwise every check
+# that can answer must say yes.
+#
+# It always checks that every renderable trip in the import has an mp4 on disk.
+# With s3_bucket it also checks every mp4 is in the bucket at a matching size;
+# with site_repo (and deploy/is-complete.py) it asks the site what it actually
+# serves, and that answer is the authority whenever it can be had. With neither,
+# those checks are not silently skipped — it says plainly that publication could
+# not be verified and that the renders under <out> are then the only copy of
+# that footage, and still makes you type CLEAN.
+#
+# The card is a different item with different evidence: 9) Delete SIM Data, which
+# refuses unless every clip on the card is accounted for somewhere you can go and
+# look, and asks for the word ERASE.
 
 # REPRODUCING THE FULL SETUP, if you want it. The shape is: an S3 bucket holding
 # the mp4s (private, fronted by CloudFront with signed URLs — deploy-site.sh
@@ -3694,7 +3704,7 @@ def main() -> int:
           f"(start to end per trip)")
     print("Parking inside a trip is cut and replaced with a Fast-forwarding "
           "slide,\nso the encoded result is shorter — often far shorter. "
-          "Preview (step 3)\nwrites the real moving time per trip into "
+          "Generate Meta (item 2)\nwrites the real moving time per trip into "
           "each _meta.json.")
 
     # When --drives is given, ONLY those groups run (and the min-clips filter
@@ -3766,7 +3776,7 @@ def main() -> int:
         # group_into_trips(), with `wanted`/`trip_moved` for the skip decision and
         # `pub_no`/`import_ns` for the output naming. Nothing here re-derives a
         # boundary; every file listed is a Clip object the grouper itself put in
-        # that trip. That matters because the caller (pipeline.py's drop step)
+        # that trip. That matters because the caller (pipeline.py's Exclude Trip)
         # DELETES the files in this list: inferring a trip's extent from filename
         # timestamps would eventually cut one clip either side of a real boundary
         # and destroy original footage.
