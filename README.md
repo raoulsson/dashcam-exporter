@@ -376,6 +376,23 @@ You do not need it. The local website is a real deliverable on its own.
 
 ---
 
+## Tests
+
+```bash
+./run-tests.sh
+```
+
+Fixtures only — it never reads the card, the workspace or the output tree, so it
+is safe to run mid-render. It covers the predicates the destructive steps obey:
+what makes the working area expendable, what counts as evidence a copy of the
+card survives, what the sweep keeps when it runs, that the ledger never moves
+backwards, and that `import-sd-card.sh` refuses to erase the card when its
+verify pass cannot run or reports files still pending.
+
+32 checks, well under a second.
+
+---
+
 ## Requirements
 
 - **ffmpeg** and **ffprobe** — every render, still and duration goes through them
