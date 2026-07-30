@@ -848,11 +848,19 @@ class TestExcludeTripAsksTheTarget(SeamTest):
     def test_a_trip_nobody_can_vouch_for_gets_the_full_warning(self):
         """The other half, which is what makes the first half meaningful: a
         destination that cannot say does NOT suppress the panel, and the caveat
-        says which of the three silences this was."""
+        says which of the three silences this was.
+
+        RESTATED on the caveat's wording. It read "could not answer", which was
+        the only way to get here while every answer covered every trip. There
+        is a second way now — the answer was about a different import than the
+        trips on screen — and both leave the same hole, so the sentence states
+        the hole ("no answer covering these trips") rather than guessing which
+        of the two produced it.
+        """
         b = self._published_then_cleaned_up(Recorder(complete=UNKNOWN))
         ran = b.run(EXCLUDE, typed=["1", "DROP"])
         self.assertIn("ONLY copy", ran.printed)
-        self.assertIn("could not answer", ran.printed)
+        self.assertIn("gave no answer covering these trips", ran.printed)
 
     def test_with_no_target_the_warning_says_nothing_is_off_this_machine(self):
         """Three silences, three sentences. No plugin at all is not the same as

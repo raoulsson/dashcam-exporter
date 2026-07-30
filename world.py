@@ -100,12 +100,22 @@ class TargetFacts:
     not asked at this scope, or the plugin raised and what it said. Printed
     under a refusal so an operator can tell "the destination said no" from
     "nobody could ask it".
+
+    `namespace` is WHICH IMPORT the answer is about, and it is not optional
+    bookkeeping. The question asked is "are THESE trips complete", and the
+    trips are one import's — but several imports can sit under one <out>, each
+    in its own namespace, and the working area is swept across all of them.
+    Without the scope written down beside the answer, a yes about one import
+    reads as a yes about material nobody was asked about. Empty means the
+    answer covers nothing: no plugin, or no import was settled on, in which
+    case the trip list was empty and a yes to it is vacuous.
     """
 
     configured: bool = False
     name: str = ""
     origin: str = ""                    # who answered, composed by the loader
     complete: Evidence = Evidence.NA
+    namespace: str = ""                 # the import the answer is about
     note: str = ""
 
 

@@ -70,7 +70,7 @@ class TestAnAnswerThatIsNotAnAnswerPermitsNothing(unittest.TestCase):
         """An exception is not a thing the plugin said. It has to read as
         unreachable, and the note is what tells the operator afterwards that
         nobody could ask rather than that the answer was no."""
-        facts = self.P._answered(_a_ctx(_Raises()), ("trip_A",))
+        facts = self.P._answered(_a_ctx(_Raises()), "import", ("trip_A",))
         self.assertIs(facts.complete, M.Evidence.UNKNOWN)
         self.assertIn("Raises", facts.note)
         self.assertIn("the shelf fell over", facts.note)
@@ -79,9 +79,27 @@ class TestAnAnswerThatIsNotAnAnswerPermitsNothing(unittest.TestCase):
         """LOCAL scope reads UNKNOWN, which no guard treats as proven, and the
         note distinguishes it from a destination that was asked and could not
         say."""
-        facts = self.P._asked(_a_ctx(_Silent()), M.Scope.LOCAL, ("trip_A",))
+        facts = self.P._asked(_a_ctx(_Silent()), M.Scope.LOCAL, "import",
+                              ("trip_A",))
         self.assertIs(facts.complete, M.Evidence.UNKNOWN)
         self.assertIn("not asked", facts.note)
+
+    def test_the_answer_carries_the_import_it_is_about(self):
+        """An answer is about ONE import's trips, and several imports can sit
+        under one <out>. Read without its scope a yes about this round clears
+        last round's renders, which nobody was asked about — so the scope
+        travels with the answer rather than being inferred by each reader.
+
+        The empty case is the one that bites: with no import settled on, the
+        trip list handed over is empty and an implementation that folds an
+        empty list to YES is answering about nothing at all.
+        """
+        ctx = _a_ctx(_Silent())
+        self.assertEqual(
+            self.P._target_facts(ctx, M.Scope.FULL, Path("/w/2026-07-28"),
+                                 ("trip_A",)).namespace, "2026-07-28")
+        self.assertEqual(
+            self.P._target_facts(ctx, M.Scope.FULL, None, ()).namespace, "")
 
 
 class _Silent(U.Uploader):

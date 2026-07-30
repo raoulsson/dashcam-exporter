@@ -33,15 +33,20 @@ import menu as M                 # noqa: E402
 import world as W                # noqa: E402
 
 
-def target(complete=M.Evidence.YES, configured=True, note=""):
+def target(complete=M.Evidence.YES, configured=True, note="", namespace="import"):
     """What the configured plugin said, as the world carries it.
 
     Written down rather than arranged, which is the whole point of freezing the
     answer at capture: what the guard sees is data a test can state.
+
+    `namespace` defaults to the fixture's own import directory, because an
+    answer with no import behind it is about no trips at all — that is a state
+    worth stating on purpose (see the tests that pass namespace="") and a poor
+    default for tests about a destination that answered.
     """
     return W.TargetFacts(configured=configured, name="target",
                          origin="target (/a/test/plugin.py:B:U)",
-                         complete=complete, note=note)
+                         complete=complete, namespace=namespace, note=note)
 
 
 def load_pipeline():
@@ -210,6 +215,33 @@ class TestWorkingAreaIsExpendable(GuardTest):
         self.w.target_unreachable()
         ok, _, strag = self.expendable()
         self.assertFalse(ok, "an unreachable target must not read as 'published'")
+        self.assertEqual(len(strag), 1)
+
+    def test_an_answer_about_another_import_does_not_clear_these_renders(self):
+        """<out> holds a NAMESPACE PER IMPORT and this sweep walks all of them,
+        while the plugin is asked about the trips of ONE.
+
+        Read without its scope, a yes about this round authorises deleting last
+        round's renders — footage that was never in the question and, once the
+        card has been erased, may exist nowhere else. The renders of an import
+        nobody was asked about are stragglers, which costs disk and keeps the
+        only copy.
+        """
+        self.w.render("trip_B", ns="last-month")
+        self.w.target = target(complete=M.Evidence.YES, namespace="import")
+        ok, why, strag = self.expendable()
+        self.assertFalse(ok, why)
+        self.assertEqual([p.name for p in strag], ["trip_B_h1080.mp4"])
+
+    def test_an_answer_about_no_import_at_all_clears_nothing(self):
+        """With several imports and none picked, the world is about no import,
+        the trip list handed over is empty, and an implementation that folds an
+        empty list to YES is saying nothing was missing from nothing. That must
+        not clear a render."""
+        self.w.render("trip_A")
+        self.w.target = target(complete=M.Evidence.YES, namespace="")
+        ok, why, strag = self.expendable()
+        self.assertFalse(ok, why)
         self.assertEqual(len(strag), 1)
 
     def test_previews_and_caches_never_block(self):
@@ -518,6 +550,20 @@ class TestImportIsExpendable(GuardTest):
         self.assertFalse(ok)
         self.assertIn("not confirmed", why)
 
+    def test_an_answer_about_another_import_confirms_nothing_here(self):
+        """Item 9's advisory walks EVERY import in the workspace; the plugin was
+        asked about one of them.
+
+        Without this the one import that is published silences the warning
+        about the one that is not — and that warning is the sentence saying the
+        copy on this machine becomes the only one the moment the card goes.
+        """
+        self.w.render("trip_A", ns=self.w.ctx.render_root.name, size=321)
+        self.w.target = target(complete=M.Evidence.YES, namespace="last-month")
+        ok, why = self.expendable()
+        self.assertFalse(ok)
+        self.assertIn("not confirmed", why)
+
     def test_with_no_target_the_render_alone_settles_it(self):
         """The local edition has no destination to confirm anything, and this
         is an advisory rather than a gate — so it says what it can see, which
@@ -525,6 +571,60 @@ class TestImportIsExpendable(GuardTest):
         self.w.render("trip_A", ns=self.w.ctx.render_root.name, size=321)
         ok, why = self.expendable()
         self.assertTrue(ok, why)
+
+
+# ---------------------------------------------------------------------------
+# 4) Exclude Trip's two sentences about the destination. Neither is a gate;
+# both are the last thing an operator reads before an irreversible delete, and
+# the world they are read from was captured BEFORE the operator was asked which
+# import to drop from. With several in the workspace those differ.
+# ---------------------------------------------------------------------------
+
+class TestWhatExcludeTripSaysAboutTheDestination(GuardTest):
+
+    def _world(self, complete, namespace, trip_ids=("trip_A",)):
+        return W.World(out_dir=self.w.ctx.out_dir, trip_ids=trip_ids,
+                       target=target(complete=complete, namespace=namespace))
+
+    def _banner(self, world, trip_id, ns):
+        """The only-copy panel for one picked trip, sitting in namespace `ns`.
+
+        Built by hand rather than driven through the prompt because the point
+        is the MISMATCH: the trip on screen belongs to one import and the
+        answer in the world is about another, which no single-import fixture
+        can express.
+        """
+        trip = {"day": "2026-06-01", "start": "2026-06-01T08:00:00",
+                "end": "2026-06-01T09:00:00", "clips": 1, "files": [],
+                "out_base": str(self.w.ctx.out_dir / ns / "2026-06-01" / trip_id)}
+        return "\n".join(P._only_copy_lines(self.w.ctx, world,
+                                            {"trips": [trip]}, {1: trip}, [1]))
+
+    def test_a_trip_of_the_import_that_was_asked_about_is_not_the_only_copy(self):
+        """The baseline the mismatch tests are read against: inside the answer's
+        own namespace a yes still suppresses the panel, which is what keeps it
+        from firing over every published trip anyone cleans up."""
+        world = self._world(M.Evidence.YES, "import")
+        self.assertNotIn("ONLY copy", self._banner(world, "trip_A", "import"))
+
+    def test_a_trip_of_another_import_still_gets_the_only_copy_panel(self):
+        """The answer is about ONE import's trips. Read across that boundary it
+        turns "nobody was asked about this" into "it is safely published", in
+        the one panel that tells the operator this is the last copy."""
+        world = self._world(M.Evidence.YES, "import")
+        printed = self._banner(world, "trip_B", "last-month")
+        self.assertIn("ONLY copy", printed)
+        self.assertIn("no answer covering these trips", printed)
+
+    def test_the_stays_behind_note_needs_the_answer_to_name_these_trips(self):
+        """The other sentence, and the other direction of the same mistake:
+        telling the operator a copy survives the drop sends him looking for one
+        that was never there. world.trip_ids IS the list the plugin was handed,
+        so containment in it is the exact test."""
+        world = self._world(M.Evidence.YES, "import", trip_ids=("trip_A",))
+        self.assertTrue(P._all_at_the_destination(world, ["trip_A"]))
+        self.assertFalse(P._all_at_the_destination(world, ["trip_B"]))
+        self.assertFalse(P._all_at_the_destination(world, ["trip_A", "trip_B"]))
 
 
 # ---------------------------------------------------------------------------

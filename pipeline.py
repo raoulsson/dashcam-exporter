@@ -1280,15 +1280,28 @@ def import_is_expendable(ctx, root, target):
     # only shape there is now, and it is the right one for an advisory: the
     # sentence it feeds says "the copy on this machine is the only one", which
     # is true as soon as ANY of it is unconfirmed.
-    if _not_at_the_destination(target):
+    if _not_at_the_destination(root, target):
         return False, "not confirmed at %s" % target.name
     return True, ""
 
 
-def _not_at_the_destination(target) -> bool:
+def _not_at_the_destination(root, target) -> bool:
     """NA counts as settled: the local edition has no destination to confirm
     anything, and this is an advisory rather than a gate."""
-    return target.complete not in (menu.Evidence.YES, menu.Evidence.NA)
+    if target.complete is menu.Evidence.NA:
+        return False
+    return not _confirmed_for(root, target)
+
+
+def _confirmed_for(root, target) -> bool:
+    """YES, and about THIS import.
+
+    Item 9's advisory walks every import in the workspace; the plugin was asked
+    about one of them. An answer about a different import settles nothing here,
+    so it has to read the same as no confirmation — otherwise the one import
+    that IS published silences the warning about the one that is not.
+    """
+    return target.namespace == root.name and target.complete is menu.Evidence.YES
 
 
 OWNER_FILE = ".owned-by"
@@ -1425,14 +1438,14 @@ def working_area_is_expendable(ctx, target):
     # All or nothing, and in the safe direction: unless the plugin vouched for
     # the whole import, only a gathered render clears. A render it did not
     # speak for is kept, which costs disk and never footage.
-    covered = target.complete is menu.Evidence.YES
+    covered = _vouched_for(ctx, target, loose)
     stragglers = []
     for f in loose:
         try:
             size = f.stat().st_size
         except OSError:
             continue
-        if (f.name, size) in gathered or covered:
+        if (f.name, size) in gathered or f in covered:
             continue
         stragglers.append(f)
 
@@ -1441,6 +1454,41 @@ def working_area_is_expendable(ctx, target):
                 else "neither published nor gathered")
         return False, "%d render(s) %s" % (len(stragglers), what), stragglers
     return True, "%d render(s), all published or gathered" % len(loose), []
+
+
+def _vouched_for(ctx, target, loose):
+    """The loose renders the destination's answer actually clears.
+
+    All or nothing WITHIN ONE IMPORT, which is the scope of the question that
+    was asked: every trip of THAT import is at the destination. The working
+    area is not one import — <out> holds a namespace per import, and the sweep
+    below walks all of them — so an answer read across the whole tree lets a
+    yes about this round's trips authorise deleting last round's renders, which
+    were never in the question and may exist nowhere else. Those are kept, and
+    the clean-up prints them as stragglers.
+    """
+    if target.complete is not menu.Evidence.YES:
+        return set()
+    return set(filter(lambda f: _answer_covers(target, ctx.out_dir, f), loose))
+
+
+def _answer_covers(target, out_dir, path) -> bool:
+    """Is this file inside the import the destination was asked about?
+
+    An empty namespace covers nothing on purpose: it means no import was
+    settled on, so the trip list handed over was empty and a YES to it says
+    only that nothing was missing from nothing.
+
+    RESOLVED on both sides, the same rule trip_renders states: one of these
+    paths comes out of a scan and the other off the world, and /var against
+    /private/var is a mismatch on every macOS install. Here the mismatch would
+    read as "nobody was asked about this", which is the safe direction but
+    turns the last-copy panel into something that fires over everything —
+    a warning that is always on is one nobody reads.
+    """
+    if not target.namespace:
+        return False
+    return _is_under(_resolved(path), _resolved(out_dir / target.namespace))
 
 
 def purge_published_renders(ctx, root):
@@ -2653,7 +2701,21 @@ def _note_trips_published(world, ids):
 def _all_at_the_destination(world, ids) -> bool:
     if not ids:
         return False
-    return world.target.complete is menu.Evidence.YES
+    return _the_answer_names(world, ids)
+
+
+def _the_answer_names(world, ids) -> bool:
+    """YES, and given about these very trips.
+
+    world.trip_ids IS the list handed to the plugin, so containment in it is
+    the exact test for "this answer speaks about that trip". With several
+    imports in the workspace the trips picked here can come from another one,
+    and telling the operator a copy stays online when nobody was asked about it
+    is the wrong half of this note to get wrong.
+    """
+    if world.target.complete is not menu.Evidence.YES:
+        return False
+    return set(ids) <= set(world.trip_ids)
 
 
 def _say_they_stay(where, count):
@@ -2724,9 +2786,26 @@ def _at_the_destination(world, trip, consulted):
     that footage" panel would fire over a trip that is safely published, which
     is how an operator learns to stop reading warnings.
     """
-    if not trip.get("out_base"):
+    base = trip.get("out_base")
+    if not base:
         return False            # no render name to look for; nothing to ask
-    return consulted.saw(world.target.complete)
+    return consulted.saw(_answer_about(world, Path(base)))
+
+
+def _answer_about(world, base) -> menu.Evidence:
+    """The destination's answer where it applies, UNKNOWN where it does not.
+
+    The world was captured about ONE import; the trips on screen come from
+    whichever import the operator picked a moment later, and with several in
+    the workspace those differ. Read across that boundary a yes about this
+    round's trips suppresses the last-copy panel over another round's footage —
+    the one sentence that has to be right in front of an irreversible delete.
+    UNKNOWN is what "nobody was asked about this" has to read as here, and it
+    keeps the panel.
+    """
+    if _answer_covers(world.target, world.out_dir, base):
+        return world.target.complete
+    return menu.Evidence.UNKNOWN
 
 
 def _last_copy_banner(world, only_copy, consulted):
@@ -2763,11 +2842,18 @@ def _target_caveat(world, consulted):
 
 
 def _unreachable_caveat(world, consulted):
+    """"No answer covering these trips", which is two states with one meaning.
+
+    The plugin could not be reached, or it was asked about a different import
+    than the one these trips came from. Both leave the same hole and the same
+    sentence is true of both; naming a reason would mean guessing which,
+    in the panel where a guess is worth least.
+    """
     if not consulted.unknown:
         return []
-    return [C.red("  (%s could not answer, so 'not published' is unverified —"
+    return [C.red("  (%s gave no answer covering these trips, so 'not published'"
                   % world.target.name),
-            C.red("   an unknown is not evidence of a copy.)")]
+            C.red("   is unverified — an unknown is not evidence of a copy.)")]
 
 
 def drop_plan(ctx, world):
@@ -4571,15 +4657,24 @@ def _resolved(path):
 # refresh mechanism to keep in step with the first.
 # ---------------------------------------------------------------------------
 
-def _target_facts(ctx, scope, trip_ids):
+def _target_facts(ctx, scope, root, trip_ids):
     """What the plugin says about this import's trips, or NA for the local
-    edition."""
+    edition.
+
+    `root` travels with the answer as its namespace: the reply is about the
+    trips of THAT import and nothing else, and the readers of it work over a
+    whole <out> that can hold several.
+    """
     if ctx.plugin is None:
         return W.TargetFacts()
-    return _asked(ctx, scope, trip_ids)
+    return _asked(ctx, scope, _namespace_of(root), trip_ids)
 
 
-def _asked(ctx, scope, trip_ids):
+def _namespace_of(root):
+    return root.name if root is not None else ""
+
+
+def _asked(ctx, scope, namespace, trip_ids):
     """Only FULL scope pays for the question that leaves this machine.
 
     The menu is redrawn on every keystroke. At LOCAL scope a configured plugin
@@ -4587,17 +4682,18 @@ def _asked(ctx, scope, trip_ids):
     shape the old bucket listing had, for the same reason.
     """
     if scope is not menu.Scope.FULL:
-        return _facts(ctx, menu.Evidence.UNKNOWN,
+        return _facts(ctx, menu.Evidence.UNKNOWN, namespace,
                       "not asked: the menu redraws too often to go and look")
-    return _answered(ctx, trip_ids)
+    return _answered(ctx, namespace, trip_ids)
 
 
-def _facts(ctx, evidence, note=""):
+def _facts(ctx, evidence, namespace, note=""):
     return W.TargetFacts(configured=True, name=ctx.plugin.name,
-                         origin=ctx.plugin.origin, complete=evidence, note=note)
+                         origin=ctx.plugin.origin, complete=evidence,
+                         namespace=namespace, note=note)
 
 
-def _answered(ctx, trip_ids):
+def _answered(ctx, namespace, trip_ids):
     """Ask, and let a raising implementation read as unreachable.
 
     An implementation is trusted about what it SAYS; an exception is not a
@@ -4605,9 +4701,10 @@ def _answered(ctx, trip_ids):
     destination that could not be reached produces, and it permits nothing.
     """
     try:
-        return _facts(ctx, _an_evidence(ctx.plugin.uploader.is_complete(trip_ids)))
+        return _facts(ctx, _an_evidence(ctx.plugin.uploader.is_complete(trip_ids)),
+                      namespace)
     except Exception as e:
-        return _facts(ctx, menu.Evidence.UNKNOWN,
+        return _facts(ctx, menu.Evidence.UNKNOWN, namespace,
                       "%s raised while being asked: %s" % (ctx.plugin.name, e))
 
 
@@ -4699,7 +4796,7 @@ def capture_world(ctx, scope=menu.Scope.LOCAL):
     trip_ids = _trip_ids_here(metas, root, ctx.out_dir)
     # The plugin is asked BEFORE the expendability check, because that check is
     # now half local (a render in a final_ folder) and half its answer.
-    target = _target_facts(ctx, scope, trip_ids)
+    target = _target_facts(ctx, scope, root, trip_ids)
     return _world_of(ctx, scope, imports, root, metas, renders, trip_ids, target,
                      working_area_is_expendable(ctx, target))
 
