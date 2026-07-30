@@ -13,14 +13,14 @@ The constructor bound ctx into the gatherer, build_result_page passed ctx again,
 and a two-argument function got three. Two hundred and seventy-one tests were
 green over it.
 
-The gap got WIDER when the publishing half became an interface. There is now a
-whole surface an outsider implements and this repo calls, and the call sites are
-spread across capture_world, item 6, item 7 and Exclude Trip. So the question is
-asked here for every method on the interface, and the table of call sites is
-checked against WebsiteUploaderInterface.__abstractmethods__ — a method added to
-the interface later fails this file until someone writes down where it is called
-from. Binding the signature is enough and is side-effect free: the bug class is
-an arity mismatch, and no footage needs to move to prove it.
+The gap got WIDER when the publishing half became an interface. There is a
+surface an outsider implements and this repo calls, and the call sites are
+spread across capture_world, item 6 and item 7. So the question is asked here
+for every method on the interface, and the table of call sites is checked
+against the abstract methods of Builder and Uploader — a method added later
+fails this file until someone writes down where it is called from. Binding the
+signature is enough and is side-effect free: the bug class is an arity
+mismatch, and no footage needs to move to prove it.
 """
 
 import inspect
@@ -40,51 +40,53 @@ import world as W                                                  # noqa: E402
 UPLOADER, LOCAL = M.Strategy.UPLOADER, M.Strategy.LOCAL_PAGE
 
 
-class Nothing(U.WebsiteUploaderInterface):
-    """A target that answers everything with the null answer.
+class NothingBuilt(U.Builder):
+    """A builder whose bodies are as empty as the ABC permits.
 
-    Only its SHAPE is under test here, so the bodies are as empty as the ABC
-    permits. What the answers mean is test_uploader.py's subject and what the
-    guards do with them is test_guards.py's.
+    Only its SHAPE is under test here. What the answers mean is
+    test_uploader.py's subject and what the guards do with them is
+    test_guards.py's.
     """
 
-    def build(self, world, ui):
-        return U.Report(True)
+    def describe(self):
+        return "a wiring test's builder"
 
-    def upload(self, world, ui):
-        return U.Report(True)
+    def evaluate(self, workspace):
+        return U.go()
 
-    def why_not_build(self, world):
-        return None
-
-    def why_not_upload(self, world):
-        return None
-
-    def owes(self, renders):
-        return U.Owed.nothing()
-
-    def holds(self, renders):
-        return U.Answers.unknown("a wiring test does not go and look")
-
-    def published(self, renders):
-        return U.Answers.unknown("a wiring test does not go and look")
-
-    def carries(self, trip_ids):
-        return U.Answers.unknown("a wiring test does not go and look")
+    def execute(self, workspace):
+        return U.did("nothing")
 
 
-def a_ctx(uploader=None):
-    """Enough of a Ctx for the collaborator factories: the uploader, and
+class NothingSent(U.Uploader):
+    def describe(self):
+        return "a wiring test's uploader"
+
+    def evaluate(self, workspace):
+        return U.go()
+
+    def execute(self, workspace):
+        return U.did("nothing")
+
+    def is_complete(self, trip_ids):
+        return M.Evidence.UNKNOWN     # a wiring test does not go and look
+
+
+def a_plugin():
+    return U.Plugin(NothingBuilt(), NothingSent(), "/a/wiring/test.py:B:U")
+
+
+def a_ctx(plugin=None):
+    """Enough of a Ctx for the collaborator factories: the plugin, and
     nothing that would make anything happen."""
     ctx = P.Ctx.__new__(P.Ctx)
-    ctx.uploader = uploader
-    ctx.uploader_origin = "Nothing (a wiring test)"
+    ctx.plugin = plugin
     return ctx
 
 
-def a_work(uploader=None):
+def a_work(plugin=None):
     work = P.Work.__new__(P.Work)
-    work.ctx = a_ctx(uploader)
+    work.ctx = a_ctx(plugin)
     return work
 
 
@@ -93,75 +95,76 @@ def a_work(uploader=None):
 # ---------------------------------------------------------------------------
 
 A_WORLD = W.World()
-RENDERS = (W.Render("trip_2026-07-28_08-57_01_h1080.mp4", 64),)
 TRIP_IDS = ("trip_2026-07-28_08-57_01",)
 A_UI = P.Console(a_ctx())
+A_WORKSPACE = U.Workspace(trip_ids=TRIP_IDS, ui=A_UI)
 
 # What each method is really called with, written where it can be checked.
 # Read it as documentation of the boundary: the left column is everything the
 # exporter asks an outsider, the right column is all it ever hands over.
 CALL_SITES = {
-    # pipeline.TargetBuild.build, from item 6's _perform
-    "build": (A_WORLD, A_UI),
-    # pipeline.TargetPublish.run, from item 7's _perform
-    "upload": (A_WORLD, A_UI),
-    # pipeline.TargetBuild.why_not, from item 6's evaluate, every menu draw
-    "why_not_build": (A_WORLD,),
-    # pipeline.TargetPublish.why_not, from item 7's evaluate, every menu draw
-    "why_not_upload": (A_WORLD,),
-    # pipeline._answered, inside capture_world at FULL scope
-    "owes": (RENDERS,),
-    "holds": (RENDERS,),
-    "published": (RENDERS,),
-    "carries": (TRIP_IDS,),
-    # pipeline._record_curation, when Exclude Trip has actually dropped one
-    "dropped": (TRIP_IDS, A_UI),
-    # pipeline._target_status, once at launch
-    "status_lines": (),
-    # read for the menu row, the gate table and the erase banner
-    "name": (),
+    # pipeline.TargetBuild/TargetPublish.describe, for the menu row, and
+    # pipeline._target_status once at launch
     "describe": (),
+    # pipeline.TargetBuild/TargetPublish.evaluate, from item 6's and item 7's
+    # evaluate, on every menu draw
+    "evaluate": (A_WORKSPACE,),
+    # pipeline.TargetBuild/TargetPublish.execute, from the items' _perform
+    "execute": (A_WORKSPACE,),
 }
+
+# The uploader's one extra question, asked by pipeline._answered inside
+# capture_world at FULL scope.
+UPLOADER_CALL_SITES = dict(CALL_SITES, is_complete=(TRIP_IDS,))
 
 
 class TestEveryInterfaceMethodHasAKnownCallSite(unittest.TestCase):
-    """The table above is the boundary, stated once.
+    """The tables above are the boundary, stated once.
 
-    Its value is that it goes stale loudly: add a method to the interface and
-    this fails until the table says where the exporter calls it from, which is
-    the moment to notice that nothing calls it at all.
+    Their value is that they go stale loudly: add a method to an act and this
+    fails until the table says where the exporter calls it from, which is the
+    moment to notice that nothing calls it at all.
     """
 
-    def test_no_abstract_method_is_missing_from_the_table(self):
-        missing = U.WebsiteUploaderInterface.__abstractmethods__ - set(CALL_SITES)
-        self.assertEqual(missing, set(),
-                         "the interface grew a method with no call site written down")
+    def _no_orphans(self, cls, table):
+        self.assertEqual(cls.__abstractmethods__ - set(table), set(),
+                         "%s grew a method with no call site written down" % cls.__name__)
+
+    def test_the_builder_declares_nothing_the_exporter_does_not_call(self):
+        self._no_orphans(U.Builder, CALL_SITES)
+
+    def test_the_uploader_declares_nothing_the_exporter_does_not_call(self):
+        self._no_orphans(U.Uploader, UPLOADER_CALL_SITES)
 
     def test_no_entry_in_the_table_is_absent_from_the_interface(self):
-        for name in CALL_SITES:
+        for name in UPLOADER_CALL_SITES:
             with self.subTest(method=name):
-                self.assertTrue(callable(getattr(U.WebsiteUploaderInterface, name, None)),
+                self.assertTrue(callable(getattr(U.Uploader, name, None)),
                                 "%s is called but the interface does not declare it" % name)
 
 
 class TestTheInterfaceAcceptsWhatItsCallSitesPass(unittest.TestCase):
     """Signature binding, method by method, against the real arguments.
 
-    Against the ABC AND against the shipped example, because a subclass is
+    Against the ABCs AND against the shipped example, because a subclass is
     free to narrow a signature and only the subclass is what actually runs.
     """
 
-    def _bind_all(self, target):
-        for name, args in CALL_SITES.items():
+    def _bind_all(self, act, table):
+        for name, args in table.items():
             with self.subTest(method=name):
-                inspect.signature(getattr(target, name)).bind(*args)
+                inspect.signature(getattr(act, name)).bind(*args)
 
     def test_the_declared_interface_binds(self):
-        self._bind_all(Nothing())
+        self._bind_all(NothingBuilt(), CALL_SITES)
+        self._bind_all(NothingSent(), UPLOADER_CALL_SITES)
 
     def test_the_shipped_example_binds(self):
-        spec = "%s:FolderTarget" % (REPO / "examples" / "uploader_folder.py")
-        self._bind_all(U.load_uploader(spec, REPO))
+        spec = ("%s:LocalWebSiteBuilderPlugin:LocalWebSiteUploader"
+                % (REPO / "examples" / "local_website.py"))
+        plugin = U.load_plugin(spec, REPO)
+        self._bind_all(plugin.builder, CALL_SITES)
+        self._bind_all(plugin.uploader, UPLOADER_CALL_SITES)
 
 
 # ---------------------------------------------------------------------------
@@ -178,21 +181,21 @@ class TestTheBuilderFitsItsCallSite(unittest.TestCase):
     """
 
     def _builders(self):
-        return ((UPLOADER, a_work(Nothing()).builder(UPLOADER)),
+        return ((UPLOADER, a_work(a_plugin()).builder(UPLOADER)),
                 (LOCAL, a_work().builder(LOCAL)))
 
     def test_every_builder_answers_the_whole_call_site(self):
         for strategy, builder in self._builders():
             with self.subTest(strategy=strategy.value):
                 inspect.signature(builder.describe).bind()
-                inspect.signature(builder.why_not).bind(A_WORLD)
-                inspect.signature(builder.build).bind(A_WORLD)
+                inspect.signature(builder.evaluate).bind(A_WORLD)
+                inspect.signature(builder.execute).bind(A_WORLD)
 
     def test_the_edition_decides_which_builder_is_installed(self):
         """The defect being fixed, stated as a property of the wiring: under a
-        configured uploader the local page's writer is not installed at all,
+        configured plugin the local page's writer is not installed at all,
         so it cannot run and cannot claim nothing left this machine."""
-        self.assertIsInstance(a_work(Nothing()).builder(UPLOADER), P.TargetBuild)
+        self.assertIsInstance(a_work(a_plugin()).builder(UPLOADER), P.TargetBuild)
         self.assertIsInstance(a_work().builder(LOCAL), P.LocalPage)
 
     def test_nothing_arrives_with_arguments_already_bound(self):
@@ -201,25 +204,27 @@ class TestTheBuilderFitsItsCallSite(unittest.TestCase):
         against the two the call site really passes."""
         for strategy, builder in self._builders():
             with self.subTest(strategy=strategy.value):
-                self.assertFalse(getattr(builder.build, "args", ()))
+                self.assertFalse(getattr(builder.execute, "args", ()))
 
 
 class TestThePublisherFitsItsCallSite(unittest.TestCase):
-    """Item 7 asks its publisher two things, and both are asked by name."""
+    """Item 7 asks its publisher the same three things item 6 asks its
+    builder, which is what "one act, twice" means at the wiring."""
 
     def _publishers(self):
-        return ((UPLOADER, a_work(Nothing()).publisher(UPLOADER)),
+        return ((UPLOADER, a_work(a_plugin()).publisher(UPLOADER)),
                 (LOCAL, a_work().publisher(LOCAL)))
 
     def test_every_publisher_answers_the_whole_call_site(self):
         for strategy, publisher in self._publishers():
             with self.subTest(strategy=strategy.value):
-                inspect.signature(publisher.why_not).bind(A_WORLD)
-                inspect.signature(publisher.run).bind(A_WORLD)
+                inspect.signature(publisher.describe).bind()
+                inspect.signature(publisher.evaluate).bind(A_WORLD)
+                inspect.signature(publisher.execute).bind(A_WORLD)
 
     def test_the_local_edition_installs_one_that_refuses_by_configuration(self):
         self.assertIsInstance(a_work().publisher(LOCAL), P.NoPublisher)
-        self.assertTrue(a_work().publisher(LOCAL).why_not(A_WORLD))
+        self.assertTrue(a_work().publisher(LOCAL).evaluate(A_WORLD).blocked)
 
 
 class TestTheUiHandedOverIsTheRealOne(unittest.TestCase):

@@ -12,15 +12,15 @@ answer could have changed, and always immediately before anything irreversible.
 
 Three shapes here carry weight and must not be simplified:
 
-  * `TargetFacts` holds FROZEN ANSWERS, not a live handle on the configured
-    uploader. A guard that could call out to the network answers differently
+  * `TargetFacts` holds a FROZEN ANSWER, not a live handle on the configured
+    plugin. A guard that could call out to the network answers differently
     on two reads of the same World, and the destructive re-check is built on
     exactly that not happening.
   * `Card.new_stamps` and `Card.owed_stamps` are FIELDS, derived once at
     capture. They used to be a function reading a module global that four call
     sites remembered to refresh first; a global four places remember is a
     global the fifth forgets.
-  * `expected_trips` stays Optional[int] and the target's answers stay
+  * `expected_trips` stays Optional[int] and the destination's answer stays
     three-valued-plus-NA. Collapsing either to a bool weakens a guard without
     the diff looking like it.
 """
@@ -31,8 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import FrozenSet, Optional, Tuple
 
-from menu import Scope, Strategy
-from uploader import Answers, Owed
+from menu import Evidence, Scope, Strategy
 
 
 @dataclass(frozen=True)
@@ -81,26 +80,33 @@ class Card:
 
 @dataclass(frozen=True)
 class TargetFacts:
-    """What the configured publishing target said about these renders, as of
-    world.at.
+    """What the configured plugin said about this import's trips, as of world.at.
 
-    Answers, not a handle: nothing downstream may ask the target a NEW question
-    while judging a world. The whole point of freezing them is that the
-    destructive re-check captures a second world and gets a second set of
-    answers, and the two can then be compared by the same guard.
+    One answer, all or nothing: is EVERY trip of this import at the
+    destination. That is the only shape anything here acts on — Clean Workspace
+    erases the whole working area, never a chosen trip — and a per-trip map
+    would be a finer answer to a question nobody asks.
 
-    The defaults are the local edition: nothing configured, so every question
+    An answer, not a handle: nothing downstream may ask the plugin a NEW
+    question while judging a world. The whole point of freezing it is that the
+    destructive re-check captures a second world and gets a second answer, and
+    the two are then judged by the same guard.
+
+    The defaults are the local edition: nothing configured, so the question
     about a destination is NA rather than unanswered. An unreachable CONFIGURED
-    target is a different thing entirely and says UNKNOWN, which fails closed.
+    plugin is a different thing entirely and says UNKNOWN, which fails closed.
+
+    `note` is the EXPORTER's own words about how the answer was arrived at —
+    not asked at this scope, or the plugin raised and what it said. Printed
+    under a refusal so an operator can tell "the destination said no" from
+    "nobody could ask it".
     """
 
     configured: bool = False
     name: str = ""
     origin: str = ""                    # who answered, composed by the loader
-    holds: Answers = field(default_factory=Answers.not_applicable)
-    published: Answers = field(default_factory=Answers.not_applicable)
-    owed: Owed = field(default_factory=Owed.nothing)
-    carried: Answers = field(default_factory=Answers.not_applicable)
+    complete: Evidence = Evidence.NA
+    note: str = ""
 
 
 @dataclass(frozen=True)
@@ -129,6 +135,14 @@ class World:
     metas: Tuple[TripMeta, ...] = ()
     renders: Tuple[Render, ...] = ()             # the whole output tree
     renders_here: Tuple[Render, ...] = ()        # this import's namespace only
+    # The trips THIS IMPORT contains, sidecar-derived, including any that
+    # produced no render — which is what makes the destination's all-or-nothing
+    # answer safe: a trip nobody encoded is still in the list it is asked about.
+    trip_ids: Tuple[str, ...] = ()
+    # Trips deleted on purpose, ever, in this workspace. A dropped trip and a
+    # published-then-cleaned-up trip are indistinguishable afterwards, so this
+    # is recorded at the only moment that knows which it was.
+    dropped_ids: Tuple[str, ...] = ()
     final_folders: Tuple[Path, ...] = ()
     expected_trips: Optional[int] = None         # None = grouping unreadable
     has_track: bool = False

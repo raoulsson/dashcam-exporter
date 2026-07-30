@@ -30,26 +30,18 @@ sys.path.insert(0, str(REPO))
 import guards                    # noqa: E402
 import items                     # noqa: E402,F401  (registers the ten)
 import menu as M                 # noqa: E402
-import uploader as U             # noqa: E402
 import world as W                # noqa: E402
 
 
-def target(holds=(), published=None, unreachable=False, configured=True):
-    """What a publishing target said, as the world carries it.
+def target(complete=M.Evidence.YES, configured=True, note=""):
+    """What the configured plugin said, as the world carries it.
 
     Written down rather than arranged, which is the whole point of freezing the
-    answers at capture: what the guard sees is data a test can state.
+    answer at capture: what the guard sees is data a test can state.
     """
-    if unreachable:
-        answers = U.Answers.unknown("could not reach the target")
-        return W.TargetFacts(configured=True, name="target", holds=answers,
-                             published=answers, carried=answers,
-                             owed=U.Owed.everything((), "could not reach the target"))
-    return W.TargetFacts(
-        configured=configured, name="target",
-        holds=U.Answers.of({n: M.Evidence.YES for n in holds}),
-        published=(U.Answers.of({}) if published is None
-                   else U.Answers.of(published)))
+    return W.TargetFacts(configured=configured, name="target",
+                         origin="target (/a/test/plugin.py:B:U)",
+                         complete=complete, note=note)
 
 
 def load_pipeline():
@@ -86,7 +78,7 @@ class Workspace:
         self.ctx.render_root = self.root / "import"
         self.ctx.import_root = self.root / "import"
         self.ctx.card = self.root / "card"
-        self.ctx.uploader = None
+        self.ctx.plugin = None
         self.ctx.offline = False
         self.ctx.selected_import = None
         self.ctx.last_scan = None
@@ -121,19 +113,25 @@ class Workspace:
     def ledger(self, through):
         (self.ctx.out_dir / P.LEDGER_FILE).write_text(json.dumps({"through": through}))
 
-    def target_holds(self, *names):
-        """The configured target says it holds these render names.
+    def target_has_everything(self):
+        """The configured plugin says every trip of this import is at the
+        destination.
 
-        Whether "holds" means an object in a bucket at a matching size, a file
-        in a folder, or something else entirely is the implementation's rule
-        and is tested where it lives. What the exporter's guard reads is the
-        reading, and that is what a test states here.
+        What "at the destination" means — an object in a bucket at a matching
+        size, a page on a server, a file in a folder — is the implementation's
+        rule and is tested where it lives. What the exporter's guard reads is
+        the one reading, and that is what a test states here.
         """
-        self.target = target(holds=names)
+        self.target = target(complete=M.Evidence.YES)
+        return self.target
+
+    def target_says_no(self):
+        self.target = target(complete=M.Evidence.NO)
         return self.target
 
     def target_unreachable(self):
-        self.target = target(unreachable=True)
+        self.target = target(complete=M.Evidence.UNKNOWN,
+                             note="could not reach the destination")
         return self.target
 
     def cleanup(self):
@@ -190,17 +188,19 @@ class TestWorkingAreaIsExpendable(GuardTest):
         self.assertFalse(ok)
         self.assertEqual(len(strag), 1)
 
-    def test_a_render_the_target_holds_is_expendable(self):
+    def test_a_render_the_destination_vouches_for_is_expendable(self):
         self.w.render("trip_A", size=777)
-        self.w.target_holds("trip_A_h1080.mp4")
+        self.w.target_has_everything()
         ok, why, _ = self.expendable()
         self.assertTrue(ok, why)
 
-    def test_a_render_the_target_does_not_answer_about_blocks(self):
-        """The target spoke, and said nothing about this one. Not published —
-        unknown, which is not permission to sweep the only local copy."""
+    def test_a_render_no_answer_covers_blocks(self):
+        """RESTATED: the plugin used to answer per render and this stated the
+        case where it named a different one. It answers about the whole import
+        now, so "not covered" is a NO rather than a silence — and the rule is
+        the same one: anything short of YES keeps the only local copy."""
         self.w.render("trip_A", size=777)
-        self.w.target_holds("trip_B_h1080.mp4")
+        self.w.target_says_no()
         ok, _, strag = self.expendable()
         self.assertFalse(ok)
         self.assertEqual(len(strag), 1)
@@ -366,46 +366,30 @@ def _renders(n):
     return tuple(W.Render("trip_%d.mp4" % i, 64) for i in range(n))
 
 
-def _answers(renders, evidence):
-    if evidence is M.Evidence.NA:
-        return U.Answers.not_applicable("this target does not answer that")
-    return U.Answers.of({r.name: evidence for r in renders})
-
-
-def _world(renders_here=1, expected=3, held=M.Evidence.NA,
-           published=M.Evidence.NA, unreachable=False):
+def _world(renders_here=1, expected=3, complete=M.Evidence.NA):
     """A world built by hand, with no filesystem anywhere near it.
 
-    This is what the move off the disk bought — and what freezing the target's
-    answers at capture preserves: the guard is a pure function, so a test
-    states the evidence directly instead of arranging a fixture tree, or a
-    fake network, and hoping it produces the state it meant.
+    This is what the move off the disk bought — and what freezing the plugin's
+    answer at capture preserves: the guard is a pure function, so a test states
+    the evidence directly instead of arranging a fixture tree, or a fake
+    network, and hoping it produces the state it meant.
     """
-    renders = _renders(renders_here)
-    if unreachable:
-        unknown = U.Answers.unknown("could not reach the target")
-        facts = W.TargetFacts(configured=True, name="target", holds=unknown,
-                              published=unknown, carried=unknown)
-    else:
-        facts = W.TargetFacts(configured=held is not M.Evidence.NA
-                              or published is not M.Evidence.NA,
-                              name="target",
-                              holds=_answers(renders, held),
-                              published=_answers(renders, published))
-    return W.World(renders_here=renders, expected_trips=expected, target=facts)
+    return W.World(renders_here=_renders(renders_here), expected_trips=expected,
+                   target=target(complete=complete,
+                                 configured=complete is not M.Evidence.NA))
 
 
 class TestWorkspaceRefusesWhenNothingElseCanDecide(GuardTest):
-    """'Noted, not blocking — the target decides' is only honest when a target
-    will actually answer. With none configured it never does, so the
-    under-rendered branches must refuse rather than defer to nothing — the
+    """'Noted, not blocking — the destination decides' is only honest when a
+    destination will actually answer. With none configured it never does, so
+    the under-rendered branches must refuse rather than defer to nothing — the
     rmtree would erase footage of trips that were never encoded.
 
-    Deliberately NOT "the last applicable check wins". Under that reading the
-    held-at-the-destination gate has the last word when nothing can say what
-    is served, and it says yes about the renders that exist while saying
-    nothing at all about the trips that were never encoded — whose footage
-    exists in no render, at no destination, nowhere.
+    RESTATED for the narrowed interface. There used to be two destination gates
+    and this class enumerated which of them decided in which state; there is
+    one question now, so what is pinned is the shape that survived: the floors
+    first, then one answer, and NA drops that answer's gate rather than passing
+    it.
     """
 
     def test_under_rendered_import_refuses_with_no_target(self):
@@ -418,53 +402,39 @@ class TestWorkspaceRefusesWhenNothingElseCanDecide(GuardTest):
         self.assertTrue(verdict.blocked, verdict.reason)
         self.assertIn("unknown", verdict.reason)
 
-    def test_a_target_holding_everything_does_not_excuse_an_under_rendered_import(self):
-        """The divergence that made the fold worth checking by enumeration.
+    def test_a_destination_that_has_everything_does_not_excuse_a_short_count(self):
+        """The floor, and the reason it stays.
 
-        One mp4 exists, three trips were expected, nothing can say what is
-        served, and that one mp4 IS at the destination. The two trips that
-        were never encoded exist nowhere. This must refuse.
+        One mp4 exists where three trips were expected, and the destination
+        says every trip of this import is there. It still refuses: the trip
+        LIST is read off the sidecars, so a trip whose sidecar was never
+        written is in nobody's question, and an unreadable grouping means the
+        count cannot be compared against anything at all.
         """
         verdict = guards.workspace_is_expendable(
-            _world(renders_here=1, expected=3, held=M.Evidence.YES))
+            _world(renders_here=1, expected=3, complete=M.Evidence.YES))
         self.assertTrue(verdict.blocked, verdict.reason)
+        self.assertIn("rendered locally", verdict.reason)
 
-    def test_being_served_is_decisive_against_the_erase(self):
-        """A NO from the destination stops it even when everything else agrees.
-        That half of the rule is unchanged."""
+    def test_a_no_from_the_destination_is_decisive_against_the_erase(self):
+        """A NO stops it even when everything local agrees. That half of the
+        rule is unchanged."""
         no = guards.workspace_is_expendable(
-            _world(renders_here=3, expected=3, held=M.Evidence.YES,
-                   published=M.Evidence.NO))
+            _world(renders_here=3, expected=3, complete=M.Evidence.NO))
         self.assertTrue(no.blocked, no.reason)
 
-    def test_a_short_local_count_is_not_commentary_any_more(self):
-        """CHANGED RULE, AND IT NEEDS THE OWNER'S SIGN-OFF.
-
-        This used to assert the opposite: 1 render where 3 were expected was
-        allowed through on the destination's yes, because "what the destination
-        SERVES is the only question that matters".
-
-        That was true while the thing answering walked every local TRIP and so
-        could say no on a short count. Since the publishing side became an
-        interface it is asked published(renders) and holds(renders) — about
-        renders that EXIST. The two trips that were never encoded produced no
-        render, so no answer is about them, and their footage is only in the
-        import this step erases. The old assertion described a state where that
-        footage goes.
-
-        carries() could speak for them and is not wired into this gate. Until
-        it is, a short count refuses. If that is too strict, the fix is to wire
-        carries() in, not to let this through again.
-        """
-        verdict = guards.workspace_is_expendable(
-            _world(renders_here=1, expected=3, published=M.Evidence.YES))
-        self.assertTrue(verdict.blocked, verdict.reason)
-
-    def test_a_target_that_could_not_answer_is_not_a_yes(self):
+    def test_a_destination_that_could_not_answer_is_not_a_yes(self):
         """Fails closed: "could not find out" is not "it is there"."""
         verdict = guards.workspace_is_expendable(
-            _world(renders_here=3, expected=3, unreachable=True))
+            _world(renders_here=3, expected=3, complete=M.Evidence.UNKNOWN))
         self.assertTrue(verdict.blocked, verdict.reason)
+
+    def test_not_applicable_drops_the_gate_rather_than_failing_it(self):
+        """A plugin may genuinely have no notion of a destination to check —
+        an archive disk stores footage and does not publish it. Then the erase
+        rests on the local render count alone, and unproven_lines says so."""
+        world = _world(renders_here=3, expected=3, complete=M.Evidence.NA)
+        self.assertFalse(guards.workspace_is_expendable(world).blocked)
 
     def test_everything_proven_locally_is_expendable(self):
         verdict = guards.workspace_is_expendable(_world(renders_here=3, expected=3))
@@ -472,48 +442,44 @@ class TestWorkspaceRefusesWhenNothingElseCanDecide(GuardTest):
 
 
 class TestNothingRenderedIsBelowTheTargetsWordEntirely(GuardTest):
-    """A yes from the target cannot vouch for an import it never saw.
+    """A yes from the destination cannot vouch for an import it never saw.
 
-    A target answers about the trips it knows, and the local metas under <out>
-    outlive every sweep — so on a machine that published last month it reports
-    last month's trips all live while today's import has not been encoded at
-    all. Its word is decisive about SHORT counts, which is the case the
-    deferral was written for; it is not evidence about footage that produced
-    no render for it to look at.
+    Sidecars under <out> outlive every sweep, so a machine that published last
+    month can answer confidently about trips it published then while today's
+    import has not been encoded at all. Its word is decisive about a
+    destination; it is not evidence about footage that produced no render.
 
-    This is also requirement A of the trust model, as a test: an
-    implementation is believed about what it says, and it still cannot talk
-    this into erasing an import that produced no renders, because the question
-    is never delegated.
+    This is also requirement A of the trust model, as a test: an implementation
+    is believed about what it says, and it still cannot talk this into erasing
+    an import that produced no renders, because the question is never
+    delegated.
     """
 
-    def test_a_target_saying_everything_is_served_does_not_excuse_no_renders(self):
-        """Import today, sidecars, no render, then Clean Workspace. Every gate
-        below the floor is vacuously happy: an empty render list is "covered"
-        by anything, and the target is talking about a previous round. The
-        rmtree would take footage that exists in no render and at no
-        destination."""
+    def test_a_destination_saying_yes_does_not_excuse_no_renders(self):
+        """Import today, sidecars, no render, then Clean Workspace. The gate
+        below the floor is vacuously happy — the destination is talking about a
+        previous round. The rmtree would take footage that exists in no render
+        and at no destination."""
         verdict = guards.workspace_is_expendable(
-            _world(renders_here=0, expected=3, held=M.Evidence.YES,
-                   published=M.Evidence.YES))
+            _world(renders_here=0, expected=3, complete=M.Evidence.YES))
         self.assertTrue(verdict.blocked, verdict.reason)
         self.assertIn("nothing from this import was rendered", verdict.reason)
 
-    def test_it_refuses_before_the_target_is_consulted_at_all(self):
-        """Not "the target said no" — the target is not what decided. Asserted
-        on an UNKNOWN grouping too, so the refusal cannot be read as the count
+    def test_it_refuses_before_the_destination_is_consulted_at_all(self):
+        """Not "the destination said no" — it is not what decided. Asserted on
+        an UNKNOWN grouping too, so the refusal cannot be read as the count
         comparison happening to fail."""
         for expected in (None, 0, 3):
             with self.subTest(expected=expected):
                 verdict = guards.workspace_is_expendable(
                     _world(renders_here=0, expected=expected,
-                           published=M.Evidence.YES))
+                           complete=M.Evidence.YES))
                 self.assertTrue(verdict.blocked, verdict.reason)
 
     def test_the_gate_table_and_the_verdict_agree(self):
         """The screen printed "rendered locally .... no" and then proceeded to
         the CLEAN prompt. A gate the operator can read must be a gate."""
-        world = _world(renders_here=0, expected=3, published=M.Evidence.YES)
+        world = _world(renders_here=0, expected=3, complete=M.Evidence.YES)
         readings = dict(guards.gate_readings(world))
         self.assertIs(readings["rendered locally"], M.Evidence.NO)
         self.assertTrue(guards.workspace_is_expendable(world).blocked)
@@ -535,15 +501,19 @@ class TestImportIsExpendable(GuardTest):
         self.assertFalse(ok)
         self.assertIn("nothing from it was rendered", why)
 
-    def test_rendered_and_held_at_the_destination_is_expendable(self):
+    def test_rendered_and_at_the_destination_is_expendable(self):
         self.w.render("trip_A", ns=self.w.ctx.render_root.name, size=321)
-        self.w.target_holds("trip_A_h1080.mp4")
+        self.w.target_has_everything()
         ok, why = self.expendable()
         self.assertTrue(ok, why)
 
     def test_rendered_but_not_confirmed_there_is_not(self):
+        """RESTATED: the advisory used to count renders the plugin had not
+        vouched for by name. There is one answer now, so anything short of YES
+        makes the whole import unconfirmed — which is what the sentence it
+        feeds already said."""
         self.w.render("trip_A", ns=self.w.ctx.render_root.name, size=321)
-        self.w.target_holds()                  # the target answered about nothing
+        self.w.target_says_no()
         ok, why = self.expendable()
         self.assertFalse(ok)
         self.assertIn("not confirmed", why)
@@ -577,7 +547,7 @@ class TestTheDestructiveSequence(GuardTest):
         P.write_ledger(self.w.ctx, "20260728090000")
         self.clip = (self.w.ctx.card / "DCIM" / "200video" / "front"
                      / "20260728090000_0060.mp4")
-        self.item = M.build_menu(M.Strategy.of(self.w.ctx.uploader),
+        self.item = M.build_menu(M.Strategy.of(self.w.ctx.plugin),
                                  P.Work(self.w.ctx))[M.ERASE_CARD]
 
     def _run(self, answer):
@@ -641,40 +611,21 @@ class TestTheDestructiveSequence(GuardTest):
 
 
 # ---------------------------------------------------------------------------
-# What the target's answers mean where the exporter reads them. The rule for
+# What the plugin's answer means where the exporter reads it. The rule for
 # deciding YES — a whole-name match, a size comparison, whatever "there" means
 # for that destination — belongs to the implementation and is tested where it
 # lives (tests/test_uploader.py drives the shipped example). What is pinned
 # here is the exporter's side: which reading permits what.
 # ---------------------------------------------------------------------------
 
-class TestWhatIsStillOwed(unittest.TestCase):
-    """Owed is what makes an interrupted upload resumable, and what decides
-    whether 7) Upload Website has anything left to do."""
-
-    def test_a_target_that_could_not_be_asked_owes_everything(self):
-        """Fails closed, and it is the interface that says so rather than each
-        call site: a listing that failed proves nothing, so the offer stands
-        and the upload itself is what discovers the target is down."""
-        renders = (W.Render("trip_A.mp4", 500),)
-        owed = U.Owed.everything(renders, "could not reach the target")
-        self.assertTrue(owed.any)
-        self.assertFalse(owed.certain)
-
-    def test_a_target_that_holds_everything_owes_nothing(self):
-        self.assertFalse(U.Owed.nothing().any)
-
-
 class TestTheLocalRenderGateHasNoWayToAbstain(unittest.TestCase):
-    """rendered_locally is the hard floor under the unanimity rule.
+    """rendered_locally is the hard floor under the erase rule.
 
-    workspace_is_expendable defers to the target when the target can say what
-    is served, and otherwise every gate that CAN answer must say yes. That
-    sentence is only total because this gate never answers "not applicable" —
-    if it could abstain, an import with nothing rendered would leave the
-    held-at-the-destination gate talking about the renders that exist while
-    saying nothing about the trips that were never encoded, whose footage is
-    in the workspace and nowhere else.
+    Below it there is one question left and the destination's answer decides
+    it. That is only safe because this gate never answers "not applicable" — if
+    it could abstain, an import with nothing rendered would be judged by a
+    destination talking about trips it published last month while today's
+    footage is in the workspace and nowhere else.
     """
 
     def test_an_import_with_no_renders_at_all_answers_no(self):
@@ -687,7 +638,7 @@ class TestTheLocalRenderGateHasNoWayToAbstain(unittest.TestCase):
 
     def test_it_never_answers_not_applicable(self):
         """Asserted over every shape of world the capture can produce, because
-        one abstention is all the unanimity rule needs to be waved through."""
+        one abstention is all the floor needs to be waved through."""
         for renders_here in (0, 1, 3):
             for expected in (None, 0, 3):
                 with self.subTest(renders=renders_here, expected=expected):

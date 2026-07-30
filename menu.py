@@ -38,15 +38,15 @@ class Strategy(Enum):
     LOCAL_PAGE = "local page"
 
     @classmethod
-    def of(cls, uploader) -> "Strategy":
-        """Was an implementation supplied. That is the whole question.
+    def of(cls, plugin) -> "Strategy":
+        """Was a publishing plugin supplied. That is the whole question.
 
-        It takes the uploader itself, not the ctx it came from: asked of a ctx
+        It takes the plugin itself, not the ctx it came from: asked of a ctx
         this would read config keys, and the keys it read named one operator's
         arrangement. Which product this is has to be answerable without knowing
         how anybody publishes.
         """
-        return cls.UPLOADER if uploader is not None else cls.LOCAL_PAGE
+        return cls.UPLOADER if plugin is not None else cls.LOCAL_PAGE
 
 
 # Item numbers, named once so the graph reads as sentences rather than integers.

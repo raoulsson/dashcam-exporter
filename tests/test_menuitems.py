@@ -42,7 +42,6 @@ sys.path.insert(0, str(REPO))
 import guards                    # noqa: E402
 import items                     # noqa: E402  (importing registers the ten)
 import menu as M                 # noqa: E402
-import uploader as U             # noqa: E402
 import world as W                # noqa: E402
 from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                   UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
@@ -93,10 +92,12 @@ class FakeBuilder:
     def describe(self):
         return "Build under %s." % self.strategy.value
 
-    def why_not(self, world):
-        return self.reason
+    def evaluate(self, world):
+        if self.reason:
+            return M.blocked(self.reason)
+        return M.go()
 
-    def build(self, world):
+    def execute(self, world):
         self.worlds.append(world)
         return M.did("built")
 
@@ -118,10 +119,15 @@ class FakePublisher:
         self.reason = reason
         self.worlds = []
 
-    def why_not(self, world):
-        return self.reason
+    def describe(self):
+        return "Publish."
 
-    def run(self, world):
+    def evaluate(self, world):
+        if self.reason:
+            return M.blocked(self.reason)
+        return M.go()
+
+    def execute(self, world):
         self.worlds.append(world)
         return M.did("published")
 
@@ -283,39 +289,19 @@ def full_card(**kw):
     return a_card(**base)
 
 
-def said(spec):
-    """A test's shorthand for one of the target's answers.
+def a_target(complete=M.Evidence.NA, configured=True, name="target"):
+    """What the configured plugin said about this world, written down.
 
-    A tuple of names means "these YES and nothing else known", which is the
-    shape almost every test wants. None means the question does not arise for
-    this target at all — an archive disk holds but does not serve — and is the
-    default, so a test that says nothing about `published` gets NA rather than
-    an accidental UNKNOWN that would refuse for a reason the test never wrote.
-    An Answers passes through, for the cases that need UNKNOWN or NO by name.
-    """
-    if isinstance(spec, U.Answers):
-        return spec
-    return _named(spec)
-
-
-def _named(spec):
-    if spec is None:
-        return U.Answers.not_applicable()
-    return U.Answers.of({n: M.Evidence.YES for n in spec})
-
-
-def a_target(holds=None, published=None, owed=(), carried=None,
-             configured=True, name="target"):
-    """What a publishing target said about this world, written down.
-
-    Frozen answers, because that is how the world carries them: the target is
+    One frozen answer, because that is how the world carries it: the plugin is
     asked once at capture and every guard reads the same reading, which is what
     lets the destructive re-check compare two instants rather than two moods.
+
+    NA is the default — the question does not arise for this destination at all
+    — so a test that says nothing about it gets a dropped gate rather than an
+    accidental UNKNOWN that would refuse for a reason the test never wrote.
     """
-    return W.TargetFacts(
-        configured=configured, name=name, origin="%s (a test)" % name,
-        holds=said(holds), published=said(published),
-        owed=U.Owed.just(owed), carried=said(carried))
+    return W.TargetFacts(configured=configured, name=name,
+                         origin="%s (a test)" % name, complete=complete)
 
 
 def evaluate(item, w):
@@ -857,9 +843,9 @@ class TestBuildWebsite(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 def a_published_world(**kw):
-    """Renders on disk, and the target says it has and serves all of them."""
+    """Renders on disk, and the destination has every trip of this import."""
     base = dict(renders=(MP4,), renders_here=(MP4,),
-                target=a_target(holds=(MP4.name,), published=(MP4.name,)))
+                target=a_target(complete=M.Evidence.YES))
     base.update(kw)
     return imported(**base)
 
@@ -867,22 +853,27 @@ def a_published_world(**kw):
 class TestUploadWebsite(unittest.TestCase):
     """Getting the built site online. One job, two transports."""
 
-    def test_outstanding_uploads_are_work_to_do(self):
-        """What the target says it still owes is exactly what this item exists
-        to settle. A target that could not be asked owes everything, so the
-        offer stands and the upload is what discovers it is down."""
-        w = imported(renders=(MP4,), renders_here=(MP4,),
-                     target=a_target(owed=(MP4.name,)))
-        self.assertIs(ruling(item_for(UPLOAD), w), M.Ruling.GO)
+    def test_a_destination_that_does_not_have_them_is_work_to_do(self):
+        """RESTATED: this used to read a set of owed render names, and owes()
+        is gone with the per-name map it filled. The question it answered is
+        the same one — is there anything left for the upload to do — and it is
+        now the one all-or-nothing answer. A destination that could not be
+        asked reads UNKNOWN, which is not YES, so the offer stands and the
+        upload is what discovers it is down."""
+        for answer in (M.Evidence.NO, M.Evidence.UNKNOWN, M.Evidence.NA):
+            with self.subTest(answer=answer.value):
+                w = imported(renders=(MP4,), renders_here=(MP4,),
+                             target=a_target(complete=answer))
+                self.assertIs(ruling(item_for(UPLOAD), w), M.Ruling.GO)
 
     def test_everything_already_online_is_settled_not_refused(self):
-        """The postcondition holds: the target owes nothing. The item completes
-        without touching the network."""
+        """The postcondition holds: the destination has every trip. The item
+        completes without touching the network."""
         verdict = evaluate(item_for(UPLOAD), a_published_world())
         self.assertIs(verdict.ruling, M.Ruling.SATISFIED)
 
     def test_nothing_rendered_is_refused_rather_than_vacuously_settled(self):
-        """"The target has everything" is true of no renders at all, and it
+        """"The destination has everything" is true of no renders at all, and it
         is the wrong sentence to put in front of someone who has published
         nothing. Evidence, not order: it survives the renders being deleted."""
         verdict = evaluate(item_for(UPLOAD), imported())
@@ -967,119 +958,75 @@ def rendered_world(**kw):
     return imported(**base)
 
 
-def all_of(w):
-    """Every render of this import, by name — what a target that has them all
-    would have answered about."""
-    return tuple(r.name for r in w.renders_here)
-
-
-def none_of(w, reading):
-    """The same names, all answered with one reading. For NO and for UNKNOWN,
-    which no shorthand should make as easy to write as YES."""
-    return U.Answers.of({name: reading for name in all_of(w)})
-
-
 class TestTheWorkspaceIsExpendableRule(unittest.TestCase):
     """What has to be true before the imported footage may be erased.
 
-    One sentence, applied through the item that acts on it: THE TARGET DECIDES
-    WHEN IT CAN BE ASKED; OTHERWISE EVERY CHECK THAT CAN ANSWER MUST SAY YES.
-    Deliberately not "the last applicable check wins" — that reading approves
-    the wipe when the local render count is short and the renders that DO exist
-    are at the destination, and the trips that were never encoded exist nowhere.
+    One sentence, applied through the item that acts on it: THE FLOORS THAT
+    NEVER LEAVE THIS MACHINE FIRST, AND THEN THE DESTINATION'S ANSWER DECIDES.
 
-    Two of the three gates are now the configured target's answers rather than
-    a bucket listing and a script this repo shipped. Which destination it is is
-    the implementation's business; what a reading means here is unchanged, and
-    that is what these tests pin.
+    RESTATED for the narrowed interface. Two of the three gates used to be the
+    plugin's answers — is the file there, is it being served — and this class
+    enumerated how they combined. They are one question now, asked about the
+    import's TRIPS rather than about the renders that happen to exist, so what
+    is left to pin is which reading permits what. The floors are unchanged and
+    so are the readings; only the number of ways to spell them is smaller.
     """
 
-    def test_a_local_shortfall_refuses_even_when_the_target_says_yes(self):
-        """CHANGED RULE, AND IT NEEDS THE OWNER'S SIGN-OFF.
+    def test_a_local_shortfall_refuses_even_when_the_destination_says_yes(self):
+        """The floor, and why it stays.
 
-        This asserted the erase RAN with nine trips expected and only the
-        rendered ones present, on the strength of the destination's yes. The
-        destination is asked about renders that exist, so it never spoke for
-        the eight that do not, and their footage is only in the import this
-        step erases. Now it refuses and the act does not run.
-
-        See test_guards.test_a_short_local_count_is_not_commentary_any_more
-        for the full reasoning and the way to relax it properly.
+        Nine trips expected and only the rendered ones present. The trip ids
+        are read off the sidecars, so a trip whose sidecar was never written is
+        in nobody's question — and its footage is only in the import this step
+        erases.
         """
-        fresh = rendered_world(
-            expected_trips=9,
-            target=a_target(published=all_of(rendered_world())))
+        fresh = rendered_world(expected_trips=9,
+                               target=a_target(complete=M.Evidence.YES))
         _work, act, outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertFalse(act.ran)
         self.assertFalse(outcome.completed)
 
-    def test_a_target_that_says_no_refuses_however_good_the_local_evidence(self):
-        fresh = rendered_world(
-            target=a_target(holds=all_of(rendered_world()),
-                            published=none_of(rendered_world(), M.Evidence.NO)))
+    def test_a_destination_that_says_no_refuses_however_good_the_local_evidence(self):
+        fresh = rendered_world(target=a_target(complete=M.Evidence.NO))
         work, act, outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertFalse(act.ran)
         self.assertFalse(outcome.completed)
         self.assertTrue(work.refusals)
 
-    def test_a_full_destination_does_not_excuse_an_under_rendered_import(self):
-        """The money path, and the exact defect a "last applicable check wins"
-        fold would open: five renderable trips, two encoded, a target with no
-        notion of serving, and those two are at the destination. The three that
-        were never encoded exist in no render, at no destination, nowhere — and
-        erasing the import would take their only copy.
-
-        The gate that catches it is the one the exporter never delegates."""
-        fresh = rendered_world(expected_trips=5,
-                               target=a_target(holds=all_of(rendered_world())))
-        _work, act, outcome = clean_with(guards.workspace_is_expendable, fresh)
-        self.assertFalse(act.ran)
-        self.assertFalse(outcome.completed)
-
     def test_a_grouping_that_could_not_be_read_refuses(self):
         """"Could not find out how many trips there should be" is not "the
-        count is fine". With no serving answer to defer to, the unknown is the
-        answer."""
+        count is fine"."""
         fresh = rendered_world(expected_trips=None,
-                               target=a_target(holds=all_of(rendered_world())))
+                               target=a_target(complete=M.Evidence.YES))
         _work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertFalse(act.ran)
 
-    def test_a_target_that_could_not_be_asked_fails_closed(self):
+    def test_a_destination_that_could_not_be_asked_fails_closed(self):
         """The rule the whole interface is shaped around. An implementation
         that cannot reach its destination says UNKNOWN, and unreachable is not
         permission — turning "could not find out" into "yes" is what this
         forbids, and one negation is all it would take."""
-        fresh = rendered_world(
-            target=a_target(holds=U.Answers.unknown("destination unreachable"),
-                            published=U.Answers.unknown("destination unreachable")))
+        fresh = rendered_world(target=a_target(complete=M.Evidence.UNKNOWN))
         _work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertFalse(act.ran)
 
-    def test_an_unknown_hold_is_not_rescued_by_the_serving_question_being_moot(self):
-        """The other way in: a target that does not serve at all, so gate 3 is
-        NA and the unanimity rule decides — and there UNKNOWN must still not
-        pass for yes. NA removes a gate; UNKNOWN fails it."""
-        fresh = rendered_world(
-            target=a_target(holds=U.Answers.unknown("destination unreachable")))
-        _work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
-        self.assertFalse(act.ran)
-
-    def test_a_render_nobody_answered_about_reads_unknown(self):
-        """The target answered — about the OTHER trip. A name absent from the
-        readings is the same as no answer, and no answer is not yes. This is
-        why Answers has no accessor a caller can hand a default to."""
-        fresh = rendered_world(
-            target=a_target(holds=(MP4.name,), published=(MP4.name,)))
-        _work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
-        self.assertFalse(act.ran)
+    def test_not_applicable_drops_the_gate_and_unknown_fails_it(self):
+        """The two answers that are easiest to confuse, side by side. NA is a
+        destination the question does not arise for — an archive disk stores
+        and does not publish — and the erase then rests on the local render
+        count. UNKNOWN is a question that could not be answered, and it
+        refuses."""
+        for answer, expected in ((M.Evidence.NA, True), (M.Evidence.UNKNOWN, False)):
+            with self.subTest(answer=answer.value):
+                fresh = rendered_world(target=a_target(complete=answer))
+                _work, act, _outcome = clean_with(guards.workspace_is_expendable,
+                                                  fresh)
+                self.assertIs(act.ran, expected)
 
     def test_everything_proven_lets_the_workspace_go(self):
-        """Every trip encoded, and the target says it holds and serves every
-        render. This is the case the whole rule exists to permit."""
-        fresh = rendered_world(
-            target=a_target(holds=all_of(rendered_world()),
-                            published=all_of(rendered_world())))
+        """Every trip encoded, and the destination has all of them. This is the
+        case the whole rule exists to permit."""
+        fresh = rendered_world(target=a_target(complete=M.Evidence.YES))
         _work, act, outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertTrue(act.ran)
         self.assertTrue(outcome.completed)
@@ -1096,9 +1043,9 @@ class TestTheWorkspaceIsExpendableRule(unittest.TestCase):
         self.assertEqual(len(lines), 1)
         self.assertIn("website_uploader", lines[0])
 
-    def test_a_configured_target_does_not_get_that_sentence(self):
+    def test_a_configured_plugin_that_answers_does_not_get_that_sentence(self):
         lines = guards.unproven_lines(
-            rendered_world(target=a_target(holds=all_of(rendered_world()))))
+            rendered_world(target=a_target(complete=M.Evidence.YES)))
         self.assertEqual(lines, ())
 
 
@@ -1109,8 +1056,7 @@ class TestTheRecheckHappensAfterTheWordIsTyped(unittest.TestCase):
         """The world the menu was drawn with is a prompt old, and a card can be
         swapped or a folder deleted while the prompt is on screen. The same
         callable is asked twice, against two worlds captured at two instants."""
-        fresh = rendered_world(
-            target=a_target(published=none_of(rendered_world(), M.Evidence.NO)))
+        fresh = rendered_world(target=a_target(complete=M.Evidence.NO))
         work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertEqual(work.scopes, [M.Scope.FULL])
         self.assertFalse(act.ran)
@@ -1119,12 +1065,12 @@ class TestTheRecheckHappensAfterTheWordIsTyped(unittest.TestCase):
         """Not "the trees do not overlap so the evidence must still hold" —
         that reasoning produced the defect this replaces. The act is handed the
         re-captured world by construction, so it cannot be handed a stale one."""
-        fresh = rendered_world(target=a_target(holds=all_of(rendered_world())))
+        fresh = rendered_world(target=a_target(complete=M.Evidence.YES))
         _work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
         self.assertEqual(act.worlds, [fresh])
 
     def test_the_wrong_word_stops_before_the_re_check(self):
-        fresh = rendered_world(target=a_target(holds=all_of(rendered_world())))
+        fresh = rendered_world(target=a_target(complete=M.Evidence.YES))
         work, act, outcome = clean_with(guards.workspace_is_expendable, fresh,
                                         word="clean")
         self.assertFalse(act.ran)
@@ -1317,7 +1263,7 @@ class TestIdempotence(unittest.TestCase):
         work = FakeWork()
         item = menu_for(UPLOADER, work)[UPLOAD]
         item.execute(imported(renders=(MP4,), renders_here=(MP4,),
-                              target=a_target(owed=(MP4.name,))))
+                              target=a_target(complete=M.Evidence.NO)))
         item.execute(a_published_world())
         self.assertEqual(len(work.publishers[0].worlds), 1)
 

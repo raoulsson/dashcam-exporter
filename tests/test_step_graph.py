@@ -106,7 +106,7 @@ class MockState:
         c.render_root = self.root / "import"
         c.import_root = self.root / "import"
         c.card = self.root / "card"
-        c.uploader = None
+        c.plugin = None
         c.offline = False
         c.selected_import = None
         c.last_scan = None
@@ -150,19 +150,20 @@ class MockState:
         return self
 
     def published(self, trip="trip_2026-07-28_08-57_01", size=64):
-        """This render is at the destination already, byte for byte.
+        """This trip is at the destination already.
 
-        A folder target, so "already published" is a real file in a real
-        directory rather than a patched-out listing. What the guards then read
-        is a genuine answer from a genuine implementation.
+        The shipped example publishes a page per trip, so "already published"
+        is a real file in a real directory rather than a patched-out listing.
+        What the guards then read is a genuine answer from a genuine
+        implementation.
         """
         d = self.root / "published"
         d.mkdir(parents=True, exist_ok=True)
-        (d / (trip + "_h1080.mp4")).write_bytes(b"x" * size)
+        (d / (trip + ".html")).write_text("<html/>")
         return self
 
     def with_uploader(self):
-        """A configured publishing target, loaded the way a real install loads
+        """A configured publishing plugin, loaded the way a real install loads
         one.
 
         The shipped example rather than a stub written here: what these tests
@@ -170,15 +171,16 @@ class MockState:
         and a stub would let that wiring drift from the one implementation
         anybody actually reads.
         """
-        os.environ["DASHCAM_FOLDER_TARGET"] = str(self.root / "published")
-        spec = "%s:FolderTarget" % (REPO / "examples" / "uploader_folder.py")
-        self.ctx.uploader = U.load_uploader(spec, REPO)
-        self.ctx.uploader_origin = U.origin_of(spec, self.ctx.uploader)
+        os.environ["DASHCAM_LOCAL_SITE_STAGING"] = str(self.root / "staging")
+        os.environ["DASHCAM_LOCAL_SITE_DEST"] = str(self.root / "published")
+        spec = ("%s:LocalWebSiteBuilderPlugin:LocalWebSiteUploader"
+                % (REPO / "examples" / "local_website.py"))
+        self.ctx.plugin = U.load_plugin(spec, REPO)
         return self
 
     def menu(self):
         """The ten items, built for whatever this ctx configures."""
-        return M.build_menu(M.Strategy.of(self.ctx.uploader), P.Work(self.ctx))
+        return M.build_menu(M.Strategy.of(self.ctx.plugin), P.Work(self.ctx))
 
     def verdicts(self, scope=None):
         """{number: Verdict} — what each item says about this world."""
@@ -400,10 +402,10 @@ class TestStrategySplit(GraphTest):
 
     def test_strategy_is_whether_an_implementation_was_supplied(self):
         local = MockState()
-        self.assertIs(M.Strategy.of(local.ctx.uploader), M.Strategy.LOCAL_PAGE)
+        self.assertIs(M.Strategy.of(local.ctx.plugin), M.Strategy.LOCAL_PAGE)
         local.cleanup()
         pub = MockState(M.Strategy.UPLOADER)
-        self.assertIs(M.Strategy.of(pub.ctx.uploader), M.Strategy.UPLOADER)
+        self.assertIs(M.Strategy.of(pub.ctx.plugin), M.Strategy.UPLOADER)
         pub.cleanup()
 
     def test_the_strategy_cannot_see_a_ctx_to_read_config_keys_off(self):
@@ -510,7 +512,7 @@ class TestMockedWork(GraphTest):
 
     def test_publishing_makes_the_workspace_expendable(self):
         """Driven through a real implementation rather than a patched listing,
-        so what this proves is the whole path: the target is asked at capture,
+        so what this proves is the whole path: the plugin is asked at capture,
         its answer is frozen into the world, and the guard reads it there."""
         m = MockState(M.Strategy.UPLOADER)
         try:

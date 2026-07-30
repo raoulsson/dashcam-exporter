@@ -38,7 +38,6 @@ sys.path.insert(0, str(REPO))
 import guards                    # noqa: E402
 import items                     # noqa: E402  (registers the ten)
 import menu as M                 # noqa: E402
-import uploader as U             # noqa: E402
 import world as W                # noqa: E402
 from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                   UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
@@ -74,20 +73,25 @@ SIDECAR = W.TripMeta("trip_2026-07-28_08-57_01", "20260728080000", "202607280930
 
 
 def _target(strategy):
-    """A publishing install has an uploader that answers; a local one has no
-    uploader at all, and NA is not the same answer as no.
+    """A publishing install has a plugin that answers; a local one has no
+    plugin at all, and NA is not the same answer as no.
 
     Which destination it is stopped being this file's business when the second
-    repo became an implementation: what a path test needs is a target that
-    answers everything yes, so nothing here refuses for a reason about
-    evidence when the subject is order.
+    repo became an implementation: what a path test needs is a destination that
+    is not in the way, so nothing here refuses for a reason about evidence when
+    the subject is order.
+
+    NA, and that is the only answer that works here now that there is one.
+    YES would make item 7 SATISFIED — a legitimate answer and the wrong one to
+    hold constant in a file about which paths EXIST, because a satisfied item
+    completes without running. NO would refuse item 8. NA is the plugin
+    declining the destination question, which neither satisfies the upload nor
+    blocks the erase: it is the state where nothing about the destination is in
+    the way of anything, which is what a file about ORDER needs.
     """
     if strategy is UPLOADER:
-        return W.TargetFacts(
-            configured=True, name="a target", origin="a target (a test)",
-            holds=U.Answers.of({RENDERED.name: M.Evidence.YES}),
-            published=U.Answers.of({RENDERED.name: M.Evidence.YES}),
-            owed=U.Owed.just((RENDERED.name,)))
+        return W.TargetFacts(configured=True, name="a target",
+                             origin="a target (a test)", complete=M.Evidence.NA)
     return W.TargetFacts()
 
 
@@ -122,10 +126,10 @@ class FakeBuilder:
     def describe(self):
         return "Build whatever this product publishes."
 
-    def why_not(self, world):
-        return None
+    def evaluate(self, world):
+        return M.go()
 
-    def build(self, world):
+    def execute(self, world):
         self._done.append(BUILD)
         return M.did("built")
 
@@ -138,12 +142,15 @@ class FakePublisher:
         self._local = strategy is LOCAL
         self._done = done
 
-    def why_not(self, world):
-        if self._local:
-            return "no website_uploader is configured"
-        return None
+    def describe(self):
+        return "Put what was built online."
 
-    def run(self, world):
+    def evaluate(self, world):
+        if self._local:
+            return M.blocked("no website_uploader is configured")
+        return M.go()
+
+    def execute(self, world):
         self._done.append(UPLOAD)
         return M.did("uploaded")
 

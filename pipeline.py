@@ -27,12 +27,13 @@ parse into a progress bar. Where real progress cannot be derived it shows an
 elapsed-time spinner rather than inventing a percentage.
 
 This repo does import, render and a local page on its own. Publishing is
-supplied from outside: `website_uploader` names a class implementing
-uploader.WebsiteUploaderInterface, and where that class sends things is its
-business, not this module's. Set it and items 6 and 7 do what it does; leave it
-unset (what a fresh clone gets) and item 7 stays greyed out with the reason
-printed underneath. Nothing in this repo contacts a network host at any point —
-not as a setting, but because there is no networked code left here.
+supplied from outside: `website_uploader` names a file and the two classes in
+it — a uploader.Builder for item 6 and a uploader.Uploader for item 7 — and
+where they send things is their business, not this module's. Set it and items 6
+and 7 do what they do; leave it unset (what a fresh clone gets) and item 7 stays
+greyed out with the reason printed underneath. Nothing in this repo contacts a
+network host at any point — not as a setting, but because there is no networked
+code left here.
 """
 from __future__ import annotations
 
@@ -234,21 +235,15 @@ def load_env(path):
     return out
 
 
-def _loaded_uploader(spec, exporter_dir):
-    """The configured implementation, or None for the local edition.
+def _loaded_plugin(spec, exporter_dir):
+    """The configured plugin — both its classes — or None for the local edition.
 
     UploaderNotLoaded is deliberately not caught here. It reaches main(), which
     prints the reason and exits without drawing a menu.
     """
     if not spec:
         return None
-    return uploader.load_uploader(spec, exporter_dir)
-
-
-def _uploader_origin(spec, instance):
-    if instance is None:
-        return ""
-    return uploader.origin_of(spec, instance)
+    return uploader.load_plugin(spec, exporter_dir)
 
 
 class Ctx:
@@ -268,15 +263,13 @@ class Ctx:
             if val:
                 self.cfg[key] = val
 
-        # Who publishes, if anybody. "<path to a .py>:<ClassName>", and the
-        # class implements uploader.WebsiteUploaderInterface. Absent means the
-        # local edition, exactly as an unconfigured install has always
-        # behaved; present and broken stops the tool rather than quietly
-        # becoming the local edition, because a menu that silently stops
-        # publishing looks exactly like a menu that is publishing fine.
-        spec = self.cfg_opt("website_uploader")
-        self.uploader = _loaded_uploader(spec, self.exporter)
-        self.uploader_origin = _uploader_origin(spec, self.uploader)
+        # Who publishes, if anybody. "<path to a .py>:<Builder>:<Uploader>",
+        # one plugin supplying the two acts. Absent means the local edition,
+        # exactly as an unconfigured install has always behaved; present and
+        # broken stops the tool rather than quietly becoming the local edition,
+        # because a menu that silently stops publishing looks exactly like a
+        # menu that is publishing fine.
+        self.plugin = _loaded_plugin(self.cfg_opt("website_uploader"), self.exporter)
 
         # The workspace holding the footage to work on. `root` is the old name
         # and still read, because configs carrying it exist; import_dir wins.
@@ -841,22 +834,16 @@ def rendered_mp4s(out_dir):
 
 
 def _target_status(ctx):
-    """The configured target's own status rows, or none at all.
+    """One row naming what this install publishes, in the plugin's own words.
 
-    Wrapped so a badly-behaved implementation costs the operator a dim line
-    rather than the launch. This is not distrust — it is that a status screen
-    is the wrong place to die, and the answer here decides nothing.
+    The plugin's describe() and nothing else. It used to be an interface method
+    of its own — status_lines() — which was a fourth kind of question that no
+    decision ever read, and which was allowed to go to the network at launch.
+    describe() is already required to be cheap, because the menu draws it.
     """
-    if ctx.uploader is None:
+    if ctx.plugin is None:
         return ()
-    return _asked_for_status(ctx.uploader)
-
-
-def _asked_for_status(target):
-    try:
-        return tuple(target.status_lines())
-    except Exception as e:                    # pragma: no cover - defensive
-        return (C.dim("  %s could not report its status: %s" % (target.name(), e)),)
+    return ("  Publishes    %s" % C.dim(ctx.plugin.uploader.describe()),)
 
 
 def print_status(ctx):
@@ -1146,6 +1133,28 @@ EXCLUDED_FILE = ".excluded.json"
 _EXCLUDED = set()
 
 
+def _excluded_record(ctx):
+    """The whole file: {"stamps": [clip stamps], "ids": [trip ids]}.
+
+    Two facts about one act, so one file. They are read by different readers —
+    the delta import and the card accounting want the stamps, a publisher wants
+    the ids — and writing either half on its own is how the other half gets
+    dropped by a rewrite.
+    """
+    try:
+        return json.loads((ctx.out_dir / EXCLUDED_FILE).read_text())
+    except Exception:
+        return {}
+
+
+def _write_excluded(ctx, record):
+    try:
+        ctx.out_dir.mkdir(parents=True, exist_ok=True)
+        (ctx.out_dir / EXCLUDED_FILE).write_text(json.dumps(record, indent=1))
+    except OSError:
+        pass
+
+
 def excluded_stamps(ctx):
     """The stamps of clips deliberately excluded, refreshed from disk.
 
@@ -1155,25 +1164,42 @@ def excluded_stamps(ctx):
     every later step would be asking the same question again.
     """
     global _EXCLUDED
-    try:
-        d = json.loads((ctx.out_dir / EXCLUDED_FILE).read_text())
-        _EXCLUDED = {str(s) for s in d.get("stamps", [])}
-    except Exception:
-        _EXCLUDED = set()
+    _EXCLUDED = {str(s) for s in _excluded_record(ctx).get("stamps", [])}
     return set(_EXCLUDED)
+
+
+def dropped_trip_ids(ctx):
+    """The trips deleted on purpose, ever, in this workspace.
+
+    Handed to a builder as Workspace.dropped_ids. It outlives the sweep for the
+    same reason the ledger does: a publisher rebuilding an index from the
+    previous one cannot otherwise tell a dropped trip from one that was
+    published and then cleaned up.
+    """
+    return tuple(sorted(str(i) for i in _excluded_record(ctx).get("ids", [])))
+
+
+def _strings(values):
+    return set(map(str, values))
 
 
 def record_excluded_stamps(ctx, stamps):
     """Persist clip stamps whose footage was deliberately dropped."""
     global _EXCLUDED
-    merged = excluded_stamps(ctx) | {str(s) for s in stamps}
-    try:
-        ctx.out_dir.mkdir(parents=True, exist_ok=True)
-        (ctx.out_dir / EXCLUDED_FILE).write_text(
-            json.dumps({"stamps": sorted(merged)}, indent=1))
-    except OSError:
-        pass
+    record = _excluded_record(ctx)
+    merged = _strings(record.get("stamps", ())) | _strings(stamps)
+    record["stamps"] = sorted(merged)
+    _write_excluded(ctx, record)
     _EXCLUDED = merged
+    return merged
+
+
+def record_dropped_trips(ctx, trip_ids):
+    """Persist the trip ids a drop removed, beside their clip stamps."""
+    record = _excluded_record(ctx)
+    merged = _strings(record.get("ids", ())) | _strings(trip_ids)
+    record["ids"] = sorted(merged)
+    _write_excluded(ctx, record)
     return merged
 
 
@@ -1250,12 +1276,19 @@ def import_is_expendable(ctx, root, target):
         want = sum(1 for g in gs if g.get("renderable", True)) if gs else None
         if want is not None and len(mp4s) < want:
             return False, "%d of %d trip(s) rendered" % (len(mp4s), want)
-    unheld = [p.name for p in mp4s
-              if target.holds.about(p.name) not in (menu.Evidence.YES,
-                                                    menu.Evidence.NA)]
-    if unheld:
-        return False, "%d render(s) not confirmed at %s" % (len(unheld), target.name)
+    # One answer about the whole import rather than one per render. It is the
+    # only shape there is now, and it is the right one for an advisory: the
+    # sentence it feeds says "the copy on this machine is the only one", which
+    # is true as soon as ANY of it is unconfirmed.
+    if _not_at_the_destination(target):
+        return False, "not confirmed at %s" % target.name
     return True, ""
+
+
+def _not_at_the_destination(target) -> bool:
+    """NA counts as settled: the local edition has no destination to confirm
+    anything, and this is an advisory rather than a gate."""
+    return target.complete not in (menu.Evidence.YES, menu.Evidence.NA)
 
 
 OWNER_FILE = ".owned-by"
@@ -1347,10 +1380,11 @@ def working_area_is_expendable(ctx, target):
     unlinking it costs the hours it took to encode.
 
     A render is expendable when it is EITHER
-      - held at the configured destination, which is the TARGET's answer and
-        the target's definition of "there" — one arrangement meant an object in
-        the destination at a matching size, and that
-        two-part rule now lives with the arrangement instead of here, OR
+      - covered by the plugin saying every trip of this import is complete at
+        the destination, which is ITS answer and its definition of "there" —
+        one arrangement meant an object in a bucket at a matching size plus a
+        deploy that covered it, and that rule now lives with the arrangement
+        instead of here, OR
       - inside a final_<date> folder, which is where Build Website moves the
         deliverable on an install that does not publish.
     Everything else in the working area — previews/, the caches, the stills —
@@ -1388,20 +1422,22 @@ def working_area_is_expendable(ctx, target):
                     except OSError:
                         pass
 
+    # All or nothing, and in the safe direction: unless the plugin vouched for
+    # the whole import, only a gathered render clears. A render it did not
+    # speak for is kept, which costs disk and never footage.
+    covered = target.complete is menu.Evidence.YES
     stragglers = []
     for f in loose:
         try:
             size = f.stat().st_size
         except OSError:
             continue
-        if (f.name, size) in gathered:
-            continue
-        if target.holds.about(f.name) is menu.Evidence.YES:
+        if (f.name, size) in gathered or covered:
             continue
         stragglers.append(f)
 
     if stragglers:
-        what = ("not held by %s and not gathered" % target.name if target.configured
+        what = ("not confirmed at %s and not gathered" % target.name if target.configured
                 else "neither published nor gathered")
         return False, "%d render(s) %s" % (len(stragglers), what), stragglers
     return True, "%d render(s), all published or gathered" % len(loose), []
@@ -1743,14 +1779,15 @@ def step_progress(ctx, world):
     """Progress: the files on disk and what has been done to them. Read-only.
 
     An observation of state, not a transition in the flow: which trips exist,
-    which are excluded, which are rendered, held and served. It generates
-    nothing and writes nothing.
+    which are excluded, which are rendered. It generates nothing and writes
+    nothing.
 
-    The last two columns are the TARGET's answers, read off the world that was
-    already captured for this dispatch rather than asked again here — a report
-    that goes and looks a second time can disagree with the gates the operator
-    just read, and then two screens of the same session say different things
-    about the same file.
+    The destination gets ONE line under the table rather than two columns in
+    it. There is one answer about the whole import now, and repeating the same
+    word down a column of trips would draw it as a per-trip fact that nobody
+    can act on. It is read off the world already captured for this dispatch
+    rather than asked again here — a report that goes and looks a second time
+    can disagree with the gates the operator just read.
     """
     started = time.time()
     trips = listed_trips(ctx)
@@ -1772,40 +1809,32 @@ def step_progress(ctx, world):
             renders[p.name] = p.stat().st_size
         except OSError:
             continue
-    n_rendered = n_held = n_served = 0
-    print("  %-38s %-9s %-9s %-9s %s"
-          % ("trip", "sidecars", "rendered", "held", "served"))
+    n_rendered = 0
+    print("  %-38s %-9s %s" % ("trip", "sidecars", "rendered"))
     for t in trips:
         mp4 = next((n for n in sorted(renders) if n.startswith(t["id"] + "_h")), None)
-        held = served = menu.Evidence.NA
-        if mp4:
-            n_rendered += 1
-            held = world.target.holds.about(mp4)
-            served = world.target.published.about(mp4)
-            n_held += 1 if held is menu.Evidence.YES else 0
-            n_served += 1 if served is menu.Evidence.YES else 0
-        print("  %-38s %-9s %-9s %-9s %s"
-              % (t["id"], "yes", "yes" if mp4 else "-",
-                 _column(mp4, held), _column(mp4, served)))
+        n_rendered += 1 if mp4 else 0
+        print("  %-38s %-9s %s" % (t["id"], "yes", "yes" if mp4 else "-"))
     print()
-    print("  %d trip(s): %d rendered, %d held, %d served"
-          % (len(trips), n_rendered, n_held, n_served))
+    print("  %d trip(s): %d rendered" % (len(trips), n_rendered))
+    _print_all(_destination_line(world.target))
     if excluded:
         print(C.dim("  %d clip stamp(s) excluded on purpose." % len(excluded)))
     return record(ctx, NAME[PROGRESS], RAN, started,
-                  "%d trip(s), %d rendered, %d served" % (len(trips), n_rendered,
-                                                          n_served))
+                  "%d trip(s), %d rendered, destination %s"
+                  % (len(trips), n_rendered, world.target.complete.value))
 
 
-_COLUMN = {menu.Evidence.YES: "yes", menu.Evidence.NO: "-",
-           menu.Evidence.UNKNOWN: "?", menu.Evidence.NA: "-"}
+def _destination_line(target):
+    """What the destination said about this import, in one line.
 
-
-def _column(mp4, evidence):
-    """A cell in the progress table. No render, no question."""
-    if not mp4:
-        return "-"
-    return _COLUMN[evidence]
+    Nothing at all when there is no destination: a row reading "not
+    applicable" is a question mark where the local edition has no question.
+    """
+    if not target.configured:
+        return ()
+    return ("  %s: these trips complete at the destination — %s"
+            % (target.name, target.complete.value),)
 
 
 def step_generate_meta(ctx):
@@ -2611,24 +2640,20 @@ def _note_trips_published(world, ids):
     """Local deletion is not unpublishing. Say so rather than letting a clean
     local result imply the trip is gone from the world.
 
-    Asked through carries() and not holds(), for the same reason the only-copy
-    warning below it is. holds() means "this exact file, at this exact size,
-    and fully published"; this is the loose question — is there ANYTHING at the
-    destination for this trip that deleting locally will not touch. A trip
-    re-rendered since it was uploaded fails holds() on the size alone, and a
-    machine that has lost its deploy record fails it outright, and in both
-    states the copy at the destination is still there and still being served.
-    Driven off holds() the note went silent in exactly those states, which is
-    the reading that lets an operator believe a drop removed the trip from the
-    world.
+    Fired off the one all-or-nothing answer: the destination has every trip of
+    this import, so it has these. It cannot fire on a partial state any more —
+    with one answer there is no "this trip yes, that one no" to read — and that
+    is the conservative direction: an unsaid note costs the operator a second
+    look at the site, while a wrong one has him believe a copy is safe.
     """
-    up = list(filter(lambda t: _carried_there(world, t), ids))
-    if up:
-        _say_they_stay(world.target.name, len(up))
+    if _all_at_the_destination(world, ids):
+        _say_they_stay(world.target.name, len(ids))
 
 
-def _carried_there(world, trip_id) -> bool:
-    return world.target.carried.about(trip_id) is menu.Evidence.YES
+def _all_at_the_destination(world, ids) -> bool:
+    if not ids:
+        return False
+    return world.target.complete is menu.Evidence.YES
 
 
 def _say_they_stay(where, count):
@@ -2641,14 +2666,13 @@ def _say_they_stay(where, count):
 
 
 class Consulted:
-    """Whether the target was asked about these trips, and what came back.
+    """Whether the destination was asked about these trips, and what came back.
 
     A list-of-one bool used to carry the first half of this. The second half —
-    "asked, and it could not say" — has to be recorded per trip as the answers
-    are read, because it cannot be recovered afterwards: a target that answered
-    fully and a target that answered nothing both leave an Answers object, and
-    the difference between them is the difference between "not published" and
-    "nobody knows", in a delete prompt.
+    "asked, and it could not say" — has to be recorded as the answer is read,
+    because it cannot be recovered afterwards: "not published" and "nobody
+    knows" are different sentences to put in a delete prompt, and a trip with
+    no render name to look for was never asked about at all.
     """
 
     def __init__(self):
@@ -2691,19 +2715,18 @@ def _exists_elsewhere(ctx, world, payload, trip, consulted):
 
 
 def _at_the_destination(world, trip, consulted):
-    """Does the target carry this trip, keyed on its id?
+    """Is this trip at the destination — the loose question, not the strict one.
 
-    Asked through carries() rather than holds(): this trip may have no local
-    render at all — the published-then-cleaned-up case — so there is no Render
-    to key on and no size to compare. Answered through holds() it would read
-    UNKNOWN and the full "ONLY copy of that footage" panel would fire over a
-    trip that is safely published, which is how an operator learns to stop
-    reading warnings.
+    Answered by the import-wide "are these trips complete there", which is
+    keyed on TRIP IDS and so still covers the case this was written for: a trip
+    whose local render is long gone because it was published and cleaned up.
+    Asked about a render name it would read UNKNOWN and the full "ONLY copy of
+    that footage" panel would fire over a trip that is safely published, which
+    is how an operator learns to stop reading warnings.
     """
-    base = trip.get("out_base")
-    if not base:
+    if not trip.get("out_base"):
         return False            # no render name to look for; nothing to ask
-    return consulted.saw(world.target.carried.about(Path(base).name))
+    return consulted.saw(world.target.complete)
 
 
 def _last_copy_banner(world, only_copy, consulted):
@@ -2838,7 +2861,7 @@ def _drop_commit(ctx, picked, by_index, files, render_files, started):
     ctx.last_scan = None
 
     _drop_orphan_sidecars(by_index, picked)
-    _tell_the_target(ctx, by_index, picked, render_files)
+    _record_the_drop(ctx, by_index, picked)
 
     if errors:
         return _outcome(record(ctx, NAME[EXCLUDE], FAILED, started,
@@ -2897,28 +2920,30 @@ def _existing_sidecars(base):
     return [p for p in paths if p.is_file()]
 
 
-def _tell_the_target(ctx, by_index, picked, render_files):
-    """Tell the configured target these trips were dropped ON PURPOSE.
+def _record_the_drop(ctx, by_index, picked):
+    """Write down that these trips went ON PURPOSE.
 
     Deleting the files is NOT enough, and the reason is a fact about every
-    index-rebuilding target rather than about one of them: a rebuild
+    index-rebuilding publisher rather than about one of them: a rebuild
     deliberately carries a previously-published trip forward when its local
     output is gone, because that is what makes "delete local after publish"
     safe. A dropped trip and a cleaned-up published trip look identical to it —
     id in the previous index, nothing on disk — so nothing downstream can tell
-    them apart. Only the moment of dropping knows which this is, so it is said
-    here or never.
+    them apart. Only the moment of dropping knows which this is.
 
-    What the target does with it is its own business, and a target that does
-    not curate implements nothing: dropped() has a no-op default.
+    Recorded rather than announced. It used to be a call into the plugin, which
+    made the exporter run a stranger's code immediately after an irreversible
+    delete, and told only the plugin that happened to be configured at that
+    moment. As a fact in the workspace it survives a restart, reaches a plugin
+    installed next week, and arrives where a builder can act on it: item 6
+    hands it over as Workspace.dropped_ids.
     """
-    if not (render_files and ctx.uploader):
-        return
     ids = _picked_ids(by_index, picked)
     if not ids:
         return
-    print()
-    ctx.uploader.dropped(ids, Console(ctx))
+    record_dropped_trips(ctx, ids)
+    print(C.dim("  Recorded %d trip(s) as dropped on purpose; the next build"
+                " leaves them out of the index." % len(ids)))
 
 
 def _clear_intermediates(ctx):
@@ -4038,14 +4063,16 @@ def clean_workspace_plan(ctx, world):
 
 
 def _print_gate_detail(world):
-    """What the deciding gate actually saw, under the refusal.
+    """How the destination's answer was arrived at, under the refusal.
 
-    The target's own words, carried through Answers.detail. It used to be one
-    script's raw table; an implementation says whatever makes its answer
-    checkable — when it looked, what it found, why it could not.
+    The exporter's own words, not the plugin's: whether it was asked at all,
+    and what it raised if it fell over. An implementation that wants to explain
+    a NO says so on its own output while it is being asked; what must be here
+    is the difference between "the destination said no" and "nobody could ask
+    it", because those two look identical in a one-word answer.
     """
-    for line in (world.target.published.detail + world.target.holds.detail)[-15:]:
-        print(C.dim("        " + line))
+    if world.target.note:
+        print(C.dim("        " + world.target.note))
 
 
 def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
@@ -4544,71 +4571,81 @@ def _resolved(path):
 # refresh mechanism to keep in step with the first.
 # ---------------------------------------------------------------------------
 
-def _target_facts(ctx, scope, renders, trip_ids):
-    """What the target says, or the null answer for the local edition."""
-    if ctx.uploader is None:
+def _target_facts(ctx, scope, trip_ids):
+    """What the plugin says about this import's trips, or NA for the local
+    edition."""
+    if ctx.plugin is None:
         return W.TargetFacts()
-    return _asked(ctx, scope, renders, trip_ids)
+    return _asked(ctx, scope, trip_ids)
 
 
-def _asked(ctx, scope, renders, trip_ids):
-    """Only FULL scope pays for the questions that leave this machine.
+def _asked(ctx, scope, trip_ids):
+    """Only FULL scope pays for the question that leaves this machine.
 
-    The menu is redrawn on every keystroke. At LOCAL scope a configured target
-    reads UNKNOWN everywhere, which every guard already treats as not proven —
-    the same shape the old bucket listing had, for the same reason.
+    The menu is redrawn on every keystroke. At LOCAL scope a configured plugin
+    reads UNKNOWN, which every guard already treats as not proven — the same
+    shape the old bucket listing had, for the same reason.
     """
     if scope is not menu.Scope.FULL:
-        return _not_at_this_scope(ctx, renders)
-    return _answered(ctx, renders, trip_ids)
+        return _facts(ctx, menu.Evidence.UNKNOWN,
+                      "not asked: the menu redraws too often to go and look")
+    return _answered(ctx, trip_ids)
 
 
-def _not_at_this_scope(ctx, renders):
-    why = "not asked: the menu redraws too often to go and look"
-    return W.TargetFacts(
-        configured=True, name=ctx.uploader.name(), origin=ctx.uploader_origin,
-        holds=uploader.Answers.unknown(why),
-        published=uploader.Answers.unknown(why),
-        owed=uploader.Owed.everything(renders, why),
-        carried=uploader.Answers.unknown(why))
+def _facts(ctx, evidence, note=""):
+    return W.TargetFacts(configured=True, name=ctx.plugin.name,
+                         origin=ctx.plugin.origin, complete=evidence, note=note)
 
 
-def _answered(ctx, renders, trip_ids):
+def _answered(ctx, trip_ids):
     """Ask, and let a raising implementation read as unreachable.
 
     An implementation is trusted about what it SAYS; an exception is not a
-    thing it said. Fail closed: UNKNOWN everywhere and everything owed, which
-    is exactly the reading a target that could not be reached produces, and it
-    permits nothing.
+    thing it said. Fail closed: UNKNOWN, which is exactly the reading a
+    destination that could not be reached produces, and it permits nothing.
     """
-    target = ctx.uploader
     try:
-        return W.TargetFacts(
-            configured=True, name=target.name(), origin=ctx.uploader_origin,
-            holds=target.holds(renders), published=target.published(renders),
-            owed=target.owes(renders), carried=target.carries(trip_ids))
+        return _facts(ctx, _an_evidence(ctx.plugin.uploader.is_complete(trip_ids)))
     except Exception as e:
-        return _target_raised(ctx, renders, e)
+        return _facts(ctx, menu.Evidence.UNKNOWN,
+                      "%s raised while being asked: %s" % (ctx.plugin.name, e))
 
 
-def _target_raised(ctx, renders, error):
-    why = "%s raised while being asked: %s" % (ctx.uploader.name(), error)
-    return W.TargetFacts(
-        configured=True, name=ctx.uploader.name(), origin=ctx.uploader_origin,
-        holds=uploader.Answers.unknown(why),
-        published=uploader.Answers.unknown(why),
-        owed=uploader.Owed.everything(renders, why),
-        carried=uploader.Answers.unknown(why))
+def _an_evidence(answer):
+    """Anything that is not an Evidence is not an answer.
 
-
-def _trip_ids(metas):
-    """The trip ids a target is asked about by name, e.g. trip_2026-07-24_16-16_02.
-
-    Read off the sidecars rather than the renders, because the question they
-    answer is about trips whose render may be gone — the published-then-
-    cleaned-up case, which is the whole reason carries() exists.
+    Cheap, and it guards the one value in this tool that can permit an erase: a
+    plugin returning True, "yes" or None would otherwise flow into a guard that
+    compares it against Evidence.YES and gets an arbitrary result.
     """
-    return tuple(sorted(set(map(_trip_id_of, metas))))
+    if isinstance(answer, menu.Evidence):
+        return answer
+    return menu.Evidence.UNKNOWN
+
+
+def _trip_ids_here(metas, root, out_dir):
+    """The trips THIS IMPORT contains, by id, read off the sidecars.
+
+    Off the sidecars rather than the renders, because a trip that was never
+    encoded must be in the list: it is what makes an all-or-nothing answer safe
+    to act on — the destination does not have that trip, says NO, and its
+    footage is not erased. Read off the renders it would be invisible.
+
+    Namespaced to the import under judgement. Sidecars outlive every sweep, so
+    the whole tree would carry months of trips a destination may legitimately
+    no longer serve, and one of those would hold the erase gate shut forever.
+    """
+    if root is None:
+        return ()
+    return tuple(sorted(set(map(_trip_id_of, _metas_under(metas, out_dir / root.name)))))
+
+
+def _metas_under(metas, base):
+    return filter(lambda m: _is_under(m.path, base), metas)
+
+
+def _is_under(path, base):
+    return path is not None and base in path.parents
 
 
 def _trip_id_of(meta):
@@ -4659,10 +4696,11 @@ def capture_world(ctx, scope=menu.Scope.LOCAL):
     root = _chosen_import(ctx, imports)
     metas = _metas_of(ctx)
     renders = _renders_of_tree(ctx.out_dir)
-    # The target is asked BEFORE the expendability check, because that check is
-    # now half local (a render in a final_ folder) and half the target's answer.
-    target = _target_facts(ctx, scope, renders, _trip_ids(metas))
-    return _world_of(ctx, scope, imports, root, metas, renders, target,
+    trip_ids = _trip_ids_here(metas, root, ctx.out_dir)
+    # The plugin is asked BEFORE the expendability check, because that check is
+    # now half local (a render in a final_ folder) and half its answer.
+    target = _target_facts(ctx, scope, trip_ids)
+    return _world_of(ctx, scope, imports, root, metas, renders, trip_ids, target,
                      working_area_is_expendable(ctx, target))
 
 
@@ -4674,10 +4712,11 @@ def _path_of(meta):
     return meta.path
 
 
-def _world_of(ctx, scope, imports, root, metas, renders, target, expendable):
+def _world_of(ctx, scope, imports, root, metas, renders, trip_ids, target,
+              expendable):
     settled, why, stragglers = expendable
     return W.World(
-        at=time.time(), scope=scope, strategy=menu.Strategy.of(ctx.uploader),
+        at=time.time(), scope=scope, strategy=menu.Strategy.of(ctx.plugin),
         offline=ctx.offline,
         # RESOLVED: an implementation may compare this against a symlink of its
         # own, and a symlink resolves to the real path. Comparing /var/...
@@ -4685,6 +4724,7 @@ def _world_of(ctx, scope, imports, root, metas, renders, target, expendable):
         out_dir=_resolved(ctx.out_dir), out_dir_owner=claim_out_dir(ctx),
         imports=imports, selected_import=root, metas=metas,
         renders=renders, renders_here=_renders_here(ctx, root),
+        trip_ids=trip_ids, dropped_ids=dropped_trip_ids(ctx),
         final_folders=_final_folders(ctx), expected_trips=_expected_trips(ctx, root),
         has_track=_has_track(imports), stills_current=_stills_current(ctx),
         local_page=_page_exists(ctx), ledger_mark=last_imported_stamp(ctx),
@@ -4738,11 +4778,24 @@ class Console(uploader.Ui):
         return rc
 
 
+def _handed_over(ctx, world):
+    """The World, reduced to what an act needs to find the material.
+
+    Not the World itself: that carries card facts, ledger marks and the
+    destination's own answers, which an implementation has no business reading
+    and which would couple it to internals that move.
+    """
+    return uploader.Workspace(
+        out_dir=world.out_dir, import_dir=world.selected_import,
+        renders=world.renders, metas=world.metas, trip_ids=world.trip_ids,
+        dropped_ids=world.dropped_ids, offline=world.offline, ui=Console(ctx))
+
+
 class LocalPage:
     """Item 6 under the local edition: write the page, and gather.
 
     Gathering is what makes the local edition's workspace expendable, so the
-    two belong to one job. Under an uploader neither happens here.
+    two belong to one job. Under a plugin neither happens here.
     """
 
     def __init__(self, ctx):
@@ -4752,56 +4805,47 @@ class LocalPage:
         return ("Build the local result page from the renders. Nothing leaves "
                 "this machine.")
 
-    def why_not(self, world):
-        return None
+    def evaluate(self, world):
+        return menu.go()
 
-    def build(self, world):
+    def execute(self, world):
         return _outcome(step_site(self._ctx, gather_into_final))
 
 
 class TargetBuild:
-    """Item 6 with an uploader configured: whatever the target builds.
+    """Item 6 with a plugin configured: whatever its builder builds.
 
     The local page is not written and gather_into_final does not run. Moving
     the render tree would rename every published trip out from under whatever
-    index the target keeps, and the page is the other product's deliverable.
+    index the plugin keeps, and the page is the other product's deliverable.
     """
 
-    def __init__(self, ctx, target):
+    def __init__(self, ctx, act):
         self._ctx = ctx
-        self._target = target
+        self._act = act
 
     def describe(self):
-        return self._target.describe()
+        return self._act.describe()
 
-    def why_not(self, world):
-        return self._target.why_not_build(world)
+    def evaluate(self, world):
+        return self._act.evaluate(_handed_over(self._ctx, world))
 
-    def build(self, world):
-        return _reported(self._ctx, BUILD, self._target.build(world,
-                                                              Console(self._ctx)))
+    def execute(self, world):
+        return _logged(self._ctx, BUILD,
+                       self._act.execute(_handed_over(self._ctx, world)))
 
 
-class TargetPublish:
-    """Item 7 with an uploader configured: one job, however many transports."""
+class TargetPublish(TargetBuild):
+    """Item 7 with a plugin configured: one job, however many transports.
 
-    def __init__(self, ctx, target):
-        self._ctx = ctx
-        self._target = target
+    The same three calls as item 6's collaborator against a different act,
+    which is the whole point of the acts having one shape — the only thing that
+    differs is which step the outcome is logged against.
+    """
 
-    def why_not(self, world):
-        """What is missing from THIS world, in the world's own terms.
-
-        Never how to change the installation. Which product this is and how to
-        turn the other one on is said once at startup and belongs in the
-        README; an item that answered it would be describing the machine it
-        runs in rather than the job it does.
-        """
-        return self._target.why_not_upload(world)
-
-    def run(self, world):
-        return _reported(self._ctx, UPLOAD, self._target.upload(world,
-                                                                Console(self._ctx)))
+    def execute(self, world):
+        return _logged(self._ctx, UPLOAD,
+                       self._act.execute(_handed_over(self._ctx, world)))
 
 
 class NoPublisher:
@@ -4812,22 +4856,44 @@ class NoPublisher:
     anyone writes about "item 5" true only locally.
     """
 
-    def why_not(self, world):
-        return "not part of this edition"
+    def describe(self):
+        return "Put what was built online. Not part of this edition."
 
-    def run(self, world):        # pragma: no cover - unreachable by two rules
+    def evaluate(self, world):
+        """What is missing from THIS installation, never how to change it.
+
+        Which product this is and how to turn the other one on is said once at
+        startup and belongs in the README; an item that answered it would be
+        describing the machine it runs in rather than the job it does.
+        """
+        return menu.blocked("not part of this edition")
+
+    def execute(self, world):    # pragma: no cover - unreachable by two rules
         return menu.stopped("publishing is not configured")
 
 
-def _reported(ctx, number, report):
-    """An implementation's Report becomes this session's logged step.
+def _logged(ctx, number, outcome):
+    """An act's Outcome, written into this session's log on the way past.
 
-    The log is the exporter's, not the target's: a StepResult carries a
+    The log is the exporter's, not the plugin's: a StepResult carries a
     duration and a status the summary and the crash log read, and an
-    implementation must not have to construct one. `ok` is all the menu reads.
+    implementation must not have to construct one. The Outcome itself goes
+    back to the item untouched — it is the act's answer, not this module's.
     """
-    status = RAN if report.ok else FAILED
-    return _outcome(record(ctx, NAME[number], status, time.time(), report.note))
+    record(ctx, NAME[number], _status_of(outcome), time.time(), outcome.note)
+    return outcome
+
+
+def _status_of(outcome):
+    if not outcome.completed:
+        return FAILED
+    return _did_or_settled(outcome)
+
+
+def _did_or_settled(outcome):
+    if outcome.performed:
+        return RAN
+    return SATISFIED
 
 
 class Work:
@@ -4862,12 +4928,12 @@ class Work:
         what fixes that, and it is why there is no gatherer() any more.
         """
         if strategy is menu.Strategy.UPLOADER:
-            return TargetBuild(self.ctx, self.ctx.uploader)
+            return TargetBuild(self.ctx, self.ctx.plugin.builder)
         return LocalPage(self.ctx)
 
     def publisher(self, strategy):
         if strategy is menu.Strategy.UPLOADER:
-            return TargetPublish(self.ctx, self.ctx.uploader)
+            return TargetPublish(self.ctx, self.ctx.plugin.uploader)
         return NoPublisher()
 
     # -- the destructive plans ---------------------------------------------
@@ -5315,7 +5381,7 @@ def build_runner(ctx, classes=None):
     for it. `classes` lets a test drive the whole loop with mocks instead of
     the real ten.
     """
-    strategy = menu.Strategy.of(ctx.uploader)
+    strategy = menu.Strategy.of(ctx.plugin)
     menu_items = menu.build_menu(strategy, Work(ctx), classes)
     position = menu.position_for(menu_items)
     position.orient(capture_world(ctx, menu.Scope.LOCAL), items.COLD_START_RULES)
@@ -5348,7 +5414,7 @@ def _edition_line(ctx):
     job, and the shape of the machine around it is the session's to state.
     """
     return C.dim("  %s edition — README.md has the step graph and what each"
-                 " edition does." % menu.Strategy.of(ctx.uploader).value)
+                 " edition does." % menu.Strategy.of(ctx.plugin).value)
 
 
 def _chain(ctx):
@@ -5359,9 +5425,9 @@ def _chain(ctx):
 
     The configured half is named by whoever publishes, because the exporter no
     longer knows where anything goes."""
-    if ctx.uploader is None:
+    if ctx.plugin is None:
         return "card -> render -> local page"
-    return "card -> render -> %s" % ctx.uploader.name()
+    return "card -> render -> %s" % ctx.plugin.name
 
 
 def _exit_code(ctx):

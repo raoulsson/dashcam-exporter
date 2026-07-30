@@ -16,8 +16,9 @@ menu.disagreements diffs the two.
 
 from __future__ import annotations
 
-from menu import (Anywhere, Destructive, Edges, MenuItem, Plan, Scope, StartNode,
-                  StepBack, Strategy, Verdict, blocked, go, satisfied,
+from menu import (Anywhere, Destructive, Edges, Evidence, MenuItem, Plan, Ruling,
+                  Scope, StartNode, StepBack, Strategy, Verdict, blocked, go,
+                  satisfied,
                   PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER,
                   BUILD, UPLOAD, CLEAN_WS, ERASE_CARD)
 import guards
@@ -52,6 +53,22 @@ def _nothing_rendered(world):
     if world.renders:
         return None
     return "no renders on disk to publish"
+
+
+def _nothing_left_to_do(world) -> Verdict:
+    """Is there anything for the upload to do, off the frozen answer.
+
+    Asked of the world rather than of the uploader, because the uploader's
+    evaluate() is asked forty times a session and this question goes to the
+    destination. capture_world asks it once per dispatch, at FULL scope, and
+    freezes what came back; at a menu draw it reads UNKNOWN, which is not YES,
+    so the offer stands. That is the same rule the old owes() carried — a
+    failed listing proves nothing, so everything stays outstanding and the
+    UPLOAD is what discovers the destination is down.
+    """
+    if world.target.complete is Evidence.YES:
+        return satisfied("%s has everything" % world.target.name)
+    return go()
 
 
 def _no_import(world, reason: str):
@@ -333,17 +350,20 @@ class BuildWebsite(MenuItem):
         return self._builder.describe()
 
     def evaluate(self, world) -> Verdict:
-        """The exporter's own question first, then the target's.
+        """The exporter's own question first, then the builder's own verdict.
 
-        The renders check never leaves home and can block on its own: a target
-        that answers yes to everything still cannot get a page built out of an
-        empty tree.
+        The renders check never leaves home and can block on its own: a builder
+        that says yes to everything still cannot get a page built out of an
+        empty tree. Past that the answer is the builder's, verbatim — including
+        SATISFIED, which is how an act that has nothing left to do says so.
         """
-        return _first_block(guards.nothing_to_build_from(world),
-                            self._builder.why_not(world))
+        stop = guards.nothing_to_build_from(world)
+        if stop:
+            return blocked(stop)
+        return self._builder.evaluate(world)
 
     def _perform(self, world):
-        return self._builder.build(world)
+        return self._builder.execute(world)
 
 
 # ---------------------------------------------------------------------------
@@ -383,35 +403,42 @@ class UploadWebsite(MenuItem):
         super().__init__(strategy, work, inbound)
         self._publish = work.publisher(strategy)
 
-    def evaluate(self, world) -> Verdict:
-        """Configuration first, then evidence, then "is there anything left".
+    def description(self) -> str:
+        """What THIS installation's upload does, asked of the thing that does it.
 
-        The sidecar check is the one guard that came across from the folded-in
-        deploy step and it is evidence, not order: publishing is putting the
-        trips' metadata online, and with no sidecar anywhere the deploy pushes
-        an index describing no drives.
+        The same rule as item 6's row: the entry answers for its own job rather
+        than restating how the tool is installed.
         """
-        stop = _reason(self._publish.why_not(world), _nothing_rendered(world),
-                       guards.no_sidecars_at_all(world))
+        return self._publish.describe()
+
+    def evaluate(self, world) -> Verdict:
+        """The exporter's own evidence first, then the uploader, then the
+        frozen answer about the destination.
+
+        Both local checks are evidence, not order: something rendered to send,
+        and a sidecar somewhere to describe it. The sidecar one came across
+        from the folded-in deploy step — publishing is putting the trips'
+        metadata online, and with no sidecar anywhere the deploy pushes an
+        index describing no drives.
+        """
+        stop = _reason(_nothing_rendered(world), guards.no_sidecars_at_all(world))
         if stop:
             return blocked(stop)
-        return self._outstanding(world)
+        return self._still_owed(world)
 
-    def _outstanding(self, world) -> Verdict:
-        """Would this do anything, asked of the target.
+    def _still_owed(self, world) -> Verdict:
+        """The uploader's own word stands unless it says GO.
 
-        A target that could not be reached answers "everything is owed", so
-        the offer stands and the UPLOAD is what discovers it is down. That is
-        the same rule as before — a failed listing proved nothing and left
-        everything outstanding — stated once on the interface instead of at
-        each call site.
+        It is asked on every menu draw, so it may not go and look; what it can
+        answer is whether anything about THIS installation is in the way.
         """
-        if world.target.owed.any:
-            return go()
-        return satisfied("%s has everything" % world.target.name)
+        verdict = self._publish.evaluate(world)
+        if verdict.ruling is not Ruling.GO:
+            return verdict
+        return _nothing_left_to_do(world)
 
     def _perform(self, world):
-        return self._publish.run(world)
+        return self._publish.execute(world)
 
 
 # ---------------------------------------------------------------------------
@@ -452,12 +479,12 @@ class CleanWorkspace(Destructive):
     def evaluate(self, world) -> Verdict:
         """The cheap half only.
 
-        The three heavy gates — rendered locally, held at the destination,
-        published at the destination — are plan.guard, asked against a world
-        captured at dispatch and again after the word is typed. The last two go
-        to whatever was configured to publish, and asking that forty times a
-        session makes the menu slow; a menu that is not instant stops being
-        recomputed and starts being remembered.
+        The heavy gates — rendered locally, and complete at the destination —
+        are plan.guard, asked against a world captured at dispatch and again
+        after the word is typed. The second goes to whatever was configured to
+        publish, and asking that forty times a session makes the menu slow; a
+        menu that is not instant stops being recomputed and starts being
+        remembered.
         """
         return _first_block(
             _no_import(world, "nothing imported — nothing to clean up"),

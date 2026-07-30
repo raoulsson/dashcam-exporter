@@ -61,7 +61,7 @@ class Bench:
         c.render_root = self.root / "import"
         c.import_root = self.root / "import"
         c.card = self.root / "card"
-        c.uploader = None
+        c.plugin = None
         c.offline = False
         c.selected_import = None
         c.last_scan = None
@@ -105,25 +105,37 @@ class Bench:
         return self
 
     def publishes(self):
-        """A configured publishing target — which is what decides the edition.
+        """A configured publishing plugin — which is what decides the edition.
 
         The shipped example, loaded the way a real install loads one, rather
         than a stub: these tests are about the wiring between the menu and
         whatever was configured, and a stub lets that wiring drift from the
-        one implementation anybody reads. It is a folder, so "already
-        published" is a real file a test can put there.
+        one implementation anybody reads. Its destination is a directory, so
+        "already published" is a real file a test can put there.
         """
         self.published_dir = self.root / "published"
-        os.environ["DASHCAM_FOLDER_TARGET"] = str(self.published_dir)
-        spec = "%s:FolderTarget" % (REPO / "examples" / "uploader_folder.py")
-        self.ctx.uploader = U.load_uploader(spec, REPO)
-        self.ctx.uploader_origin = U.origin_of(spec, self.ctx.uploader)
+        os.environ["DASHCAM_LOCAL_SITE_STAGING"] = str(self.root / "staging")
+        os.environ["DASHCAM_LOCAL_SITE_DEST"] = str(self.published_dir)
+        spec = ("%s:LocalWebSiteBuilderPlugin:LocalWebSiteUploader"
+                % (REPO / "examples" / "local_website.py"))
+        self.ctx.plugin = U.load_plugin(spec, REPO)
+        return self
+
+    def built(self):
+        """As if item 6 had run: the plugin has staged a site of its own.
+
+        Written through the plugin rather than by hand, because where it stages
+        and what it stages are its business — the bench only knows that the
+        build ran.
+        """
+        world = P.capture_world(self.ctx, M.Scope.LOCAL)
+        self.ctx.plugin.builder.execute(P._handed_over(self.ctx, world))
         return self
 
     def already_there(self, trip="trip_2026-07-28_08-57_01", size=1024):
-        """This render is at the destination already, byte for byte."""
+        """This trip is at the destination already: its page is there."""
         self.published_dir.mkdir(parents=True, exist_ok=True)
-        (self.published_dir / (trip + "_h1080.mp4")).write_bytes(b"x" * size)
+        (self.published_dir / (trip + ".html")).write_text("<html/>")
         return self
 
     def verdicts(self, scope=None):
@@ -134,7 +146,7 @@ class Bench:
         and looks.
         """
         world = P.capture_world(self.ctx, scope or M.Scope.FULL)
-        menu_items = M.build_menu(M.Strategy.of(self.ctx.uploader), P.Work(self.ctx))
+        menu_items = M.build_menu(M.Strategy.of(self.ctx.plugin), P.Work(self.ctx))
         return {n: item.evaluate(world) for n, item in menu_items.items()}
 
     def blocked(self):
@@ -191,7 +203,7 @@ class TestAvailability(SpecTest):
         cannot do that, and Clean Workspace's outbound of {1} means it can never
         even precede the other.
         """
-        built = M.build_menu(M.Strategy.of(self.b.ctx.uploader), P.Work(self.b.ctx))
+        built = M.build_menu(M.Strategy.of(self.b.ctx.plugin), P.Work(self.b.ctx))
         self.assertNotIn(ERASE_CARD,
                          built[CLEAN_WS].outbound().offers(frozenset(built)))
 
@@ -200,8 +212,21 @@ class TestAvailability(SpecTest):
         self.b.publishes().imported().sidecars()
         self.assertBlocked(UPLOAD, "no renders exist, upload must be unavailable")
 
-    def test_can_upload_once_rendered(self):
+    def test_can_upload_once_the_site_has_been_built(self):
+        """RESTATED: this used to say "once rendered", and it passed because
+        the old shipped example published the render files themselves and so
+        had nothing of its own to be missing.
+
+        The graph has always been 6 then 7 — item 7 puts the BUILT site online
+        — and the example now has a build step with an artefact, so "nothing
+        staged yet" is a real answer about the destination's material rather
+        than about ordering. The exporter still answers its own two questions
+        (something rendered, a sidecar somewhere) before asking the plugin at
+        all, and those are what the two tests around this one pin.
+        """
         self.b.publishes().imported().sidecars().render()
+        self.assertBlocked(UPLOAD, "nothing has been built to upload yet")
+        self.b.built()
         self.assertAvailable(UPLOAD)
 
     def test_publishing_is_no_longer_reachable_before_a_render(self):
@@ -214,7 +239,7 @@ class TestAvailability(SpecTest):
         why this is asserted on the edges and not on a verdict.
         """
         self.b.imported().sidecars().publishes()
-        built = M.build_menu(M.Strategy.of(self.b.ctx.uploader), P.Work(self.b.ctx))
+        built = M.build_menu(M.Strategy.of(self.b.ctx.plugin), P.Work(self.b.ctx))
         self.assertNotIn(UPLOAD, built[META].outbound().offers(frozenset(built)))
         self.assertEqual(set(built[UPLOAD].inbound().edges()), {BUILD, UPLOAD})
 
@@ -308,14 +333,22 @@ class TestInterruptions(SpecTest):
         self.assertFalse((d / "trip_2026-07-28_08-57_01_h1080.mp4.part").exists())
         self.assertFalse(any(inter.iterdir()), "scratch frames must be cleared")
 
-    def test_an_interrupted_upload_resumes_rather_than_restarts(self):
-        """Uploads can be interrupted, stopped, cancelled, resumed."""
+    def test_an_interrupted_upload_is_offered_again_rather_than_reported_done(self):
+        """Uploads can be interrupted, stopped, cancelled, resumed.
+
+        RESTATED: this used to read the set of owed render names off the world,
+        and owes() is gone with the per-name map it filled. What decides
+        whether item 7 has anything left to do is now one answer — is every
+        trip of this import at the destination — and half-landed must not read
+        as done. What a re-run then re-sends is the plugin's own business, and
+        the shipped example only sends what is missing.
+        """
         self.b.publishes().imported().sidecars()
         self.b.render("trip_A", size=100).render("trip_B", size=100)
         self.b.already_there("trip_A", size=100)          # A landed, B did not
         world = P.capture_world(self.b.ctx, M.Scope.FULL)
-        self.assertEqual(sorted(world.target.owed.names), ["trip_B_h1080.mp4"],
-                         "an interrupted upload resumes with what is missing")
+        self.assertIs(world.target.complete, M.Evidence.NO,
+                      "a half-landed upload must not read as complete")
 
 
 # ---------------------------------------------------------------------------

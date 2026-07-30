@@ -75,13 +75,13 @@ def card_is_expendable(world) -> Verdict:
 
 
 # ---------------------------------------------------------------------------
-# The workspace — item 8, Clean Workspace. Three gates and one sentence.
+# The workspace — item 8, Clean Workspace. Two gates and one sentence.
 # ---------------------------------------------------------------------------
 
 def rendered_locally(world) -> Evidence:
     """Did every renderable trip in this import actually get encoded?
 
-    The hard floor: never NA, which is what makes the unanimity rule total.
+    The hard floor: never NA, which is what keeps the rule below it total.
     UNKNOWN means the grouping could not be read, which is not the same as
     "the count is fine".
     """
@@ -100,44 +100,42 @@ def _at_least(have: int, want: int) -> Evidence:
     return Evidence.YES if have >= want else Evidence.NO
 
 
-def held_at_the_destination(world) -> Evidence:
-    """Is this exact render there, at this size — whatever "there" is.
+def complete_at_the_destination(world) -> Evidence:
+    """Is EVERY trip of this import at the destination — held and served.
 
-    The target's answer, frozen at capture. It used to be a bucket listing
-    read here; which destination it is and how it was asked is the
-    implementation's business, and the reading it produces is the guard's.
+    The plugin's answer, frozen at capture. It used to be two questions asked
+    per render (is the file there, is it being served) and folded together
+    here; which destination it is, how it was asked and what "complete" means
+    there is the implementation's business, and the one reading it produces is
+    the guard's.
+
+    All or nothing on purpose. This erases the WHOLE working area, so "which
+    trips are there" is a finer answer than anything acts on — and asking about
+    TRIPS rather than renders is what lets a trip that produced no render at
+    all be covered by the question.
     """
-    return world.target.holds.covers(world.renders_here)
-
-
-def published_at_the_destination(world) -> Evidence:
-    """Is the render actually being SERVED, not merely stored."""
-    return world.target.published.covers(world.renders_here)
+    return world.target.complete
 
 
 WORKSPACE_GATES = (("rendered locally", rendered_locally),
-                   ("held at the destination", held_at_the_destination),
-                   ("published at the destination", published_at_the_destination))
-
-WORKSPACE_GUARDS = tuple(fn for _label, fn in WORKSPACE_GATES)
+                   ("complete at the destination", complete_at_the_destination))
 
 
 def nothing_was_rendered_here(world) -> Optional[Verdict]:
     """The floor under the whole rule: not ONE mp4 from this import exists.
 
-    A target answers about the trips it knows, and the local metas under <out>
-    outlive every sweep — so on a machine that published last month it answers
-    a confident yes about last month's trips while THIS import has not been
-    encoded at all. Letting it decide alone in that state erases footage that
-    exists in no render and at no destination, and the gate table on screen
-    says "rendered locally .... no" one line above the CLEAN prompt.
+    Zero renders is the absence of the thing every later gate reasons about,
+    and it is the state where a destination's YES is most likely to be about
+    something else: sidecars under <out> outlive every sweep, so a machine that
+    published last month can be asked about trips it published then while THIS
+    import has not been encoded at all.
 
-    So this is asked BEFORE the target, and no answer overrides it — including
-    an implementation that answers yes to everything, which is why this
-    question is never delegated. Short or unreadable render counts still defer
-    to the target, which is the case the deferral was written for: a trip
-    dropped after grouping, a size that moved under a re-encode. Zero is not
-    that case; it is the absence of the thing every later gate reasons about.
+    So this is asked BEFORE the destination, and no answer overrides it —
+    including an implementation that answers YES to everything, which is
+    requirement A of the trust model and the reason this question is never
+    delegated. The gate table on screen says "rendered locally .... no" one
+    line above the CLEAN prompt, and a gate the operator can read must be a
+    gate.
     """
     if world.renders_here:
         return None
@@ -146,24 +144,20 @@ def nothing_was_rendered_here(world) -> Optional[Verdict]:
 
 
 def workspace_is_expendable(world) -> Verdict:
-    """Nothing rendered refuses outright; otherwise the "is it served" answer
-    decides when it can be given at all, and failing that every check that can
-    answer must say yes.
+    """The floors first, and then the destination's answer decides.
 
-    The first gate never leaves this machine, and that is the point: an
-    implementation that answers yes to everything still cannot talk this into
-    erasing an import that produced no renders, because the exporter does not
-    delegate a question it already knows the answer to.
+    The floors never leave this machine, and that is the point: an
+    implementation that answers YES to everything still cannot talk this into
+    erasing an import that produced no renders, or one whose local render count
+    is short, because the exporter does not delegate a question it can already
+    answer.
 
-    Deliberately NOT "the last applicable check wins". That reading approves
-    the wipe when the local render count is short or unreadable, the target
-    cannot say whether anything is served, and the renders that DO exist are
-    at the destination — and the trips that were never encoded exist in no
-    render, at no destination, nowhere. Their footage would go.
-    tests/test_guards.py enumerates all 48 combinations of the three gates
-    against the branches this replaces.
+    Below them there is one question left and one answer to it. NA — no plugin
+    configured, or one that genuinely cannot speak about a destination — drops
+    that gate rather than passing it, and the erase then rests on the local
+    render count alone, which unproven_lines says out loud.
     """
-    return _floor_refusal(world) or _decided_by_the_gates(world)
+    return _floor_refusal(world) or _decided_by_the_destination(world)
 
 
 def _floor_refusal(world) -> Optional[Verdict]:
@@ -174,20 +168,20 @@ def _floor_refusal(world) -> Optional[Verdict]:
 def _local_count_unproven(world) -> Optional[Verdict]:
     """A short or unreadable local render count is a floor too, not one vote.
 
-    The target is asked published(renders) and holds(renders) -- about renders
-    that EXIST. A trip that was never encoded produced no render, so no answer
-    from any destination is about it, and its footage lives only in the import
-    this step erases. Deferring a short count to the target therefore asks a
-    question that cannot reach the trips at risk.
+    The destination is now asked about TRIP IDS, including trips that produced
+    no render, so its answer does reach the trips a short count leaves at risk
+    — an honest implementation says NO about a trip it never received. This
+    floor costs nothing in that case and is not there for it.
 
-    It used to reach them: the arrangement that answered before this became an
-    interface walked every local TRIP and said no on a short count. Asked per
-    render, a target cannot, and carries() -- which could -- is not wired into
-    this gate. Until it is, short and unreadable both refuse here.
+    It is there for the case no answer from any destination can catch: the trip
+    LIST itself being incomplete. The ids are read off the sidecars, so a trip
+    whose sidecar was never written is in nobody's question, and an unreadable
+    grouping means the count cannot be compared against anything at all. Both
+    are states where the destination can answer YES truthfully while footage
+    exists only in the import this step erases.
 
-    The cost is a refusal when the grouping is not cached this session, because
-    then the count cannot be compared against anything. That is a step to
-    re-run, not footage to lose.
+    The cost is a refusal when the grouping is not cached this session. That is
+    a step to re-run, not footage to lose.
     """
     reading = rendered_locally(world)
     if reading is Evidence.YES:
@@ -198,24 +192,17 @@ def _local_count_unproven(world) -> Optional[Verdict]:
 _FLOORS = (nothing_was_rendered_here, _local_count_unproven)
 
 
-def _decided_by_the_gates(world) -> Verdict:
-    if world.target.published.applicable:
-        return _verdict_of(WORKSPACE_GATES[2][0], published_at_the_destination(world))
-    return _unanimous(world)
+def _decided_by_the_destination(world) -> Verdict:
+    """NA drops this gate; anything else has to be a YES.
 
-
-def _applicable(reading) -> bool:
-    return reading[1].applicable
-
-
-def _not_yes(reading) -> bool:
-    return reading[1] is not Evidence.YES
-
-
-def _unanimous(world) -> Verdict:
-    can_answer = filter(_applicable, gate_readings(world))
-    label, evidence = next(filter(_not_yes, can_answer), ("every check", Evidence.YES))
-    return _verdict_of(label, evidence)
+    A dropped gate is not a passed one — it is a gate that was never asked, and
+    what is left standing is said out loud by unproven_lines rather than passed
+    over in silence.
+    """
+    reading = complete_at_the_destination(world)
+    if reading is Evidence.NA:
+        return go()
+    return _verdict_of(WORKSPACE_GATES[1][0], reading)
 
 
 def _verdict_of(label: str, e: Evidence) -> Verdict:
@@ -230,25 +217,18 @@ def gate_readings(world) -> Tuple[Tuple[str, Evidence], ...]:
 
 
 def destination_proof(world) -> str:
-    """Which of the target's answers a go rests on, or "" when neither applies.
+    """The answer a go rests on, or "" when the destination gave none.
 
-    The two destination gates are not interchangeable and the erase does not
-    always rest on the same one: with a serving answer available that one
-    decides, and without it the hold answer has to be yes for the unanimity
-    rule to pass. A target with no notion of serving — the shipped folder
-    example is one, and an archive disk is the general case — is therefore
-    erased against on its HOLD answer, and saying "published" over that names
-    an answer it never gave.
-
-    Read in the order the decision is made, so the label is the gate that
-    actually decided rather than the first one that could have.
+    Named rather than assumed, because the banner above the CLEAN prompt says
+    which answer the erase is proceeding on and a plugin that declined the
+    question never gave one. Attribution to an answer that was not given is
+    worse than none: it is the last sentence before the footage goes, and a
+    reader checking it afterwards is checking a sentence the plugin can
+    truthfully deny.
     """
-    answered = filter(_applicable, reversed(gate_readings(world)[1:]))
-    return next(map(_label_of, answered), "")
-
-
-def _label_of(reading) -> str:
-    return reading[0]
+    if complete_at_the_destination(world).applicable:
+        return WORKSPACE_GATES[1][0]
+    return ""
 
 
 def unproven_lines(world) -> Tuple[str, ...]:
@@ -261,8 +241,8 @@ def unproven_lines(world) -> Tuple[str, ...]:
     Two conditions, not the two this used to have. "No bucket" and "no site
     repo" were one operator's two settings for one condition and collapsed
     correctly. What did NOT exist before the interface is the second condition
-    below: a target that IS configured and answers "not applicable" to both
-    destination questions. It leaves exactly the same hole as having no target
+    below: a plugin that IS configured and answers "not applicable" to whether
+    the trips are complete. It leaves exactly the same hole as having no plugin
     at all — nothing off this machine was checked — and it used to say nothing,
     which is the one state where silence reads as proof.
     """
@@ -277,9 +257,9 @@ def _no_target_line(world) -> str:
 
 
 def _declined_line(world) -> str:
-    """A configured target that answered NA to both destination questions.
+    """A configured plugin that answered NA to the destination question.
 
-    Not a complaint about the target: declining a question it genuinely cannot
+    Not a complaint about the plugin: declining a question it genuinely cannot
     answer is what NA is for, and whoever configured it owns that. It is a
     statement about what this erase then rests on, which is the local render
     count and nothing else.
@@ -292,8 +272,8 @@ def _declined_line(world) -> str:
 def _declined_by(target) -> str:
     if not target.configured:
         return ""               # already said, by _no_target_line
-    return ("%s answered 'not applicable' to both destination questions, so no"
-            " copy off this machine was checked" % target.name)
+    return ("%s answered 'not applicable' to whether these trips are at the"
+            " destination, so no copy off this machine was checked" % target.name)
 
 
 # ---------------------------------------------------------------------------
