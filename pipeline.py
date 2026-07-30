@@ -846,6 +846,74 @@ def _target_status(ctx):
     return ("  Publishes    %s" % C.dim(ctx.plugin.uploader.describe()),)
 
 
+def _edition_rows(ctx):
+    """Which edition this is, and under the uploader one, what is registered.
+
+    The two editions have different deliverables, so they report different
+    rows. A "Local site: not built" line on an install that publishes is not
+    status — item 6 does not write that page here and never will, so the row
+    is a permanent complaint about a file nobody wants.
+
+    What matters instead is the thing that WOULD be hard to find out: that a
+    plugin is registered at all, which classes, and from which file. Reading it
+    off the spec rather than off a name the implementation supplies means it
+    cannot drift, and it answers "where is this coming from" without going and
+    grepping the config.
+    """
+    if ctx.plugin is None:
+        return _local_site_rows(ctx)
+    return _plugin_rows(ctx.plugin)
+
+
+def _plugin_rows(plugin):
+    return ("  Edition      %s  %s" % (C.bold("uploader"),
+                                       C.dim("publishing is the plugin's")),
+            "  Registered   %s" % C.bold("%s + %s"
+                                         % (type(plugin.builder).__name__,
+                                            type(plugin.uploader).__name__)),
+            "               %s" % C.dim(tilde(Path(plugin.spec.split(":")[0]))))
+
+
+def _local_site_rows(ctx):
+    """The local edition's deliverable, which is a file on this machine."""
+    return ("  Edition      %s  %s" % (C.bold("local page"),
+                                       C.dim("no website_uploader configured")),
+            "  Local site   %s" % _built_or_not(_result_page(ctx)))
+
+
+def _result_page(ctx):
+    """Where the page is, which is inside the newest final_ folder once one
+    exists and beside the renders until then."""
+    gathered = _gathered_page(getattr(ctx, "final_root", ctx.out_dir))
+    return gathered or (ctx.out_dir / RESULT_FILE)
+
+
+def _gathered_page(froot):
+    finals = _final_dirs(froot)
+    if not finals:
+        return None
+    return finals[-1] / RESULT_FILE
+
+
+def _final_dirs(froot):
+    if not froot.is_dir():
+        return []
+    return sorted(froot.glob(FINAL_PREFIX + "*"))
+
+
+def _built_or_not(page):
+    if not page.is_file():
+        return "%s  %s" % (C.yellow("not built"), C.dim(tilde(page)))
+    return "%s  %s" % (C.bold(tilde(page)), C.dim(_age_phrase(page)))
+
+
+def _age_phrase(page):
+    age = human_age(time.time() - page.stat().st_mtime)
+    if age == "just now":
+        return "built just now"
+    return "built %s ago" % age
+
+
 def print_status(ctx):
     print()
     print(rule("status"))
@@ -882,18 +950,7 @@ def print_status(ctx):
         C.bold("%d mp4" % len(mp4s)) if mp4s else C.yellow("none"),
         C.dim("%s in %s" % (human_bytes(size), tilde(ctx.out_dir)))))
 
-    # Local site — always meaningful, because Site needs nothing but this machine.
-    # The page lives in the newest final_* folder once one exists.
-    froot = getattr(ctx, "final_root", ctx.out_dir)
-    finals = sorted(froot.glob(FINAL_PREFIX + "*")) if froot.is_dir() else []
-    site_index = (finals[-1] / RESULT_FILE) if finals else (ctx.out_dir / RESULT_FILE)
-    if site_index.is_file():
-        age = human_age(time.time() - site_index.stat().st_mtime)
-        print("  Local site   %s  %s" % (
-            C.bold(tilde(site_index)),
-            C.dim("built %s" % age if age == "just now" else "built %s ago" % age)))
-    else:
-        print("  Local site   %s  %s" % (C.yellow("not built"), C.dim(tilde(site_index))))
+    _print_all(_edition_rows(ctx))
 
     # The publishing half, in the target's own words. Which rows those are, and
     # whether asking for them touches the network, is the implementation's
