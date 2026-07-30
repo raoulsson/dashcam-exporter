@@ -866,8 +866,9 @@ def _edition_rows(ctx):
 
 
 def _plugin_rows(plugin):
-    return ("  Edition      %s  %s" % (C.bold("uploader"),
-                                       C.dim("publishing is the plugin's")),
+    return ("  Edition      %s  %s"
+            % (C.bold("uploader"),
+               C.dim("User plugin handles build and upload of website")),
             "  Registered   %s" % C.bold("%s + %s"
                                          % (type(plugin.builder).__name__,
                                             type(plugin.uploader).__name__)),
