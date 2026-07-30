@@ -5433,7 +5433,9 @@ class Runner:
         print(C.bold("== %d) %s" % (number, item.name())))
         print(C.dim("     " + item.description()))
         hint_reset()
+        started, already = time.time(), len(self.ctx.results)
         outcome = self._execute(item)
+        _stamp_elapsed(self.ctx.results[already:], time.time() - started)
         _print_all(_nothing_to_do_lines(outcome))
         self.position.advance(item)
         _print_all(_stayed_lines(item, outcome, self.menu, self.position))
@@ -5495,6 +5497,22 @@ def _nothing_to_do_lines(outcome):
     if outcome.performed or not outcome.completed:
         return []
     return [C.green("  Nothing to do: %s." % (outcome.note or "already done"))]
+
+
+def _stamp_elapsed(results, seconds):
+    """How long the operator waited, from the menu's side of the call.
+
+    Each step body used to time itself from its own first line, which left out
+    everything the operator sat through but the body did not do -- above all
+    the world capture, which at FULL scope now shells out over ssh and lists a
+    bucket. The menu knows when it dispatched and when it got control back,
+    and that is the number he is actually asking about.
+
+    One dispatch is normally one result; a body that logs more than one gets
+    the same elapsed on each, because they are one wait.
+    """
+    for result in results:
+        result.seconds = seconds
 
 
 def _stayed_lines(item, outcome, menu_items, position):

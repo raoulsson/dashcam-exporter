@@ -185,6 +185,64 @@ def drive(menu_items, position, keys):
 
 
 # ---------------------------------------------------------------------------
+# How long it took, measured where the operator waited
+# ---------------------------------------------------------------------------
+
+class TheClockRunsFromTheMenusSideOfTheCall(unittest.TestCase):
+    """Each body used to time itself from its own first line.
+
+    That leaves out everything the operator sat through which the body did not
+    do — above all the world capture, which at FULL scope shells out over ssh
+    and lists a bucket before the body is even entered. The menu knows when it
+    dispatched and when it got control back, and that is the number being
+    asked for.
+    """
+
+    def _dispatch(self, body):
+        ctx = mock.Mock()
+        ctx.results = []
+        item = fake_item(UPLOAD)
+        item.execute.side_effect = lambda world: body(ctx)
+        position = mock.Mock()
+        position.current = UPLOAD
+        runner = P.Runner.__new__(P.Runner)
+        runner.ctx, runner.menu, runner.position = ctx, {UPLOAD: item}, position
+        with mock.patch.object(P, "capture_world", lambda c, s=None: object()), \
+                redirect_stdout(io.StringIO()):
+            runner.run_one(UPLOAD)
+        return ctx.results
+
+    def test_the_wait_is_measured_even_when_the_body_does_not_measure_it(self):
+        """The body logs a duration of zero, as one that times itself after the
+        work has finished would. The dispatch is what decides."""
+        def slow(ctx):
+            time.sleep(0.05)
+            ctx.results.append(P.StepResult("Upload Website", P.RAN, 0.0, "deployed"))
+            return M.did("deployed")
+        results = self._dispatch(slow)
+        self.assertGreater(results[0].seconds, 0.0)
+
+    def test_a_body_that_logs_twice_gets_one_wait_on_both(self):
+        """They are one dispatch, so they are one wait — not a duration split
+        between them by a rule nobody wrote down."""
+        def twice(ctx):
+            ctx.results.append(P.StepResult("Upload Website", P.RAN, 0.0, "sent"))
+            ctx.results.append(P.StepResult("Upload Website", P.RAN, 0.0, "deployed"))
+            return M.did("deployed")
+        results = self._dispatch(twice)
+        self.assertEqual(results[0].seconds, results[1].seconds)
+
+    def test_results_from_earlier_dispatches_are_left_alone(self):
+        """Only what this dispatch appended is stamped. An earlier item's
+        duration is a fact about an earlier wait."""
+        def one(ctx):
+            ctx.results.append(P.StepResult("Upload Website", P.RAN, 0.0, "deployed"))
+            return M.did("deployed")
+        ctx_results = self._dispatch(one)
+        self.assertEqual(len(ctx_results), 1)
+
+
+# ---------------------------------------------------------------------------
 # When an item raises instead of answering
 # ---------------------------------------------------------------------------
 
