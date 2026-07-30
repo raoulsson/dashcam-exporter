@@ -411,6 +411,43 @@ def _world(renders_here=1, expected=3, complete=M.Evidence.NA):
                                  configured=complete is not M.Evidence.NA))
 
 
+class TestTheTripCountIsSomethingWeKnow(unittest.TestCase):
+    """WE do the rendering, so how many trips there are is not a question that
+    needs asking twice.
+
+    It used to come only from this session's cached grouping — a boundary scan
+    that walks the video and costs minutes, so a capture is not allowed to
+    start one. A fresh launch therefore had no number, the local render gate
+    answered UNKNOWN, and Clean Workspace refused until a scan had been run
+    again. That is the exporter failing to know something entirely its own.
+
+    Generate Meta writes one sidecar per trip. They are on disk and already
+    listed, so they answer it.
+    """
+
+    def _metas(self, n):
+        return tuple(W.TripMeta("trip_%d" % i, "2026", "2026") for i in range(n))
+
+    def test_the_sidecars_answer_when_no_scan_has_run_this_session(self):
+        ctx = mock.Mock()
+        ctx.last_groups = None
+        self.assertEqual(P._expected_trips(ctx, Path("/w/import"), self._metas(6)), 6)
+
+    def test_a_grouping_from_this_session_still_wins(self):
+        """It is the authority the sidecars were written from; its absence is
+        what stopped being a reason to refuse, not its answer."""
+        root = Path("/w/import")
+        ctx = mock.Mock()
+        ctx.last_groups = (root, {"trips": [{"renderable": True}] * 4})
+        self.assertEqual(P._expected_trips(ctx, root, self._metas(6)), 4)
+
+    def test_the_gate_no_longer_abstains_on_a_fresh_session(self):
+        """The symptom, stated as the gate's answer: six sidecars, six renders,
+        no scan — yes, not unknown."""
+        world = W.World(renders_here=_renders(6), expected_trips=6)
+        self.assertIs(guards.rendered_locally(world), M.Evidence.YES)
+
+
 class TestWorkspaceRefusesWhenNothingElseCanDecide(GuardTest):
     """'Noted, not blocking — the destination decides' is only honest when a
     destination will actually answer. With none configured it never does, so

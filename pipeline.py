@@ -4612,21 +4612,28 @@ def _has_track(cands):
     return any(map(lambda d: any(map(_is_track_file, d.iterdir())), _gps_dirs(cands)))
 
 
-def _expected_trips(ctx, root):
-    """How many trips this import SHOULD produce, or None when not known.
+def _expected_trips(ctx, root, metas):
+    """How many trips this import has. We know this; nothing needs asking.
 
-    Read from THIS SESSION'S cached grouping and never by starting a scan.
-    The grouping comes from make_dashcam_videos --print-groups, which decodes
-    video to find the real pull-away and park moments and costs minutes; the
-    world is captured on every menu draw, so a capture that could start one
-    would make the menu unusable.
+    It used to come only from this session's cached grouping, so a fresh launch
+    had no number, the local render gate answered UNKNOWN, and Clean Workspace
+    refused until a scan had been run again. That was the exporter failing to
+    know something entirely its own: WE do the rendering, and a trip we know
+    about is a trip we wrote a sidecar for.
 
-    None is therefore an ordinary state, not a failure — and it is not zero
-    and not "fine". It is what the workspace guard reads as UNKNOWN: the local
-    render count cannot be compared against anything, so that gate abstains
-    and, with no site to ask instead, the erase is refused.
+    So the sidecars answer it. Generate Meta writes one per trip, they sit in
+    the output tree, and counting them costs a listing that has already
+    happened. The grouping still wins when this session has one — it is the
+    authority the sidecars were written from — but its absence is no longer a
+    reason to refuse.
     """
-    return _renderable_count(_cached_grouping(ctx, root))
+    return _first_count(_renderable_count(_cached_grouping(ctx, root)), metas)
+
+
+def _first_count(from_grouping, metas):
+    if from_grouping is not None:
+        return from_grouping
+    return len(metas)
 
 
 def _cached_grouping(ctx, root):
@@ -4891,7 +4898,7 @@ def _world_of(ctx, scope, imports, root, metas, renders, trip_ids, target,
         imports=imports, selected_import=root, metas=metas,
         renders=renders, renders_here=_renders_here(ctx, root),
         trip_ids=trip_ids, dropped_ids=dropped_trip_ids(ctx),
-        final_folders=_final_folders(ctx), expected_trips=_expected_trips(ctx, root),
+        final_folders=_final_folders(ctx), expected_trips=_expected_trips(ctx, root, metas),
         has_track=_has_track(imports), stills_current=_stills_current(ctx),
         local_page=_page_exists(ctx), ledger_mark=last_imported_stamp(ctx),
         excluded=frozenset(excluded_stamps(ctx)), excluded_at=_excluded_at(ctx),
