@@ -4990,7 +4990,7 @@ class TargetBuild:
 
     def execute(self, world):
         return _logged(self._ctx, BUILD,
-                       self._act.execute(_handed_over(self._ctx, world)))
+                       lambda: self._act.execute(_handed_over(self._ctx, world)))
 
 
 class TargetPublish(TargetBuild):
@@ -5003,7 +5003,7 @@ class TargetPublish(TargetBuild):
 
     def execute(self, world):
         return _logged(self._ctx, UPLOAD,
-                       self._act.execute(_handed_over(self._ctx, world)))
+                       lambda: self._act.execute(_handed_over(self._ctx, world)))
 
 
 class NoPublisher:
@@ -5030,15 +5030,23 @@ class NoPublisher:
         return menu.stopped("publishing is not configured")
 
 
-def _logged(ctx, number, outcome):
-    """An act's Outcome, written into this session's log on the way past.
+def _logged(ctx, number, run):
+    """Run an act, and write what it amounted to into this session's log.
+
+    It takes the act rather than its result BECAUSE OF THE CLOCK. Handed the
+    outcome, the only start time available is the moment the work already
+    finished, so every act logged 0:00 — a fifty-seven second deploy included,
+    which is exactly the line an operator would read to find out where a
+    session went.
 
     The log is the exporter's, not the plugin's: a StepResult carries a
     duration and a status the summary and the crash log read, and an
     implementation must not have to construct one. The Outcome itself goes
     back to the item untouched — it is the act's answer, not this module's.
     """
-    record(ctx, NAME[number], _status_of(outcome), time.time(), outcome.note)
+    started = time.time()
+    outcome = run()
+    record(ctx, NAME[number], _status_of(outcome), started, outcome.note)
     return outcome
 
 
@@ -5309,8 +5317,19 @@ def print_summary(ctx):
 
 
 def _summary_line(r):
-    return "  %s  %-37s %8s   %s" % (_status_tag(r.status), _numbered(r.name),
-                                     human_secs(r.seconds), C.dim(r.detail))
+    return "  %s  %-37s %9s   %s" % (_status_tag(r.status), _numbered(r.name),
+                                     _hms(r.seconds), C.dim(r.detail))
+
+
+def _hms(seconds):
+    """hh:mm:ss, always, and only here.
+
+    human_secs drops the hour when there is not one, which reads well in prose
+    -- a trip is "9:00 long" -- and badly in a column, where the same width
+    every row is what lets a long step be spotted by shape instead of read.
+    """
+    s = int(seconds or 0)
+    return "%02d:%02d:%02d" % (s // 3600, (s % 3600) // 60, s % 60)
 
 
 _NUMBER_OF = {name: number for number, name in NAME.items()}

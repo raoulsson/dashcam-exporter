@@ -1198,6 +1198,54 @@ class TestTheDestinationsStateIsThePluginsToKeep(SeamTest):
         self.assertTrue(b.footage_on_disk(), "erased on last session's answer")
 
 
+class TestTheLogTimesTheWorkAndNotTheLogging(unittest.TestCase):
+    """A plugin's act is timed around the CALL, not after it returned.
+
+    _logged used to be handed the outcome, so the earliest clock reading
+    available to it was the moment the work had already finished, and every
+    act logged 00:00:00 — a fifty-seven second deploy included. That line is
+    exactly what an operator reads to find out where a session went, and it
+    was the one line that could not be right.
+
+    The clock here steps ten seconds per reading, and the fake act takes two
+    readings. Timed around the call that is thirty seconds; timed after it,
+    ten. Only the first is the truth about the act.
+    """
+
+    def _run_with_a_clock(self):
+        ctx = mock.Mock()
+        ctx.results = []
+        ticks = iter([100.0, 110.0, 120.0, 130.0, 140.0, 150.0])
+
+        def act():
+            P.time.time()
+            P.time.time()
+            return M.did("published")
+
+        with mock.patch.object(P.time, "time", lambda: next(ticks)):
+            P._logged(ctx, UPLOAD, act)
+        return ctx.results[0]
+
+    def test_the_duration_covers_the_whole_act(self):
+        self.assertEqual(self._run_with_a_clock().seconds, 30.0)
+
+    def test_the_act_ran_exactly_once(self):
+        """Taking a callable rather than a result is what makes the timing
+        possible, so it must not become a way to run the work twice."""
+        calls = []
+        ctx = mock.Mock()
+        ctx.results = []
+        P._logged(ctx, UPLOAD, lambda: (calls.append(1), M.did("published"))[1])
+        self.assertEqual(len(calls), 1)
+
+    def test_the_log_column_is_always_hours_minutes_seconds(self):
+        """Fixed width, so a long step is visible by shape rather than by
+        reading every row."""
+        self.assertEqual(P._hms(0), "00:00:00")
+        self.assertEqual(P._hms(57), "00:00:57")
+        self.assertEqual(P._hms(3661), "01:01:01")
+
+
 class TestATargetThatFallsOverAwayFromTheAskPath(SeamTest):
     """capture_world already reads an exception from is_complete() as
     "unreachable". The three places an implementation can raise that are NOT on
