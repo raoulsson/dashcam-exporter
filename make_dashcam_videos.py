@@ -723,7 +723,7 @@ def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
             n_no_rear += 1
         clips.append(Clip(ts, epoch, dur, path_f, rear_path))
     if n_no_rear:
-        print(f"  note: {n_no_rear} clip(s) have no rear pair — rendered "
+        print(f"  note: {n_no_rear} clips have no rear pair — rendered "
               f"front-only (no PiP)")
     return clips
 
@@ -3462,7 +3462,7 @@ def main() -> int:
         sys.stdout = sys.stderr
 
     if cfg:
-        print(f"config:      loaded {len(cfg)} setting(s) from {config_path}")
+        print(f"config:      loaded {len(cfg)} settings from {config_path}")
 
     root = Path(args.root).expanduser()
     out_dir = Path(args.out).expanduser()
@@ -3541,7 +3541,7 @@ def main() -> int:
                     except OSError:
                         pass
             if removed:
-                print(f"  cache TTL: removed {removed} file(s) older than "
+                print(f"  cache TTL: removed {removed} files older than "
                       f"{args.cache_max_age_days}d from {target}")
 
     front_dir = root / "DCIM" / "200video" / "front"
@@ -3776,7 +3776,7 @@ def main() -> int:
             if renderable:
                 reason = None
             elif len(g) < args.min_clips_per_group:
-                reason = (f"fragment: {len(g)} clip(s), fewer than "
+                reason = (f"fragment: {len(g)} clips, fewer than "
                           f"--min-clips-per-group {args.min_clips_per_group}")
             elif not trip_moved[i - 1]:
                 reason = "stationary: GPS shows no real drive away from the anchor"
@@ -3844,8 +3844,8 @@ def main() -> int:
                         p.unlink(missing_ok=True)
                     removed += 1
         if target_days:
-            print(f"fresh output: cleared {removed} file(s) under "
-                  f"{import_ns.name}/ for day(s) {', '.join(target_days)} "
+            print(f"fresh output: cleared {removed} files under "
+                  f"{import_ns.name}/ for days {', '.join(target_days)} "
                   f"(only this import's namespace; other imports untouched)")
 
     work_dir = out_dir / ".intermediates"

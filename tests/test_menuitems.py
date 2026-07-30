@@ -1141,7 +1141,7 @@ class TestDeleteSimData(unittest.TestCase):
                      card=full_card(new_stamps=frozenset({"20260101121000"})))
         verdict = evaluate(item_for(ERASE_CARD), w)
         self.assertTrue(verdict.blocked)
-        self.assertIn("never imported", verdict.reason)
+        self.assertIn("new clips", verdict.reason)
 
     def test_one_accounted_clip_does_not_vouch_for_the_whole_card(self):
         """The per-clip accounting, and the reason it is a SET and not a

@@ -44,10 +44,18 @@ def never_imported(world) -> Optional[Verdict]:
 
 
 def clips_never_copied(world) -> Optional[Verdict]:
-    """Clips newer than the mark, and not excluded on purpose."""
+    """Clips newer than the mark, and not excluded on purpose.
+
+    Phrased as what they ARE rather than what has not happened to them. "were
+    never imported" reads as a fault, and this is the ordinary state of a card
+    you have just put in: footage waiting for the next round. It is greying out
+    the erase, which is the whole point — there is nothing wrong here, and the
+    line should not sound like there is.
+    """
     if not world.card.new_stamps:
         return None
-    return blocked("card: %d clip(s) were never imported" % len(world.card.new_stamps))
+    return blocked("card: %d new clips ready for next session"
+                   % len(world.card.new_stamps))
 
 
 def copy_lost(world) -> Optional[Verdict]:
@@ -62,7 +70,7 @@ def copy_lost(world) -> Optional[Verdict]:
     """
     if not world.card.owed_stamps:
         return None
-    return blocked("card: %d clip(s) exist nowhere but this card"
+    return blocked("card: %d clips exist nowhere but this card"
                    % len(world.card.owed_stamps))
 
 

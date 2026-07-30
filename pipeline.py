@@ -135,7 +135,7 @@ def human_age(seconds):
         return "%d min" % (seconds // 60)
     if seconds < 86400:
         return "%d h" % (seconds // 3600)
-    return "%d day(s)" % (seconds // 86400)
+    return "%d days" % (seconds // 86400)
 
 
 def term_width(default=100):
@@ -557,7 +557,7 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
             if note:
                 # Drop whatever the note already says. Two shapes do this:
                 # "[scan  17/ 239] NAME" and aws's "Completed 6.0 MiB/13.0 GiB
-                # (457.4 KiB/s) with 6 file(s) remaining" — in both, the head of
+                # (457.4 KiB/s) with 6 files remaining" — in both, the head of
                 # the line is the counter we have already extracted, and the
                 # useful remainder (the filename, or the rate and files left)
                 # was being pushed off the right edge by it.
@@ -651,7 +651,7 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
         print(C.red("  FAILED: %s (exit %d)" % (" ".join(cmd), rc)))
         tail = [l for l in lines if l.strip()][-tail_lines:]
         if tail:
-            print(C.dim("  --- last %d line(s) of output ---" % len(tail)))
+            print(C.dim("  --- last %d lines of output ---" % len(tail)))
             for l in tail:
                 print(C.dim("  " + l))
     return rc, lines
@@ -1333,7 +1333,7 @@ def import_is_expendable(ctx, root, target):
         gs = (payload or {}).get("trips") or []
         want = sum(1 for g in gs if g.get("renderable", True)) if gs else None
         if want is not None and len(mp4s) < want:
-            return False, "%d of %d trip(s) rendered" % (len(mp4s), want)
+            return False, "%d of %d trips rendered" % (len(mp4s), want)
     # One answer about the whole import rather than one per render. It is the
     # only shape there is now, and it is the right one for an advisory: the
     # sentence it feeds says "the copy on this machine is the only one", which
@@ -1510,8 +1510,8 @@ def working_area_is_expendable(ctx, target):
     if stragglers:
         what = ("not confirmed at %s and not gathered" % target.name if target.configured
                 else "neither published nor gathered")
-        return False, "%d render(s) %s" % (len(stragglers), what), stragglers
-    return True, "%d render(s), all published or gathered" % len(loose), []
+        return False, "%d renders %s" % (len(stragglers), what), stragglers
+    return True, "%d renders, all published or gathered" % len(loose), []
 
 
 def _vouched_for(ctx, target, loose):
@@ -1661,7 +1661,7 @@ def prepare_for_import(ctx):
                 except OSError:
                     pass
     if removed:
-        print(C.dim("  Cleared %d cached gpx file(s) from %s — a new card must not"
+        print(C.dim("  Cleared %d cached gpx files from %s — a new card must not"
                     " inherit the old card's tracks." % (removed, tilde(cache))))
     return removed
 
@@ -1776,11 +1776,11 @@ def step_import(ctx):
         print()
         print("  Already imported through %s" % C.bold(after))
         print("  At the source: %s new, %s already here" % (
-            C.bold("%d clip(s)" % n_new), C.dim("%d" % n_old)))
+            C.bold("%d clips" % n_new), C.dim("%d" % n_old)))
         if not n_new:
             print(C.green("  Nothing new at the source — it is already all imported."))
             return record(ctx, NAME[IMPORT], SATISFIED, started, "no new clips")
-        delta = confirm("  Copy only the %d new clip(s)?" % n_new, True)
+        delta = confirm("  Copy only the %d new clips?" % n_new, True)
     else:
         delta = False
         print(C.dim("  Nothing imported before, so this copies the whole card."))
@@ -1803,7 +1803,7 @@ def step_import(ctx):
         # by a run that finished days ago, a fact recorded in a ledger the shell
         # script cannot read. Erasing them here would be a delete on somebody
         # else's evidence.
-        print(C.dim("  Source kept. Erasing it would also remove the %d clip(s) this run" % n_old))
+        print(C.dim("  Source kept. Erasing it would also remove the %d clips this run" % n_old))
         print(C.dim("  skipped, and this run checked nothing about those — they were"))
         print(C.dim("  verified by the earlier import, not by this one. Erase the card"))
         print(C.dim("  yourself once these have rendered and uploaded."))
@@ -1922,16 +1922,16 @@ def step_progress(ctx, world):
         n_rendered += 1 if mp4 else 0
         print("  %-38s %-9s %s" % (t["id"], "yes", "yes" if mp4 else "-"))
     print()
-    print("  %d trip(s): %d rendered" % (len(trips), n_rendered))
+    print("  %d trips: %d rendered" % (len(trips), n_rendered))
     _print_all(_destination_line(world.target))
     if excluded:
-        print(C.dim("  %d clip stamp(s) excluded on purpose." % len(excluded)))
+        print(C.dim("  %d clip stamps excluded on purpose." % len(excluded)))
     # What this session has done, without waiting for the exit to say it. The
     # table above is the workspace; this is the cycle, and the two answer
     # different questions -- "what is here" and "how did it get that way".
     print_summary(ctx)
     return record(ctx, NAME[PROGRESS], RAN, started,
-                  "%d trip(s), %d rendered, destination %s"
+                  "%d trips, %d rendered, destination %s"
                   % (len(trips), n_rendered, world.target.complete.value))
 
 
@@ -1983,14 +1983,14 @@ def step_generate_meta(ctx):
                     done += 1
             need = done < len(gs)
             if not need:
-                print(C.dim("  Sidecars already written for all %d trip(s) — nothing to"
+                print(C.dim("  Sidecars already written for all %d trips — nothing to"
                             " generate." % len(gs)))
                 # The postcondition holds: every trip has its set. Nothing was
                 # done and nothing is owed.
                 return record(ctx, NAME[META], SATISFIED, started,
-                              "sidecars already complete for %d trip(s)" % len(gs))
+                              "sidecars already complete for %d trips" % len(gs))
             if done:
-                print(C.dim("  %d of %d trip(s) have sidecars; rewriting all (the"
+                print(C.dim("  %d of %d trips have sidecars; rewriting all (the"
                             " renderer has no per-trip mode)." % (done, len(gs))))
     # The renderer prints its usual "[Trip a/b]" headers here, so the real trip
     # counter drives the bar; there are no per-clip lines in this mode.
@@ -2001,9 +2001,9 @@ def step_generate_meta(ctx):
     if rc != 0:
         return record(ctx, NAME[META], FAILED, started, "sidecars exit %d" % rc)
     metas = len(list(ctx.out_dir.rglob("trip_*_meta.json")))
-    print(C.green("  Sidecars in place — %d trip meta file(s) under %s."
+    print(C.green("  Sidecars in place — %d trip meta files under %s."
                   % (metas, tilde(ctx.out_dir))))
-    return record(ctx, NAME[META], RAN, started, "%d trip meta file(s)" % metas)
+    return record(ctx, NAME[META], RAN, started, "%d trip meta files" % metas)
 
 
 # ---------------------------------------------------------------------------
@@ -2382,7 +2382,7 @@ def _clip_list_html(label, paths, previews_dir):
         items.append("<li title=\"%s\">%s <span>%s</span></li>" % (
             html.escape(str(p)), html.escape(p.name), human_bytes(n)))
     return (
-        "<details><summary>%s source clips: %d file(s), %s</summary>"
+        "<details><summary>%s source clips: %d files, %s</summary>"
         "<ul>%s</ul>"
         "<details><summary>full paths (copy/paste)</summary><pre>%s</pre></details>"
         "</details>" % (
@@ -2502,7 +2502,7 @@ def write_contact_sheet(ctx, root, payload, previews_dir, stills):
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         "<title>Trip previews — %s</title><style>%s</style></head><body>"
-        "<header><h1><span>preview</span> %d trip(s) in %s</h1>"
+        "<header><h1><span>preview</span> %d trips in %s</h1>"
         "<p>Stills are a single frame from each trip's first front clip — no video "
         "has been encoded and nothing has been published. The maps and numbers come "
         "from the sidecars written by <code>--sidecars-only</code>.</p>"
@@ -2655,7 +2655,7 @@ def step_preview(ctx):
         else:
             failed.append(t["index"])
     if failed:
-        print(C.yellow("  No still for trip(s) %s — ffmpeg could not read the first clip."
+        print(C.yellow("  No still for trips %s — ffmpeg could not read the first clip."
                        % ", ".join(str(i) for i in failed)))
 
     index = write_contact_sheet(ctx, root, payload, previews_dir, stills)
@@ -2667,14 +2667,14 @@ def step_preview(ctx):
 
     print()
     print(C.green("  previews are in %s" % previews_dir))
-    print("  %d trip(s), %d still(s). Open the contact sheet with:" % (len(trips), len(stills)))
+    print("  %d trips, %d stills. Open the contact sheet with:" % (len(trips), len(stills)))
     print("    open %s" % index)
     print(C.dim("  Nothing was encoded and nothing was published. On the website these"))
     print(C.dim("  trips would say the video is not available — that is expected: the"))
     print(C.dim("  sidecars carry the map, the stats and the places, but no video exists"))
     print(C.dim("  yet. Render (and only then upload) the ones you decide to keep."))
     return record(ctx, NAME[PREVIEW], RAN, started,
-                  "%d trip(s), %d still(s) in %s" % (len(trips), len(stills), previews_dir))
+                  "%d trips, %d stills in %s" % (len(trips), len(stills), previews_dir))
 
 
 # ---------------------------------------------------------------------------
@@ -2781,7 +2781,7 @@ def _the_answer_names(world, ids) -> bool:
 
 
 def _say_they_stay(where, count):
-    print(C.red("  NOTE: %d of these trip(s) are already at %s and stay there."
+    print(C.red("  NOTE: %d of these trips are already at %s and stay there."
                 % (count, where)))
     print(C.dim("  Deleting locally does not remove them from the destination."))
     print(C.dim("  Rebuild and republish (%d, %d) after this, and remove them"
@@ -2823,7 +2823,7 @@ def _only_copy_lines(ctx, world, payload, by_index, picked):
          else only_copy).append(i)
     lines = []
     if elsewhere:
-        lines.append(C.dim("  Trip(s) %s also exist as a render elsewhere or at %s."
+        lines.append(C.dim("  Trips %s also exist as a render elsewhere or at %s."
                            % (", ".join(str(i) for i in elsewhere),
                               world.target.name or "the destination")))
     if only_copy:
@@ -2873,7 +2873,7 @@ def _answer_about(world, base) -> menu.Evidence:
 def _last_copy_banner(world, only_copy, consulted):
     bar = C.red("  " + "!" * (term_width() - 4))
     lines = [bar,
-             C.red("  Trip(s) %s are NOT rendered anywhere and NOT published."
+             C.red("  Trips %s are NOT rendered anywhere and NOT published."
                    % ", ".join(str(i) for i in only_copy)),
              C.red("  These files are the ONLY copy of that footage. Deleting them"),
              C.red("  ends it — there is nothing to restore from, here or online.")]
@@ -2947,7 +2947,7 @@ def _drop_plan_for(ctx, world, payload, by_index, picked, started):
     render_files = _renders_of(ctx, payload, by_index, picked)
     if render_files:
         print()
-        print(C.yellow("  Already rendered. The render goes too, %d file(s):"
+        print(C.yellow("  Already rendered. The render goes too, %d files:"
                        % len(render_files)))
         _note_trips_published(world, _picked_ids(by_index, picked))
         for f in render_files[:8]:
@@ -2965,7 +2965,7 @@ def _drop_plan_for(ctx, world, payload, by_index, picked, started):
             i, t["day"], t["start"][11:16], t["end"][11:16], t.get("clips", 0),
             human_bytes(trip_bytes(t))))
     print()
-    print("  %d file(s) will be deleted:" % len(files))
+    print("  %d files will be deleted:" % len(files))
     for p in files:
         print(C.dim("    %s" % p))
     print("  Total: %s" % C.bold(human_bytes(total)))
@@ -3000,7 +3000,7 @@ def _drop_commit(ctx, picked, by_index, files, render_files, started):
                       for m in [STAMP_RE.search(p.name)] if m}
     if dropped_stamps:
         record_excluded_stamps(ctx, dropped_stamps)
-        print(C.dim("  Recorded %d excluded clip stamp(s); the delta import will not"
+        print(C.dim("  Recorded %d excluded clip stamps; the delta import will not"
                     " re-copy them." % len(dropped_stamps)))
 
     # Any cached view of this import is now wrong: the grouping is computed from
@@ -3013,12 +3013,12 @@ def _drop_commit(ctx, picked, by_index, files, render_files, started):
 
     if errors:
         return _outcome(record(ctx, NAME[EXCLUDE], FAILED, started,
-                               "%d of %d file(s) deleted, %d error(s)"
+                               "%d of %d files deleted, %d errors"
                                % (deleted, len(files), len(errors))))
-    print(C.green("  Dropped trip(s) %s: %d file(s), %s freed." % (
+    print(C.green("  Dropped trips %s: %d files, %s freed." % (
         ", ".join(str(i) for i in picked), deleted, human_bytes(freed))))
     return _outcome(record(ctx, NAME[EXCLUDE], RAN, started,
-                           "trip(s) %s, %d file(s), %s freed" % (
+                           "trips %s, %d files, %s freed" % (
                                ", ".join(str(i) for i in picked), deleted,
                                human_bytes(freed))))
 
@@ -3052,7 +3052,7 @@ def _drop_orphan_sidecars(by_index, picked):
     if not orphans:
         return
     print()
-    print("  %d preview sidecar(s) now describe a trip that no longer exists:"
+    print("  %d preview sidecars now describe a trip that no longer exists:"
           % len(orphans))
     for p in orphans:
         print(C.dim("    %s" % p))
@@ -3090,7 +3090,7 @@ def _record_the_drop(ctx, by_index, picked):
     if not ids:
         return
     record_dropped_trips(ctx, ids)
-    print(C.dim("  Recorded %d trip(s) as dropped on purpose; the next build"
+    print(C.dim("  Recorded %d trips as dropped on purpose; the next build"
                 " leaves them out of the index." % len(ids)))
 
 
@@ -3141,7 +3141,7 @@ def recover_aborted_render(ctx):
                     pass
     scratch = _clear_intermediates(ctx)
     if removed or scratch:
-        print(C.dim("  Aborted render cleaned up: %d partial file(s), %d scratch file(s)."
+        print(C.dim("  Aborted render cleaned up: %d partial files, %d scratch files."
                     % (len(removed), scratch)))
         for p in removed[:6]:
             print(C.dim("    removed %s" % tilde(p)))
@@ -3152,7 +3152,7 @@ def after_render(ctx):
     """A finished render leaves renders and sidecars, not intermediates."""
     n = _clear_intermediates(ctx)
     if n:
-        print(C.dim("  Cleared %d scratch file(s) from .intermediates." % n))
+        print(C.dim("  Cleared %d scratch files from .intermediates." % n))
     return n
 
 
@@ -3312,7 +3312,7 @@ def step_render(ctx):
         bases = [g.get("out_base") for g in groups if g.get("index") in picked]
         doomed = _videos([f for b in bases if b
                           for f in Path(b).parent.glob(Path(b).name + "*")])
-        what = "the mp4(s) of %d trip(s)" % len(bases)
+        what = "the mp4(s) of %d trips" % len(bases)
     else:
         doomed = _videos(ns.rglob("*")) if ns.is_dir() else []
         what = "every mp4 under %s" % tilde(ns)
@@ -3320,7 +3320,7 @@ def step_render(ctx):
         size = sum(f.stat().st_size for f in doomed if f.exists())
         print()
         print(C.yellow("  Replacing existing output: %s" % what))
-        print(C.yellow("  %d file(s), %s — deleted first so the result is exactly this run"
+        print(C.yellow("  %d files, %s — deleted first so the result is exactly this run"
                        % (len(doomed), human_bytes(size))))
         print(C.dim("  Maps, GPX and metadata beside them are left alone; only video goes."))
         if not confirm("  Delete and re-render?", True):
@@ -3847,7 +3847,7 @@ def gather_into_final(ctx, out_dir):
         except OSError:
             pass
     if kept:
-        print(C.yellow("  %d file(s) already present were left as they were:" % len(kept)))
+        print(C.yellow("  %d files already present were left as they were:" % len(kept)))
         for f in kept[:5]:
             print(C.yellow("    %s" % tilde(f)))
     return final if moved or any(final.iterdir()) else None
@@ -4036,16 +4036,16 @@ def step_site(ctx, gather):
         return record(ctx, NAME[BUILD], SKIPPED, started, "no trips")
 
     if info["no_video"]:
-        print(C.dim("  %d trip(s) have no video yet; the page says so." % info["no_video"]))
+        print(C.dim("  %d trips have no video yet; the page says so." % info["no_video"]))
     if info["no_gps"]:
-        print(C.dim("  %d trip(s) have no GPS, so they show no route." % info["no_gps"]))
+        print(C.dim("  %d trips have no GPS, so they show no route." % info["no_gps"]))
 
     print()
     print(C.green("  %s" % info["path"]))
-    print("  %d drive(s), %s. Open it with:" % (info["trips"], human_bytes(info.get("bytes", 0))))
+    print("  %d drives, %s. Open it with:" % (info["trips"], human_bytes(info.get("bytes", 0))))
     print("    open %s" % info["path"])
     return record(ctx, NAME[BUILD], RAN, started,
-                  "%d trip(s), %s" % (info["trips"], human_bytes(info.get("bytes", 0))))
+                  "%d trips, %s" % (info["trips"], human_bytes(info.get("bytes", 0))))
 
 # ---------------------------------------------------------------------------
 # Item 8 — Clean Workspace. Erase the imported footage and the renders it
@@ -4072,7 +4072,7 @@ def _clean_target(ctx, root):
         return root
     target = root / "DCIM"
     print()
-    print(C.yellow("  %s also holds %d other import(s): %s" % (
+    print(C.yellow("  %s also holds %d other imports: %s" % (
         root, len(siblings), ", ".join(c.name for c in siblings))))
     print(C.yellow("  Narrowing the delete to %s; the others are untouched." % target))
     return target
@@ -4194,7 +4194,7 @@ def clean_workspace_plan(ctx, world):
     print()
     print(rule("erase the imported footage"))
     print("  Target: %s" % C.bold(str(target)))
-    print("  %d file(s), %s — this is the ORIGINAL footage and it is not recoverable."
+    print("  %d files, %s — this is the ORIGINAL footage and it is not recoverable."
           % (files, C.bold(human_bytes(size))))
     print()
     _print_gates(world)
@@ -4255,7 +4255,7 @@ def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
     else:
         _keeping_the_renders(why, stragglers)
     return _outcome(record(ctx, NAME[CLEAN_WS], RAN, started,
-                           "%d file(s), %s freed%s"
+                           "%d files, %s freed%s"
                            % (files + n, human_bytes(size + freed),
                               _on_whose_word(fresh.target))))
 
@@ -4315,7 +4315,7 @@ def _card_advisory(ctx, world):
 def erase_card_plan(ctx, world):
     """Item 9's plan."""
     started = time.time()
-    lines = [C.red("  The card's %d clip(s) go; its folders stay so the camera can"
+    lines = [C.red("  The card's %d clips go; its folders stay so the camera can"
                    " record." % len(world.card.stamps)),
              C.green("  Every clip is accounted for: %s." % world.card.note)]
     lines.extend(_card_advisory(ctx, world))
@@ -4331,7 +4331,7 @@ def _erase_card_commit(ctx, started):
         return _outcome(record(ctx, NAME[ERASE_CARD], SKIPPED, started,
                                "refused: %s" % reason))
     return _outcome(record(ctx, NAME[ERASE_CARD], RAN, started,
-                           "%d file(s), %s freed" % (gone, human_bytes(freed))))
+                           "%d files, %s freed" % (gone, human_bytes(freed))))
 
 
 def card_stamps(ctx):
@@ -4489,7 +4489,7 @@ def _unlink_card_files(dcim):
             gone += 1
         except OSError as e:
             print(C.red("  %s: %s" % (f.name, e)))
-    print(C.green("  Erased %d file(s), %s freed. Folders kept so the camera can record."
+    print(C.green("  Erased %d files, %s freed. Folders kept so the camera can record."
                   % (gone, human_bytes(freed))))
     return gone, freed, ""
 

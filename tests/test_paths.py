@@ -469,7 +469,7 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
         self.assertEqual(b.work.asked, ["ERASE"], "the word was never asked for")
         self.assertEqual(b.work.done, [], "the card was erased on stale evidence")
         self.assertEqual(len(b.work.refused), 1)
-        self.assertIn("never imported", b.work.refused[0])
+        self.assertIn("new clips", b.work.refused[0])
 
     def test_the_three_destructive_items_ask_three_different_words(self):
         """Two identical prompts is how the second one gets typed from muscle
