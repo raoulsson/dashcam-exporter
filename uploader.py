@@ -252,9 +252,23 @@ class Uploader(Act):
                      for something that merely could not be checked today —
                      that is UNKNOWN, and it fails closed.
 
-        Do not memoise. It is asked again after the operator has typed CLEAN,
-        precisely so a destination that changed under the prompt is noticed. A
-        cached answer silently defeats that, and the exporter cannot detect it.
+        THE SAME STATE MUST GIVE THE SAME ANSWER, however many times it is
+        asked. That is the whole contract, and it is what lets the exporter ask
+        whenever it needs to know instead of rationing the question.
+
+        Which means you may cache — you are expected to, if going and looking
+        is expensive, because nothing out here presumes to know what it costs
+        you. It means the cache must be wrong for no longer than the state is.
+        Your own build and upload you can see. Everything else that changes
+        what you would be asked about — an import landing, a trip dropped, the
+        working area erased — arrives as reset(), because none of it goes
+        anywhere near you.
+
+        What the exporter will NOT do is reach past your cache. It asks a
+        second time before an erase, after the confirmation word, and takes
+        that answer as the state's. If your destination changed under you and
+        you said yes from memory, that is a wrong answer rather than a question
+        asked badly.
 
         AND THE STATE IS YOURS ACROSS SESSIONS. The exporter persists nothing
         about your destination: not what was built, not what was uploaded, not

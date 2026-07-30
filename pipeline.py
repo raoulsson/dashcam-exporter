@@ -5133,18 +5133,16 @@ class Work:
     def recapture(self, scope):
         """The refresh point. Called after the word and before the act.
 
-        It tells the plugin to forget first, and that is not the exporter
-        deciding how the plugin should cache. It is the exporter saying, at the
-        one moment it owns, that this answer must not come from memory: the
-        whole point of asking a second time is to catch a destination that
-        changed while the prompt was on screen, and a remembered answer is the
-        first answer wearing a second coat.
+        It asks again rather than reusing the world the banner was drawn from,
+        because the LOCAL half can move under the prompt — an operator deleting
+        a render in Finder while the confirmation sits on screen.
 
-        Nothing between the banner and the typed word touches the workspace, so
-        the plugin is otherwise right to reuse — which is exactly why it has to
-        be told here and nowhere else.
+        It does not tell the plugin to forget first. An act answers for the
+        state it is in, so the same state has to give the same answer however
+        many times it is asked; a plugin that caches and is wrong about its own
+        destination is wrong, and reaching in to defeat its cache would be this
+        module compensating for a contract it should be relying on.
         """
-        _reset_before_erasing(self.ctx)
         return capture_world(self.ctx, scope)
 
     def refuse(self, reason):
@@ -5519,12 +5517,6 @@ def _nothing_to_do_lines(outcome):
     if outcome.performed or not outcome.completed:
         return []
     return [C.green("  Nothing to do: %s." % (outcome.note or "already done"))]
-
-
-def _reset_before_erasing(ctx):
-    plugin = getattr(ctx, "plugin", None)
-    if plugin is not None:
-        _reset_quietly(plugin)
 
 
 def _tell_the_plugin(ctx, item, outcome):

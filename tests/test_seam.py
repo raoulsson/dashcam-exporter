@@ -1253,26 +1253,37 @@ class TestTheLogTimesTheWorkAndNotTheLogging(unittest.TestCase):
         self.assertEqual(P._hms(3661), "01:01:01")
 
 
-class TestThePluginIsToldBeforeAnythingIsErased(SeamTest):
-    """The one place the exporter insists on a fresh answer.
+class TestTheEraseAsksASecondTime(SeamTest):
+    """RESTATED. It asserted that the re-check tells the plugin to forget
+    first, so a cached answer could not be handed back.
 
-    Asking twice only means something if the second answer can differ from the
-    first. A plugin that caches — which it is entitled to do, and which it must
-    do if its destination is expensive — would otherwise hand back the answer
-    the banner was drawn from, and the re-check would be the first answer
-    wearing a second coat.
+    That was this module compensating for a contract it should rely on. An act
+    answers for the state it is in, so the same state gives the same answer
+    however many times it is asked — and reaching past a cache to try to get a
+    different answer out of an unchanged state is either pointless or an
+    admission the contract is not believed. A plugin that is wrong about its
+    own destination is wrong; that is not a question asked badly.
 
-    Where the workspace CHANGING invalidates it is a Runner concern and lives
-    in test_pipeline.py; this is the erase insisting for its own reasons.
+    What survives, and is what the second ask was always for: the world is
+    captured again after the word, so anything that moved under the prompt is
+    seen, and an act that changes its answer stops the erase.
     """
 
-    def test_the_recheck_forces_a_fresh_answer(self):
+    def test_a_plugin_that_changes_its_mind_stops_the_erase(self):
         target = Recorder(complete=[YES, NO])
         b = self.bench(target).complete()
         ran = b.run(CLEAN_WS)
         self.assertFalse(ran.completed, ran.note)
         self.assertTrue(b.footage_on_disk(), "erased on the pre-prompt answer")
-        self.assertGreater(target.times("reset"), 0)
+
+    def test_it_is_asked_twice(self):
+        """Once for the banner, once for the act. One ask would mean acting on
+        a world that is a confirmation prompt old."""
+        target = Recorder(complete=[YES, YES])
+        b = self.bench(target).complete()
+        ran = b.run(CLEAN_WS)
+        self.assertTrue(ran.completed, ran.note)
+        self.assertGreaterEqual(target.times("is_complete"), 2)
 
 
 class TestATargetThatFallsOverAwayFromTheAskPath(SeamTest):
