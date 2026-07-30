@@ -743,25 +743,29 @@ class TestTheRecheckAsksTheTargetAgain(SeamTest):
         self.assertTrue(ran.completed, ran.note)
         self.assertGreaterEqual(target.times("is_complete"), 2)
 
-    def test_a_menu_draw_never_asks_the_question_that_leaves_the_machine(self):
-        """The scope rule, stated in calls made rather than in a comment.
+    def test_every_capture_asks_including_a_menu_draw(self):
+        """RESTATED. This asserted the opposite: that a menu draw must never
+        ask, because a plugin going to the network would make the menu
+        unusable.
 
-        The menu is redrawn on every keystroke. If is_complete were asked
-        there, every plugin that goes to the network would make the menu
-        unusable — and a menu that is not instant stops being recomputed and
-        starts being remembered, which is the one thing a greying rule must
-        never be. At LOCAL scope a configured plugin reads UNKNOWN, which no
-        guard treats as proven.
+        That was the exporter budgeting on a guess about someone else's code.
+        It does not know what is behind the interface — an ssh session, a dict,
+        a mock — so it cannot know whether asking is expensive, and deciding
+        not to ask cost real accuracy: the menu offered items that refused the
+        moment they were picked.
+
+        Whether to cache is the implementation's decision, made where the cost
+        is known and where an upload can invalidate it. The exporter asks.
         """
         target = Recorder()
         b = self.bench(target).complete()
-        local = b.world(M.Scope.LOCAL)
-        self.assertEqual(target.asked("is_complete"), [])
-        self.assertIs(local.target.complete, UNKNOWN)
-        self.assertTrue(local.target.configured)
-
-        b.world(M.Scope.FULL)
-        self.assertEqual(target.asked("is_complete"), ["is_complete"])
+        for scope in (M.Scope.LOCAL, M.Scope.FULL):
+            with self.subTest(scope=scope.value):
+                before = target.times("is_complete")
+                world = b.world(scope)
+                self.assertGreater(target.times("is_complete"), before,
+                                   "the plugin was not asked at %s" % scope.value)
+                self.assertTrue(world.target.configured)
 
     def test_the_trips_it_is_asked_about_are_this_imports_own(self):
         """WHICH trips are named is half the safety of a binary answer.

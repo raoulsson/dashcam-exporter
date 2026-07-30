@@ -75,14 +75,26 @@ class TestAnAnswerThatIsNotAnAnswerPermitsNothing(unittest.TestCase):
         self.assertIn("Raises", facts.note)
         self.assertIn("the shelf fell over", facts.note)
 
-    def test_a_menu_draw_does_not_ask_and_says_so(self):
-        """LOCAL scope reads UNKNOWN, which no guard treats as proven, and the
-        note distinguishes it from a destination that was asked and could not
-        say."""
-        facts = self.P._asked(_a_ctx(_Silent()), M.Scope.LOCAL, "import",
-                              ("trip_A",))
-        self.assertIs(facts.complete, M.Evidence.UNKNOWN)
-        self.assertIn("not asked", facts.note)
+    def test_a_menu_draw_asks_like_any_other_capture(self):
+        """RESTATED. This asserted that LOCAL scope skips the question and
+        answers "not asked".
+
+        Scope no longer gates it. The exporter does not get to decide, on a
+        guess about somebody else's code, when going to look is too expensive
+        — it cannot see what is behind the interface, and deciding not to ask
+        made the menu offer items that refused when picked. Caching belongs to
+        the implementation, which knows what its destination costs and can
+        invalidate on its own upload.
+
+        So at either scope the answer is the PLUGIN'S. _Silent was only ever
+        silent because nothing asked it.
+        """
+        for scope in (M.Scope.LOCAL, M.Scope.FULL):
+            with self.subTest(scope=scope.value):
+                facts = self.P._asked(_a_ctx(_Silent()), scope, "import",
+                                      ("trip_A",))
+                self.assertIs(facts.complete, M.Evidence.YES)
+                self.assertNotIn("not asked", facts.note)
 
     def test_the_answer_carries_the_import_it_is_about(self):
         """An answer is about ONE import's trips, and several imports can sit

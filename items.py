@@ -570,6 +570,13 @@ class DeleteSimData(Destructive):
 # it, and it does not.
 COLD_START_RULES = (
     (EXCLUDE, lambda w: bool(w.excluded) and w.excluded_at > w.newest_meta_at),
+    # The destination's own answer comes first, because it is the only one that
+    # knows anything about the half of the cycle this machine does not do. The
+    # two rules under it read local artefacts that a configured install never
+    # creates -- the self-contained page and the gather are the local edition's
+    # deliverables -- so without this, publishing left no trace orientation
+    # could see and every restart landed back at the renders.
+    (UPLOAD, lambda w: w.target.complete is Evidence.YES),
     (BUILD, lambda w: w.local_page or bool(w.final_folders)),
     (RENDER, lambda w: bool(w.renders)),
     (PREVIEW, lambda w: w.stills_current),

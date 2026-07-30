@@ -4737,15 +4737,22 @@ def _namespace_of(root):
 
 
 def _asked(ctx, scope, namespace, trip_ids):
-    """Only FULL scope pays for the question that leaves this machine.
+    """Ask, every time the world is captured. Scope does not gate this.
 
-    The menu is redrawn on every keystroke. At LOCAL scope a configured plugin
-    reads UNKNOWN, which every guard already treats as not proven — the same
-    shape the old bucket listing had, for the same reason.
+    It used to: LOCAL skipped the question and reported UNKNOWN, so a menu draw
+    never went to the destination. That was the exporter deciding, on a guess
+    about somebody else's code, that asking is expensive — and it has no idea
+    what is behind the interface. An ssh session, a dict, a mock in a test, a
+    binary somebody dropped in. Budgeting around a guess is the one thing this
+    seam exists to prevent, and it cost real accuracy: the menu showed items as
+    available that would refuse the moment they were picked.
+
+    So the exporter asks whenever it needs to know, and WHETHER TO CACHE IS THE
+    IMPLEMENTATION'S DECISION. It knows what its destination costs; this module
+    does not. A plugin whose answer is slow memoises behind its own front door,
+    where it can also invalidate on its own upload — which nothing out here
+    could do correctly anyway.
     """
-    if scope is not menu.Scope.FULL:
-        return _facts(ctx, menu.Evidence.UNKNOWN, namespace,
-                      "not asked: the menu redraws too often to go and look")
     return _answered(ctx, namespace, trip_ids)
 
 
@@ -5596,7 +5603,19 @@ def build_runner(ctx, classes=None):
     strategy = menu.Strategy.of(ctx.plugin)
     menu_items = menu.build_menu(strategy, Work(ctx), classes)
     position = menu.position_for(menu_items)
-    position.orient(capture_world(ctx, menu.Scope.LOCAL), items.COLD_START_RULES)
+    # FULL, so the plugin IS asked before the first menu is drawn. Where the
+    # cycle has got to is not knowable from this machine alone once publishing
+    # is somebody else's code: the local artefacts that used to answer it are
+    # the local edition's, and a configured install never makes them. Without
+    # asking, every restart landed back at the renders however much had been
+    # published.
+    #
+    # And the exporter does not get to decide that asking is expensive. It has
+    # no idea what is behind the interface -- an ssh session, a dict, a mock in
+    # a test -- so budgeting on a guess about someone else's implementation is
+    # the one thing this seam exists to stop. Startup is a defined moment an
+    # implementor can plan for; what it costs there is theirs to manage.
+    position.orient(capture_world(ctx, menu.Scope.FULL), items.COLD_START_RULES)
     return Runner(ctx, menu_items, position)
 
 
