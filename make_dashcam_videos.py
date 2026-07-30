@@ -454,20 +454,22 @@ software = true
 # There is exactly ONE setting about publishing, and it names an implementation
 # rather than describing a destination. Where the videos end up and what serves
 # them is that implementation's business, not this repo's. Set it and 6) Build
-# Website builds what YOUR target publishes and 7) Upload Website lights up.
+# Website builds what YOUR plugin publishes and 7) Upload Website lights up.
 # Leave it and both stay as a fresh clone has them: item 6 writes the local
 # page, item 7 sits greyed out with the reason printed underneath. The item
 # NUMBERS never move, so a note saying "run 5" means the same thing on every
 # machine.
 
-# The class that publishes, as "<path to a .py>:<ClassName>". It must subclass
-# uploader.WebsiteUploaderInterface: build, upload, why_not_build,
-# why_not_upload, owes, holds, published and carries.
+# The plugin that publishes, as "<path to a .py>:<Builder>:<Uploader>". Two
+# classes: the builder subclasses uploader.Builder and is item 6, the uploader
+# subclasses uploader.Uploader and is item 7. Each answers describe(),
+# evaluate(workspace) and execute(workspace); the uploader also answers
+# is_complete(trip_ids).
 #
-# examples/uploader_folder.py is a complete working one in about eighty lines,
-# and the test suite drives the menu through it. Read that first, then copy it.
+# examples/local_website.py is a complete working one, and the test suite
+# drives the menu through it. Read that first, then copy it.
 #
-#   website_uploader = ~/dashcam-exporter/examples/uploader_folder.py:FolderTarget
+#   website_uploader = ~/dashcam-exporter/examples/local_website.py:LocalWebSiteBuilderPlugin:LocalWebSiteUploader
 #
 # The value belongs in the gitignored .env as SET_WEBSITE_UPLOADER, not here:
 # this file is tracked, and a path to your own work written here gets

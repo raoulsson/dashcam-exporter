@@ -378,22 +378,24 @@ software = true
 # rather than describing a destination. Where the videos end up, what serves
 # them, whether that involves a bucket, a second repo, a rack in a cupboard or
 # a folder on an external disk, is that implementation's business and not this
-# repo's. Set it and 6) Build Website builds what YOUR target publishes and
+# repo's. Set it and 6) Build Website builds what YOUR plugin publishes and
 # 7) Upload Website lights up. Leave it and both stay exactly as a fresh clone
 # has them: item 6 writes the local page, item 7 sits in the menu greyed out
 # with the reason printed underneath. The item NUMBERS never move, so a note
 # saying "run 5" means the same thing on every machine.
 
-# The class that publishes, as "<path to a .py>:<ClassName>". It must subclass
-# uploader.WebsiteUploaderInterface, which is the whole contract: build,
-# upload, why_not_build, why_not_upload, owes, holds, published and carries —
-# plus dropped() and status_lines(), which have defaults and may be ignored.
+# The plugin that publishes, as "<path to a .py>:<Builder>:<Uploader>". One
+# file, two classes: the builder subclasses uploader.Builder and is 6) Build
+# Website, the uploader subclasses uploader.Uploader and is 7) Upload Website.
+# Each answers three questions — describe(), evaluate(workspace),
+# execute(workspace) — and the uploader answers one more, is_complete(trip_ids).
+# That is the whole contract.
 #
-# examples/uploader_folder.py is a complete working one in about eighty lines,
-# and the test suite drives the menu through it, so it cannot rot into a lie.
-# Read that first, then copy it.
+# examples/local_website.py is a complete working one, and the test suite
+# drives the menu through it, so it cannot rot into a lie. Read that first,
+# then copy it.
 #
-#   website_uploader = ~/dev/dashcam-exporter/examples/uploader_folder.py:FolderTarget
+#   website_uploader = ~/dev/dashcam-exporter/examples/local_website.py:LocalWebSiteBuilderPlugin:LocalWebSiteUploader
 #
 # A file path rather than a dotted module name, because the implementation
 # lives somewhere that is not installed and must not have to be — and when the
@@ -403,10 +405,10 @@ software = true
 # this file is tracked, and a path to your own work written here gets
 # committed. The line above is the SHAPE; .env holds the value.
 #
-# A named implementation that will not load STOPS THE TOOL, loudly, before the
-# menu is drawn. It never falls back to the local edition — a menu that has
-# quietly stopped publishing looks exactly like a menu that is publishing fine,
-# and the renders stop reaching the world with nothing on screen to say so.
+# A named plugin that will not load STOPS THE TOOL, loudly, before the menu is
+# drawn. It never falls back to the local edition — a menu that has quietly
+# stopped publishing looks exactly like a menu that is publishing fine, and the
+# renders stop reaching the world with nothing on screen to say so.
 #website_uploader =
 
 # THE DELETE GUARD. 8) Clean Workspace erases the original clips and the renders
@@ -414,55 +416,53 @@ software = true
 # card is not this item's business — that is 9) Delete SIM Data, with its own
 # evidence and its own word.)
 #
-# THE RULE, in one sentence: the target decides when it can be asked; otherwise
-# every check that can answer must say yes.
+# THE RULE, in one sentence: the floors that never leave this machine first,
+# and then the destination's answer decides.
 #
-# Three gates. How many renderable trips have an mp4 ON THIS MACHINE; whether
-# your target says it HOLDS those mp4s at a matching size; and whether it says
-# they are actually SERVED. The third is the authority whenever it can run,
-# because it asks what is really being served rather than what ought to be — so
-# a short local count is commentary next to a yes from it.
+# The floors: not one mp4 from this import exists, or the local render count is
+# short or unreadable. Neither is delegated and no answer overrides them — an
+# implementation that says yes to everything still cannot get an import that
+# produced no renders erased.
 #
-# GATE ONE NEVER LEAVES THIS MACHINE, and that is deliberate. Your
-# implementation runs inside the trust boundary: whatever it says is believed,
-# and whatever it really does with your footage is between you and it. But a
-# question this tool can answer itself is not delegated, so an implementation
-# that answers yes to everything still cannot get an import that produced no
-# renders erased. Gates two and three are yours; gate one is not, and it can
-# block on its own.
-#
-# It is NOT "the last check that can answer wins": with three trips grouped,
-# one encoded, a target that does not serve anything, and that one mp4 at the
-# destination at a matching size, the destination would be the last word and
-# would say yes — while the two trips that were never encoded exist in no
-# render, at no destination, nowhere. Their footage would go. So every gate
-# that CAN answer has to say yes, and a gate that could not find out answers
-# "unknown", which is not a yes.
+# Then one question, asked of your uploader: is_complete(trip_ids) — are ALL of
+# this import's trips at the destination? The trip ids come from THIS repo's
+# reading of the import, off the sidecars, so a trip that was never encoded is
+# in the list. You do not have it, the honest answer is NO, and its footage
+# stays. That is what makes one all-or-nothing answer safe: asked "do you have
+# everything you were given" you could truthfully say yes about a trip you were
+# never given.
 #
 # THE ONE READING THAT MUST NEVER BE INVENTABLE is "could not find out". An
-# implementation whose target is unreachable says UNKNOWN, and unreachable is
-# not permission. Answers.not_applicable() is a different thing entirely — it
-# means the question does not ARISE here (a folder holds files; it does not
-# serve them) and it removes the gate rather than failing it. Getting those two
-# the wrong way round is how footage gets erased on the strength of a check
-# that never ran.
+# uploader whose destination is unreachable says Evidence.UNKNOWN, and
+# unreachable is not permission. Evidence.NA is a different thing entirely — it
+# means the question does not ARISE here (an archive disk stores footage; it
+# does not publish it) and it removes the gate rather than failing it. Getting
+# those two the wrong way round is how footage gets erased on the strength of a
+# check that never ran.
 #
 # With no website_uploader configured nothing can be verified: it says so in
 # red, names the check that could not run, keeps the renders instead of purging
 # them, and still makes you type CLEAN.
 #
-# When it DOES go ahead on your target's answer, the gate table and the banner
-# name the implementation that gave it, and so does the recorded step. Not a
-# safeguard — a trusted component needs none — but so that afterwards, when the
-# footage is gone, whose answer it was is readable off the tool.
+# When it DOES go ahead on your answer, the gate table and the banner name the
+# implementation that gave it, and so does the recorded step. Not a safeguard —
+# a trusted component needs none — but so that afterwards, when the footage is
+# gone, whose answer it was is readable off the tool.
 
-# WRITING YOUR OWN. Copy examples/uploader_folder.py and answer the eight
+# WRITING YOUR OWN. Copy examples/local_website.py and answer the four
 # questions honestly. There is no shape you have to reproduce and no service
 # you have to sign up for: object storage behind a CDN, an rsync to a box, a
 # copy onto an external disk and a page you open by hand — all of them are the
-# same eight answers. This repo produces the videos and their sidecars; what
-# counts as "published" is yours to define, and holds()/published() are where
-# you define it.
+# same four answers. This repo produces the videos and their sidecars; what
+# counts as "complete at the destination" is yours to define, and is_complete()
+# is where you define it.
+#
+# THE ONE CONDITION OF TRUST: your plugin READS the workspace and never
+# modifies it — no move, no rename, no delete, no writing into the output tree.
+# Copy what you need somewhere of your own and build there. Nothing enforces
+# this. It matters because the files you are handed are the same ones the erase
+# gates above reason about, and a mv leaves them judging a workspace that
+# shifted underneath.
 
 # ============================================================================
 # THE RESULT PAGE

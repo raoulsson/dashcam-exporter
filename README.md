@@ -217,7 +217,7 @@ earn its place.
 
 The sweep only runs when the round is **finished**, and finished means one of
 two things: every render is inside a `final_<date>` folder, or the configured
-target says it holds every render. Either way the workspace holds nothing that
+plugin says every trip of this import is complete at the destination. Either way the workspace holds nothing that
 exists only there. If neither is true it deletes nothing, names the files, and
 says which of the two would settle it.
 
@@ -256,7 +256,7 @@ one setting:
 | Configured | You get |
 |---|---|
 | nothing | Import, render, and `dashcam_export_data_site.html` — one self-contained page, every still embedded, every route drawn from its GPX. Opens from `file://` with no network. |
-| `website_uploader` | Item 6 builds what YOUR target publishes instead of the local page, and item 7, Upload Website, wakes up. |
+| `website_uploader` | Item 6 builds what YOUR plugin publishes instead of the local page, and item 7, Upload Website, wakes up. |
 
 Unconfigured, item 7 stays in the menu, greyed out, with the reason printed
 underneath. Run the cycle and the result is gathered into `final_<date>/` —
@@ -388,56 +388,81 @@ If your card came formatted so macOS will not mount it, see
 ## Publishing — plugging in your own
 
 This repo does not know where your videos go, and it is not supposed to. It
-knows one interface, `WebsiteUploaderInterface` in
-[uploader.py](uploader.py), and it calls whatever class you point it at.
+knows one interface — an ACT of publishing work, in [uploader.py](uploader.py) —
+and it calls whatever classes you point it at.
 
 Set one thing, in the gitignored `.env`:
 
 ```
-SET_WEBSITE_UPLOADER=~/dev/my-site/my_uploader.py:MyTarget
+SET_WEBSITE_UPLOADER=~/dev/my-site/my_plugin.py:MySiteBuilder:MySiteUploader
 ```
 
-`<path to a .py>:<ClassName>`. A file path rather than a dotted module name,
-because your implementation lives somewhere that is not installed and must not
-have to be — and when the path is wrong, the error names your file instead of
-Python's search path.
+`<path to a .py>:<BuilderClass>:<UploaderClass>`. One plugin, two classes: the
+builder is item 6, the uploader is item 7. A file path rather than a dotted
+module name, because your implementation lives somewhere that is not installed
+and must not have to be — and when the path is wrong, the error names your file
+instead of Python's search path.
 
-**Start from [examples/uploader_folder.py](examples/uploader_folder.py).** It
-is a complete implementation in about eighty lines that publishes to a folder:
-no network, no credentials, no second repo, so what is left is the shape and
-nothing else. The test suite drives the real menu through it, which is the
-point — an example nobody runs rots into a lie.
+**Start from [examples/local_website.py](examples/local_website.py).** It is a
+complete plugin in about two hundred lines that copies the renders into a
+staging directory under `/tmp`, builds a small HTML site there, and then sends
+it — the transport itself sketched as clearly-marked pseudo code so nothing in
+it can reach a network. The test suite drives the real menu through it, twice,
+which is the point: an example nobody runs rots into a lie.
 
-Eight questions, in three groups plus one:
+### The interface
+
+Both classes answer the same three questions — the same three a menu item
+answers — and the uploader answers one more:
 
 | | |
 |---|---|
-| `build(world, ui)` | Item 6. Produce whatever you publish, from the renders. |
-| `upload(world, ui)` | Item 7. Put it online. One job; how many transports that takes is yours, not the menu's. |
-| `why_not_build(world)` / `why_not_upload(world)` | `None`, or one reason in the operator's words. Asked on **every menu draw**, so keep them cheap and local — no network, no subprocess. |
-| `owes(renders)` | Which renders `upload()` would still act on. Empty means item 7 reports "settled" instead of offering itself. |
-| `holds(renders)` | Is this exact render at the destination, at this exact size? |
-| `published(renders)` | Is it actually being **served**, not merely stored? |
-| `carries(trip_ids)` | Is there anything there for these trips, by id — for a trip whose local render is already gone. |
-| `dropped(trip_ids, ui)`, `status_lines()`, `name()`, `describe()` | Have defaults. Ignore them until you want them. |
+| `describe()` | One line for the menu row: what this act does on this machine. |
+| `evaluate(workspace)` | May it run? `go()`, `satisfied(reason)` when it is already done, or `blocked(reason)` with one reason in the operator's words. Asked on **every menu draw**, so keep it cheap and local — no network, no subprocess. |
+| `execute(workspace)` | Do it, and say what happened: `did(note)` or `stopped(note)`. |
+| `is_complete(trip_ids)` — uploader only | Are **all** of these trips at the destination? `YES` / `NO` / `UNKNOWN` / `NA`. |
+
+Nothing is registered and nothing calls back. The exporter calls; you return.
+The graph already decides when each act may run, so a readiness callback would
+have no work to do.
+
+`workspace` is a small frozen value object: `out_dir`, `import_dir`, `renders`
+(name, size and path of each mp4), `metas`, `trip_ids`, `dropped_ids`,
+`offline`, and `ui` — the exporter's own output, so your progress looks like
+the rest of the tool.
+
+### The one condition of trust
+
+**Read the workspace. Never modify it.** No move, no rename, no delete, no
+writing into the output tree: copy what you need somewhere of your own and work
+there. This is not policed and will not be. It matters because the renders and
+sidecars you are handed are the same files the exporter's erase gates then
+reason about — a `mv` leaves items 4, 8 and 9 judging a workspace that shifted
+under them.
 
 ### What the exporter will and will not believe
 
-Your class is **inside the trust boundary**. Whoever installed it owns what it
-does, exactly as with any library — the exporter runs your code and believes
+Your classes are **inside the trust boundary**. Whoever installed them owns what
+they do, exactly as with any library — the exporter runs your code and believes
 what it says. There is no sandbox and no output validation, because there is no
-threat model in which those would help: you chose the class.
+threat model in which those would help: you chose the classes.
 
 Two things follow, and they are the whole design:
 
-**"I could not find out" must be unwritable as "yes".** An implementation whose
-target is unreachable answers `Answers.unknown(...)`, and unreachable is not
-permission. `Answers.not_applicable(...)` is a different thing — the question
-does not *arise* for your target (a folder holds files; it does not serve them)
-— and it removes the gate rather than failing it. Getting those two the wrong
-way round is how Clean Workspace erases footage on the strength of a check that
-never ran. A render name you simply did not mention reads UNKNOWN, never yes:
-there is no accessor that takes a default.
+**"I could not find out" must be unwritable as "yes".** An uploader whose
+destination is unreachable answers `Evidence.UNKNOWN`, and unreachable is not
+permission. `Evidence.NA` is a different thing — the question does not *arise*
+for your destination (an archive disk stores footage; it does not publish it) —
+and it removes the erase gate rather than failing it. Getting those two the
+wrong way round is how Clean Workspace erases footage on the strength of a
+check that never ran.
+
+**`is_complete` is all or nothing, and the list is ours.** Clean Workspace
+erases the whole working area, never a chosen trip, so a per-trip answer would
+be finer than anything acts on. The exporter names every trip of the import —
+*including one that produced no render at all*, which is exactly the trip whose
+footage exists nowhere else. You do not have it, so the honest answer is NO, and
+its footage stays.
 
 **The exporter still answers its own questions.** "Were these trips rendered on
 this machine" never leaves home. An implementation that answers yes to

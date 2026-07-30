@@ -11,9 +11,9 @@ The renderer (`make_dashcam_videos.py`) is self-contained — it reads a card an
 writes trips into `--out`, and knows nothing about any website. The rest of
 this repo used to reach for one operator's arrangement in nine places: a
 sibling checkout, a bucket, two deploy scripts, a manifest builder and a live
-URL. All of it is gone. What replaced it is one interface,
-`uploader.WebsiteUploaderInterface`, and one setting that names a class
-implementing it.
+URL. All of it is gone. What replaced it is one interface — an ACT of publishing
+work, `uploader.Act` — and one setting that names a file and the two classes in
+it that implement it: a `Builder` for item 6 and an `Uploader` for item 7.
 
 So the seam is a **type**, not a set of config keys, and it is worth being
 precise about why that matters: config keys describe a destination, and a
@@ -30,13 +30,14 @@ networked code left here to run.
 
 ## What the exporter asks, and what it never asks
 
-| It asks the target | It answers for itself |
+| It asks the plugin | It answers for itself |
 |---|---|
-| Is this render at the destination, at this size? (`holds`) | Were these trips rendered on this machine? |
-| Is it actually being served? (`published`) | Is there anything to build a page from? |
-| Would an upload still do anything? (`owes`) | Is there an import, a sidecar, a GPS track? |
-| Is anything there for this trip id? (`carries`) | Has the operator typed the word? |
-| May build/upload run, and why not? (`why_not_*`) | Which item may follow which — the graph's job |
+| Are ALL of this import's trips at the destination? (`is_complete`) | Were these trips rendered on this machine? |
+| May this act run, and would it do anything? (`evaluate`) | Is there anything to build a page from? |
+| Do it, and what happened? (`execute`) | Is there an import, a sidecar, a GPS track? |
+| What does this act do, in one line? (`describe`) | Which trips is the plugin asked about — the exporter's idea of the import, including one that produced no render |
+| | Has the operator typed the word? |
+| | Which item may follow which — the graph's job |
 
 The right-hand column is the part that never leaves home, and it is not
 distrust. An implementation is inside the trust boundary: you chose the class,
@@ -44,7 +45,14 @@ the exporter runs it, and it believes what the class says. The exporter simply
 does not delegate a question it can already answer. The practical effect is
 that an implementation answering yes to everything still cannot talk Clean
 Workspace into erasing an import that produced no renders, because that gate
-was never the target's to answer.
+was never the plugin's to answer.
+
+There is one more thing the exporter keeps for itself, and it is what makes an
+all-or-nothing answer safe: WHICH trips get named. The list is read off this
+import's sidecars, so a trip that was never encoded is in it — the plugin does
+not have that trip, answers NO, and the footage that exists nowhere else is not
+erased. Asked "do you have everything you were given", a plugin could
+truthfully say yes about a trip it was never given.
 
 ## The shape
 
@@ -84,9 +92,9 @@ Loudly, before the menu is drawn, with the reason and no fallback. Never a
 quiet degradation to the local edition, because that failure is invisible from
 the outside: the menu looks normal, item 6 writes a local page, item 7 sits
 greyed out, and the renders quietly stop reaching the world. The shape check
-happens at startup for the same reason — an implementation missing
-`published()` would otherwise raise at the moment item 8 asks, which is after
-the operator has typed CLEAN.
+happens at startup for the same reason — an uploader missing `is_complete()`
+would otherwise raise at the moment item 8 asks, which is after the operator
+has typed CLEAN.
 
 ## The Build Website item
 
@@ -98,10 +106,12 @@ render already produced, and also GATHERS the render tree into
 `final_<day>_<import>` — that is what makes the workspace expendable, and there
 is no separate gather item, so it lives here or nowhere.
 
-With an uploader configured, **neither happens**. The page is the local
-edition's deliverable and "Nothing leaves this machine" is a sentence about the
-other product; and moving the render tree would rename every published trip out
-from under whatever index the target keeps. This used to be a bug: only the
+With a plugin configured, **neither happens**. The page is the local edition's
+deliverable and "Nothing leaves this machine" is a sentence about the other
+product; and moving the render tree would rename every published trip out from
+under whatever index the plugin keeps. The same rule binds the plugin itself:
+it reads the workspace and never modifies it, which is the one condition of
+trust the interface states and does not police. This used to be a bug: only the
 *mover* was the strategy branch, so the page writer ran either way and a
 publishing install got a local page it never asked for, announcing that nothing
 had left the machine while item 7 was about to send it all.
@@ -134,7 +144,8 @@ whatever your implementation makes it. A local page has no threat model.
 
 See the README's [Publishing](../README.md#publishing--plugging-in-your-own)
 section for the method-by-method table, and
-[examples/uploader_folder.py](../examples/uploader_folder.py) for a complete
-one that publishes to a folder. The test suite drives the real menu — items 6,
-7 and 8, including the erase gates — through that example, so it cannot rot
-into a lie.
+[examples/local_website.py](../examples/local_website.py) for a complete plugin
+that stages a site in `/tmp` and sends it, with the transport itself sketched
+as pseudo code. The test suite drives the real menu — items 6, 7 and 8,
+including the erase gates — through that example, twice, so it cannot rot into
+a lie and the already-done path is proven rather than described.
