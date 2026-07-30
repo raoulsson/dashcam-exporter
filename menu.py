@@ -647,7 +647,7 @@ def _rule_number(rule) -> int:
     return rule[0]
 
 
-def _is_view(item: MenuItem) -> bool:
+def is_view(item: MenuItem) -> bool:
     """A view neighbours everything and is never a position of its own."""
     return isinstance(item.outbound(), Anywhere)
 
@@ -689,6 +689,6 @@ def _reaches(item: MenuItem, number: int) -> bool:
 
 def position_for(menu: Dict[int, MenuItem]) -> Position:
     """A Position that knows this menu's universe, views and entry points."""
-    views = frozenset(filter(lambda n: _is_view(menu[n]), menu))
+    views = frozenset(filter(lambda n: is_view(menu[n]), menu))
     starts = frozenset(filter(lambda n: menu[n].start(), menu))
     return Position(frozenset(menu), views, starts)

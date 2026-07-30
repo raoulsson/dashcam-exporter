@@ -5131,7 +5131,20 @@ class Work:
         return ask("  Type %s to confirm, anything else to cancel: " % word)
 
     def recapture(self, scope):
-        """The refresh point. Called after the word and before the act."""
+        """The refresh point. Called after the word and before the act.
+
+        It tells the plugin to forget first, and that is not the exporter
+        deciding how the plugin should cache. It is the exporter saying, at the
+        one moment it owns, that this answer must not come from memory: the
+        whole point of asking a second time is to catch a destination that
+        changed while the prompt was on screen, and a remembered answer is the
+        first answer wearing a second coat.
+
+        Nothing between the banner and the typed word touches the workspace, so
+        the plugin is otherwise right to reuse — which is exactly why it has to
+        be told here and nowhere else.
+        """
+        _reset_before_erasing(self.ctx)
         return capture_world(self.ctx, scope)
 
     def refuse(self, reason):
@@ -5444,6 +5457,7 @@ class Runner:
         started, already = time.time(), len(self.ctx.results)
         outcome = self._execute(item)
         _stamp_elapsed(self.ctx.results[already:], time.time() - started)
+        _tell_the_plugin(self.ctx, item, outcome)
         _print_all(_nothing_to_do_lines(outcome))
         self.position.advance(item)
         _print_all(_stayed_lines(item, outcome, self.menu, self.position))
@@ -5505,6 +5519,52 @@ def _nothing_to_do_lines(outcome):
     if outcome.performed or not outcome.completed:
         return []
     return [C.green("  Nothing to do: %s." % (outcome.note or "already done"))]
+
+
+def _reset_before_erasing(ctx):
+    plugin = getattr(ctx, "plugin", None)
+    if plugin is not None:
+        _reset_quietly(plugin)
+
+
+def _tell_the_plugin(ctx, item, outcome):
+    """A step changed the plugin's INPUT, so what it was holding is stale.
+
+    It cannot see an import land, a trip get dropped, or the working area get
+    erased — none of that goes anywhere near it — and every one of them changes
+    the workspace it is handed and therefore what its destination should be
+    asked about.
+
+    The trigger is derived rather than listed: a step that performed work, and
+    is not a VIEW. A view changes nothing by definition, so Progress does not
+    invalidate anything; a blocked or already-satisfied step did nothing, so
+    neither does that. A hand-kept list of the steps that matter would be a
+    list to forget to add to.
+    """
+    plugin = getattr(ctx, "plugin", None)
+    if _changed_the_input(plugin, item, outcome):
+        _reset_quietly(plugin)
+
+
+def _changed_the_input(plugin, item, outcome):
+    if plugin is None:
+        return False
+    return _did_real_work(item, outcome)
+
+
+def _did_real_work(item, outcome):
+    if menu.is_view(item):
+        return False
+    return outcome.performed
+
+
+def _reset_quietly(plugin):
+    try:
+        plugin.reset()
+    except Exception as e:
+        # Its own cache is its own problem. A step that just finished must not
+        # be reported as failed because a notification about it went wrong.
+        print(C.dim("  (%s.reset() raised: %s)" % (plugin.name, e)))
 
 
 def _stamp_elapsed(results, seconds):

@@ -146,6 +146,9 @@ class Recording(U.Act):
     def describe(self):
         return self.script.describes
 
+    def reset(self):
+        self.script.calls.append("reset")
+
 
 class RecordingBuilder(Recording, U.Builder):
 
@@ -1248,6 +1251,28 @@ class TestTheLogTimesTheWorkAndNotTheLogging(unittest.TestCase):
         self.assertEqual(P._hms(0), "00:00:00")
         self.assertEqual(P._hms(57), "00:00:57")
         self.assertEqual(P._hms(3661), "01:01:01")
+
+
+class TestThePluginIsToldBeforeAnythingIsErased(SeamTest):
+    """The one place the exporter insists on a fresh answer.
+
+    Asking twice only means something if the second answer can differ from the
+    first. A plugin that caches — which it is entitled to do, and which it must
+    do if its destination is expensive — would otherwise hand back the answer
+    the banner was drawn from, and the re-check would be the first answer
+    wearing a second coat.
+
+    Where the workspace CHANGING invalidates it is a Runner concern and lives
+    in test_pipeline.py; this is the erase insisting for its own reasons.
+    """
+
+    def test_the_recheck_forces_a_fresh_answer(self):
+        target = Recorder(complete=[YES, NO])
+        b = self.bench(target).complete()
+        ran = b.run(CLEAN_WS)
+        self.assertFalse(ran.completed, ran.note)
+        self.assertTrue(b.footage_on_disk(), "erased on the pre-prompt answer")
+        self.assertGreater(target.times("reset"), 0)
 
 
 class TestATargetThatFallsOverAwayFromTheAskPath(SeamTest):

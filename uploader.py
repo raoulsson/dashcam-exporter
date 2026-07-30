@@ -186,6 +186,27 @@ class Act(ABC):
         """
 
 
+    def reset(self) -> None:
+        """The workspace changed under you. Anything you were holding is stale.
+
+        Called after any menu item that actually did something — an import
+        brought a new card in, a trip was dropped, the working area was erased.
+        You cannot see those: they are this machine's business and they happen
+        without going anywhere near you. But they change what your destination
+        should be asked about, and an answer cached across one of them is about
+        trips that may no longer exist.
+
+        The default does nothing, because a plugin that goes and looks every
+        time has nothing to forget. Implement it if you cache — which you may
+        well want to, since the exporter asks on every capture and does not
+        presume to know what that costs you. Your own build and upload are
+        yours to notice; this is for everything else.
+
+        It must not raise and must not be slow: it is called on the way past a
+        step the operator is watching finish.
+        """
+
+
 class Builder(Act):
     """Item 6: produce whatever this installation publishes, from the renders.
 
@@ -287,6 +308,11 @@ class Plugin:
     builder: Builder
     uploader: Uploader
     spec: str
+
+    def reset(self) -> None:
+        """Tell both acts. One arrangement, one notification."""
+        self.builder.reset()
+        self.uploader.reset()
 
     @property
     def name(self) -> str:

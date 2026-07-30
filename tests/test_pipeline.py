@@ -185,6 +185,61 @@ def drive(menu_items, position, keys):
 
 
 # ---------------------------------------------------------------------------
+# Telling the plugin its input moved
+# ---------------------------------------------------------------------------
+
+class ThePluginIsToldWhenItsInputChanged(unittest.TestCase):
+    """A plugin cannot see the workspace change, so the dispatcher tells it.
+
+    An import landing, a trip being dropped, the working area being erased —
+    none of that goes anywhere near it, and every one changes which trips it
+    would be asked about. Whether it caches is its own decision, made where the
+    cost is known; knowing when to stop is not something it could arrange for
+    itself.
+
+    The trigger is derived, not listed: a step that performed work and is not a
+    view. A hand-kept list of the steps that matter is a list to forget to add
+    to, and the forgotten one would be the one that erases something.
+    """
+
+    def _dispatch(self, number, outcome=None):
+        ctx = mock.Mock()
+        ctx.results = []
+        item = fake_item(number)
+        item.execute.return_value = outcome or M.did("done")
+        position = mock.Mock()
+        position.current = number
+        runner = P.Runner.__new__(P.Runner)
+        runner.ctx, runner.menu, runner.position = ctx, {number: item}, position
+        with mock.patch.object(P, "capture_world", lambda c, s=None: object()), \
+                redirect_stdout(io.StringIO()):
+            runner.run_one(number)
+        return ctx.plugin
+
+    def test_a_step_that_did_work_tells_it(self):
+        self.assertTrue(self._dispatch(RENDER).reset.called)
+
+    def test_looking_at_progress_tells_it_nothing(self):
+        """A view changes nothing by definition, so it invalidates nothing."""
+        self.assertFalse(self._dispatch(PROGRESS).reset.called)
+
+    def test_a_step_that_was_already_satisfied_tells_it_nothing(self):
+        """Nothing happened, so nothing the plugin holds went stale."""
+        settled = M.Outcome(True, "already done", performed=False)
+        self.assertFalse(self._dispatch(RENDER, settled).reset.called)
+
+    def test_a_plugin_that_raises_on_reset_does_not_fail_the_step(self):
+        """Its cache is its own problem. A step that just finished must not be
+        reported as failed because a notification about it went wrong."""
+        ctx = mock.Mock()
+        ctx.results = []
+        ctx.plugin.reset.side_effect = RuntimeError("shelf fell over")
+        with redirect_stdout(io.StringIO()) as out:
+            P._tell_the_plugin(ctx, fake_item(RENDER), M.did("done"))
+        self.assertIn("shelf fell over", out.getvalue())
+
+
+# ---------------------------------------------------------------------------
 # How long it took, measured where the operator waited
 # ---------------------------------------------------------------------------
 
