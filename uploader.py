@@ -235,6 +235,25 @@ class Uploader(Act):
         precisely so a destination that changed under the prompt is noticed. A
         cached answer silently defeats that, and the exporter cannot detect it.
 
+        AND THE STATE IS YOURS ACROSS SESSIONS. The exporter persists nothing
+        about your destination: not what was built, not what was uploaded, not
+        this answer. The four files it keeps in the working area are its own
+        business — where the card import reached, which trips the operator
+        dropped, the owner marker and the lock — and none of them describes a
+        destination. So every session starts by asking you, with no memory of
+        the last one, and a plugin that only knows what it did since it was
+        constructed will answer wrongly the moment the tool is restarted.
+
+        Best is not to remember at all: go and look, the way the shipped
+        example lists its destination directory on every call. Then a site
+        someone changed while the tool was closed is seen, and there is no
+        record to fall out of step with reality. If your destination is too
+        expensive to interrogate and you must keep a record, keep it in YOUR
+        storage — beside the destination, or wherever the arrangement belongs.
+        Never in the exporter's working area: writing there breaks the one
+        condition asked of an implementation, and the erase gates reason about
+        those very files.
+
         Nor is execute()'s return value a substitute for being asked: it says
         what happened at the time it ran, and the world moves between then and
         the irreversible act.

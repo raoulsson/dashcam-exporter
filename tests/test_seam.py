@@ -389,6 +389,19 @@ class Bench:
     def footage_on_disk(self):
         return (self.ctx.import_root / "DCIM").is_dir()
 
+    def reopen(self, plugin):
+        """The same working area, a freshly constructed plugin.
+
+        What a restart amounts to here: the disk is where the last session left
+        it, and nothing the plugin knew in memory survives. The menu is rebuilt
+        from ctx on every call, so swapping it is the whole of it — which is
+        itself the point, since anything the exporter had cached about the
+        destination would survive this and be caught by the tests that use it.
+        """
+        self.plugin = plugin
+        self.ctx.plugin = plugin
+        return self
+
     def cleanup(self):
         shutil.rmtree(self.root, ignore_errors=True)
 
@@ -1126,6 +1139,63 @@ def _plugin_with(builder=None, uploader=None, **kw):
     return U.Plugin(builder(script) if builder else plugin.builder,
                     uploader(script) if uploader else plugin.uploader,
                     plugin.spec)
+
+
+class TestTheDestinationsStateIsThePluginsToKeep(SeamTest):
+    """The exporter remembers nothing about a destination, between prompts or
+    between sessions.
+
+    It used to: a .deployed.json beside the renders recorded what had been put
+    online, and the erase gate read it. That is a second account of a far end
+    the exporter cannot see, and it is wrong the moment anyone changes the site
+    while the tool is closed — which is the ordinary case, since the site is
+    curated from a browser.
+
+    So the answer is asked, never stored, and a plugin that only knows what it
+    did since it was constructed is wrong on the next launch. The shipped
+    example shows the way out: go and look, every time.
+    """
+
+    def _cycled(self, target):
+        """A workspace taken all the way to published."""
+        b = self.bench(target).imported().sidecars().render().grouped(trips=1)
+        b.run(BUILD)
+        b.run(UPLOAD)
+        return b
+
+    def test_the_working_area_records_nothing_about_the_destination(self):
+        """Whatever the exporter keeps beside the renders has to be about the
+        card, the operator's own decisions, or itself. A file naming the
+        destination would be an answer nobody asked the plugin for."""
+        b = self._cycled(Recorder(complete=YES))
+        kept = sorted(p.name for p in b.ctx.out_dir.rglob("*")
+                      if p.is_file() and p.name.startswith("."))
+        for name in kept:
+            with self.subTest(file=name):
+                self.assertIn(name, (P.LEDGER_FILE, P.EXCLUDED_FILE,
+                                     P.OWNER_FILE, P.LOCK_FILE),
+                              "an unexpected dotfile in the working area: %s" % name)
+
+    def test_a_second_session_asks_again_rather_than_remembering(self):
+        """The plugin is reconstructed and the count starts from zero, which is
+        what a restart looks like. The erase must still consult it."""
+        b = self._cycled(Recorder(complete=YES))
+        fresh = Recorder(complete=YES)
+        b.reopen(fresh)
+        self.assertEqual(fresh.times("is_complete"), 0, "the bench started dirty")
+        b.run(CLEAN_WS)
+        self.assertTrue(fresh.times("is_complete"),
+                        "the erase acted without asking this session's plugin")
+
+    def test_a_destination_emptied_while_the_tool_was_closed_refuses(self):
+        """The reason the rule earns its place. Last session it said yes and
+        the footage stayed; this session it says no, and the erase must obey
+        the answer it gets NOW rather than the one it got then."""
+        b = self._cycled(Recorder(complete=YES))
+        b.reopen(Recorder(complete=NO))
+        ran = b.run(CLEAN_WS)
+        self.assertFalse(ran.completed)
+        self.assertTrue(b.footage_on_disk(), "erased on last session's answer")
 
 
 class TestATargetThatFallsOverAwayFromTheAskPath(SeamTest):
