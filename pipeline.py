@@ -1925,6 +1925,10 @@ def step_progress(ctx, world):
     _print_all(_destination_line(world.target))
     if excluded:
         print(C.dim("  %d clip stamp(s) excluded on purpose." % len(excluded)))
+    # What this session has done, without waiting for the exit to say it. The
+    # table above is the workspace; this is the cycle, and the two answer
+    # different questions -- "what is here" and "how did it get that way".
+    print_summary(ctx)
     return record(ctx, NAME[PROGRESS], RAN, started,
                   "%d trip(s), %d rendered, destination %s"
                   % (len(trips), n_rendered, world.target.complete.value))
@@ -5305,8 +5309,24 @@ def print_summary(ctx):
 
 
 def _summary_line(r):
-    return "  %s  %-34s %8s   %s" % (_status_tag(r.status), r.name,
+    return "  %s  %-37s %8s   %s" % (_status_tag(r.status), _numbered(r.name),
                                      human_secs(r.seconds), C.dim(r.detail))
+
+
+_NUMBER_OF = {name: number for number, name in NAME.items()}
+
+
+def _numbered(name):
+    """"5) Render Videos" -- the number the operator pressed, in front.
+
+    The log reads back as the session that happened, and what he pressed is
+    the number. A name alone makes him translate every line back into a
+    keystroke to see the shape of what he did.
+    """
+    number = _NUMBER_OF.get(name)
+    if number is None:
+        return name
+    return "%d) %s" % (number, name)
 
 
 _STATUS_TAGS = {RAN: lambda: C.green("ran      "),
