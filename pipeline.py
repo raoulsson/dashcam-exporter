@@ -5730,7 +5730,21 @@ def _failed(result):
     return result.status == FAILED
 
 
-def _run_menu(ctx):
+def _startup_note(ctx):
+    """What the launch actually paid for.
+
+    Config, the lock, the ego-motion check and the status screen are all
+    cheap. The one that is not is the world captured to work out where the
+    cycle had got to, which asks the plugin — and what THAT costs is the
+    plugin's business, which is exactly why it belongs in the log where it can
+    be seen rather than assumed about.
+    """
+    if getattr(ctx, "plugin", None) is None:
+        return "read the workspace"
+    return "read the workspace and asked %s" % ctx.plugin.name
+
+
+def _run_menu(ctx, launched):
     """The menu loop IS the state machine: it draws from the position and the
     world, and dispatches one item at a time.
 
@@ -5740,7 +5754,9 @@ def _run_menu(ctx):
     habit the typed word exists to defeat.
     """
     try:
-        build_runner(ctx).loop()
+        runner = build_runner(ctx)
+        record(ctx, "Startup", RAN, launched, _startup_note(ctx))
+        runner.loop()
     except (KeyboardInterrupt, Aborted):
         print()
         print(C.yellow("  Interrupted."))
@@ -5770,7 +5786,7 @@ def main(argv=None):
     # cannot strand it.
     if not acquire_single_instance_lock(ctx):
         return _lock_taken(ctx)
-    return _start(ctx)
+    return _start(ctx, launched)
 
 
 def _uploader_broken(error):
@@ -5789,7 +5805,7 @@ def _uploader_broken(error):
     return 4
 
 
-def _start(ctx):
+def _start(ctx, launched):
     print()
     print(C.bold("  dashcam pipeline") + C.dim("   " + _chain(ctx)))
     print(_edition_line(ctx))
@@ -5798,7 +5814,7 @@ def _start(ctx):
     if not require_ego_motion(ctx):
         return 3
     print_status(ctx)
-    _run_menu(ctx)
+    _run_menu(ctx, launched)
     return _exit_code(ctx)
 
 
