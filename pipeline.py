@@ -5693,7 +5693,7 @@ def _info_row(label, value):
 
 
 def _help_lines(menu_items, position, args):
-    """`h` for the keys, `h <n>` for one entry, in the entry's own words."""
+    """`h` for the keys, `h` then a digit for one entry, in its own words."""
     if args:
         return _entry_help(menu_items, position, args[0])
     return _general_help(menu_items)
@@ -5703,8 +5703,9 @@ def _general_help(menu_items):
     return ("",
             C.bold("  keys"),
             "    <n>          run entry n",
-            "    h <n>        what entry n is, and why it is or is not offered",
+            "    h<n>         what entry n is, and why it is or is not offered",
             "    s            status, and why each greyed entry is greyed",
+            "    i            version, licence, repository, funding",
             "    q            quit",
             "",
             C.dim("  Entries erasing footage ask for a typed word first: %s."
@@ -5714,7 +5715,7 @@ def _general_help(menu_items):
 
 def _entry_help(menu_items, position, arg):
     if not arg.isdigit() or int(arg) not in menu_items:
-        return ("", C.yellow("  No entry %s. Try h <n> with a number from the menu." % arg), "")
+        return ("", C.yellow("  No entry %s. Press h then a number from the menu." % arg), "")
     return _about(menu_items, position, int(arg))
 
 
