@@ -6214,7 +6214,7 @@ def build_runner(ctx, classes=None):
     # a test -- so budgeting on a guess about someone else's implementation is
     # the one thing this seam exists to stop. Startup is a defined moment an
     # implementor can plan for; what it costs there is theirs to manage.
-    with waiting("Reading the workspace and asking the plugin"):
+    with waiting("Reading the workspace and querying the plugin..."):
         world = capture_world(ctx, menu.Scope.FULL)
     _resume(ctx, position, world)
     return Runner(ctx, menu_items, position)
@@ -6253,8 +6253,12 @@ def _big_banner():
 
     On the last line of the glyphs rather than a line of its own: the art is
     already the header, and a version under it would be a second one.
+
+    No blank above it. The launcher's own line sits there and is the break;
+    one of ours as well made two. The blank below comes from the status block,
+    which has always printed its own.
     """
-    return ("",) + tuple(map(C.bold, _with_version(BANNER.strip("\n").splitlines())))
+    return tuple(map(C.bold, _with_version(BANNER.strip("\n").splitlines())))
 
 
 def _with_version(lines):
@@ -6320,7 +6324,7 @@ def _startup_note(ctx):
     """
     if getattr(ctx, "plugin", None) is None:
         return "read the workspace"
-    return "read the workspace and asked %s" % ctx.plugin.name
+    return "read the workspace and queried %s" % ctx.plugin.name
 
 
 def _run_menu(ctx, launched):
