@@ -6203,7 +6203,7 @@ def _big_banner():
 def _with_version(lines):
     at = len(lines) - 2                     # the last line of the letterforms
     tagged = list(lines)
-    tagged[at] = "%-*s  v%s" % (BANNER_WIDTH, tagged[at], version())
+    tagged[at] = "%s v%s" % (tagged[at].rstrip(), version())
     return tagged
 
 
