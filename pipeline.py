@@ -184,6 +184,12 @@ class C:
     def cyan(cls, s):
         return cls._w("36", s)
 
+    @classmethod
+    def violet(cls, s):
+        """The bars, and nothing else. 256-colour, because magenta (35) is the
+        same weight as the red that means "this destroys something"."""
+        return cls._w("38;5;177", s)
+
 
 def rule(title="", ch="-"):
     # Exactly the reported width. A character wider reaches the right edge and
@@ -564,8 +570,8 @@ class Bar:
         width = self.width()
         filled = int(round(width * min(fraction, 1.0)))
         bar = self.FILLED * filled + self.EMPTY * (width - filled)
-        return "%s [%s] %3d%% %s/%s" % (self.label, bar, int(fraction * 100),
-                                        human_secs(elapsed),
+        return "%s [%s] %3d%% %s/%s" % (self.label, C.violet(bar),
+                                        int(fraction * 100), human_secs(elapsed),
                                         human_secs(_eta(fraction, elapsed)))
 
 
@@ -628,7 +634,7 @@ class Waiting(Bar):
         width = self.width(room_for=40)
         at = self._bounce(i, width)
         bar = self.EMPTY * at + self.BLOCK + self.EMPTY * (width - at - len(self.BLOCK))
-        return "  %s [%s] %s " % (self.label, bar, human_secs(elapsed))
+        return "  %s [%s] %s " % (self.label, C.violet(bar), human_secs(elapsed))
 
     def _bounce(self, i, width):
         span = max(1, width - len(self.BLOCK))
@@ -785,8 +791,11 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
         if note:
             head += "  " + note
 
-        # give whatever is left of the terminal to the child's latest line
-        room = term_width() - len(head) - 4
+        # give whatever is left of the terminal to the child's latest line.
+        # _visible_len, not len: the bar inside `head` carries colour now, and
+        # counting its escapes as width would shrink the tail by a dozen
+        # characters that are not on the screen.
+        room = term_width() - _visible_len(head) - 4
         tail = ""
         if last_raw and room > 12:
             t = last_raw.strip()
@@ -808,7 +817,7 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
                 # MiB/20.0 MiB"); the ends are filenames and units that repeat.
                 t = t[:room - 1] + "…"
             tail = "  " + C.dim(t)
-        live.draw([C.cyan(head) + tail])
+        live.draw([C.yellow(head) + tail])
 
     try:
         while not done:
