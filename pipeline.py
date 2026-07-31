@@ -53,6 +53,11 @@ import subprocess
 import sys
 import tempfile
 import threading
+try:
+    import termios
+    import tty
+except ImportError:      # not a POSIX terminal; typed lines still work
+    termios = tty = None
 import time
 import traceback
 import urllib.parse
@@ -1088,6 +1093,66 @@ _HINTED = [True]     # True at the menu, so the hint never appears there
 
 def hint_reset():
     _HINTED[0] = False
+
+
+def read_key(prompt):
+    """One keypress at the menu, no Enter. Falls back to a typed line.
+
+    The menu is single characters -- a digit, s, h, i, q -- so making the
+    operator press return after each one is a keystroke that carries no
+    information. h is the exception: it takes a second key, and reads it the
+    same way, so `h` then `4` is help about entry 4 and `h` then anything else
+    is the general help.
+
+    Falls back to input() when stdin is not a terminal, which is every test and
+    any piped run, so nothing here changes what those see.
+    """
+    ch = _one_char_at(prompt)
+    if ch is None:
+        # Not a terminal: a typed line through the same prompt everything else
+        # uses, so a piped run and every test are unchanged.
+        return ask(prompt, quits=False).strip().lower()
+    return _echoed(ch)
+
+
+def _one_char_at(prompt):
+    if not (sys.stdin.isatty() and termios is not None):
+        return None
+    sys.stdout.write(C.bold(prompt))
+    sys.stdout.flush()
+    return _one_char()
+
+
+def _one_char():
+    """A single character in raw mode, or None when that is not possible."""
+    if not (sys.stdin.isatty() and termios is not None):
+        return None
+    fd = sys.stdin.fileno()
+    saved = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        return sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+
+
+def _echoed(ch):
+    """Show what was pressed, since raw mode does not, and read h's second key."""
+    if ch in ("\x03", "\x04"):
+        print()
+        raise Aborted()
+    if ch.lower() != "h":
+        print(ch if ch.isprintable() else "")
+        return ch.strip().lower()
+    return _help_key()
+
+
+def _help_key():
+    sys.stdout.write("h")
+    sys.stdout.flush()
+    second = _one_char() or ""
+    print(second if second.isprintable() else "")
+    return ("h " + second).strip() if second.strip() else "h"
 
 
 def ask(prompt, default="", quits=True):
@@ -5691,9 +5756,17 @@ class Runner:
         print_menu(self.ctx, self.menu, self.position, world)
         print()
         _HINTED[0] = True                      # no hint on the menu itself
-        return self._dispatch(ask("Select> ", quits=False).strip().lower())
+        return self._dispatch(read_key("Select> "))
 
     def _dispatch(self, sel):
+        """Empty is Enter on its own, which is not a choice and not an error.
+
+        It used to reach `sel.split()[0]` and take the whole session down with
+        an IndexError -- for pressing return at a prompt, which is the most
+        ordinary thing anyone does to a menu.
+        """
+        if not sel:
+            return True
         if sel in ("q", "quit", "exit"):
             return False
         return self._not_quit(sel)
