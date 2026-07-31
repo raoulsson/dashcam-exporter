@@ -329,7 +329,8 @@ class TheLiveProgressLineIsActuallyDrawn(unittest.TestCase):
     def test_the_note_goes_in_front_of_the_bar(self):
         rc, out = self._run(True)
         self.assertEqual(rc, 0)
-        self.assertIn("one.mp4 9MB/s", out)
+        self.assertIn("one.mp4", out)
+        self.assertIn("9MB/s", out)
         drawn = [l for l in out.replace("\r", "\n").split("\n") if "9MB/s" in l]
         self.assertTrue(drawn, "nothing was drawn")
         for line in drawn:

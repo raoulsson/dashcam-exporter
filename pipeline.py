@@ -965,12 +965,35 @@ def _remember_name(state, line):
         state["name"] = name.rsplit("/", 1)[-1]
 
 
+# Fixed columns, so nothing on the line moves except what it is measuring.
+# A clip is "20260730141804_0060.mp4" -- 23 characters, the same every time --
+# and the rate and the two sizes are right-aligned against their widest form
+# ("271.36MB/s", "142.3 MB"). Left to size themselves, every field jumped
+# sideways whenever a number gained a digit, which is the whole line wiggling
+# to report that one clip is faster than the last.
+NAME_W, RATE_W, SIZE_W = 23, 10, 8
+
+
 def _import_progress(state, moved, total, rate):
     if not total:
         return None
-    return (min(moved / float(total), 1.0),
-            "%s %s %s/%s" % (state["name"], rate,
-                             human_bytes(moved), human_bytes(total)))
+    note = "%s %s %s/%-*s" % (_fitted(state["name"], NAME_W), _right(rate, RATE_W),
+                              _right(human_bytes(moved), SIZE_W),
+                              SIZE_W, human_bytes(total))
+    # \0: no log tail after this. The tail shows the child's last raw line,
+    # and for rsync that line IS where these numbers came from -- it printed
+    # the rate and a percentage again, truncated, after the ones on the left.
+    return min(moved / float(total), 1.0), note + "\0"
+
+
+def _fitted(text, width):
+    if len(text) > width:
+        return text[:width - 1] + "…"
+    return "%-*s" % (width, text)
+
+
+def _right(text, width):
+    return "%*s" % (width, text)
 
 
 def _bar_line(label, frac, elapsed, note, note_first):
@@ -6819,11 +6842,28 @@ def print_summary(ctx, close=True):
     if not ctx.results:
         return
     print()
-    print(rule("Summary"))
+    print(rule("Summary", ch="="))
     print(C.dim("  %-9s  %-37s %18s   %s"
-                % ("", "task", "CPU / Network time", "Description")))
+                % ("State", "Task", "CPU / Network Time", "Description")))
     _print_all(map(_summary_line, ctx.results))
-    _print_all((rule(),) if close else ())
+    print(C.dim(_total_line(ctx.results)))
+    _print_all((rule(ch="="),) if close else ())
+
+
+# Where the time column ends: two spaces, the nine-wide status tag, two more,
+# the thirty-seven-wide name, a space, and eighteen right-aligned digits.
+TIME_COL = 2 + 9 + 2 + 37 + 1 + 18
+
+
+def _total_line(results):
+    """What the session cost, in the column it is the total of.
+
+    Right-aligned as one phrase so the figure lands on the same edge as every
+    row above it -- a total that does not line up with its column is a number
+    the eye has to hunt for to add anything up.
+    """
+    return "%*s" % (TIME_COL, "Total Runtime  %s"
+                    % _hms(sum(r.seconds or 0 for r in results)))
 
 
 def _summary_line(r):
