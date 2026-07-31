@@ -580,7 +580,7 @@ class TestTheMenuSaysWhichProductItIs(unittest.TestCase):
     """
 
     def test_the_item_with_no_edges_names_the_strategy(self):
-        """Asked for with `s` rather than printed under every draw, along with
+        """Asked for with `p` rather than printed under every draw, along with
         every other reason an entry is greyed."""
         b = Bench(LOCAL)
         b.type()
@@ -849,7 +849,7 @@ class TestTheMenuIsTheMachine(PainterTest):
         self.assertNotIn("%d) not available from here" % YANKEE, out)
 
     def test_where_we_are_is_said_in_the_items_own_words(self):
-        """RESTATED: the position moved off the menu footer onto the status
+        """RESTATED: the position moved off the menu footer onto the progress
         screen. Under the grid it was one more thing identical on every draw;
         asked for, it answers a question."""
         built = invented_menu()
@@ -927,7 +927,7 @@ class TestThePaintedMenuMatchesTheRealMachine(PainterTest):
         the menu draws that no item holds is a number written into the painter.
 
         Progress is not drawn: it is a view, it changes nothing, and it is
-        reached with `s` like the other keys that only show you something. It
+        reached with `p` like the other keys that only show you something. It
         is still in the machine and still reachable -- what changed is that the
         grid lists steps, and looking at the workspace is not one."""
         b = Bench(UPLOADER, current=RENDER)

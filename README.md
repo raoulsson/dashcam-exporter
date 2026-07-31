@@ -40,41 +40,50 @@ deliberate — see [One source of truth](#one-source-of-truth).
 ## What it looks like
 
 ```
-  dashcam pipeline   card -> render -> folder(~/dashcam-published)
-  uploader edition — README.md has the step graph and what each edition does.
+-- configuration (read from ~/dev/dashcam-exporter/config.txt) ------------------
+  SIM Card             /Volumes/NO NAME
+  Workspace Directory  ~/dashcam-data
+  Import Directory     ~/dashcam-data/import
+  Export Directory     ~/dashcam-data/export
+  Running in           ~/dev/dashcam-exporter
+  Export-Mode          uploader: User plugin handles build and upload of website
+  Plugin               MyBuilder, MyUploader
+    Location           ~/dev/my-site/exporter_uploader.py
+    Description        Send the videos to S3 and deploy the pages.
+  Python               3.14.6 (~/dev/dashcam-exporter/.venv/bin/python)
+--------------------------------------------------------------------------------
 
--- status ---------------------------------------------------------------------
-  Source       present  /Volumes/NO NAME  (222 clips)
-  Import       ~/dashcam-data/import/2026-07-28  612 clips, 116.6 GB
-  Rendered     6 mp4  8.3 GB in ~/dashcam-data/output
-  Local site   ~/dashcam-data/output/dashcam_export_data_site.html  built 22 min ago
-  Folder       ~/dashcam-published  29 file(s)
-  Repo         ~/dev/dashcam-exporter
+-- status ----------------------------------------------------------------------
+    SIM Card     mounted  222 clips         (/Volumes/NO NAME)
+    Import       612 clips, 116.6 GB       (~/dashcam-data/import/2026-07-28)
+    Rendered     6 mp4, 8.3 GB             (~/dashcam-data/export)
+    Published    all 6 trips are live      (goodnight-drives.com)
+    Disk         238.8 GB free of 917.0 GB (/Volumes/Macintosh HD)
 --------------------------------------------------------------------------------
-  disk: 238.8 GB free of 917.0 GB
---------------------------------------------------------------------------------
-  0) Progress             3) Build Preview        6) Build Website        9) Delete SIM Data
+================================================================================
   1) Import SIM           4) Exclude Trip         7) Upload Website
   2) Generate Meta        5) Render Videos        8) Clean Workspace
-   9) no card at ~/dashcam-data/card
-   1,7) not from here — the graph does not offer them yet
-   at: 5) Render Videos   s = status   q = quit    (4,8,9 destroy footage)
+  3) Build Preview        6) Build Website        9) Delete SIM Data
+  p = progress   h = help   i = info   q = quit
 
 Select>
 ```
 
 The menu is drawn from the state machine, so everything on it is an answer
-rather than a label. An item you cannot pick is greyed out with the reason
-underneath, and the reason says which of the two gates refused: the **graph**
-("not from here" — this does not follow where the pipeline is) or the item's
-own **guard** ("no card at ...", "no GPS track in the import"). The numbering
-never moves, so "run 5" means the same thing on every machine.
+rather than a label. An item you cannot pick is greyed out, and `p` says why —
+which of the two gates refused: the **graph** (this does not follow where the
+pipeline is) or the item's own **guard** ("no card at ...", "no GPS track in
+the import"). The numbering never moves, so "run 5" means the same thing on
+every machine.
 
-### The ten items
+### The nine steps
+
+Plus `p` — progress: which trips exist, what has been done to them, what can
+be done next and why the rest cannot. It is not numbered, because looking at
+the workspace is not a step in working through it.
 
 | | Item | What it does |
 |---|---|---|
-| 0 | **Progress** | The read-only view: which trips exist and what has been done to them. Changes nothing, reachable from anywhere, never greyed out. |
 | 1 | **Import SIM** | Copies the source's `DCIM` tree into the workspace and verifies it file-for-file. Takes only clips newer than the last import. |
 | 2 | **Generate Meta** | Writes each trip's sidecars — `_meta.json`, `.gpx`, `.html` map. The metadata everything downstream reads. |
 | 3 | **Build Preview** | One still per trip and a local contact sheet, from the sidecars. No encoding. |
@@ -110,8 +119,8 @@ cancelled leaves the pipeline exactly where it was.
 9   delete sim data   free the card, at any point once its clips are safe
 ```
 
-Progress (0) is not in the sequence because it is not a transition — it is the
-view you run at any point to see where things stand, including on an empty
+Progress (`p`) is not in the sequence because it is not a transition — it is
+the view you run at any point to see where things stand, including on an empty
 workspace. It neighbours everything and never becomes the position.
 
 Items 2 and 3 exist because encoding is hours and uploading is days. Deciding

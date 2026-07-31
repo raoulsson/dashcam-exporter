@@ -1413,7 +1413,7 @@ def hint_reset():
 def read_key(prompt):
     """One keypress at the menu, no Enter. Falls back to a typed line.
 
-    The menu is single characters -- a digit, s, h, i, q -- so making the
+    The menu is single characters -- a digit, p, h, i, q -- so making the
     operator press return after each one is a keystroke that carries no
     information. h is the exception: it takes a second key, and reads it the
     same way, so `h` then `4` is help about entry 4 and `h` then anything else
@@ -6128,13 +6128,13 @@ def print_menu(ctx, menu_items, position, world):
     cell = _cell_width(shown)
     _print_all(_grid(shown, verdicts, offered, cell,
                      _grid_columns(term_width(), cell)))
-    # The reasons entries are greyed have moved to `s`. They are the same eight
+    # The reasons entries are greyed have moved to `p`. They are the same eight
     # lines under every menu draw, and a block that never changes stops being
     # read -- which is a problem when the one line that DID change is in it.
     # The destructive entries are already red, and every one of them asks for
     # a typed word before it does anything. A line naming them under every
     # draw was a third telling of the same fact.
-    print(C.dim("   s = status   h = help   i = info   q = quit"))
+    print(C.dim("  p = progress   h = help   i = info   q = quit"))
 
 
 def _verdicts(menu_items, world):
@@ -6157,7 +6157,7 @@ def _safe_verdict(item, world):
 def _in_the_grid(menu_items):
     """The entries the grid draws: the steps.
 
-    Progress is not one. It changes nothing, it is reached with `s` like the
+    Progress is not one. It changes nothing, it is reached with `p` like the
     other things that only show you something, and a number beside it invited
     the reading that looking at the workspace is a step in working through it.
     """
@@ -6214,7 +6214,7 @@ def _general_help(menu_items):
             C.bold("  keys"),
             "    <n>          run entry n",
             "    h<n>         what entry n is, and why it is or is not offered",
-            "    s            status, and why each greyed entry is greyed",
+            "    p            progress, and why each greyed entry is greyed",
             "    i            version, licence, repository, funding",
             "    q            quit",
             "",
@@ -6388,16 +6388,16 @@ class Runner:
         return self._not_quit(sel)
 
     def _not_quit(self, sel):
-        if sel in ("s", "status"):
-            return self._status()
+        if sel in ("p", "progress"):
+            return self._progress()
         if sel.split()[0] in ("h", "help", "?"):
             return self._help(sel)
         if sel in ("i", "info"):
             return self._info()
         return self._select(sel)
 
-    def _status(self):
-        """`s` is Progress, plus where we are and why each entry is greyed.
+    def _progress(self):
+        """`p` is Progress, plus where we are and why each entry is greyed.
 
         The two answered halves of one question -- what is here, and what can
         be done about it -- and asking them separately meant reading two
