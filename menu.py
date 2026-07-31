@@ -474,7 +474,7 @@ class Destructive(MenuItem, abstract=True):
         fresh = self._work.recapture(self.SCOPE)
         verdict = plan.guard(fresh)
         if verdict.blocked:
-            return self._work.refuse(verdict.reason)
+            return self._work.refuse(self.name(), verdict.reason)
         return plan.act(fresh)
 
     @abstractmethod

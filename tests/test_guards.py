@@ -776,7 +776,7 @@ class TestTheDestructiveSequence(GuardTest):
         with mock.patch.object(P, "ask", side_effect=answer_and_move_the_world):
             outcome = self.item.execute(P.capture_world(self.w.ctx, M.Scope.FULL))
         self.assertFalse(outcome.completed)
-        self.assertIn("refused after re-check", outcome.note)
+        self.assertIn("Refused after the re-check", outcome.note)
         self.assertTrue(self.clip.is_file(), "nothing may be erased after a refusal")
 
     def test_every_destructive_plan_carries_a_callable_re_check(self):

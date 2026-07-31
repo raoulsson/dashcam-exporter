@@ -579,12 +579,25 @@ class ARuntimeFailureIsOneItemsFailure(unittest.TestCase):
         run = drive(menu_items, position, [str(RENDER), "q"])
         self.assertTrue(run.ctx.results, "a crash left no trace in the results")
 
-    def test_deciding_to_leave_still_leaves(self):
-        """Ctrl-C is the operator deciding, not the tool failing. It must not
-        be swallowed by the catch that keeps the session alive."""
+    def test_ctrl_c_inside_a_step_stops_the_step(self):
+        """RESTATED: it used to end the SESSION.
+
+        Ctrl-C is the operator deciding, not the tool failing — that part
+        stands. What was wrong is where the decision landed: inside a child
+        process run_stream already caught it and aborted the STEP, so the same
+        keypress ended the session or ended one step depending on whether the
+        step happened to be shelling out at that moment. A stills loop is
+        Python and a render is a subprocess, and the operator cannot see the
+        difference.
+
+        Leaving is still one keypress away: the menu's own prompt raises
+        Aborted, which _run_menu catches and exits on.
+        """
         menu_items, position = self.raising(META, boom=KeyboardInterrupt())
-        with self.assertRaises(KeyboardInterrupt):
-            drive(menu_items, position, [str(RENDER), "q"])
+        run = drive(menu_items, position, [str(RENDER), "q"])
+        self.assertEqual([r.status for r in run.ctx.results], [P.ABORTED])
+        self.assertEqual([r.detail for r in run.ctx.results],
+                         ["Aborted by user mid-run."])
 
 
 # ---------------------------------------------------------------------------

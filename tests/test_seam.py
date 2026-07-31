@@ -745,7 +745,7 @@ class TestTheRecheckAsksTheTargetAgain(SeamTest):
         ran = b.run(CLEAN_WS)
         self.assertFalse(ran.completed)
         self.assertTrue(b.footage_on_disk(), "footage went on a pre-prompt answer")
-        self.assertIn("refused after re-check", ran.note)
+        self.assertIn("Refused after the re-check", ran.note)
         self.assertGreaterEqual(target.times("is_complete"), 2,
                                 "the plugin was asked once and remembered")
 

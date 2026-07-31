@@ -236,7 +236,7 @@ class FakeWork:
         that turned up AFTER the operator typed the word."""
         return self.fresh or self.world
 
-    def refuse(self, reason):
+    def refuse(self, name, reason):
         self.refused.append(reason)
         return M.stopped("refused after re-check: %s" % reason)
 

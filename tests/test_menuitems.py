@@ -229,7 +229,7 @@ class FakeWork:
             return self.last_world
         return self.fresh
 
-    def refuse(self, reason):
+    def refuse(self, name, reason):
         self.refusals.append(reason)
         return M.stopped("refused after re-check: %s" % reason)
 

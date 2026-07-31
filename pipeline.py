@@ -922,7 +922,10 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
             out_fh.close()
 
     if rc != 0:
-        print(C.red("  FAILED: %s (exit %d)" % (" ".join(cmd), rc)))
+        # The command line is this module's business: which flags it composed
+        # and where the script lives. What the operator can act on is the tail
+        # below, which is what the child said before it gave up.
+        print(C.red("  %s failed (exit %d). Last lines:" % (label, rc)))
         tail = [l for l in lines if l.strip()][-tail_lines:]
         if tail:
             print(C.dim("  --- last %d lines of output ---" % len(tail)))
@@ -1015,6 +1018,25 @@ def _fitted(text, width):
 
 def _right(text, width):
     return "%*s" % (width, text)
+
+
+def done_line(what):
+    """The one line a step leaves behind when it worked.
+
+    Every step used to end on run_stream's own "Label [####] 100% 0:34
+    completed" -- a bar redrawn full to announce that the finished thing had
+    finished, in the streamer's words rather than the step's. This is the
+    step's own sentence, and there is exactly one of it.
+    """
+    print(C.green("  100%% - %s." % what))
+
+
+def _still_bar(bar, i, total, name):
+    """One line, redrawn, for a loop that is countable and short."""
+    if not C.enabled:
+        return
+    _write_line("  %s %s %s" % (C.yellow(bar.label), bar.bracket(i / float(total)),
+                                C.yellow("%d/%d  %s" % (i, total, name))))
 
 
 def _bar_line(label, frac, elapsed, note, note_first):
@@ -1732,19 +1754,21 @@ def pick_import(ctx, purpose):
     """Choose which import folder a step should work on."""
     cands = import_candidates(ctx)
     if not cands:
-        print(C.red("  No import folder with a DCIM tree under %s" % ctx.import_root))
+        print(C.dim("  No import folder with a DCIM tree under %s."
+                    % tilde(ctx.import_root)))
         return None
     if len(cands) == 1:
         ctx.selected_import = cands[0]
         return cands[0]
     if ctx.selected_import in cands:
-        keep = confirm("  Use %s for %s?" % (ctx.selected_import, purpose), True)
+        keep = confirm("  Use %s for %s?" % (tilde(ctx.selected_import), purpose), True)
         if keep:
             return ctx.selected_import
     print("  Import folders:")
     for i, p in enumerate(cands, 1):
         n = clip_count(p)
-        print("    %d) %s  %s" % (i, p, C.dim("%s clips" % (n if n is not None else "?"))))
+        print("    %d) %-40s %s" % (i, tilde(p),
+                                   C.dim("%s clips" % (n if n is not None else "?"))))
     s = ask("  Which one? [1] ", "1")
     try:
         ctx.selected_import = cands[int(s) - 1]
@@ -2950,8 +2974,8 @@ def step_import(ctx):
         return record(ctx, NAME[IMPORT], FAILED, started, "exit %d" % rc)
 
     moved, count = watch.state["done"], watch.state["files"]
-    print(C.green("  100%% - imported %d files, %s from SIM."
-                  % (count, human_bytes(moved))))
+    done_line("imported %s files, %s from SIM"
+              % (C.yellow("%d" % count), human_bytes(moved)))
 
     dest = ctx.import_root / day
     ctx.selected_import = dest if (dest / "DCIM").is_dir() else ctx.selected_import
@@ -3164,6 +3188,11 @@ def step_generate_meta(ctx):
     # whole pass runs again. Correct and occasionally slow beats fast and
     # subtly incomplete.
     have = load_groups(ctx, root)
+    if have is None:
+        # The scan failed and said so in red. Carrying on runs the whole pass
+        # again on a grouping nobody could read -- minutes of work behind a
+        # failure the operator has already been shown.
+        return record(ctx, NAME[META], FAILED, started, "the trip scan failed")
     need = True
     if have:
         gs = [g for g in have.get("trips", []) if g.get("renderable", True)]
@@ -3176,27 +3205,33 @@ def step_generate_meta(ctx):
                     done += 1
             need = done < len(gs)
             if not need:
-                print(C.dim("  Sidecars already written for all %d trips — nothing to"
-                            " generate." % len(gs)))
-                # The postcondition holds: every trip has its set. Nothing was
-                # done and nothing is owed.
+                # Nothing printed here. The postcondition holds, and the runner
+                # says so in green from the note below -- said twice it was the
+                # same sentence in two colours on consecutive lines.
                 return record(ctx, NAME[META], SATISFIED, started,
                               "sidecars already complete for %d trips" % len(gs))
-            if done:
-                print(C.dim("  %d of %d trips have sidecars; rewriting all (the"
-                            " renderer has no per-trip mode)." % (done, len(gs))))
     # The renderer prints its usual "[Trip a/b]" headers here, so the real trip
-    # counter drives the bar; there are no per-clip lines in this mode.
-    cmd = (["./make-trips-rendered.sh", "--sidecars-only", "--root", str(root), "--out", str(ctx.out_dir)]
-           + ctx.config_args + ctx.scan_args)
-    rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars", parser=make_scan_parser(),
-                            keep=lambda l: l.startswith("[Trip "))
+    # counter drives the bar. They are not KEPT: the bar's note already reads
+    # "trip 2/6", and a permanent line per trip in the renderer's words is the
+    # same count a second time, spelled differently.
+    cmd = (["./make-trips-rendered.sh", "--sidecars-only", "--root", str(root),
+            "--out", str(ctx.out_dir)] + ctx.config_args + ctx.scan_args)
+    rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars",
+                            parser=make_scan_parser(), quiet_finish=True)
     if rc != 0:
         return record(ctx, NAME[META], FAILED, started, "sidecars exit %d" % rc)
-    metas = len(list(ctx.out_dir.rglob("trip_*_meta.json")))
-    print(C.green("  Sidecars in place — %d trip meta files under %s."
-                  % (metas, tilde(ctx.out_dir))))
-    return record(ctx, NAME[META], RAN, started, "%d trip meta files" % metas)
+    # Counted where they were written, not across the whole export tree: an
+    # rglob there counts every earlier import's trips too, so six scanned trips
+    # reported eighteen.
+    n = _sidecars_for(ctx, root)
+    done_line("described %s trips, sidecars under %s"
+              % (C.yellow("%d" % n), tilde(ctx.out_dir)))
+    return record(ctx, NAME[META], RAN, started, "%d trips described" % n)
+
+
+def _sidecars_for(ctx, root):
+    """How many trips of THIS import have their meta on disk."""
+    return len(list((ctx.out_dir / root.name).rglob("trip_*_meta.json")))
 
 
 # ---------------------------------------------------------------------------
@@ -3318,13 +3353,14 @@ def load_groups(ctx, root, refresh=False):
     pass's own boundary scan.
     """
     if not refresh and ctx.last_groups and ctx.last_groups[0] == root:
-        print(C.dim("  Using the trip grouping already scanned in this session."))
         return ctx.last_groups[1]
 
-    print(C.dim("  Scanning %s for the authoritative trip grouping." % root))
-    print(C.dim("  This is the same boundary scan %d) %s runs (it walks the video), so it takes"
-                % (META, NAME[META])))
-    print(C.dim("  a while; the result is reused for the rest of this session."))
+    # One line, and only because the wait is minutes: the scan decodes video
+    # to find where each trip pulls away and parks. It said that three times
+    # over -- what it was scanning, that this is the same pass item 2 runs
+    # (from inside item 2), and that the answer is cached. The bar under it
+    # says it is working; the cache is nobody's business but this function's.
+    print(C.dim("  Scanning %s for trip boundaries." % tilde(root)))
     fd, tmp = tempfile.mkstemp(prefix="dashcam-groups-", suffix=".json")
     os.close(fd)
     try:
@@ -3801,11 +3837,6 @@ def step_preview(ctx):
         return record(ctx, NAME[PREVIEW], SKIPPED, started, "no import folder")
 
     previews_dir = ctx.out_dir / PREVIEW_DIRNAME
-    print(C.dim("  Two cheap things, no encoding:"))
-    print(C.dim("    1. one still per trip, a frame from its first front clip"))
-    print(C.dim("    2. %s/preview_<day>.html — a contact sheet to open locally"
-                % previews_dir))
-    print(C.dim("  Reviewing is entirely offline; deploying stays a separate choice."))
 
     # No second confirmation here: the menu already asked "Go?", and the source
     # directory is resolved and printed just above. Asking again puts a question
@@ -3819,19 +3850,24 @@ def step_preview(ctx):
         return record(ctx, NAME[PREVIEW], FAILED, started, "--print-groups failed")
     trips = payload.get("trips", [])
     if not trips:
-        print(C.yellow("  The scan found no trips in %s." % root))
+        print(C.dim("  No trips in %s." % tilde(root)))
         return record(ctx, NAME[PREVIEW], SKIPPED, started, "no trips")
 
     # Stills. Every trip gets one, including the auto-skipped fragments — he
     # is deciding what to keep, and a trip he cannot see is one he cannot judge.
     previews_dir.mkdir(parents=True, exist_ok=True)
     stills, failed = {}, []
+    # A bar rather than a line per trip. Forty trips was forty lines of scroll
+    # for a countable loop, and the two shapes it printed -- one for a still
+    # that was made and one for a trip with no front clip at all -- were the
+    # same line, so a failure looked exactly like a success.
+    bar = Bar("Stills")
     for i, t in enumerate(trips, 1):
         front = t.get("front") or []
         name = "trip_%02d_%s_%s.jpg" % (t["index"], t["day"], t["start"][11:16].replace(":", "-"))
         dst = previews_dir / name
+        _still_bar(bar, i, len(trips), name)
         if not front:
-            print("  still %d/%d  %s" % (i, len(trips), name))
             failed.append(t["index"])
             continue
         # Keep a still that is already there and not older than its clip. It is
@@ -3841,18 +3877,19 @@ def step_preview(ctx):
         # a wait.
         src = Path(front[0])
         if dst.is_file() and src.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
-            print("  still %d/%d  %s %s" % (i, len(trips), name, C.dim("(have it)")))
             stills[t["index"]] = dst
             continue
-        print("  still %d/%d  %s" % (i, len(trips), name))
         if extract_still(src, dst,
                          seconds=ctx.still_seconds, width=ctx.still_width):
             stills[t["index"]] = dst
         else:
             failed.append(t["index"])
+    _erase_line()
     if failed:
-        print(C.yellow("  No still for trips %s — ffmpeg could not read the first clip."
-                       % ", ".join(str(i) for i in failed)))
+        # Not "ffmpeg could not read it": one of these two reasons is that the
+        # trip has no front clip at all, and ffmpeg was never asked.
+        print(C.yellow("  No still for %d trips: %s."
+                       % (len(failed), ", ".join(str(i) for i in failed))))
 
     index = write_contact_sheet(ctx, root, payload, previews_dir, stills)
 
@@ -3861,14 +3898,9 @@ def step_preview(ctx):
     # target; whatever publishes re-indexes as its own first act, so publishing
     # never carries a stale manifest anyway. One step, one job.
 
-    print()
-    print(C.green("  previews are in %s" % previews_dir))
-    print("  %d trips, %d stills. Open the contact sheet with:" % (len(trips), len(stills)))
-    print("    open %s" % index)
-    print(C.dim("  Nothing was encoded and nothing was published. On the website these"))
-    print(C.dim("  trips would say the video is not available — that is expected: the"))
-    print(C.dim("  sidecars carry the map, the stats and the places, but no video exists"))
-    print(C.dim("  yet. Render (and only then upload) the ones you decide to keep."))
+    done_line("%s stills for %s trips, contact sheet at %s"
+              % (C.yellow("%d" % len(stills)), C.yellow("%d" % len(trips)),
+                 tilde(index)))
     return record(ctx, NAME[PREVIEW], RAN, started,
                   "%d trips, %d stills in %s" % (len(trips), len(stills), previews_dir))
 
@@ -3879,17 +3911,20 @@ def step_preview(ctx):
 
 def _print_trip_table(ctx, root, trips):
     """List the trips, and return them by index."""
+    # No rule of its own. The runner already opened "== Exclude Trip ==" and
+    # a step that draws two more inside it reads as three sections where there
+    # is one screen.
     print()
-    print(rule("Trips in %s" % root.name))
     by_index = {}
     for t in trips:
         by_index[t["index"]] = t
-        note = "" if t.get("renderable") else C.yellow("  [%s]" % (t.get("reason") or "skipped"))
+        note = "" if t.get("renderable") else C.dim("  [%s]" % (t.get("reason") or "skipped"))
         print("  %2d) %s  %s -> %s  %3d clips  %8s  %9s%s" % (
             t["index"], t["day"], t["start"][11:16], t["end"][11:16], t.get("clips", 0),
             human_secs(t.get("duration_secs")), human_bytes(trip_bytes(t)), note))
-    print(rule())
-    print(C.dim("  The stills and maps for these are in %s" % (ctx.out_dir / PREVIEW_DIRNAME)))
+    print()
+    print(C.dim("  Stills and maps for these are in %s"
+                % tilde(ctx.out_dir / PREVIEW_DIRNAME)))
     return by_index
 
 
@@ -4122,20 +4157,24 @@ def drop_plan(ctx, world):
     not delete.
     """
     started = time.time()
+    # Through _nothing(), which RECORDS. These four exits returned a plan and
+    # logged nothing, so "no import folder", "the scan failed", "no trips" and
+    # "cancelled" left no row in the session summary at all -- the one step
+    # whose refusals were invisible afterwards.
     root = pick_import(ctx, "dropping a trip")
     if root is None:
-        return menu.Plan.nothing_to_do("no import folder")
+        return _nothing(ctx, EXCLUDE, started, "no import folder")
     payload = load_groups(ctx, root)
     if payload is None:
-        return menu.Plan.nothing_to_do("--print-groups failed")
+        return _nothing(ctx, EXCLUDE, started, "the trip scan failed")
     trips = payload.get("trips", [])
     if not trips:
-        print(C.yellow("  No trips in %s — nothing to drop." % root))
-        return menu.Plan.nothing_to_do("no trips")
+        print(C.dim("  No trips in %s." % tilde(root)))
+        return _nothing(ctx, EXCLUDE, started, "no trips")
     by_index = _print_trip_table(ctx, root, trips)
     picked = _ask_trip_indices(by_index)
     if not picked:
-        return menu.Plan.nothing_to_do("cancelled")
+        return _nothing(ctx, EXCLUDE, started, "cancelled")
     return _drop_plan_for(ctx, world, payload, by_index, picked, started)
 
 
@@ -4153,20 +4192,14 @@ def _drop_plan_for(ctx, world, payload, by_index, picked, started):
 
     files = [p for i in picked for p in trip_files(by_index[i])] + render_files
     total = sum(_size_of(p) for p in files)
+    # The table above already listed every picked trip by index, day, span and
+    # clip count. Repeating it under a rule of its own, then naming all 212
+    # files one per line in full, is the same screen twice and then some -- and
+    # the figure the typed word answers was the one thing not standing out.
     print()
-    print(rule("Drop from Import"))
-    for i in picked:
-        t = by_index[i]
-        print("  Trip %d  %s  %s -> %s  %d clips  %s" % (
-            i, t["day"], t["start"][11:16], t["end"][11:16], t.get("clips", 0),
-            human_bytes(trip_bytes(t))))
-    print()
-    print("  %d files will be deleted:" % len(files))
-    for p in files:
-        print(C.dim("    %s" % p))
-    print("  Total: %s" % C.bold(human_bytes(total)))
-    print(C.dim("  (The .gpx files in DCIM/203gps are left alone — they are tiny and"))
-    print(C.dim("   harmless without their clips.)"))
+    print("  Dropping trips %s: %s files (%s)"
+          % (", ".join(str(i) for i in picked), C.yellow("%d" % len(files)),
+             C.yellow(human_bytes(total))))
 
     banner = _only_copy_lines(ctx, world, payload, by_index, picked)
     return menu.Plan(menu.nothing_to_recheck,
@@ -4186,7 +4219,7 @@ def _drop_commit(ctx, picked, by_index, files, render_files, started):
     """The irreversible half. Everything above this line only printed."""
     deleted, freed, errors = _unlink_all(files)
     for e in errors[:10]:
-        print(C.red("  could not delete %s" % e))
+        print(C.red("  Could not delete %s" % e))
 
     # Record the dropped clips' stamps as excluded. From here on they are
     # treated as if imported: the next delta import does not re-copy them off
@@ -4196,8 +4229,6 @@ def _drop_commit(ctx, picked, by_index, files, render_files, started):
                       for m in [STAMP_RE.search(p.name)] if m}
     if dropped_stamps:
         record_excluded_stamps(ctx, dropped_stamps)
-        print(C.dim("  Recorded %d excluded clip stamps; the delta import will not"
-                    " re-copy them." % len(dropped_stamps)))
 
     # Any cached view of this import is now wrong: the grouping is computed from
     # the clips that just stopped existing.
@@ -4208,11 +4239,14 @@ def _drop_commit(ctx, picked, by_index, files, render_files, started):
     _record_the_drop(ctx, by_index, picked)
 
     if errors:
+        print(C.red("  Dropped %s of %s files (%s could not be deleted)."
+                    % (deleted, len(files), len(errors))))
         return _outcome(record(ctx, NAME[EXCLUDE], FAILED, started,
                                "%d of %d files deleted, %d errors"
                                % (deleted, len(files), len(errors))))
-    print(C.green("  Dropped trips %s: %d files, %s freed." % (
-        ", ".join(str(i) for i in picked), deleted, human_bytes(freed))))
+    done_line("dropped trips %s: %s files, %s freed"
+              % (", ".join(str(i) for i in picked), C.yellow("%d" % deleted),
+                 human_bytes(freed)))
     return _outcome(record(ctx, NAME[EXCLUDE], RAN, started,
                            "trips %s, %d files, %s freed" % (
                                ", ".join(str(i) for i in picked), deleted,
@@ -4251,7 +4285,7 @@ def _drop_orphan_sidecars(by_index, picked):
     print("  %d preview sidecars now describe a trip that no longer exists:"
           % len(orphans))
     for p in orphans:
-        print(C.dim("    %s" % p))
+        print(C.dim("    %s" % tilde(p)))
     if confirm("  Remove them too (they are derived data, not footage)?", False):
         _unlink_all(orphans)
         print(C.dim("  Removed. The next %s or %s drops them from the site index."
@@ -4285,9 +4319,10 @@ def _record_the_drop(ctx, by_index, picked):
     ids = _picked_ids(by_index, picked)
     if not ids:
         return
+    # Recorded, not announced. Both ledgers are bookkeeping the operator
+    # cannot act on, and each was a dim line above the one green sentence that
+    # says what actually happened.
     record_dropped_trips(ctx, ids)
-    print(C.dim("  Recorded %d trips as dropped on purpose; the next build"
-                " leaves them out of the index." % len(ids)))
 
 
 def _clear_intermediates(ctx):
@@ -4387,28 +4422,28 @@ def step_render(ctx):
                 if move_min is not None:
                     tot_move += float(move_min) * 60.0
                     have_move = True
-            movecol = ("  -> %s video" % human_secs(float(move_min) * 60.0)
+            # %8s on the span and %9s on the encode length, the same widths
+            # item 4's table uses for the same two figures. Unpadded, every
+            # row's last column started somewhere else -- 48:12 is five
+            # characters and 6:29:06 is seven.
+            movecol = (human_secs(float(move_min) * 60.0)
                        if move_min is not None else "")
-            line = "%s%2d) %s  %s -> %s  %3d clips  %s%s" % (
+            line = "%s%2d) %s  %s -> %s  %3d clips  %8s  %9s" % (
                 mark, g["index"], g.get("day", ""),
                 str(g.get("start", ""))[11:16], str(g.get("end", ""))[11:16],
-                g.get("clips", 0), span, C.bold(movecol))
+                g.get("clips", 0), span, movecol)
             if not g.get("renderable", True):
                 line += C.dim("  auto-skipped: %s" % (g.get("reason") or "fragment"))
             print(line)
         if have_move:
-            print("      total %s span  ->  %s of video to encode"
-                  % (human_secs(tot_span), C.bold(human_secs(tot_move))))
-            print(C.dim("      parking inside a trip is cut"))
-        else:
-            print(C.dim("  span is start->end. The encode is shorter — parking is cut — but by"))
-            print(C.dim("  how much is only known after %d) %s writes the sidecars."
-                        % (META, NAME[META])))
+            print("      %8s span, %9s to encode (parking is cut)"
+                  % (human_secs(tot_span), C.yellow(human_secs(tot_move))))
         print()
     elif ctx.last_scan and ctx.last_scan.root == root:
         print("  Last scan: %d trips, %d renderable%s" % (
             ctx.last_scan.total, ctx.last_scan.renderable,
-            (", auto-skipped %s" % sorted(ctx.last_scan.skipped)) if ctx.last_scan.skipped else ""))
+            (", auto-skipped %s" % ", ".join(map(str, sorted(ctx.last_scan.skipped))))
+            if ctx.last_scan.skipped else ""))
 
     # Which trips already have a video. Blank means "the ones with no video" —
     # NOT "all renderable", which on an import that is already rendered would
@@ -4430,13 +4465,13 @@ def step_render(ctx):
         (done_idx if have else todo_idx).append(g["index"])
     if done_idx:
         print()
-        print("  Already rendered: %s" % C.green(", ".join(str(i) for i in done_idx)))
+        print(C.dim("  Already rendered: %s" % ", ".join(str(i) for i in done_idx)))
         if todo_idx:
-            print("  Not yet rendered: %s" % C.bold(", ".join(str(i) for i in todo_idx)))
-            print(C.dim("  Blank renders only those. Naming a rendered trip re-encodes it."))
-        else:
-            print(C.dim("  Every renderable trip has a video. Blank does nothing; name"))
-            print(C.dim("  trips explicitly to re-encode them."))
+            # Amber on the list the blank answer acts on; dim on the one it
+            # does not. Green was saying "good" about a fact, and bold was
+            # spent on the same list the prompt below repeats.
+            print("  Not yet rendered: %s"
+                  % C.yellow(", ".join(str(i) for i in todo_idx)))
 
     idx = ask("  Trip indices to render (space separated, blank = %s): "
               % ("the %d not yet rendered" % len(todo_idx) if done_idx and todo_idx
@@ -4508,17 +4543,16 @@ def step_render(ctx):
         bases = [g.get("out_base") for g in groups if g.get("index") in picked]
         doomed = _videos([f for b in bases if b
                           for f in Path(b).parent.glob(Path(b).name + "*")])
-        what = "the videos of %d trips" % len(bases)
+        what = "the video of 1 trip" if len(bases) == 1 else \
+               "the videos of %d trips" % len(bases)
     else:
         doomed = _videos(ns.rglob("*")) if ns.is_dir() else []
         what = "every video under %s" % tilde(ns)
     if doomed:
         size = sum(f.stat().st_size for f in doomed if f.exists())
         print()
-        print(C.yellow("  Replacing existing output: %s" % what))
-        print(C.yellow("  %d files, %s — deleted first so the result is exactly this run"
-                       % (len(doomed), human_bytes(size))))
-        print(C.dim("  Maps, GPX and metadata beside them are left alone; only video goes."))
+        print("  Replacing %s: %s files (%s). Only video goes."
+              % (what, C.yellow("%d" % len(doomed)), C.yellow(human_bytes(size))))
         if not confirm("  Delete and re-render?", True):
             return record(ctx, NAME[RENDER], ABORTED, started,
                           "Aborted by user pre-run.")
@@ -4540,23 +4574,23 @@ def step_render(ctx):
     cmd = ["./make-trips-rendered.sh"]
     cmd += idx.split()                       # bare integers become --drives
     cmd += ["--root", str(root), "--out", str(ctx.out_dir), "--output-height", str(height)] + ctx.config_args
-    # No confirmation here. Choosing the trips, the height and (when there is
-    # output to replace) the clean are three deliberate answers already; asking a
-    # fourth time with the command spelled out is the same decision again. The
-    # renderer records its own argv at the top of the run log, so what ran is
-    # still written down — just not asked about.
-    print(C.dim("  %s" % " ".join(cmd)))
-
+    # Not echoed, and not kept. The command line is this module's business,
+    # and the renderer already records its own argv at the top of the run log.
+    # The "[Trip 3/6] ..." headers it prints are what the bar's own note
+    # already says, and its "✓ <absolute path>" lines are one per video in the
+    # renderer's words -- the sentence below counts them once, in the tool's.
     rc, _lines = run_stream(cmd, ctx.exporter, "Render", parser=make_render_parser(),
                             env_extra={"LOG_DIR": str(ctx.log_dir)},
-                            keep=lambda l: l.startswith("[Trip ") or l.strip().startswith("✓ "))
+                            quiet_finish=True)
     after = set(rendered_mp4s(ctx.out_dir))
     new = after - before
     if rc != 0:
         return record(ctx, NAME[RENDER], FAILED, started,
                       "exit %d (%d new videos before the failure)" % (rc, len(new)))
-    detail = "%d new videos, %s" % (len(new),
-                                    human_bytes(sum(p.stat().st_size for p in new)))
+    grown = human_bytes(sum(p.stat().st_size for p in new))
+    detail = "%d new videos, %s" % (len(new), grown)
+    done_line("encoded %s videos (%s) into %s"
+              % (C.yellow("%d" % len(new)), grown, tilde(ctx.out_dir)))
     # A finished render leaves renders and sidecars, not scratch.
     after_render(ctx)
 
@@ -5200,7 +5234,7 @@ def build_result_page(ctx, out_dir, gather):
 
     doc = ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            "<title>Drives</title><style>%s</style></head><body>%s%s%s%s</body></html>"
+            "<title>Trips</title><style>%s</style></head><body>%s%s%s%s</body></html>"
             % (RESULT_CSS, head, "".join(rows), key, foot))
     page.write_text(doc, encoding="utf-8")
     made["bytes"] = page.stat().st_size
@@ -5220,31 +5254,39 @@ def step_site(ctx, gather):
     about to publish everything was the bug that started this.
     """
     started = time.time()
-    print(C.dim("  Writes %s into %s." % (RESULT_FILE, tilde(ctx.out_dir))))
-    print(C.dim("  One self-contained file: every still is embedded and every route is"))
-    print(C.dim("  drawn from its .gpx, so it opens with no network and can be sent as"))
-    print(C.dim("  it is. The videos are linked where they already sit, not copied."))
 
+    # An absent state is dim, not amber. Nothing is wrong with a workspace that
+    # has not been rendered yet -- it is where every cycle starts.
     if not ctx.out_dir.is_dir():
-        print(C.yellow("  Nothing rendered yet: %s does not exist." % tilde(ctx.out_dir)))
+        print(C.dim("  Nothing rendered yet: %s does not exist." % tilde(ctx.out_dir)))
         return record(ctx, NAME[BUILD], SKIPPED, started, "no output tree")
 
     info = build_result_page(ctx, ctx.out_dir, gather)
     if not info["trips"]:
-        print(C.yellow("  No trips found under %s — render some first." % tilde(ctx.out_dir)))
+        print(C.dim("  No trips under %s yet." % tilde(ctx.out_dir)))
         return record(ctx, NAME[BUILD], SKIPPED, started, "no trips")
 
-    if info["no_video"]:
-        print(C.dim("  %d trips have no video yet; the page says so." % info["no_video"]))
-    if info["no_gps"]:
-        print(C.dim("  %d trips have no GPS, so they show no route." % info["no_gps"]))
+    _print_all(_page_caveats(info))
+    size = human_bytes(info.get("bytes", 0))
+    done_line("built %s trips into %s (%s)"
+              % (C.yellow("%d" % info["trips"]), tilde(Path(info["path"])), size))
+    return record(ctx, NAME[BUILD], RAN, started, "%d trips, %s" % (info["trips"], size))
 
-    print()
-    print(C.green("  %s" % info["path"]))
-    print("  %d trips, %s. Open it with:" % (info["trips"], human_bytes(info.get("bytes", 0))))
-    print("    open %s" % info["path"])
-    return record(ctx, NAME[BUILD], RAN, started,
-                  "%d trips, %s" % (info["trips"], human_bytes(info.get("bytes", 0))))
+
+def _page_caveats(info):
+    """What the page cannot show, and only when there is something it cannot.
+
+    Dim: these are absences, and both are ordinary -- a trip described but not
+    yet encoded, a trip through a tunnel with no fix.
+    """
+    lines = []
+    if info["no_video"]:
+        lines.append(C.dim("  %d trips have no video yet; the page says so."
+                           % info["no_video"]))
+    if info["no_gps"]:
+        lines.append(C.dim("  %d trips have no GPS, so they show no route."
+                           % info["no_gps"]))
+    return lines
 
 # ---------------------------------------------------------------------------
 # Item 8 — Clean Workspace. Erase the imported footage and the renders it
@@ -5420,7 +5462,7 @@ def clean_workspace_plan(ctx, world):
         return _nothing(ctx, CLEAN_WS, started, "no import folder")
     target = _clean_target(ctx, root)
     if not target.is_dir():
-        print(C.red("  Nothing to delete at %s" % target))
+        print(C.dim("  Nothing to delete at %s." % tilde(target)))
         return _nothing(ctx, CLEAN_WS, started, "nothing at the target")
 
     size, files = tree_size(target), count_files(target)
@@ -5511,7 +5553,8 @@ def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
         ctx.selected_import = None
     ctx.last_scan = None
     ctx.last_groups = None
-    print(C.green("  Deleted %s (%s)" % (target, human_bytes(size))))
+    done_line("deleted %s files (%s) from %s"
+              % (C.yellow("%d" % files), human_bytes(size), tilde(target)))
     if discarding:
         _unclaim_the_discarded(ctx, fresh)
 
@@ -5601,22 +5644,28 @@ def _card_advisory(ctx, world):
     that copy is not published, it becomes the ONLY one the moment the card
     goes, which is worth saying out loud even though it does not refuse.
     """
-    lines = []
-    for cand in import_candidates(ctx):
-        ok, why = import_is_expendable(ctx, cand, world.target)
-        if not ok:
-            lines.append(C.yellow("  Not yet published (%s: %s) — after this the copy"
-                                  % (tilde(cand), why)))
-            lines.append(C.yellow("  on this machine is the only one, so do not lose it."))
-    return lines
+    # One line for the lot. It said the same two-line sentence once per
+    # unpublished import, hard-wrapped at a column the terminal knows nothing
+    # about -- three imports meant six amber lines saying one thing.
+    unpublished = [cand for cand in import_candidates(ctx)
+                   if not import_is_expendable(ctx, cand, world.target)[0]]
+    if not unpublished:
+        return []
+    return [C.yellow("  %s imports here are not published yet: after this the copy"
+                     " on this machine is the only one."
+                     % C.yellow("%d" % len(unpublished)))]
 
 
 def erase_card_plan(ctx, world):
     """Item 9's plan."""
     started = time.time()
-    lines = [C.red("  The card's %d clips go; its folders stay so the camera can"
-                   " record." % len(world.card.stamps)),
-             C.green("  Every clip is accounted for: %s." % world.card.note)]
+    # Amber on the figure, red on the sentence that says it is gone. The
+    # accounting below it is EVIDENCE, not success -- green is the colour of
+    # the one line that says a step worked, and spending it here made the
+    # strongest reassurance on the screen the thing directly under the warning.
+    lines = [C.red("  The card's %s clips go; its folders stay so the camera can"
+                   " record." % C.yellow("%d" % len(world.card.stamps))),
+             C.dim("  Every clip is accounted for: %s." % world.card.note)]
     lines.extend(_card_advisory(ctx, world))
     return menu.Plan(guards.card_is_expendable,
                      lambda fresh: _erase_card_commit(ctx, started),
@@ -5791,9 +5840,11 @@ def _unlink_card_files(dcim):
             f.unlink()
             gone += 1
         except OSError as e:
-            print(C.red("  %s: %s" % (f.name, e)))
-    print(C.green("  Erased %d files, %s freed. Folders kept so the camera can record."
-                  % (gone, human_bytes(freed))))
+            print(C.red("  Could not erase %s: %s" % (f.name, e)))
+    # No "folders kept so the camera can record" -- the banner said that four
+    # lines up, before the word was typed, which is when it mattered.
+    done_line("erased %s files from the card, %s freed"
+              % (C.yellow("%d" % gone), human_bytes(freed)))
     return gone, freed, ""
 
 
@@ -6335,7 +6386,12 @@ class Console(uploader.Ui):
         print(C.yellow(line))
 
     def run(self, cmd, cwd, label, env=None, parser=None):
-        rc, _lines = run_stream(cmd, cwd, label, parser=parser, env_extra=env)
+        # quiet_finish: the plugin says what its act achieved through the
+        # Outcome it returns. Without it every plugin child left the
+        # streamer's own "Deploy [####] 100% 0:34  completed" behind, which is
+        # this module announcing somebody else's work in its own words.
+        rc, _lines = run_stream(cmd, cwd, label, parser=parser, env_extra=env,
+                                quiet_finish=True)
         return rc
 
 
@@ -6554,11 +6610,20 @@ class Work:
         """
         return looked_at(self.ctx, scope)
 
-    def refuse(self, reason):
-        print(C.red("  Refusing after the re-check: %s." % reason))
-        print(C.dim("  Something changed while the prompt was on screen. Nothing"
-                    " was touched."))
-        return menu.stopped("refused after re-check: %s" % reason)
+    def refuse(self, name, reason):
+        """The word was typed and the world had moved. Said once, and RECORDED.
+
+        This path returned an Outcome and logged nothing, so the one outcome
+        where an operator typed DELETE and the tool said no afterwards left no
+        row in the summary at all. It takes the item's name for that: the
+        refusal belongs to a step, and Work does not know which one is asking.
+        """
+        print(C.red("  Refused after the re-check: %s." % reason))
+        print(C.dim("  Something changed while the prompt was on screen."
+                    " Nothing was touched."))
+        note = "Refused after the re-check: %s." % reason
+        self.ctx.results.append(StepResult(name, SKIPPED, 0, note))
+        return menu.stopped(note)
 
 
 # ---------------------------------------------------------------------------
@@ -7086,6 +7151,13 @@ class Runner:
     def _execute(self, item, world):
         try:
             return item.execute(world)
+        except KeyboardInterrupt:
+            # Ctrl-C inside a step's own loop -- the stills pass, a long walk,
+            # anything not wrapped in run_stream. KeyboardInterrupt is a
+            # BaseException, so `except Exception` never saw it: it went past
+            # the runner entirely and ended the SESSION, when what the operator
+            # stopped was one step.
+            return self._interrupted(item, Aborted(mid_run=True))
         except Exception as exc:
             return self._after_exception(item, exc)
 
