@@ -5305,7 +5305,9 @@ def clean_workspace_plan(ctx, world):
     size, files = tree_size(target), count_files(target)
     print("  Target: %s" % tilde(target))
     print()
-    print("  %d files (%s)" % (files, human_bytes(size)))
+    # Amber on the count, as on the import screen: it is the figure the typed
+    # word is answering, and the only one on this screen that moves.
+    print("  %s files (%s)" % (C.yellow("%d" % files), human_bytes(size)))
     _print_all(_what_goes_lines(world))
     _print_all(_why_it_may_go(world))
     verdict = guards.clean_is_allowed(world)
