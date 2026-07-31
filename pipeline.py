@@ -1575,11 +1575,22 @@ def _read_answer(prompt, default):
 
 
 def _from_key(ch, default):
+    """A key that is not an answer costs no line.
+
+    Every re-ask used to print the prompt again underneath, so leaning on the
+    keyboard left twenty identical lines above the one being answered. The
+    question has not changed, so neither should the screen: erase and ask
+    again in place.
+    """
     if ch in ("\x03", "\x04", "q", "Q"):
         print()
         raise Aborted()
+    answer = _meaning(ch.strip().lower(), default)
+    if answer is None:
+        _erase_line()
+        return None
     print(_printable(ch))
-    return _meaning(ch.strip().lower(), default)
+    return answer
 
 
 def _meaning(key, default):
@@ -7040,14 +7051,17 @@ def _stayed_lines(item, outcome, menu_items, position):
     """
     if item.completed():
         return []
-    return [C.dim("  Did not complete%s — still at %s."
+    return [C.dim("  Did not complete%s. Still at %s."
                   % (_because(outcome), _where(menu_items, position)))]
 
 
 def _because(outcome):
+    """Flat, not nested. The note now carries its own detail in brackets --
+    "by the user, before it ran (declined the delta)" -- and wrapping that in
+    a second pair produced a sentence with two closing parens in a row."""
     if not getattr(outcome, "note", ""):
         return ""
-    return " (%s)" % outcome.note
+    return ": " + outcome.note
 
 
 def _where(menu_items, position):
