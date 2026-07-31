@@ -21,15 +21,27 @@ echo "=== guards (python) ==="
 "$PY" -m unittest discover -s tests -q 2>&1 | tail -5 || RC=1
 
 echo
-echo "=== undefined names (pyflakes) ==="
-# Only this class, and only because it costs nothing to catch and everything to
-# miss: a name that does not exist is a crash the moment the line runs, and the
-# suite can be entirely green over one. It was -- 408 tests passed while main()
-# referred to a variable nobody assigned, because not one of them starts the
-# program. The other pyflakes warnings are style and some are deliberate
-# (uploader.py re-exports on purpose), so they are not a reason to fail a build.
+echo "=== undefined names and redefinitions (pyflakes) ==="
+# Two classes, and only because they cost nothing to catch and everything to
+# miss. Each is a crash the suite can be entirely green over.
+#
+# An undefined name is a crash the moment the line runs. It was -- 408 tests
+# passed while main() referred to a variable nobody assigned, because not one
+# of them starts the program.
+#
+# A redefinition is worse, because it does not crash where it is written. The
+# second def silently replaces the first and every caller of the first gets the
+# new one: _counted(where) counted git commits, a _counted(n) added six hundred
+# lines below formatted a clip count, and the version number crashed at launch
+# with "%d format: a real number is required, not PosixPath". That was the
+# fifth collision in this file -- _offers, _slug, _row and _is_dir came before
+# it, and _is_dir silently inverted a symlink check rather than crashing.
+#
+# The rest of pyflakes is style, and some of it is deliberate (uploader.py
+# re-exports on purpose), so it is not a reason to fail a build.
 if [ -x ".venv/bin/pyflakes" ]; then
-    UNDEF="$(.venv/bin/pyflakes ./*.py tests/*.py 2>&1 | grep "undefined name" || true)"
+    UNDEF="$(.venv/bin/pyflakes ./*.py tests/*.py 2>&1 \
+             | grep -E "undefined name|redefinition of unused" || true)"
     if [ -n "$UNDEF" ]; then
         echo "$UNDEF"
         RC=1

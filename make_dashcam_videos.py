@@ -1795,7 +1795,6 @@ def write_speed_srt(speeds: list[float], srt_path: Path) -> bool:
 # Map / link outputs (per drive or per day)
 # ---------------------------------------------------------------------------
 
-import json
 import math
 
 # A "real" driving sample should be within these gaps of the previous one.

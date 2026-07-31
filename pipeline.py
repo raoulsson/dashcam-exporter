@@ -2851,7 +2851,7 @@ def _state_line(text, there):
     return C.dim("  " + text)
 
 
-def _counted(n):
+def _clip_total(n):
     """A folder with no DCIM/200video/front answers None, not zero -- it is a
     directory nobody has looked in, which is a different thing from empty."""
     if n is None:
@@ -2882,7 +2882,7 @@ def _box(done):
 def _imported_line(world):
     if not world.imports:
         return _fact("no clips", "imported", False)
-    return _fact("%s clips" % _counted(clip_count(world.imports[0])),
+    return _fact("%s clips" % _clip_total(clip_count(world.imports[0])),
                  "imported", True)
 
 
