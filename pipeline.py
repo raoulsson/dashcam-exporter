@@ -1636,6 +1636,10 @@ def pick_import(ctx, purpose):
 # sidecars is that, and it is not the same answer as "you cancelled" — one
 # advances the pipeline and the other leaves it where it was.
 RAN, SATISFIED, SKIPPED, FAILED = "ran", "satisfied", "skipped", "failed"
+# Ctrl-C is the operator deciding, which is not the tool failing. The summary
+# said FAILED in red beside a step he had stopped on purpose, and the process
+# exited 1 for it. Its own word, and it does not colour the exit code.
+ABORTED = "aborted"
 
 # What counts as having done the step, for MenuItem.completed().
 COMPLETING = (RAN, SATISFIED)
@@ -6489,6 +6493,12 @@ def _print_all(lines):
         print(line.rstrip())
 
 
+def _colon(reason):
+    if not reason:
+        return ""
+    return ": " + reason
+
+
 def _safe_verdict(item, world):
     """A guard that raises must not take the menu down with it."""
     try:
@@ -6688,6 +6698,7 @@ def _numbered(name):
 
 _STATUS_TAGS = {RAN: lambda: C.green("ran      "),
                 SATISFIED: lambda: C.green("satisfied"),
+                ABORTED: lambda: C.yellow("aborted  "),
                 FAILED: lambda: C.red("FAILED   ")}
 
 
@@ -6800,12 +6811,12 @@ class Runner:
 
     def _offered(self, number):
         if number not in self.position.selectable(self.menu):
-            self._not_from_here(number)
+            self._not_available(number)
             return True
         self.run_one(number)
         return True
 
-    def _not_from_here(self, number):
+    def _not_available(self, number, reason=""):
         """Plainly, and in terms of what to do rather than of the machine.
 
         "does not follow 7) Upload Website" described the graph to someone who
@@ -6818,22 +6829,36 @@ class Runner:
         at that point, which reads as the tool being arbitrary. `p` lists what
         IS available, which is the same question answered once, in one place,
         the same way every time.
+
+        The same sentence carries a guard's refusal, with its reason on the
+        same line. "8) Clean Workspace is not available: nothing imported"
+        answers the keypress; opening the screen, printing the heading and
+        the description and then reporting that it did not complete is three
+        acts of theatre around a no.
         """
-        print(C.yellow("  %d) %s is not available." % (number, self.menu[number].name())))
+        print(C.yellow("  %d) %s is not available%s."
+                       % (number, self.menu[number].name(), _colon(reason))))
 
     def run_one(self, number):
         """One item, against a world captured for ITS scope, right now.
 
         Not the world the menu was drawn with: that one is a prompt old, and
-        the card can be swapped while the prompt is on screen.
+        the card can be swapped while the prompt is on screen. The guard is
+        asked against THAT world before the screen opens, so a refusal is a
+        line rather than a step that starts and stops.
         """
         item = self.menu[number]
+        world = looked_at(self.ctx, item.SCOPE)
+        verdict = _safe_verdict(item, world)
+        if verdict.blocked:
+            self._not_available(number, verdict.reason)
+            return None
         print()
         print(rule(item.name(), ch="="))
         _print_all(_description_line(item))
         hint_reset()
         started, already = time.time(), len(self.ctx.results)
-        outcome = self._execute(item)
+        outcome = self._execute(item, world)
         _stamp_elapsed(self.ctx.results[already:], time.time() - started)
         _tell_the_plugin(self.ctx, item, outcome)
         _print_all(_nothing_to_do_lines(outcome))
@@ -6842,9 +6867,9 @@ class Runner:
         _print_all(_stayed_lines(item, outcome, self.menu, self.position))
         return outcome
 
-    def _execute(self, item):
+    def _execute(self, item, world):
         try:
-            return item.execute(looked_at(self.ctx, item.SCOPE))
+            return item.execute(world)
         except Exception as exc:
             return self._after_exception(item, exc)
 
@@ -6883,7 +6908,7 @@ class Runner:
         effect."""
         print()
         print(C.yellow("  Interrupted — %s stopped." % item.name()))
-        self.ctx.results.append(StepResult(item.name(), FAILED, 0, "interrupted"))
+        self.ctx.results.append(StepResult(item.name(), ABORTED, 0, "interrupted"))
         return item.aborted("interrupted")
 
 

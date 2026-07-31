@@ -972,13 +972,20 @@ class TheRunner(unittest.TestCase):
     def test_an_interruption_is_the_items_own_answer_and_holds_the_position(self):
         """Ctrl-C leaves execute() part-way through, so the item is told to
         record the abort as its outcome. It did not complete, so the position
-        stays — the same thing a declined prompt means."""
+        stays — the same thing a declined prompt means.
+
+        RESTATED: it is recorded ABORTED, not FAILED. Ctrl-C is the operator
+        deciding, and the summary said FAILED in red beside a step he stopped
+        on purpose. Nothing else changes: it still does not complete and the
+        position still holds.
+        """
         menu_items, position = machine(at=M.NOWHERE)
         menu_items[IMPORT].execute.side_effect = P.Aborted()
         run = drive(menu_items, position, ["1", "q"])
         menu_items[IMPORT].aborted.assert_called_once_with("interrupted")
         self.assertEqual(run.position.current, M.NOWHERE)
-        self.assertEqual([r.status for r in run.ctx.results], [P.FAILED])
+        self.assertEqual([r.status for r in run.ctx.results], [P.ABORTED])
+        self.assertEqual(P._exit_code(run.ctx), 0, "stopping on purpose is not a failure")
 
     def test_the_menu_is_repainted_from_the_position_every_loop(self):
         """The greying is recomputed, never remembered: the painter is handed

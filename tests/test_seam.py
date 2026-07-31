@@ -1325,7 +1325,8 @@ class TestATargetThatFallsOverAwayFromTheAskPath(SeamTest):
         b = self.bench(_plugin_with(builder=RaisesMidBuild)).complete()
         runner = P.build_runner(b.ctx)
         with quiet():
-            outcome = runner._execute(runner.menu[BUILD])
+            outcome = runner._execute(runner.menu[BUILD],
+                                       P.capture_world(b.ctx, M.Scope.FULL))
         self.assertFalse(outcome.completed)
         self.assertEqual([r.status for r in b.ctx.results], [P.FAILED])
 
@@ -1334,7 +1335,8 @@ class TestATargetThatFallsOverAwayFromTheAskPath(SeamTest):
                                     complete=NO)).complete()
         runner = P.build_runner(b.ctx)
         with quiet():
-            outcome = runner._execute(runner.menu[UPLOAD])
+            outcome = runner._execute(runner.menu[UPLOAD],
+                                       P.capture_world(b.ctx, M.Scope.FULL))
         self.assertFalse(outcome.completed)
         self.assertEqual([r.status for r in b.ctx.results], [P.FAILED])
 
