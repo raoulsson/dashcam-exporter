@@ -239,7 +239,7 @@ def _expand_refs(value, so_far):
 # and why they resolve from the gitignored .env first. Same rule the home
 # coordinates already followed: config.txt may carry a commented EXAMPLE, the
 # real value lives in .env or not at all.
-PRIVATE_KEYS = ("website_uploader", "home_lat", "home_lon")
+PRIVATE_KEYS = ("website_uploader", "home_lat", "home_lon", "card")
 
 
 def as_bool(v, default=False):

@@ -90,8 +90,9 @@
 #
 # Read by 1) Import SIM, which copies from here, and by 9) Delete SIM Data,
 # which erases it. Nothing renders from here: that is import_dir.
+# Personal, so it resolves from the gitignored .env first, as SET_CARD.
+# config.txt is tracked: a real path here is a path committed.
 #card = /Volumes/NO NAME
-card = /Users/raoulsson/SimCard31
 
 # ============================================================================
 # 2. THE DIRECTORIES
@@ -104,11 +105,19 @@ card = /Users/raoulsson/SimCard31
 #   import_dir = /Volumes/disk11/incoming
 #   export_dir = /Volumes/disk423/renders
 #
+# TIP: keep all three off a cloud-mirrored folder -- Drive, iCloud, Dropbox,
+# OneDrive. An import is a hundred gigabytes of one-minute clips appearing at
+# once, and a render rewrites large files repeatedly; a sync client will try to
+# upload every byte of it, twice, over a domestic connection, and some of them
+# will helpfully evict the originals to save space while a render is reading
+# them. ~/dashcam-data is deliberately not inside Documents or Desktop for
+# exactly this reason on macOS.
+#
 
 # The root where your data lives during import and export. What belongs to a
 # SESSION rather than to the footage goes here: pid.lock, which says this
 # workspace is busy, and logs/. import_dir and output_dir default inside it.
-workspace = ~/dashcam-data
+#workspace = ~/dashcam-data
 
 # Where a copy of the card is kept. Change this only to use a bigger disk
 # during import. Its contents are deleted by 8) Clean Workspace, once the trips
@@ -119,7 +128,7 @@ workspace = ~/dashcam-data
 # back in the car while the encode runs.
 #
 # Also accepts the older name `root`. import_dir wins if both are set.
-import_dir = ${workspace}/import
+#import_dir = ${workspace}/import
 
 # Where the sidecars and the rendered drives are written. They are published
 # from here, or yours to pick up, before you clean the workspace.

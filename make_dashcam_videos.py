@@ -149,6 +149,12 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # belongs to a SESSION rather than to the footage lives here: pid.lock, which
 # says this workspace is busy, and logs/. import_dir and export_dir default
 # inside it, and all three can be pointed at different disks.
+#
+# TIP: keep all three off a cloud-mirrored folder -- Drive, iCloud, Dropbox,
+# OneDrive. An import is a hundred gigabytes appearing at once and a render
+# rewrites large files repeatedly; a sync client will try to upload every byte
+# of it, and some will evict the originals to save space while a render is
+# reading them.
 #workspace = ~/dashcam-data
 
 # The footage to render. Expects DCIM/200video/{front,rear} and
