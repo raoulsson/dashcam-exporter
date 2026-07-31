@@ -567,12 +567,16 @@ class Bar:
 
     def render(self, fraction, elapsed):
         """`label [####......]  42%  0:12/0:30`."""
+        return "%s %s %3d%% %s/%s" % (self.label, self.bracket(fraction),
+                                      int(fraction * 100), human_secs(elapsed),
+                                      human_secs(_eta(fraction, elapsed)))
+
+    def bracket(self, fraction):
+        """`[####......]`, violet, for a caller composing its own line."""
         width = self.width()
         filled = int(round(width * min(fraction, 1.0)))
-        bar = self.FILLED * filled + self.EMPTY * (width - filled)
-        return "%s [%s] %3d%% %s/%s" % (self.label, C.violet(bar),
-                                        int(fraction * 100), human_secs(elapsed),
-                                        human_secs(_eta(fraction, elapsed)))
+        return "[%s]" % C.violet(self.FILLED * filled
+                                 + self.EMPTY * (width - filled))
 
 
 def _eta(fraction, elapsed):
@@ -713,7 +717,7 @@ def _reader(stream, q):
 
 
 def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
-               env_extra=None, tail_lines=40, stdout_file=None):
+               env_extra=None, tail_lines=40, stdout_file=None, note_first=False):
     """Run a command, stream its output, return (rc, all_lines).
 
     parser(line) -> (fraction, note) or None. fraction is 0..1 for a real
@@ -785,7 +789,8 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
         if frac is not None:
             # The bar is deliberately narrow: the room goes to the log tail
             # below, which is the part that says it is still alive.
-            head = Bar(label).render(frac, elapsed)
+            head = _bar_line(label, frac, elapsed, note, note_first)
+            note = ""                      # note_first has already used it
         else:
             head = "%s %s %s" % (label, SPIN[spin % len(SPIN)], human_secs(elapsed))
         if note:
@@ -920,13 +925,62 @@ RE_TRIP = re.compile(r"^\[Trip\s+(\d+)/(\d+)\]")
 #                          "  [ 12/ 87] 2026-07-19 12:46:03  encoding ..."
 RE_CLIP = re.compile(r"^\s*\[\s*(\d+)\s*/\s*(\d+)\s*\]")
 
-def rsync_parser(line):
-    m = RE_RSYNC_P2.match(line)
-    if not m:
+def make_import_parser(total):
+    """Progress over the whole copy, which rsync will not tell us.
+
+    macOS ships openrsync, whose --progress reports ONE FILE at a time: each
+    clip runs 0 to 100 and the percentage says nothing about the job. So the
+    bytes are accumulated here — every file that reaches 100% adds its size to
+    the total moved — and measured against what the import screen already
+    worked out it would copy.
+
+    The line rsync prints before each file is its name, so the last one that
+    was not a progress line IS what is being copied right now.
+    """
+    state = {"name": "", "done": 0}
+
+    def parse(line):
+        m = RE_RSYNC_P2.match(line)
+        if not m:
+            _remember_name(state, line)
+            return None
+        moved = state["done"] + int(m.group(1).replace(",", ""))
+        if int(m.group(2)) >= 100:
+            state["done"] = moved
+        return _import_progress(state, moved, total, m.group(3))
+
+    return parse
+
+
+def _remember_name(state, line):
+    """rsync names a file on its own line, then reports on it. Anything with
+    no digits-and-percent shape is that name."""
+    name = line.strip()
+    if name and not name.startswith(">>>"):
+        state["name"] = name.rsplit("/", 1)[-1]
+
+
+def _import_progress(state, moved, total, rate):
+    if not total:
         return None
-    pct = int(m.group(2)) / 100.0
-    # rsync computes its own ETA from its own byte totals; prefer it over ours.
-    return pct, "rate %s  rsync eta %s" % (m.group(3), m.group(4))
+    return (min(moved / float(total), 1.0),
+            "%s %s %s/%s" % (state["name"], rate,
+                             human_bytes(moved), human_bytes(total)))
+
+
+def _bar_line(label, frac, elapsed, note, note_first):
+    """Where the bar sits in the line, which is not the same question twice.
+
+    A step whose note is a counter reads best as "Render [####] 40% 2:10/5:30"
+    -- the label first, because five steps draw bars and the label is what
+    tells them apart. The import's note is the file being copied, its rate and
+    how far through the whole card it is, which is the sentence; the bar is
+    the picture of it and belongs after.
+    """
+    bar = Bar(label)
+    if not (note_first and note):
+        return bar.render(frac, elapsed)
+    return "%s %s %3d%%" % (note, bar.bracket(frac), int(frac * 100))
 
 
 def make_scan_parser():
@@ -2835,7 +2889,8 @@ def step_import(ctx):
     # ("only clips newer than ...", "306 of 888 files selected") restates the
     # delta decision he just made, in the script's numbers rather than his.
     prepare_for_import(ctx)
-    rc, lines = run_stream(cmd, ctx.exporter, "Import", parser=rsync_parser,
+    rc, lines = run_stream(cmd, ctx.exporter, "Import",
+                           parser=make_import_parser(size), note_first=True,
                            env_extra=env,
                            keep=lambda l: l.startswith(("Verified:", "Card cleaned",
                                                         "Done.")))
