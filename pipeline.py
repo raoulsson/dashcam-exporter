@@ -725,7 +725,8 @@ def _reader(stream, q):
 
 
 def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
-               env_extra=None, tail_lines=40, stdout_file=None, note_first=False):
+               env_extra=None, tail_lines=40, stdout_file=None, note_first=False,
+               quiet_finish=False):
     """Run a command, stream its output, return (rc, all_lines).
 
     parser(line) -> (fraction, note) or None. fraction is 0..1 for a real
@@ -906,13 +907,15 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
         # A finished step should leave a line behind saying so. live.close()
         # erases the live area, so without this the progress simply vanishes and
         # the screen gives no evidence the work happened or how much of it.
-        if rc == 0 and live.enabled:
+        if rc == 0 and live.enabled and not quiet_finish:
             el = human_secs(time.time() - started)
             bar = "#" * 24
             tail_bits = " ".join(x for x in (counts,) if x)
             live.draw([C.green("%s [%s] 100%% %s  %s  completed"
                                % (label, bar, el, tail_bits)).rstrip()])
             print()          # commit that line; the next erase starts below it
+        elif rc == 0 and live.enabled:
+            live.close()     # the caller has its own sentence for this
             live.height = 0
         live.close()
         if out_fh:
@@ -955,7 +958,7 @@ def make_import_parser(total):
     The line rsync prints before each file is its name, so the last one that
     was not a progress line IS what is being copied right now.
     """
-    state = {"name": "", "done": 0}
+    state = {"name": "", "done": 0, "files": 0}
 
     def parse(line):
         m = RE_RSYNC_P2.match(line)
@@ -964,9 +967,13 @@ def make_import_parser(total):
             return None
         moved = state["done"] + int(m.group(1).replace(",", ""))
         if int(m.group(2)) >= 100:
-            state["done"] = moved
+            state["done"], state["files"] = moved, state["files"] + 1
         return _import_progress(state, moved, total, m.group(3))
 
+    # What it counted, for the one line printed when the copy finishes. The
+    # shell script says "Done. Imported N files" about the whole destination;
+    # this is what THIS run moved.
+    parse.state = state
     return parse
 
 
@@ -2932,13 +2939,19 @@ def step_import(ctx):
     # ("only clips newer than ...", "306 of 888 files selected") restates the
     # delta decision he just made, in the script's numbers rather than his.
     prepare_for_import(ctx)
-    rc, lines = run_stream(cmd, ctx.exporter, "Import",
-                           parser=make_import_parser(size), note_first=True,
-                           env_extra=env,
-                           keep=lambda l: l.startswith(("Verified:", "Card cleaned",
-                                                        "Done.")))
+    watch = make_import_parser(size)
+    # No keep list. "Verified: 306 files in dest (306 expected from this run)"
+    # and "Done. Imported 306 files to <path>" are the script reporting to
+    # whoever ran it by hand; here they say twice, in the script's words, what
+    # the line below says once in the tool's.
+    rc, lines = run_stream(cmd, ctx.exporter, "Import", parser=watch,
+                           note_first=True, quiet_finish=True, env_extra=env)
     if rc != 0:
         return record(ctx, NAME[IMPORT], FAILED, started, "exit %d" % rc)
+
+    moved, count = watch.state["done"], watch.state["files"]
+    print(C.green("  100%% - imported %d files, %s from SIM."
+                  % (count, human_bytes(moved))))
 
     dest = ctx.import_root / day
     ctx.selected_import = dest if (dest / "DCIM").is_dir() else ctx.selected_import
@@ -2956,7 +2969,7 @@ def step_import(ctx):
     record_import(ctx, ctx.card)
 
     return record(ctx, NAME[IMPORT], RAN, started,
-                  "%d clips, %s -> %s" % (todo, human_bytes(size), dest))
+                  "%d files, %s -> %s" % (count, human_bytes(moved), tilde(dest)))
 
 
 class ScanResult:
