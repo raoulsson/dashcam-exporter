@@ -1414,7 +1414,48 @@ BANNER = r"""
 BANNER_WIDTH = max(len(line) for line in BANNER.splitlines())
 
 
-VERSION = "1.0"
+VERSION_FALLBACK = "0.0.0"
+
+
+def version(exporter=None):
+    """major.minor.patch, read off the commit count.
+
+    249 commits splits into 2, 4, 9 and the patch is the one being written, so
+    the working tree is 2.4.10. It costs a subprocess at launch and it cannot
+    disagree with what is checked out, which is more than a hand-kept constant
+    manages: the number is the history rather than a note about it.
+
+    A copy without git -- an archive, an install -- has no history to count and
+    says so rather than inventing one.
+    """
+    return _version_of(_commit_count(exporter or EXPORTER_DIR))
+
+
+def _commit_count(where):
+    try:
+        return _counted(where)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _counted(where):
+    p = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=str(where),
+                       capture_output=True, text=True, timeout=5)
+    if p.returncode != 0:
+        return None
+    return p.stdout.strip()
+
+
+def _version_of(count):
+    if not _countable(count):
+        return VERSION_FALLBACK
+    return "%s.%s.%d" % (count[0], count[1], int(count[2:]) + 1)
+
+
+def _countable(count):
+    if not count:
+        return False
+    return count.isdigit() and len(count) >= 3
 REPO_URL = "https://github.com/raoulsson/dashcam-exporter"
 SPONSORS_URL = "https://github.com/sponsors/raoulsson"
 COFFEE_URL = "https://www.buymeacoffee.com/raoulsson"
@@ -5630,7 +5671,7 @@ def _info_lines():
     and nobody needs it twice.
     """
     return ("",
-            C.bold("  dashcam-exporter %s" % VERSION),
+            C.bold("  dashcam-exporter %s" % version()),
             _info_row("Designed by", "Raoul Marc Schmidiger"),
             _info_row("Implemented by", "Claude"),
             _info_row("Repository", REPO_URL),
@@ -6145,9 +6186,19 @@ def _banner_lines(ctx):
 
 
 def _big_banner():
-    """A blank line either side, so the art is a header rather than the top of
-    a wall of text."""
-    return ("",) + tuple(map(C.bold, BANNER.strip("\n").splitlines()))
+    """The art, with the version sitting at the right end of it.
+
+    On the last line of the glyphs rather than a line of its own: the art is
+    already the header, and a version under it would be a second one.
+    """
+    return ("",) + tuple(map(C.bold, _with_version(BANNER.strip("\n").splitlines())))
+
+
+def _with_version(lines):
+    at = len(lines) - 2                     # the last line of the letterforms
+    tagged = list(lines)
+    tagged[at] = "%-*s  v%s" % (BANNER_WIDTH, tagged[at], version())
+    return tagged
 
 
 def _edition_line(ctx):
