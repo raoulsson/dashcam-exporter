@@ -5708,11 +5708,20 @@ class Runner:
         return self._select(sel)
 
     def _status(self):
+        """Status, then where we are, then why each greyed entry is greyed.
+
+        The graph's refusal and the position are one thought -- these are not
+        offered, and this is where we stand -- so they lead. The per-entry
+        reasons are the detail under that, and they are the ones worth
+        reading: each says what is actually missing.
+        """
         print_status(self.ctx)
         world = capture_world(self.ctx, menu.Scope.LOCAL)
-        _print_all(_why_lines(self.menu, _verdicts(self.menu, world),
-                              self.position.selectable(self.menu)))
+        verdicts = _verdicts(self.menu, world)
+        offered = self.position.selectable(self.menu)
+        _print_all(_not_here_line(self.menu, offered))
         _print_all(_where_lines(self.menu, self.position))
+        _print_all(_blocked_lines(self.menu, verdicts, offered))
         return True
 
     def _help(self, sel):
