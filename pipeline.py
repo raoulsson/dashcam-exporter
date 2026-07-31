@@ -2692,7 +2692,7 @@ def step_import(ctx):
         if not confirm("  Import anyway, on top of what is there?",
                        _same_card(ctx, leftovers)):
             return record(ctx, NAME[IMPORT], ABORTED, started,
-                          "declined: import area not empty")
+                          "by the user, before it ran (import area not empty)")
 
     # Delta, always. A card left in the car accumulates: this one holds 1039
     # front clips of which 427 were already taken in last time, and copying
@@ -2719,7 +2719,8 @@ def step_import(ctx):
     # Amber on the whole count: it is the one thing on the screen that changes
     # between runs, and it is what the y is answering.
     if not confirm("  Delta import: %s?" % C.yellow("%d new clips" % n_new), True):
-        return record(ctx, NAME[IMPORT], ABORTED, started, "declined at the source")
+        return record(ctx, NAME[IMPORT], ABORTED, started,
+                      "by the user, before it ran (declined the delta)")
 
     # No prompt for this. It names the folder the copy lands in, which is an
     # implementation detail of where the tool puts things — asking put a question
@@ -4337,7 +4338,8 @@ def step_render(ctx):
                        % (len(doomed), human_bytes(size))))
         print(C.dim("  Maps, GPX and metadata beside them are left alone; only video goes."))
         if not confirm("  Delete and re-render?", True):
-            return record(ctx, NAME[RENDER], ABORTED, started, "declined the clean")
+            return record(ctx, NAME[RENDER], ABORTED, started,
+                          "by the user, before it ran (declined the re-render)")
         for f in doomed:
             try:
                 f.unlink()
@@ -6929,7 +6931,8 @@ class Runner:
         effect."""
         print()
         print(C.yellow("  Interrupted — %s stopped." % item.name()))
-        self.ctx.results.append(StepResult(item.name(), ABORTED, 0, "interrupted"))
+        self.ctx.results.append(StepResult(item.name(), ABORTED, 0,
+                                          "by the user, during the run"))
         return item.aborted("interrupted")
 
 
