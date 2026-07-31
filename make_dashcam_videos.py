@@ -162,7 +162,7 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # It defaults to the import workspace rather than the card, because the normal
 # path is to copy the card and render from the copy — that is what lets the card
 # go back in the car while the encode runs. Point it at /Volumes/NO NAME to
-# render off the card directly. Formerly `root`, which is still read.
+# render off the card directly.
 #import_dir = ${workspace}/import
 
 # Where meta data like sidecars for the website and the rendered drives are
@@ -3294,7 +3294,7 @@ def main() -> int:
     # `root` is the old name for import_dir and still works: it is in configs
     # that already exist, and silently ignoring it would send a render at the
     # wrong tree. import_dir wins when both are set.
-    _import_dir = cs("import_dir", cs("root", DEFAULT_IMPORT_DIR))
+    _import_dir = cs("import_dir", DEFAULT_IMPORT_DIR)
     ap.add_argument("--root", "--import-dir", dest="root", default=_import_dir,
                     help=f"Footage to render, normally the import workspace "
                          f"(default: {_import_dir})")

@@ -314,7 +314,6 @@ class Ctx:
         self.workspace = Path(self.cfg.get("workspace")
                               or FALLBACK_WORKSPACE).expanduser()
         self.render_root = Path(self.cfg.get("import_dir")
-                                or self.cfg.get("root")
                                 or (self.workspace / "import")).expanduser()
         # export_dir, because that is what the tool does and what the project
         # is called. `output_dir` and `out` are the names it had before and are

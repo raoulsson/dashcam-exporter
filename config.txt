@@ -126,8 +126,6 @@
 # Rendering straight off the card is possible: point this at the card. That is
 # the exception, not what the tool assumes, and it means the card cannot go
 # back in the car while the encode runs.
-#
-# Also accepts the older name `root`. import_dir wins if both are set.
 #import_dir = ${workspace}/import
 
 # Where the sidecars and the rendered drives are written. They are published
