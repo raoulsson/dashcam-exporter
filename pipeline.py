@@ -185,11 +185,10 @@ class C:
 
 
 def rule(title=""):
-    # One wider than the reported width. get_terminal_size answers the number
-    # of columns, and a rule of exactly that many stops one short of the right
-    # edge on this terminal; the extra character closes the gap without
-    # wrapping, because the newline lands on the column after the last one.
-    w = term_width() + 1
+    # Exactly the reported width. A character wider reaches the right edge and
+    # then wraps a blank line onto the next one, which reads as a gap between
+    # sections rather than as a rule.
+    w = term_width()
     if not title:
         return "-" * w
     head = "-- %s " % title
