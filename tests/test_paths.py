@@ -28,6 +28,7 @@ import importlib.util
 import io
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -241,10 +242,18 @@ class FakeWork:
 
 
 class FakeCtx:
-    """As much ctx as the runner reads once capture_world is mocked out."""
+    """As much ctx as the runner reads once capture_world is mocked out.
+
+    It needs an out_dir because the runner writes where it left off beside the
+    ledger, and a temp dir it owns is the answer -- the same discipline the
+    archive uses: no attribute means the fixture has not said where, which is
+    loud, rather than a default that writes somewhere real.
+    """
 
     def __init__(self):
         self.results = []
+        self.out_dir = Path(tempfile.mkdtemp(prefix="dashcam-paths-"))
+        self.plugin = None
 
 
 # ---------------------------------------------------------------------------

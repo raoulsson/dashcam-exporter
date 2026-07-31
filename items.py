@@ -581,7 +581,12 @@ COLD_START_RULES = (
     # creates -- the self-contained page and the gather are the local edition's
     # deliverables -- so without this, publishing left no trace orientation
     # could see and every restart landed back at the renders.
-    (UPLOAD, lambda w: w.target.complete is Evidence.YES),
+    # The renders have to still be HERE. The destination answering yes is about
+    # trips, not about this machine, and after a clean-up it goes on saying yes
+    # about trips whose local copies are gone -- which put a swept, empty
+    # workspace at "7) Upload Website" with nothing to upload. Published AND
+    # still present is the state this rule is for: uploaded, not yet cleaned.
+    (UPLOAD, lambda w: bool(w.renders) and w.target.complete is Evidence.YES),
     (BUILD, lambda w: w.local_page or bool(w.final_folders)),
     (RENDER, lambda w: bool(w.renders)),
     (PREVIEW, lambda w: w.stills_current),

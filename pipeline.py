@@ -37,12 +37,14 @@ code left here.
 """
 from __future__ import annotations
 
+import contextlib
 import base64
 import html
 import itertools
 import json
 import math
 import os
+import platform
 import queue
 import re
 import shutil
@@ -421,6 +423,61 @@ class Live:
             sys.stdout.write("\x1b[?25h")   # show cursor
             sys.stdout.flush()
             self.enabled = False
+
+
+@contextlib.contextmanager
+def waiting(label):
+    """A bar for a wait whose length nobody can know.
+
+    The launch asks the plugin where the cycle got to, and what that costs is
+    the plugin's business -- an ssh round trip here, a dict somewhere else. So
+    there is no percentage to show and no honest estimate to make: the bar
+    moves to say the tool is alive, and the elapsed seconds say how long it has
+    been. Ten seconds of nothing is the only moment this tool looks hung.
+
+    Silent when stdout is not a terminal, so a piped run or a test is unchanged.
+    """
+    if not sys.stdout.isatty():
+        yield
+        return
+    stop = threading.Event()
+    spinner = threading.Thread(target=_wait_bar, args=(label, stop), daemon=True)
+    spinner.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        spinner.join(timeout=1.0)
+        _erase_wait_line()
+
+
+def _wait_bar(label, stop):
+    started, i = time.time(), 0
+    while not stop.wait(0.12):
+        _draw_wait(label, i, time.time() - started)
+        i += 1
+
+
+def _draw_wait(label, i, elapsed):
+    """A block sliding back and forth: motion without a claim about progress."""
+    width = max(10, min(28, term_width() - 40))
+    pos = _bounce(i, width)
+    bar = "." * pos + "#" * 3 + "." * (width - pos - 3)
+    sys.stdout.write("\r  %s [%s] %s " % (label, bar, human_secs(elapsed)))
+    sys.stdout.flush()
+
+
+def _bounce(i, width):
+    span = max(1, width - 3)
+    step = i % (2 * span)
+    if step < span:
+        return step
+    return 2 * span - step
+
+
+def _erase_wait_line():
+    sys.stdout.write("\r" + " " * max(0, term_width() - 1) + "\r")
+    sys.stdout.flush()
 
 
 def show_cursor():
@@ -872,11 +929,11 @@ def _plugin_rows(plugin):
     return ("  Edition      %s  %s"
             % (C.bold("uploader"),
                C.dim("User plugin handles build and upload of website")),
-            "  Registered   %s  %s" % (C.bold("%s + %s"
-                                              % (type(plugin.builder).__name__,
-                                                 type(plugin.uploader).__name__)),
-                                       C.dim(plugin.uploader.describe())),
-            "               %s" % C.dim(tilde(Path(plugin.spec.split(":")[0]))))
+            "  Plugin       %s" % C.bold("%s + %s"
+                                          % (type(plugin.builder).__name__,
+                                             type(plugin.uploader).__name__)),
+            "               %s" % C.dim(tilde(Path(plugin.spec.split(":")[0]))),
+            "               %s" % C.dim(plugin.uploader.describe()))
 
 
 def _local_site_rows(ctx):
@@ -977,6 +1034,10 @@ def print_status(ctx):
     # irrelevant; what the row answers is which copy of the tool is running,
     # which matters the moment there are two on the machine.
     print("  Running in   %s" % C.dim(tilde(ctx.exporter)))
+    # Which interpreter, spelled out. Four pythons can be on one PATH and only
+    # the one with opencv groups the trips the way the renderer will.
+    print("  Python       %s  %s" % (C.dim(platform.python_version()),
+                                     C.dim(tilde(Path(sys.executable)))))
     print(rule())
 
     # Disk goes below the rule, as a footnote rather than a status row.
@@ -1133,6 +1194,40 @@ def read_ledger(ctx):
         return json.loads((ctx.out_dir / LEDGER_FILE).read_text())
     except Exception:
         return {}
+
+
+def remember_step(ctx, number):
+    """The last STEP the operator took, beside the ledger so it outlives a clean.
+
+    Where the cycle has got to is the last thing he did, and nothing on disk
+    says that as well as he does. Deriving it was always an inference, and the
+    inference went wrong in both directions in one evening: a swept workspace
+    read as "7) Upload Website" because the destination still says the trips
+    are published, and then as "2) Generate Meta" because six receipts had not
+    been archived yet.
+
+    Not the views and not the keys. Progress, help, info and status answer a
+    question without changing anything, so they are not where you are.
+
+    A remembered position cannot lie its way past anything: it decides what is
+    OFFERED, and every item still asks its own guard before it runs.
+    """
+    d = read_ledger(ctx)
+    d["at"] = number
+    _write_ledger(ctx, d)
+
+
+def remembered_step(ctx):
+    """The step this workspace was left at, or None."""
+    at = read_ledger(ctx).get("at")
+    return at if isinstance(at, int) else None
+
+
+def _write_ledger(ctx, d):
+    try:
+        (ctx.out_dir / LEDGER_FILE).write_text(json.dumps(d, indent=1))
+    except OSError:
+        pass
 
 
 def write_ledger(ctx, stamp, note=""):
@@ -5673,6 +5768,7 @@ class Runner:
         _tell_the_plugin(self.ctx, item, outcome)
         _print_all(_nothing_to_do_lines(outcome))
         self.position.advance(item)
+        _remember_position(self.ctx, item, self.position)
         _print_all(_stayed_lines(item, outcome, self.menu, self.position))
         return outcome
 
@@ -5772,6 +5868,13 @@ def _reset_quietly(plugin):
         # Its own cache is its own problem. A step that just finished must not
         # be reported as failed because a notification about it went wrong.
         print(C.dim("  (%s.reset() raised: %s)" % (plugin.name, e)))
+
+
+def _remember_position(ctx, item, position):
+    """Written where it survives a clean-up, and only for real steps."""
+    if menu.is_view(item):
+        return
+    remember_step(ctx, position.current)
 
 
 def _stamp_elapsed(results, seconds):
@@ -5882,7 +5985,9 @@ def build_runner(ctx, classes=None):
     # a test -- so budgeting on a guess about someone else's implementation is
     # the one thing this seam exists to stop. Startup is a defined moment an
     # implementor can plan for; what it costs there is theirs to manage.
-    position.orient(capture_world(ctx, menu.Scope.FULL), items.COLD_START_RULES)
+    with waiting("Reading the workspace and asking the plugin"):
+        world = capture_world(ctx, menu.Scope.FULL)
+    _resume(ctx, position, world)
     return Runner(ctx, menu_items, position)
 
 
@@ -5936,6 +6041,15 @@ def _exit_code(ctx):
 
 def _failed(result):
     return result.status == FAILED
+
+
+def _resume(ctx, position, world):
+    """Pick up where the operator left off, and only guess when he never was."""
+    at = remembered_step(ctx)
+    if at is None:
+        position.orient(world, items.COLD_START_RULES)
+        return
+    position.current = at
 
 
 def _startup_note(ctx):

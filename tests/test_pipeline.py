@@ -34,6 +34,7 @@ import functools
 import importlib.util
 import io
 import sys
+import tempfile
 import time
 import unittest
 from contextlib import redirect_stdout
@@ -168,12 +169,20 @@ class Drive:
         return self.captured.side_effect.worlds
 
 
-def drive(menu_items, position, keys):
-    """Run the real Runner loop over mock items, answering the prompt with
-    `keys`. Nothing touches the disk: the world is a sentinel, the painter is
-    a mock, and the only I/O is the prompt, which is a mock too."""
+def a_ctx():
+    """A Mock, except for out_dir: the runner writes where it left off beside
+    the ledger, and `Mock() / "x"` is a TypeError rather than a write."""
     ctx = mock.Mock()
     ctx.results = []
+    ctx.out_dir = Path(tempfile.mkdtemp(prefix="dashcam-runner-"))
+    return ctx
+
+
+def drive(menu_items, position, keys):
+    """Run the real Runner loop over mock items, answering the prompt with
+    `keys`. Nothing touches the disk but a temp ledger: the world is a
+    sentinel, the painter is a mock, and the prompt is a mock too."""
+    ctx = a_ctx()
     runner = P.Runner(ctx, menu_items, position)
     captures = Captures()
     buf = io.StringIO()
@@ -183,6 +192,37 @@ def drive(menu_items, position, keys):
         with redirect_stdout(buf):
             runner.loop()
     return Drive(runner, ctx, captured, painter, buf.getvalue())
+
+
+class WhereWeLeftOffSurvivesARestart(unittest.TestCase):
+    """The position is the last STEP the operator took, not an inference.
+
+    Deriving it from disk went wrong in both directions in one evening: a swept
+    workspace read as Upload Website because the destination still said the
+    trips were published, then as Generate Meta because six receipts had not
+    been archived. He knows where he is; the tool should ask him by remembering.
+
+    A remembered position cannot lie its way past anything -- it decides what
+    is OFFERED, and every item still asks its own guard before it runs.
+    """
+
+    def test_a_step_is_written_down_and_read_back(self):
+        menu_items, position = machine(at=META)
+        run = drive(menu_items, position, [str(RENDER), "q"])
+        self.assertEqual(P.remembered_step(run.ctx), RENDER)
+
+    def test_looking_at_progress_does_not_move_it(self):
+        """A view answers a question without changing anything, so it is not
+        where you are. Nor are h, i and s, which never dispatch at all."""
+        menu_items, position = machine(at=RENDER)
+        run = drive(menu_items, position, [str(RENDER), str(PROGRESS), "q"])
+        self.assertEqual(P.remembered_step(run.ctx), RENDER)
+
+    def test_a_refused_step_leaves_it_where_it_was(self):
+        menu_items, position = machine(at=META)
+        menu_items[RENDER].completed.return_value = False
+        run = drive(menu_items, position, [str(RENDER), "q"])
+        self.assertEqual(P.remembered_step(run.ctx), META)
 
 
 # ---------------------------------------------------------------------------
@@ -204,8 +244,7 @@ class ThePluginIsToldWhenItsInputChanged(unittest.TestCase):
     """
 
     def _dispatch(self, number, outcome=None):
-        ctx = mock.Mock()
-        ctx.results = []
+        ctx = a_ctx()
         item = fake_item(number)
         item.execute.return_value = outcome or M.did("done")
         position = mock.Mock()
@@ -232,8 +271,7 @@ class ThePluginIsToldWhenItsInputChanged(unittest.TestCase):
     def test_a_plugin_that_raises_on_reset_does_not_fail_the_step(self):
         """Its cache is its own problem. A step that just finished must not be
         reported as failed because a notification about it went wrong."""
-        ctx = mock.Mock()
-        ctx.results = []
+        ctx = a_ctx()
         ctx.plugin.reset.side_effect = RuntimeError("shelf fell over")
         with redirect_stdout(io.StringIO()) as out:
             P._tell_the_plugin(ctx, fake_item(RENDER), M.did("done"))
@@ -258,8 +296,7 @@ class TheClockRunsFromTheMenusSideOfTheCall(unittest.TestCase):
     """
 
     def _dispatch(self, body):
-        ctx = mock.Mock()
-        ctx.results = []
+        ctx = a_ctx()
         item = fake_item(UPLOAD)
         item.execute.side_effect = lambda world: body(ctx)
         position = mock.Mock()
