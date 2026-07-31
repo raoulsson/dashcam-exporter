@@ -1670,6 +1670,11 @@ def write_ledger(ctx, stamp, note=""):
 
 STAMP_RE = re.compile(r"(\d{14})")
 
+# The camera's own drive/park event log, at the root of DCIM. Named here
+# because it is the one file on the card that GROWS between an import and a
+# look back at it: everything else is written once and rotated away whole.
+CAMERA_LOG = "IPSRecord.txt"
+
 
 def last_imported_stamp(ctx):
     """The newest source clip this machine has already taken in, or None.
@@ -4904,8 +4909,7 @@ def _clean_target(ctx, root):
     subfolders, and those have not been scanned, rendered or verified by
     anything here — rmtree of the sink would take them with it.
     """
-    siblings = [c for c in sorted(root.iterdir())
-                if c.is_dir() and (c / "DCIM").is_dir()] if root.is_dir() else []
+    siblings = _sibling_imports(root)
     if not siblings:
         return root
     target = root / "DCIM"
@@ -4914,6 +4918,33 @@ def _clean_target(ctx, root):
         root, len(siblings), ", ".join(c.name for c in siblings))))
     print(C.yellow("  Narrowing the delete to %s; the others are untouched." % target))
     return target
+
+
+def _sibling_imports(root):
+    if not root.is_dir():
+        return []
+    return [c for c in sorted(root.iterdir())
+            if c.is_dir() and (c / "DCIM").is_dir()]
+
+
+def _target_still(root, planned):
+    """Is the folder about to be rmtree'd still the one that was checked.
+
+    The narrowing above is decided when the plan is drawn, and the prompt can
+    then sit on screen for as long as it takes to answer it. A second terminal
+    running an import in that window creates a dated folder under the sink,
+    which turns "delete the sink" into "delete the sink AND the import that
+    just landed in it" — footage nothing here ever looked at, and which the
+    fresh world cannot object to because the guard is handed the world and not
+    the target.
+    """
+    return _clean_target_quietly(root) == planned
+
+
+def _clean_target_quietly(root):
+    if _sibling_imports(root):
+        return root / "DCIM"
+    return root
 
 
 def _print_gates(world):
@@ -4979,9 +5010,9 @@ def _discard_banner(world, target, size):
     """
     return (C.red("  Deleting %s removes %s from this machine."
                   % (target, human_bytes(size))),
-            C.dim("  The %d clips stay on the card, so 1) %s brings them back."
-                  % (len(world.import_stamps), NAME[IMPORT])),
-            C.dim("  Nothing else was made from them, so nothing else goes."))
+            C.dim("  The footage stays on the card, and the high-water mark is"),
+            C.dim("  wound back past it, so 1) %s offers it again." % NAME[IMPORT]),
+            C.dim("  Nothing else was made from it, so nothing else goes."))
 
 
 def _what_survives(ctx, world):
@@ -5074,8 +5105,8 @@ def _what_goes_lines(world, files, size):
     sort of warning that gets ignored where it is true.
     """
     if guards.import_is_disposable(world):
-        return ("  %d files, %s — a second copy. The card still holds all %d clips."
-                % (files, C.bold(human_bytes(size)), len(world.import_stamps)),)
+        return ("  %d files, %s — a second copy. The card holds every one of"
+                " them." % (files, C.bold(human_bytes(size))),)
     return ("  %d files, %s — this is the ORIGINAL footage and it is not"
             " recoverable." % (files, C.bold(human_bytes(size))),)
 
@@ -5095,9 +5126,9 @@ def _why_it_may_go(world):
 
 def _discard_lines(world):
     return (C.dim("  Nothing was made from this import: no sidecars, no renders,"),
-            C.dim("  nothing published. Every one of its %d clips is on the card in"
-                  % len(world.import_stamps)),
-            C.dim("  the slot, checked clip by clip."),
+            C.dim("  nothing published. All %d of its files are on the card in the"
+                  % len(world.import_files)),
+            C.dim("  slot, checked one by one, by name and by size."),
             "")
 
 
@@ -5122,6 +5153,14 @@ def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
     it, and asking that of the world the menu was drawn with would judge the
     renders by an answer from before the prompt.
     """
+    if not _target_still(root, target):
+        print(C.red("  Refusing: %s is not the folder that was checked any more."
+                    % target))
+        print(C.dim("  Something landed under it while the prompt was on screen."
+                    " Nothing was touched."))
+        return _outcome(record(ctx, NAME[CLEAN_WS], SKIPPED, started,
+                               "refused: the delete target moved"))
+    discarding = guards.import_is_disposable(fresh)
     try:
         shutil.rmtree(str(target))
     except OSError as e:
@@ -5132,6 +5171,8 @@ def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
     ctx.last_scan = None
     ctx.last_groups = None
     print(C.green("  Deleted %s (%s)" % (target, human_bytes(size))))
+    if discarding:
+        _unclaim_the_discarded(ctx, fresh)
 
     # The renders go too — but only when that is separately proven. The gates
     # above approved deleting the FOOTAGE; with nothing configured to publish to,
@@ -5149,6 +5190,45 @@ def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
                            "%d files, %s freed%s"
                            % (files + n, human_bytes(size + freed),
                               _on_whose_word(fresh.target))))
+
+
+def _unclaim_the_discarded(ctx, world):
+    """Wind the high-water mark back past the footage just thrown away.
+
+    The mark says "this machine has already taken these in", and after a
+    discard that is no longer true of them. Left standing it is the trap the
+    banner would have walked into: item 1 answers "nothing new at the source"
+    and returns satisfied without offering the copy, so the clips are on the
+    card, gone from here, and the only remaining offer is item 9.
+
+    Only the discarded span is unclaimed. Anything older keeps its mark, which
+    is what stops this from turning into a full re-copy of a card whose earlier
+    rounds were published and swept.
+    """
+    lowest = min(_stamps_in(world.import_files), default="")
+    if not lowest:
+        return
+    kept = max((s for s in world.card.stamps if s < lowest), default="")
+    _lower_the_mark(ctx, lowest, kept)
+
+
+def _lower_the_mark(ctx, lowest, kept):
+    d = read_ledger(ctx)
+    if (d.get("through") or "") < lowest:
+        return                                  # never claimed them anyway
+    d["through"] = kept
+    _write_ledger(ctx, d)
+    print(C.dim("  Import mark wound back to %s — those clips count as new again."
+                % (kept or "nothing")))
+
+
+def _stamps_in(files):
+    return set(filter(None, map(_stamp_in_name, files)))
+
+
+def _stamp_in_name(name):
+    m = STAMP_RE.search(name)
+    return m.group(1) if m else None
 
 
 def _on_whose_word(target):
@@ -5784,7 +5864,7 @@ def _world_of(ctx, scope, imports, root, metas, renders, trip_ids, target,
               expendable):
     settled, why, stragglers = expendable
     card = _card_facts(ctx)
-    mine = _import_stamps(root)
+    mine = _import_files(root)
     return W.World(
         at=time.time(), scope=scope, strategy=menu.Strategy.of(ctx.plugin),
         offline=ctx.offline,
@@ -5795,7 +5875,8 @@ def _world_of(ctx, scope, imports, root, metas, renders, trip_ids, target,
         imports=imports, selected_import=root, metas=metas,
         renders=renders, renders_here=_renders_here(ctx, root),
         trip_ids=trip_ids, dropped_ids=dropped_trip_ids(ctx),
-        import_stamps=mine, unsourced_stamps=mine - card.stamps,
+        import_files=mine, unsourced_files=_unsourced_files(root, ctx.card, mine),
+        card_shares_the_import=_card_shares(ctx.card, root),
         final_folders=_final_folders(ctx), expected_trips=_expected_trips(ctx, root, metas),
         has_track=_has_track(imports), stills_current=_stills_current(ctx),
         local_page=_page_exists(ctx), ledger_mark=last_imported_stamp(ctx),
@@ -5805,28 +5886,71 @@ def _world_of(ctx, scope, imports, root, metas, renders, trip_ids, target,
         stragglers=tuple(stragglers), card=card, target=target)
 
 
-def _import_stamps(root):
-    """Every clip in ONE import, by stamp. Empty when there is no import.
+def _import_files(root):
+    """Every file in ONE import, by path relative to it.
 
-    The front camera only, exactly as the card accounting counts it: front and
-    rear are recorded as a pair under one stamp, so counting both would compare
-    two clips against one and report footage the card does not hold.
+    Everything, not the front clips: the delete is an rmtree of the folder, so
+    the question is whether the CARD has what that folder holds -- the rear
+    camera, the GPS tars, the event log, and anything else in there. A check
+    that only knew about front clips approved deleting the rest unexamined.
     """
     if root is None:
         return frozenset()
-    front = root / "DCIM" / "200video" / "front"
-    return frozenset(filter(None, map(_stamp_of, _safe_glob(front, "*.mp4"))))
+    return frozenset(str(p.relative_to(root)) for p in _safe_rglob(root, "*")
+                     if p.is_file())
 
 
-def _safe_glob(d, pattern):
-    if not d.is_dir():
-        return []
-    return d.glob(pattern)
+def _unsourced_files(root, card_path, files):
+    """The ones the card does not have. Empty means the import is a copy."""
+    if root is None:
+        return frozenset()
+    return frozenset(f for f in files if not _also_on_the_card(root / f,
+                                                               card_path / f))
 
 
-def _stamp_of(path):
-    m = STAMP_RE.search(path.name)
-    return m.group(1) if m else None
+def _also_on_the_card(here, there):
+    """Same path, same size.
+
+    Not the same bytes: hashing a full card is minutes, and the file this
+    protects came off that card through a verified rsync. Same size is what
+    catches the case that matters -- a name still on the card whose clip was
+    rotated away and replaced, or truncated by a bad eject.
+
+    The event log is the one exception, and it is a real one rather than a
+    convenience: the camera APPENDS to it, so the card's copy is a superset of
+    whatever was imported and can never match on size again.
+    """
+    if not there.is_file():
+        return False
+    if here.name == CAMERA_LOG:
+        return _size_of(there) >= _size_of(here)
+    return _size_of(there) == _size_of(here)
+
+
+def _card_shares(card_path, root):
+    """Is the configured card the import, or something holding it.
+
+    card_root() searches down for a DCIM tree, and an import folder holds one.
+    Point the card at the workspace -- or at a symlink into it -- and the card
+    resolves to the very folder item 8 is about to delete, at which point
+    "every file is on the card" compares a directory against itself and comes
+    out true. The one state where the check is meaningless is the one where
+    acting on it erases the only copy, so it is asked separately.
+    """
+    if root is None:
+        return False
+    return _overlapping(_resolved(card_path), _resolved(root))
+
+
+def _overlapping(a, b):
+    return a == b or _inside(a, b) or _inside(b, a)
+
+
+def _inside(a, b):
+    try:
+        return a.is_relative_to(b)
+    except (AttributeError, ValueError):    # pragma: no cover - old pythons
+        return False
 
 
 # ---------------------------------------------------------------------------

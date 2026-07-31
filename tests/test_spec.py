@@ -285,6 +285,31 @@ class TestAvailability(SpecTest):
         self.b.imported().publishes()               # imported, card gone
         self.assertBlocked(CLEAN_WS)
 
+    def test_nor_when_the_cards_copy_is_a_different_size(self):
+        """The card still has the NAME. A clip rotated away and replaced, or
+        truncated by a bad eject, keeps its filename and loses its footage, so
+        name equality alone approves deleting the good copy."""
+        self.b.card_in().imported().publishes()
+        clip = (self.b.ctx.card / "DCIM" / "200video" / "front"
+                / "20260728090000_0060.mp4")
+        clip.write_text("truncated-differently")
+        self.assertBlocked(CLEAN_WS)
+
+    def test_nor_when_a_file_that_is_not_a_clip_is_missing(self):
+        """The delete is an rmtree of the folder, so everything in it has to
+        be on the card -- the rear camera, the GPS tars, the event log. A
+        check that knew only about front clips deleted the rest unexamined."""
+        self.b.card_in().imported().gpx().publishes()
+        self.assertBlocked(CLEAN_WS)
+
+    def test_nor_when_the_configured_card_IS_the_import(self):
+        """card_root() searches down for a DCIM tree and an import holds one,
+        so a card path pointing into the workspace resolves to the very folder
+        item 8 would delete. Every file is then "on the card" by identity."""
+        self.b.imported().publishes()
+        self.b.ctx.card = self.b.ctx.render_root
+        self.assertBlocked(CLEAN_WS)
+
     def test_nor_when_one_clip_of_it_is_missing_from_the_card(self):
         """Per clip, not a headcount: a card holding two of the three still
         leaves one whose only copy is the import."""

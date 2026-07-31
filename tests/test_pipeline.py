@@ -33,6 +33,7 @@ The rules pinned here, in the owner's words:
 import functools
 import importlib.util
 import io
+import shutil
 import sys
 import tempfile
 import time
@@ -46,6 +47,7 @@ sys.path.insert(0, str(REPO))
 
 import items                     # noqa: E402  (registers the ten)
 import menu as M                 # noqa: E402
+import world as W                # noqa: E402
 from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                   UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
 
@@ -243,6 +245,74 @@ class WhereWeLeftOffSurvivesARestart(unittest.TestCase):
         ctx = a_ctx()
         P.remember_step(ctx, M.NOWHERE)
         self.assertIsNone(P.remembered_step(ctx))
+
+
+class DiscardingAnImportUnclaimsIt(unittest.TestCase):
+    """After throwing away the local copy, the ledger must stop saying it has
+    it.
+
+    The mark answers "have I already taken this card in", and item 1 acts on
+    it: a card whose clips are all at or below the mark offers nothing and
+    returns satisfied. Left standing after a discard, the banner\'s promise
+    that item 1 brings the footage back is a lie, and the operator is left
+    with one copy and item 9 as the next thing on offer.
+    """
+
+    def setUp(self):
+        self.ctx = a_ctx()
+
+    def _world(self, files, card_stamps):
+        return W.World(import_files=frozenset(files),
+                       card=W.Card(stamps=frozenset(card_stamps)))
+
+    def test_the_mark_comes_back_to_before_the_discarded_clips(self):
+        P.write_ledger(self.ctx, "20260728120000")
+        P._unclaim_the_discarded(self.ctx, self._world(
+            ["DCIM/200video/front/20260728110000_0060.mp4"],
+            ["20260728090000", "20260728110000"]))
+        self.assertEqual(P.read_ledger(self.ctx).get("through"), "20260728090000")
+
+    def test_an_older_round_keeps_its_mark(self):
+        """Only the discarded span is unclaimed. Winding the mark to nothing
+        would re-copy a whole card whose earlier rounds were published and
+        swept -- hours, for footage that is not coming back."""
+        P.write_ledger(self.ctx, "20260728120000")
+        P._unclaim_the_discarded(self.ctx, self._world(
+            ["DCIM/200video/front/20260728110000_0060.mp4"],
+            ["20260728090000", "20260728110000"]))
+        self.assertGreater(P.read_ledger(self.ctx).get("through"), "")
+
+    def test_a_mark_that_never_covered_them_is_left_alone(self):
+        P.write_ledger(self.ctx, "20260728090000")
+        P._unclaim_the_discarded(self.ctx, self._world(
+            ["DCIM/200video/front/20260728110000_0060.mp4"], []))
+        self.assertEqual(P.read_ledger(self.ctx).get("through"), "20260728090000")
+
+
+class TheDeleteTargetIsRecheckedAfterTheWord(unittest.TestCase):
+    """The narrowing is decided when the plan is drawn and the prompt then
+    sits on screen for as long as it takes to answer.
+
+    A second terminal running an import in that window creates a dated folder
+    under the sink, which turns "delete the sink" into "delete the sink and
+    the import that just landed in it". The guard cannot object: it is handed
+    the world, and the target is not in it.
+    """
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="dashcam-target-"))
+        (self.root / "DCIM").mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_unchanged_is_still_the_same_target(self):
+        self.assertTrue(P._target_still(self.root, self.root))
+
+    def test_a_sibling_landing_during_the_prompt_changes_it(self):
+        (self.root / "2026-07-31" / "DCIM").mkdir(parents=True)
+        self.assertFalse(P._target_still(self.root, self.root))
+        self.assertTrue(P._target_still(self.root, self.root / "DCIM"))
 
 
 # ---------------------------------------------------------------------------

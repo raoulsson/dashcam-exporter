@@ -153,12 +153,22 @@ class World:
     # published-then-cleaned-up trip are indistinguishable afterwards, so this
     # is recorded at the only moment that knows which it was.
     dropped_ids: Tuple[str, ...] = ()
-    # The working import's own clips, and which of them the source in the slot
-    # no longer holds. Two fields rather than one flag because an import with
-    # no clips at all and an import whose every clip is still on the card both
-    # leave "unsourced" empty, and only one of them is footage worth keeping.
-    import_stamps: FrozenSet[str] = frozenset()
-    unsourced_stamps: FrozenSet[str] = frozenset()
+    # Every FILE in the working import, by path relative to it, and the ones
+    # the source in the slot does not have at the same path and size.
+    #
+    # Files rather than clip stamps, and that is not a detail. A stamp names a
+    # front clip; the import also holds the rear camera, the GPS tars and the
+    # camera's event log, and the rear folder rotates independently of the
+    # front one -- so "every stamp is on the card" was true of an import whose
+    # rear clip existed nowhere else. Two fields rather than one flag because
+    # an empty import and a fully-sourced one both leave "unsourced" empty,
+    # and only one of them is footage worth keeping.
+    import_files: FrozenSet[str] = frozenset()
+    unsourced_files: FrozenSet[str] = frozenset()
+    # The configured card path resolving to the import itself, or to something
+    # containing it. Then the comparison above is a directory against itself
+    # and its "all of it is on the card" means nothing at all.
+    card_shares_the_import: bool = False
     final_folders: Tuple[Path, ...] = ()
     expected_trips: Optional[int] = None         # None = grouping unreadable
     has_track: bool = False

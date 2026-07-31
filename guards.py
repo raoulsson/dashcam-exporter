@@ -333,26 +333,29 @@ def import_is_disposable(world) -> bool:
     Both halves are required and neither is a formality. "Produced nothing"
     means the footage has not been described, encoded or published, so no
     later step is relying on it and no copy of it exists anywhere downstream.
-    "The source still holds it" is per clip against the card in the slot, not
+    "The source still holds it" is per FILE against the card in the slot, not
     a count and not the ledger: the ledger records that a copy was made once,
     which is exactly the claim that cannot notice the card has since been
     wiped or swapped.
 
     An empty import is not disposable by this route. It is the settled case
-    sidecars_missing already lets through, and an empty set of clips would
+    sidecars_missing already lets through, and an empty set of files would
     otherwise satisfy "the source holds them all" vacuously.
     """
     if _something_was_made_from_it(world):
         return False
-    return _every_clip_is_on_the_card(world)
+    return _every_file_is_on_the_card(world)
 
 
 def _something_was_made_from_it(world) -> bool:
     return bool(world.metas or world.renders or world.final_folders)
 
 
-def _every_clip_is_on_the_card(world) -> bool:
-    return bool(world.import_stamps) and not world.unsourced_stamps
+def _every_file_is_on_the_card(world) -> bool:
+    """A card that IS the import cannot vouch for it, whatever the sets say."""
+    if world.card_shares_the_import:
+        return False
+    return bool(world.import_files) and not world.unsourced_files
 
 
 def clean_is_allowed(world) -> Verdict:
@@ -372,12 +375,15 @@ def clean_is_allowed(world) -> Verdict:
 
 
 def unsourced_lines(world) -> Tuple[str, ...]:
-    """Why a discard is refused, per clip rather than as a headcount."""
-    missing = sorted(world.unsourced_stamps)
+    """Why a discard is refused, per file rather than as a headcount."""
+    if world.card_shares_the_import:
+        return ("the configured card IS this import, so it vouches for"
+                " nothing — check the card setting in config.txt",)
+    missing = sorted(world.unsourced_files)
     if not missing:
         return ()
-    return ("%d of the %d clips in the import are not on the card: %s"
-            % (len(missing), len(world.import_stamps), ", ".join(missing[:4])),)
+    return ("%d of the %d files in the import are not on the card: %s"
+            % (len(missing), len(world.import_files), ", ".join(missing[:4])),)
 
 
 def no_sidecars_at_all(world) -> Optional[str]:

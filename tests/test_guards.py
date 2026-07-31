@@ -837,20 +837,22 @@ class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
     clips, per clip, so what is being deleted is a copy.
     """
 
-    def _import(self, mine=("A", "B"), on_card=("A", "B"), **rest):
+    def _import(self, mine=("a.mp4", "b.mp4"), on_card=("a.mp4", "b.mp4"), **rest):
         return W.World(imports=(Path("/w/import"),),
-                       import_stamps=frozenset(mine),
-                       unsourced_stamps=frozenset(mine) - frozenset(on_card),
+                       import_files=frozenset(mine),
+                       unsourced_files=frozenset(mine) - frozenset(on_card),
                        **rest)
 
     def test_a_bare_import_whose_clips_are_all_on_the_card(self):
         self.assertTrue(guards.import_is_disposable(self._import()))
         self.assertFalse(guards.clean_is_allowed(self._import()).blocked)
 
-    def test_one_clip_short_and_it_is_not_disposable(self):
-        """Per clip, because a headcount cannot tell a card holding two of the
-        three from a card holding three others."""
-        world = self._import(mine=("A", "B", "C"), on_card=("A", "B"))
+    def test_one_file_short_and_it_is_not_disposable(self):
+        """Per file, because a headcount cannot tell a card holding two of the
+        three from a card holding three others -- and because the file that is
+        short is as likely to be a rear clip or a GPS tar as a front clip."""
+        world = self._import(mine=("a.mp4", "b.mp4", "c.mp4"),
+                             on_card=("a.mp4", "b.mp4"))
         self.assertFalse(guards.import_is_disposable(world))
         self.assertTrue(guards.clean_is_allowed(world).blocked)
 
@@ -860,7 +862,7 @@ class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
         self.assertTrue(guards.clean_is_allowed(world).blocked)
 
     def test_an_empty_import_is_not_disposable_by_this_route(self):
-        """Vacuous truth is the failure mode: no clips means no clip is
+        """Vacuous truth is the failure mode: no files means no file is
         missing from the card, and "all of them are safe" would be a yes about
         nothing. sidecars_missing already settles the empty case."""
         self.assertFalse(guards.import_is_disposable(self._import(mine=())))
@@ -884,11 +886,21 @@ class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
         self.assertIsNone(guards.nothing_to_clean_up(self._import()))
         self.assertIsNotNone(guards.nothing_to_clean_up(self._import(on_card=())))
 
-    def test_the_refusal_names_the_clips(self):
-        said = guards.unsourced_lines(self._import(mine=("A", "B", "C"),
-                                                   on_card=("A",)))
-        self.assertIn("B", said[0])
-        self.assertIn("C", said[0])
+    def test_the_refusal_names_the_files(self):
+        said = guards.unsourced_lines(self._import(mine=("a.mp4", "b.mp4", "c.mp4"),
+                                                   on_card=("a.mp4",)))
+        self.assertIn("b.mp4", said[0])
+        self.assertIn("c.mp4", said[0])
+
+    def test_a_card_that_is_the_import_vouches_for_nothing(self):
+        """The sets say every file is on the card because they were read from
+        the same directory twice. Point the card setting at the workspace and
+        card_root() walks down to the import\'s own DCIM; the comparison then
+        cannot fail, and the folder it approves deleting is the only copy."""
+        world = self._import(card_shares_the_import=True)
+        self.assertFalse(guards.import_is_disposable(world))
+        self.assertTrue(guards.clean_is_allowed(world).blocked)
+        self.assertIn("card", guards.unsourced_lines(world)[0])
 
 
 if __name__ == "__main__":
