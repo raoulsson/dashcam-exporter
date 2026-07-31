@@ -1,6 +1,6 @@
 # dashcam-exporter
 
-Turn a dashcam SD card into watchable drives.
+Turn a dashcam SD card into watchable trips.
 
 A DDPAI camera writes one-minute clips, thousands of them, with the GPS track in
 a separate file and no idea where one journey ends and the next begins. This

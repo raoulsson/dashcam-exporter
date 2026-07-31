@@ -939,7 +939,7 @@ def make_scan_parser():
                         # trailing \0: clear the tail. Nothing prints during the
                         # ego-motion pass, so the last clip read would freeze on
                         # screen for minutes as if it were being processed.
-                        "%d/%d read, finding drive boundaries\0" % (state["n"], state["n"]))
+                        "%d/%d read, finding trip boundaries\0" % (state["n"], state["n"]))
             return ((state["i"] / state["n"]) if state["n"] else None,
                     "reading %d/%d" % (state["i"], state["n"]))
         m = RE_TRIP.match(line)
@@ -3116,7 +3116,7 @@ def require_ego_motion(ctx):
     print(C.red("  Ego-motion detection is not available — refusing to start."))
     print()
     print("  Trip boundaries would fall back to a GPS radius, which groups this")
-    print("  card differently: it merges parked hours into drives and invents")
+    print("  card differently: it merges parked hours into trips and invents")
     print("  trips that are not there. Previews, renders and Exclude Trip would")
     print("  all be built on the wrong grouping.")
     print()
@@ -5021,7 +5021,7 @@ def build_result_page(ctx, out_dir, gather):
            '<span><i style="background:var(--s5)"></i>over 80 km/h</span>'
            '</div>')
 
-    foot = ('<p class="foot">Each shape is that drive\'s GPS track, coloured by speed. '
+    foot = ('<p class="foot">Each shape is that trip\'s GPS track, coloured by speed. '
             'Made with dashcam-exporter.</p></div>')
 
     doc = ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
@@ -5067,7 +5067,7 @@ def step_site(ctx, gather):
 
     print()
     print(C.green("  %s" % info["path"]))
-    print("  %d drives, %s. Open it with:" % (info["trips"], human_bytes(info.get("bytes", 0))))
+    print("  %d trips, %s. Open it with:" % (info["trips"], human_bytes(info.get("bytes", 0))))
     print("    open %s" % info["path"])
     return record(ctx, NAME[BUILD], RAN, started,
                   "%d trips, %s" % (info["trips"], human_bytes(info.get("bytes", 0))))
@@ -5235,7 +5235,7 @@ def _nothing_off_this_machine_was_checked(ctx, unproven):
     return ((C.red("  Publication was NOT verified — it could not be:"),)
             + tuple(C.red("    " + line) for line in unproven)
             + (C.red("  The renders under %s are therefore the only" % tilde(ctx.out_dir)),
-               C.red("  copy of this footage that exists. Lose that disk and the drive"
+               C.red("  copy of this footage that exists. Lose that disk and the trip"
                      " is gone."),
                C.dim("  Back the renders up elsewhere first, or leave the import where"
                      " it is — keeping it costs disk, not data.")))

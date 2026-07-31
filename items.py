@@ -186,7 +186,7 @@ class ImportSim(MenuItem):
 class GenerateMeta(MenuItem):
     number = META
     NAME = "Generate Meta"
-    DESCRIPTION = "Work out where each drive begins and ends, and describe it."
+    DESCRIPTION = "Work out where each trip begins and ends, and describe it."
     OUT = _both(_e(META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD))
     IN_AUTHORED = _both_sets(META, IMPORT, EXCLUDE)
 
@@ -215,7 +215,7 @@ class GenerateMeta(MenuItem):
 class BuildPreview(MenuItem):
     number = PREVIEW
     NAME = "Build Preview"
-    DESCRIPTION = "Make one still per drive so you can see what you have."
+    DESCRIPTION = "Make one still per trip so you can see what you have."
     OUT = _both(_e(PREVIEW, META, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD))
     IN_AUTHORED = _both_sets(PREVIEW, META, EXCLUDE)
 
@@ -250,7 +250,7 @@ class ExcludeTrip(Destructive):
 
     number = EXCLUDE
     NAME = "Exclude Trip"
-    DESCRIPTION = "Select which drives to exclude from meta and render."
+    DESCRIPTION = "Select which trips to exclude from meta and render."
     DESTR = True
     WORD = "DROP"
     SCOPE = Scope.FULL          # the only-copy warning has to ask the target
@@ -272,7 +272,7 @@ class ExcludeTrip(Destructive):
 class RenderVideos(MenuItem):
     number = RENDER
     NAME = "Render Videos"
-    DESCRIPTION = "Encode the drives into watchable videos. Hours for a full card."
+    DESCRIPTION = "Encode the trips into watchable videos. Hours for a full card."
     # DEVIATION FROM THE OWNER'S TABLE: he gave item 5 an outbound edge to 7
     # under the uploader edition. Removed. Item 7 uploads the BUILT site, and reaching
     # it from Render skips the building — item 7's own inbound column says
@@ -324,7 +324,7 @@ class BuildWebsite(MenuItem):
 
     number = BUILD
     NAME = "Build Website"
-    DESCRIPTION = "Build the website from the rendered drives."
+    DESCRIPTION = "Build the website from the rendered trips."
     # DEVIATION FROM THE OWNER'S TABLE: 7 added to the outbound under the
     # publishing edition. His inbound column for item 7 says {7,6} — build the
     # site, then put it online — but no outbound set anywhere offered 7, so
@@ -426,7 +426,7 @@ class UploadWebsite(MenuItem):
         and a sidecar somewhere to describe it. The sidecar one came across
         from the folded-in deploy step — publishing is putting the trips'
         metadata online, and with no sidecar anywhere the deploy pushes an
-        index describing no drives.
+        index describing no trips.
         """
         stop = _reason(_nothing_rendered(world), guards.no_sidecars_at_all(world))
         if stop:

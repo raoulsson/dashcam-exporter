@@ -391,7 +391,7 @@ def no_sidecars_at_all(world) -> Optional[str]:
 
     Publishing is the act of putting the trips' metadata online. With no
     sidecar in the tree there is nothing to say, and a deploy would push a
-    manifest that describes no drives — a live site that comes up empty rather
+    manifest that describes no trips — a live site that comes up empty rather
     than one that refuses. An empty workspace does not settle this the way it
     settles sidecars_missing, which is exactly the difference between the two.
     """

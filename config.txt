@@ -128,7 +128,7 @@
 # back in the car while the encode runs.
 #import_dir = ${workspace}/import
 
-# Where the sidecars and the rendered drives are written. They are published
+# Where the sidecars and the rendered trips are written. They are published
 # from here, or yours to pick up, before you clean the workspace.
 #
 # Two checkouts must not share one: 8) Clean Workspace in either would erase
