@@ -6088,7 +6088,7 @@ def _help_lines(menu_items, position, args):
 
 
 def _general_help(menu_items):
-    return ("",
+    return (rule("Help", ch="="),
             C.bold("  keys"),
             "    <n>          run entry n",
             "    h<n>         what entry n is, and why it is or is not offered",
@@ -6109,8 +6109,7 @@ def _entry_help(menu_items, position, arg):
 
 def _about(menu_items, position, number):
     item = menu_items[number]
-    return ("",
-            C.bold("  %d) %s" % (number, item.name())),
+    return (rule("Help: %s" % item.name(), ch="="),
             "    " + item.description(),
             "",
             "    leads to     %s" % (_named_list(menu_items, item.outbound().edges())),
@@ -6125,13 +6124,30 @@ def _named_list(menu_items, numbers):
     return ", ".join("%d) %s" % (n, menu_items[n].name()) for n in sorted(numbers))
 
 
+def _next_steps(menu_items, verdicts, offered):
+    """What can be done from here, each in one sentence.
+
+    The menu is nine names and a number; it says what the steps ARE, not what
+    they do. Asked for status, the useful answer is the shortlist of what is
+    possible right now with a line of explanation each -- which is the thing a
+    grid of names cannot carry and a wall of every step's description would
+    bury.
+    """
+    ready = sorted(n for n in offered
+                   if not verdicts[n].blocked and not menu.is_view(menu_items[n]))
+    if not ready:
+        return ()
+    return ("", C.bold("  Next available steps:")) + tuple(
+        "     %d - %s" % (n, menu_items[n].description()) for n in ready) + ("",)
+
+
 def _where_lines(menu_items, position):
     """Where the pipeline is. On the status screen, not under every menu.
 
     Under the grid it was one more thing that looks the same every draw. Asked
     for, it is the answer to a question.
     """
-    return ("  Position     %s" % C.bold(_where(menu_items, position)),)
+    return ("  Position: %s" % C.bold(_where(menu_items, position)),)
 
 
 def _where(menu_items, position):
@@ -6271,9 +6287,9 @@ class Runner:
         world = capture_world(self.ctx, menu.Scope.LOCAL)
         verdicts = _verdicts(self.menu, world)
         offered = self.position.selectable(self.menu)
-        _print_all(_not_here_line(self.menu, offered))
-        _print_all(_where_lines(self.menu, self.position))
+        _print_all(_next_steps(self.menu, verdicts, offered))
         _print_all(_blocked_lines(self.menu, verdicts, offered))
+        _print_all(_where_lines(self.menu, self.position))
         return True
 
     def _help(self, sel):
@@ -6320,8 +6336,8 @@ class Runner:
         """
         item = self.menu[number]
         print()
-        print(C.bold("== %d) %s" % (number, item.name())))
-        print(C.dim("     " + item.description()))
+        print(rule(item.name(), ch="="))
+        print(C.dim("  " + item.description()))
         hint_reset()
         started, already = time.time(), len(self.ctx.results)
         outcome = self._execute(item)

@@ -111,8 +111,7 @@ class Progress(MenuItem):
 
     number = PROGRESS
     NAME = "Progress"
-    DESCRIPTION = ("Show what exists and what has been done to it. "
-                   "Reads only; changes nothing.")
+    DESCRIPTION = "Show what is here and what has been done to it."
     INBOUND_KIND = Anywhere
     OUT = _both(Anywhere())
     IN_AUTHORED = _both(None)
@@ -145,8 +144,7 @@ class ImportSim(MenuItem):
 
     number = IMPORT
     NAME = "Import SIM"
-    DESCRIPTION = ("Copy the SIM's DCIM tree into the workspace and verify it "
-                   "file-for-file.")
+    DESCRIPTION = "Copy the card into the workspace and verify it file-for-file."
     START = True
     INBOUND_KIND = StartNode
     OUT = _both(_e(META, CLEAN_WS, ERASE_CARD))
@@ -181,8 +179,7 @@ class ImportSim(MenuItem):
 class GenerateMeta(MenuItem):
     number = META
     NAME = "Generate Meta"
-    DESCRIPTION = ("Write each trip's sidecars: _meta.json, .gpx and .html map. "
-                   "No stills, no encoding.")
+    DESCRIPTION = "Work out where each drive begins and ends, and describe it."
     OUT = _both(_e(META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD))
     IN_AUTHORED = _both_sets(META, IMPORT, EXCLUDE)
 
@@ -211,8 +208,7 @@ class GenerateMeta(MenuItem):
 class BuildPreview(MenuItem):
     number = PREVIEW
     NAME = "Build Preview"
-    DESCRIPTION = ("A still per trip and a local contact sheet, from the sidecars. "
-                   "No encoding, nothing leaves this machine.")
+    DESCRIPTION = "Make one still per drive so you can see what you have."
     OUT = _both(_e(PREVIEW, META, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD))
     IN_AUTHORED = _both_sets(PREVIEW, META, EXCLUDE)
 
@@ -247,8 +243,7 @@ class ExcludeTrip(Destructive):
 
     number = EXCLUDE
     NAME = "Exclude Trip"
-    DESCRIPTION = ("Delete a trip's source clips so it is never rendered, "
-                   "uploaded or published.")
+    DESCRIPTION = "Select which drives to exclude from meta and render."
     DESTR = True
     WORD = "DROP"
     SCOPE = Scope.FULL          # the only-copy warning has to ask the target
@@ -270,7 +265,7 @@ class ExcludeTrip(Destructive):
 class RenderVideos(MenuItem):
     number = RENDER
     NAME = "Render Videos"
-    DESCRIPTION = "Encode the chosen trips. The slow step: hours for a full card."
+    DESCRIPTION = "Encode the drives into watchable videos. Hours for a full card."
     # DEVIATION FROM THE OWNER'S TABLE: he gave item 5 an outbound edge to 7
     # under the uploader edition. Removed. Item 7 uploads the BUILT site, and reaching
     # it from Render skips the building — item 7's own inbound column says
@@ -322,7 +317,7 @@ class BuildWebsite(MenuItem):
 
     number = BUILD
     NAME = "Build Website"
-    DESCRIPTION = ("Build what this installation publishes, from the renders.")
+    DESCRIPTION = "Build the website from the rendered drives."
     # DEVIATION FROM THE OWNER'S TABLE: 7 added to the outbound under the
     # publishing edition. His inbound column for item 7 says {7,6} — build the
     # site, then put it online — but no outbound set anywhere offered 7, so
@@ -387,7 +382,7 @@ class UploadWebsite(MenuItem):
 
     number = UPLOAD
     NAME = "Upload Website"
-    DESCRIPTION = "Put what was built online. Resumes where it left off."
+    DESCRIPTION = "Put the website online. Resumes where it left off."
     SCOPE = Scope.FULL
     # DEVIATION FROM THE OWNER'S TABLE: 6 added to the outbound under the
     # publishing edition. He wrote 7 into item 6's INBOUND column — after
@@ -467,8 +462,7 @@ class CleanWorkspace(Destructive):
 
     number = CLEAN_WS
     NAME = "Clean Workspace"
-    DESCRIPTION = ("Erase the imported footage and the renders it produced. "
-                   "Refuses unless the site says they are published.")
+    DESCRIPTION = "Erase the imported footage and its renders, once they are published."
     END = True
     DESTR = True
     WORD = "CLEAN"
@@ -516,8 +510,7 @@ class DeleteSimData(Destructive):
 
     number = ERASE_CARD
     NAME = "Delete SIM Data"
-    DESCRIPTION = ("Erase the card's clips, keeping its folders so the camera can "
-                   "record. Refuses unless every clip is accounted for.")
+    DESCRIPTION = "Erase the card, once every clip is accounted for elsewhere."
     END = True
     DESTR = True
     WORD = "ERASE"
