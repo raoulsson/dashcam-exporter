@@ -7310,7 +7310,11 @@ def main(argv=None):
     """
     # Before anything, including loading the plugin: the launch cost the
     # operator waited through is the whole of it, not the part after setup.
-    launched = time.time()
+    # And it starts before this process does -- the launcher probes a Python
+    # for opencv by importing it in a throwaway interpreter, which is a wait
+    # he sits through and time.time() here cannot see. It hands the moment
+    # over when it has one.
+    launched = _launched_at()
     _no_colour()
     try:
         ctx = Ctx()
@@ -7323,6 +7327,14 @@ def main(argv=None):
     if not acquire_single_instance_lock(ctx):
         return _lock_taken(ctx)
     return _start(ctx, launched)
+
+
+def _launched_at():
+    """When the operator started this, which is not when python started."""
+    try:
+        return min(float(os.environ["DASHCAM_LAUNCHED"]), time.time())
+    except (KeyError, ValueError):
+        return time.time()
 
 
 def _uploader_broken(error):
