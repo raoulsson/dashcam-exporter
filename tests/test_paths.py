@@ -495,7 +495,7 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
         memory, and 4, 8 and 9 are now three prompts on one path."""
         b = Bench(UPLOADER, current=PREVIEW)
         b.type("4", "2", "9", "8")
-        self.assertEqual(b.work.asked, ["DROP", "ERASE", "CLEAN"])
+        self.assertEqual(b.work.asked, ["DROP", "ERASE", "DELETE"])
 
 
 class TestIdempotence(unittest.TestCase):

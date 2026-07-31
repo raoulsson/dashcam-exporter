@@ -478,10 +478,10 @@ class CleanWorkspace(Destructive):
 
     number = CLEAN_WS
     NAME = "Clean Workspace"
-    DESCRIPTION = "Erase the imported footage and its renders, once they are published."
+    DESCRIPTION = "Delete the imported footage and its renders."
     END = True
     DESTR = True
-    WORD = "CLEAN"
+    WORD = "DELETE"
     SCOPE = Scope.FULL
     OUT = _both(_e(IMPORT, CLEAN_WS))
     IN_AUTHORED = {

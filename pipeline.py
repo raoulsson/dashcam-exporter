@@ -5218,26 +5218,17 @@ def _evidence_colour(e):
 
 
 def _clean_banner(ctx, world, target, size):
-    """The last thing on screen before the word is asked for."""
-    if guards.import_is_disposable(world):
-        return _discard_banner(world, target, size)
-    return (C.red("  Deleting %s removes %s of original footage permanently."
-                  % (target, human_bytes(size))),) + _what_survives(ctx, world)
+    """The last thing on screen before the word is asked for.
 
-
-def _discard_banner(world, target, size):
-    """A discard is still destructive and still asks for the word.
-
-    What it is not is irreversible: it deletes this machine's copy of clips
-    the card still has, and re-importing them is item 1. So the banner says
-    what is true rather than borrowing the sweep's sentence -- a red line that
-    overstates on the harmless case is a red line nobody believes on the other.
+    Nothing, for a discard. The target and the file count are three lines up
+    and have not moved, and repeating them louder before the prompt is the
+    screen insisting about a delete that takes a second copy. A sweep keeps
+    its banner: that one destroys the only copy there is.
     """
-    return (C.red("  Deleting %s removes %s from this machine."
-                  % (target, human_bytes(size))),
-            C.dim("  The footage stays on the card, and the high-water mark is"),
-            C.dim("  wound back past it, so 1) %s offers it again." % NAME[IMPORT]),
-            C.dim("  Nothing else was made from it, so nothing else goes."))
+    if guards.import_is_disposable(world):
+        return ()
+    return (C.red("  Deleting %s removes %s of original footage permanently."
+                  % (tilde(target), human_bytes(size))),) + _what_survives(ctx, world)
 
 
 def _what_survives(ctx, world):
@@ -5302,11 +5293,10 @@ def clean_workspace_plan(ctx, world):
         return _nothing(ctx, CLEAN_WS, started, "nothing at the target")
 
     size, files = tree_size(target), count_files(target)
+    print("  Target: %s" % tilde(target))
     print()
-    print(rule("Erase the Imported Footage"))
-    print("  Target: %s" % C.bold(str(target)))
-    _print_all(_what_goes_lines(world, files, size))
-    print()
+    print("  %d files (%s)" % (files, human_bytes(size)))
+    _print_all(_what_goes_lines(world))
     _print_all(_why_it_may_go(world))
     verdict = guards.clean_is_allowed(world)
     if verdict.blocked:
@@ -5321,39 +5311,33 @@ def clean_workspace_plan(ctx, world):
                      banner=_clean_banner(ctx, world, target, size))
 
 
-def _what_goes_lines(world, files, size):
-    """What the delete costs, which is not the same sentence in both cases.
+def _what_goes_lines(world):
+    """A discard says nothing more; a sweep says the one thing that matters.
 
-    Sweeping a finished cycle destroys the only copy of the raw footage. A
-    discard does not: the clips are still on the card, which is the whole
-    reason it is allowed. Saying "not recoverable" over a copy would be the
-    sort of warning that gets ignored where it is true.
+    They are not the same act. A discard deletes a second copy of clips the
+    card still holds, checked file by file, and there is nothing to warn
+    about -- the count above says it all. A sweep destroys the only copy of
+    the raw footage there will ever be, and that sentence stays however tidy
+    the screen gets.
     """
     if guards.import_is_disposable(world):
-        return ("  %d files, %s — a second copy. The card holds every one of"
-                " them." % (files, C.bold(human_bytes(size))),)
-    return ("  %d files, %s — this is the ORIGINAL footage and it is not"
-            " recoverable." % (files, C.bold(human_bytes(size))),)
+        return ()
+    return ("", C.red("  This is the ORIGINAL footage and it is not recoverable."))
 
 
 def _why_it_may_go(world):
-    """The publish gates, or the discard's own evidence -- never both.
+    """The publish gates, and only when there is publishing to gate.
 
-    Printing the two destination gates over a discard would read as a refusal
-    being overridden: they answer "no" because there is nothing to publish,
-    not because anything is wrong.
+    A discard rests on the card holding every file, which the guard has just
+    checked one by one; narrating that made four lines of reassurance in
+    front of a delete that takes a second copy. The gates stay on the sweep,
+    where the operator is being asked to act on somebody else's answer.
     """
     if guards.import_is_disposable(world):
-        return _discard_lines(world)
+        return ()
+    print()
     _print_gates(world)
     return ()
-
-
-def _discard_lines(world):
-    return (C.dim("  Nothing was made from this import: no sidecars, no renders,"),
-            C.dim("  nothing published. All %d of its files are on the card in the"
-                  % len(world.import_files)),
-            C.dim("  slot, checked one by one, by name and by size."))
 
 
 def _print_gate_detail(world):
@@ -6412,7 +6396,7 @@ class Work:
 
     def ask_word(self, word):
         print()
-        return ask("  Type %s to confirm, anything else to cancel: " % word)
+        return ask("  Type %s to confirm: " % word)
 
     def recapture(self, scope):
         """The refresh point. Called after the word and before the act.

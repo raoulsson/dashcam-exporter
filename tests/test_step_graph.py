@@ -379,7 +379,7 @@ class TestInterfaceMatchesBehaviour(GraphTest):
         memory, and items 8 and 9 are now two prompts."""
         built = M.build_menu(M.Strategy.UPLOADER, NullWork())
         words = [i.word() for i in built.values() if i.destr()]
-        self.assertEqual(sorted(words), ["CLEAN", "DROP", "ERASE"])
+        self.assertEqual(sorted(words), ["DELETE", "DROP", "ERASE"])
 
     def test_the_items_that_end_the_cycle_say_so(self):
         built = M.build_menu(M.Strategy.UPLOADER, NullWork())
