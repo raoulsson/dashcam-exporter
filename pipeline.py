@@ -1142,7 +1142,7 @@ def _state(label, state, where):
     state was, the eye has to find the one word that moved among three
     different-length paths.
     """
-    return "    %s%s(%s)" % (_padded(label, 13), _padded(state, 22), C.dim(where))
+    return "    %s%s(%s)" % (_padded(label, 13), _padded(state, 26), C.dim(where))
 
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -1177,6 +1177,72 @@ def _render_state(mp4s, size):
     return C.bold("%d mp4, %s" % (len(mp4s), human_bytes(size)))
 
 
+def _volume_rows(ctx):
+    """One row per volume in play, not one per directory and not one "disk".
+
+    Import and export normally live on the same disk, so a row per directory
+    reads as two disks with suspiciously identical numbers. But they need not:
+    the export can sit on an external drive while the workspace stays in home,
+    and then a single nameless footnote answers the wrong question. Dedup by
+    mount point and let the mount point name the row -- one line if all three
+    directories are on the same volume, three if they are on three.
+    """
+    return tuple(filter(None, map(_disk_row, _mounts_in_play(ctx))))
+
+
+def _mounts_in_play(ctx):
+    """Distinct mount points, in the order the configuration names them."""
+    seen = []
+    for path in (ctx.workspace, ctx.import_root, ctx.out_dir):
+        mount = _mount_of(path)
+        if mount not in seen:
+            seen.append(mount)
+    return seen
+
+
+def _mount_of(path):
+    """The volume `path` sits on: the first ancestor that is a mount point.
+
+    Ancestors that do not exist are simply walked past -- a directory the first
+    run has not created yet is still on a disk, and disk_usage on a missing
+    path raises rather than answering for the volume it would live on."""
+    for p in (path,) + tuple(path.parents):
+        if _is_mount(p):
+            return p
+    return Path("/")
+
+
+def _is_mount(p):
+    return p.exists() and os.path.ismount(str(p))
+
+
+def _disk_row(mount):
+    try:
+        usage = shutil.disk_usage(str(mount))
+    except OSError:
+        return None
+    return _state("Disk", _free_state(usage), _volume_path(mount))
+
+
+def _free_state(usage):
+    free = "%s free of %s" % (human_bytes(usage.free), human_bytes(usage.total))
+    # 15 GB is roughly a full card's renders; below that, say so plainly.
+    if usage.free < 15 * 1024 ** 3:
+        return C.red(free + "  — low")
+    return C.bold(free)
+
+
+def _volume_path(mount):
+    """The name the volume goes by. macOS mounts the boot disk at "/" and puts
+    a named symlink to it in /Volumes -- that name is what Finder shows and
+    what is written on the drive, so it beats a bare slash. Anything else is
+    already mounted under its own name."""
+    for entry in _safe_iterdir(Path("/Volumes")):
+        if os.path.realpath(str(entry)) == os.path.realpath(str(mount)):
+            return str(entry)
+    return str(mount)
+
+
 def _card_note(ctx):
     n = clip_count(ctx.card)
     return C.dim("%s clips" % (n if n is not None else "?"))
@@ -1202,9 +1268,13 @@ def _config_rows(ctx):
             _setting("Import Directory", tilde(ctx.import_root)),
             _setting("Export Directory", tilde(ctx.out_dir)),
             _setting("Running in", tilde(ctx.exporter)),
+            ) + _edition_rows(ctx) + (
+            # Last, and after the edition, because it is not a setting: nobody
+            # configures it here, it is whatever interpreter the launcher found.
+            # It is printed at all so a "works on mine" report says which one.
             _setting("Python", "%s (%s)" % (platform.python_version(),
-                                        tilde(Path(sys.executable)))),
-            ) + _edition_rows(ctx)
+                                            tilde(Path(sys.executable)))),
+            )
 
 
 def _setting(label, value, indent=2):
@@ -1236,6 +1306,9 @@ def print_status(ctx):
     size = sum(p.stat().st_size for p in mp4s) if mp4s else 0
     print(_state("Rendered", _render_state(mp4s, size), tilde(ctx.out_dir)))
 
+    # Where all of that has to fit. A status row like the others, because
+    # running out of disk stops the render exactly the way a missing card does.
+    _print_all(_volume_rows(ctx))
 
     # The publishing half, in the target's own words. Which rows those are, and
     # whether asking for them touches the network, is the implementation's
@@ -1248,28 +1321,6 @@ def print_status(ctx):
     # irrelevant; what the row answers is which copy of the tool is running,
     # which matters the moment there are two on the machine.
     print(rule())
-
-    # Disk goes below the rule, as a footnote rather than a status row.
-    # Printed once per directory it would read as two disks with suspiciously
-    # identical numbers — import and output are normally the same volume.
-    # Collapse when they are, and only say anything loud when the free space is
-    # actually worth worrying about next to what is waiting to render.
-    try:
-        seen = {}
-        for path in (ctx.out_dir, ctx.import_root):
-            p = path if path.exists() else path.parent
-            u = shutil.disk_usage(str(p))
-            seen.setdefault((u.total, u.free), []).append(p)
-        parts = []
-        for (total, free), paths in seen.items():
-            where = "" if len(seen) == 1 else " (%s)" % paths[0]
-            parts.append("%s free of %s%s" % (human_bytes(free), human_bytes(total), where))
-        line = "  disk: " + "   ".join(parts)
-        # 15 GB is roughly a full card's renders; below that, say so plainly.
-        low = any(free < 15 * 1024 ** 3 for (total, free) in seen)
-        print(C.red(line + "  — low") if low else C.dim(line))
-    except OSError:
-        pass
 
 
 # ---------------------------------------------------------------------------
