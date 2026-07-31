@@ -977,9 +977,10 @@ NAME_W, RATE_W, SIZE_W = 23, 10, 8
 def _import_progress(state, moved, total, rate):
     if not total:
         return None
-    note = "%s %s %s/%-*s" % (_fitted(state["name"], NAME_W), _right(rate, RATE_W),
-                              _right(human_bytes(moved), SIZE_W),
-                              SIZE_W, human_bytes(total))
+    note = "%s   %s    %s/%-*s" % (_fitted(state["name"], NAME_W),
+                                   _right(rate, RATE_W),
+                                   _right(human_bytes(moved), SIZE_W),
+                                   SIZE_W, human_bytes(total))
     # \0: no log tail after this. The tail shows the child's last raw line,
     # and for rsync that line IS where these numbers came from -- it printed
     # the rate and a percentage again, truncated, after the ones on the left.
@@ -1008,7 +1009,7 @@ def _bar_line(label, frac, elapsed, note, note_first):
     bar = Bar(label)
     if not (note_first and note):
         return bar.render(frac, elapsed)
-    return "%s %s %3d%%" % (note, bar.bracket(frac), int(frac * 100))
+    return "%s    %s %d%%" % (note, bar.bracket(frac), int(frac * 100))
 
 
 def make_scan_parser():
@@ -6846,7 +6847,7 @@ def print_summary(ctx, close=True):
     print(C.dim("  %-9s  %-37s %18s   %s"
                 % ("State", "Task", "CPU / Network Time", "Description")))
     _print_all(map(_summary_line, ctx.results))
-    print(C.dim(_total_line(ctx.results)))
+    print(C.bold(_total_line(ctx.results)))
     _print_all((rule(ch="="),) if close else ())
 
 
