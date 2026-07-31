@@ -2631,36 +2631,30 @@ def step_import(ctx):
             return record(ctx, NAME[IMPORT], SKIPPED, started,
                           "declined: import area not empty")
 
-    # Delta copy is the default. A card left in the car accumulates: this one
-    # holds 1039 front clips of which 427 were already taken in last time, and
-    # copying those again costs tens of GB and the minutes you want back to put
-    # the card away. The high-water mark survives deleting the local import,
+    # Delta, always. A card left in the car accumulates: this one holds 1039
+    # front clips of which 427 were already taken in last time, and copying
+    # those again costs tens of GB and the minutes you want back to put the
+    # card away. The high-water mark survives deleting the local import,
     # because it is read from the renders and the boundary cache, not the
     # footage.
+    #
+    # It used to print how far the mark reached and how many clips sat below
+    # it, then ask whether to take the delta or the lot. Three lines and a
+    # decision, on every import, for a question with one answer -- and the
+    # count below the mark is a fact about rounds long since rendered and
+    # swept, not about anything on this machine. What is left is the one
+    # number that matters and one y/n. Winding the mark back is what makes a
+    # clip new again, and item 8 does exactly that when it discards an import.
     after = last_imported_stamp(ctx)
     excluded_stamps(ctx)                 # refresh the cache card_split reads
-    if after:
-        n_new, n_old = card_split(ctx.card, after)
-        print()
-        print("  Already imported through %s" % C.bold(after))
-        # "already here" was wrong and read as a headcount of the workspace:
-        # these are clips at or below the mark, which is a claim about what was
-        # taken in AT SOME POINT -- a round since rendered, published and swept
-        # has none of its clips here at all. Two in the import and thirteen
-        # "already here" is what that sentence produced.
-        # Both plain. Dim said "this one matters less", which is not true of
-        # the count that decides whether a delta copy is worth taking, and the
-        # words either side already tell them apart. Amber was the alternative
-        # and it means "look at this" everywhere else in here; neither number
-        # is a problem.
-        print("  At the source: %d clips new, %d imported before" % (n_new, n_old))
-        if not n_new:
-            print(C.green("  Nothing new at the source — it is already all imported."))
-            return record(ctx, NAME[IMPORT], SATISFIED, started, "no new clips")
-        delta = confirm("  Copy only the %d new clips?" % n_new, True)
-    else:
-        delta = False
-        print(C.dim("  Nothing imported before, so this copies the whole card."))
+    n_new, n_below = card_split(ctx.card, after)
+    delta = bool(after)
+    print()
+    if not n_new:
+        print(C.green("  Nothing new at the source — it is already all imported."))
+        return record(ctx, NAME[IMPORT], SATISFIED, started, "no new clips")
+    if not confirm("  Import %d new clips?" % n_new, True):
+        return record(ctx, NAME[IMPORT], SKIPPED, started, "declined at the source")
 
     # No prompt for this. It names the folder the copy lands in, which is an
     # implementation detail of where the tool puts things — asking put a question
@@ -2672,7 +2666,7 @@ def step_import(ctx):
     # only record is a ledger the shell script cannot read. The script refuses
     # the combination outright; asking here would just be a prompt whose yes
     # ends in a failed run.
-    if delta and after:
+    if delta:                       # which is now the same as 'there is a mark'
         # The reason is not that the skipped clips are precious — they are
         # already imported, and once rendered and uploaded the card is the copy
         # that matters least. It is that --delete only ever fires after a verify,
@@ -2680,7 +2674,8 @@ def step_import(ctx):
         # by a run that finished days ago, a fact recorded in a ledger the shell
         # script cannot read. Erasing them here would be a delete on somebody
         # else's evidence.
-        print(C.dim("  Source kept. Erasing it would also remove the %d clips this run" % n_old))
+        print(C.dim("  Source kept. Erasing it would also remove the %d clips this run"
+                    % n_below))
         print(C.dim("  skipped, and this run checked nothing about those — they were"))
         print(C.dim("  verified by the earlier import, not by this one. Erase the card"))
         print(C.dim("  yourself once these have rendered and uploaded."))
