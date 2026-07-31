@@ -225,6 +225,25 @@ class WhereWeLeftOffSurvivesARestart(unittest.TestCase):
         run = drive(menu_items, position, [str(RENDER), "q"])
         self.assertEqual(P.remembered_step(run.ctx), META)
 
+    def test_nowhere_is_never_remembered(self):
+        """Because it is not a position -- it is the position not being known.
+
+        Remembered, it outranks orient() forever: an import that was started
+        and interrupted put two clips in the workspace, and the menu went on
+        offering only the start entries, so item 1 refused to import on top of
+        them while pointing at an item 8 it would not offer.
+        """
+        menu_items, position = machine(at=M.NOWHERE)
+        menu_items[RENDER].completed.return_value = False
+        run = drive(menu_items, position, [str(RENDER), "q"])
+        self.assertIsNone(P.remembered_step(run.ctx))
+
+    def test_a_nowhere_already_on_disk_is_ignored(self):
+        """The ledgers written before that fix still say -1."""
+        ctx = a_ctx()
+        P.remember_step(ctx, M.NOWHERE)
+        self.assertIsNone(P.remembered_step(ctx))
+
 
 # ---------------------------------------------------------------------------
 # Telling the plugin its input moved

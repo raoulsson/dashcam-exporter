@@ -1622,8 +1622,19 @@ def remember_step(ctx, number):
 
 
 def remembered_step(ctx):
-    """The step this workspace was left at, or None."""
+    """The step this workspace was left at, or None.
+
+    NOWHERE is not a step. It is the position saying "I could not tell", and
+    written to the ledger it stops being an admission and starts being an
+    answer: _resume trusts it, orient() never runs again, and the menu keeps
+    offering only the start entries however much has since appeared on disk.
+    That is how an interrupted first import became a dead end -- two clips in
+    the workspace, item 1 refusing to import on top of them and pointing at
+    item 8, and item 8 not on offer because the position was still nowhere.
+    """
     at = read_ledger(ctx).get("at")
+    if at == menu.NOWHERE:
+        return None
     return at if isinstance(at, int) else None
 
 
@@ -6559,8 +6570,14 @@ def _reset_quietly(plugin):
 
 
 def _remember_position(ctx, item, position):
-    """Written where it survives a clean-up, and only for real steps."""
-    if menu.is_view(item):
+    """Written where it survives a clean-up, and only for real steps.
+
+    Nor for a position that is not one: an item that did not complete leaves
+    the position where it was, and where it was on a cold start with an empty
+    workspace is NOWHERE. Writing that down turns "I could not tell" into a
+    remembered fact -- see remembered_step.
+    """
+    if menu.is_view(item) or position.current == menu.NOWHERE:
         return
     remember_step(ctx, position.current)
 
