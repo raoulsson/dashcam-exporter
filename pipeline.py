@@ -2851,17 +2851,33 @@ def _state_line(text, there):
     return C.dim("  " + text)
 
 
+def _counted(n):
+    """A folder with no DCIM/200video/front answers None, not zero -- it is a
+    directory nobody has looked in, which is a different thing from empty."""
+    if n is None:
+        return "?"
+    return "%d" % n
+
+
+def _box_line(text, done):
+    """A box for the three that are done or not done, a count for the four
+    that are quantities. "no website preview" was a number pretending not to
+    be one, and "0 trips excluded" was a zero pretending to be news."""
+    return _state_line("[%s] %s" % ("x" if done else " ", text), done)
+
+
 def _imported_line(world):
     if not world.imports:
         return _state_line("nothing imported", False)
     where = world.imports[0]
     return _state_line("%s clips imported into %s"
-                       % (clip_count(where), tilde(where)), True)
+                       % (_counted(clip_count(where)), tilde(where)), True)
 
 
 def _excluded_line(world):
-    return _state_line("%d trips excluded" % len(world.dropped_ids),
-                       bool(world.dropped_ids))
+    if not world.dropped_ids:
+        return _state_line("no trips excluded", False)
+    return _state_line("%d trips excluded" % len(world.dropped_ids), True)
 
 
 def _meta_line(world):
@@ -2879,15 +2895,12 @@ def _rendered_line(world):
 
 
 def _preview_line(world):
-    if not world.stills_current:
-        return _state_line("no website preview", False)
-    return _state_line("website preview built", True)
+    return _box_line("website preview", world.stills_current)
 
 
 def _built_line(world):
     """The local page or a gathered folder -- whichever this edition makes."""
-    built = world.local_page or bool(world.final_folders)
-    return _state_line("website built" if built else "no website build", built)
+    return _box_line("website build", world.local_page or bool(world.final_folders))
 
 
 def _uploaded_line(world):
@@ -2900,7 +2913,7 @@ def _uploaded_line(world):
     clips and no sidecar anywhere read as "website uploaded".
     """
     up = bool(world.trip_ids) and world.target.complete is menu.Evidence.YES
-    return _state_line("website uploaded" if up else "no website upload", up)
+    return _box_line("website upload", up)
 
 
 def _processed_line(ctx):
