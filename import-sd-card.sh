@@ -26,6 +26,26 @@
 
 set -euo pipefail
 
+# Read the whole script before running any of it.
+#
+# Bash reads a script LAZILY, seeking to a byte offset for each next command.
+# So editing this file while it is running does not affect a copy in memory --
+# there is no copy in memory. It resumes at the old offset in the new bytes,
+# which lands mid-line. Shortening one echo above by two characters put the
+# resume point two characters into "# --- verify before we delete anything",
+# past the "# ", and bash tried to run a command called "---". The rsync had
+# already copied 306 files; the verify never ran, and the step reported exit
+# 127 with the footage sitting there unchecked.
+#
+# One re-exec closes it: the text is read once, in full, and passed as a
+# string, so the file on disk can be rewritten mid-run without reaching the
+# process. $0 is passed through so --help and the "erase it with:" hint still
+# name this script.
+if [ -z "${DASHCAM_SCRIPT_SNAPSHOT:-}" ]; then
+    export DASHCAM_SCRIPT_SNAPSHOT=1
+    exec bash -c "$(cat "$0")" "$0" "$@"
+fi
+
 SRC="/Volumes/NO NAME"
 DEST_ROOT="${DASHCAM_IMPORT_ROOT:-$HOME/dashcam-data/import}"
 DAY="$(date +%Y-%m-%d)"
