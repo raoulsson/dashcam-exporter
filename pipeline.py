@@ -2513,6 +2513,31 @@ def record_import(ctx, card):
     return newest or None
 
 
+def _same_card(ctx, leftovers):
+    """Is everything already in the import area off the card in the slot.
+
+    The mixing warning is about TWO CARDS, and that is not what an interrupted
+    copy leaves behind: the leftovers are a prefix of this very card, and
+    importing again finishes the job. Told it would mix two cards, the
+    operator is being warned off the one action that resolves the state.
+    """
+    return all(map(lambda root: not _unsourced_files(root, ctx.card,
+                                                     _import_files(root)),
+                   leftovers))
+
+
+def _leftover_lines(ctx, leftovers):
+    if _same_card(ctx, leftovers):
+        return (C.dim("  All of it is off the card in the slot, so this looks like"),
+                C.dim("  a copy that was interrupted. Importing again finishes it;"),
+                C.dim("  only what is missing comes over."))
+    return (C.dim("  Importing now adds this card alongside that footage. Trips are"),
+            C.dim("  grouped across everything found, so the two cards would be mixed"),
+            C.dim("  and there is no record afterwards of which clip came from which."),
+            C.dim("  Clear it with %d) %s first, or finish the round it belongs to."
+                  % (CLEAN_WS, NAME[CLEAN_WS])))
+
+
 def step_import(ctx):
     """Copy the source's DCIM tree into a dated import folder (import-sd-card.sh).
 
@@ -2579,12 +2604,9 @@ def step_import(ctx):
         for src in leftovers:
             print(C.yellow("    %s  %s clips, %s"
                            % (tilde(src), clip_count(src), human_bytes(tree_size(src / "DCIM")))))
-        print(C.dim("  Importing now adds this card alongside that footage. Trips are"))
-        print(C.dim("  grouped across everything found, so the two cards would be mixed"))
-        print(C.dim("  and there is no record afterwards of which clip came from which."))
-        print(C.dim("  Clear it with %d) %s first, or finish the round it belongs to."
-                    % (CLEAN_WS, NAME[CLEAN_WS])))
-        if not confirm("  Import anyway, on top of what is there?", False):
+        _print_all(_leftover_lines(ctx, leftovers))
+        if not confirm("  Import anyway, on top of what is there?",
+                       _same_card(ctx, leftovers)):
             return record(ctx, NAME[IMPORT], SKIPPED, started,
                           "declined: import area not empty")
         print()
@@ -2601,7 +2623,12 @@ def step_import(ctx):
         n_new, n_old = card_split(ctx.card, after)
         print()
         print("  Already imported through %s" % C.bold(after))
-        print("  At the source: %s new, %s already here" % (
+        # "already here" was wrong and read as a headcount of the workspace:
+        # these are clips at or below the mark, which is a claim about what was
+        # taken in AT SOME POINT -- a round since rendered, published and swept
+        # has none of its clips here at all. Two in the import and thirteen
+        # "already here" is what that sentence produced.
+        print("  At the source: %s new, %s imported before" % (
             C.bold("%d clips" % n_new), C.dim("%d" % n_old)))
         if not n_new:
             print(C.green("  Nothing new at the source — it is already all imported."))
