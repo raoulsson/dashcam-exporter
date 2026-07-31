@@ -1187,7 +1187,63 @@ def _volume_rows(ctx):
     mount point and let the mount point name the row -- one line if all three
     directories are on the same volume, three if they are on three.
     """
-    return tuple(filter(None, map(_disk_row, _mounts_in_play(ctx))))
+    queued = _queued_bytes(ctx)
+    return tuple(filter(None, (_disk_row(m, queued.get(m, 0))
+                               for m in _mounts_in_play(ctx))))
+
+
+def _queued_bytes(ctx):
+    """What each volume is about to be asked for, in bytes.
+
+    A fixed floor cannot answer this. 15 GB free passes a "is there room" check
+    and the run still blows up when the pending import is 15 GB and its renders
+    are another 8 -- and by default import and export are the same volume, so
+    both demands land on the same disk. So add up, per mount point, what is
+    actually waiting: the clips the next import would copy off the card, and
+    the footage already imported that still has to be encoded.
+    """
+    need = {}
+    _add_need(need, _mount_of(ctx.import_root), _pending_import_bytes(ctx))
+    _add_need(need, _mount_of(ctx.out_dir), _pending_render_bytes(ctx))
+    return need
+
+
+def _add_need(need, mount, size):
+    need[mount] = need.get(mount, 0) + size
+
+
+def _pending_import_bytes(ctx):
+    """Bytes the next import would copy: the clips on the card newer than the
+    high-water mark, both cameras. Zero once the card has been taken in, which
+    is the point -- a demand that never clears is a warning nobody reads."""
+    after = last_imported_stamp(ctx)
+    return sum(_size_of(p) for p in _card_clips(ctx.card) if _is_new_clip(p, after))
+
+
+def _card_clips(card):
+    return (card / "DCIM").rglob("*.mp4") if (card / "DCIM").is_dir() else ()
+
+
+def _is_new_clip(p, after):
+    m = STAMP_RE.search(p.name)
+    return not (m and after and m.group(1) <= after)
+
+
+def _pending_render_bytes(ctx):
+    """Room the encode still needs on the export volume.
+
+    Bounded by the source it reads, which is inferred rather than measured: a
+    trip encoded at output_height is smaller than the clips it came from in
+    every render this tool has done, and the intermediates are swept after. So
+    this over-states, deliberately -- erring high on a "will it fit" question
+    costs a warning, erring low costs a dead run at 90%.
+
+    Counted only while nothing is rendered yet. Once renders exist the encode
+    is done or half done, and there is a Rendered row above saying so.
+    """
+    if rendered_mp4s(ctx.out_dir):
+        return 0
+    return sum(tree_size(p / "DCIM") for p in import_candidates(ctx))
 
 
 def _mounts_in_play(ctx):
@@ -1216,22 +1272,24 @@ def _is_mount(p):
     return p.exists() and os.path.ismount(str(p))
 
 
-def _disk_row(mount):
+def _disk_row(mount, needed):
     try:
         usage = shutil.disk_usage(str(mount))
     except OSError:
         return None
-    return _state("Disk", _free_state(usage), _volume_path(mount))
+    return _state("Disk", _free_state(usage, needed), _volume_path(mount))
 
 
-def _free_state(usage):
+def _free_state(usage, needed):
+    # Plain, not bold: bold is for the one thing on the screen that wants the
+    # eye, and a figure that reads the same every launch is not it. Red is
+    # earned by a number that says the next step cannot finish.
     free = "%s free of %s" % (human_bytes(usage.free), human_bytes(usage.total))
-    # 15 GB is roughly a full card's renders; below that, say so plainly. Plain
-    # otherwise: bold is for the one thing on the screen that wants the eye,
-    # and a number that is fine every launch is not it.
-    if usage.free < 15 * 1024 ** 3:
-        return C.red(free + "  — low")
-    return free
+    if not needed:
+        return free
+    if usage.free < needed:
+        return C.red("%s — %s queued, will not fit" % (free, human_bytes(needed)))
+    return free + C.dim("  — %s queued" % human_bytes(needed))
 
 
 def _volume_path(mount):
