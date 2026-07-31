@@ -1336,7 +1336,6 @@ def print_configuration(ctx):
     print()
     print(rule("Configuration (read from %s)" % tilde(ctx.config_path)))
     _print_all(_config_rows(ctx))
-    print(rule())
 
 
 def _config_rows(ctx):
@@ -1393,11 +1392,6 @@ def print_status(ctx):
     # the menu loop. Nothing to say is a target with nothing to report, not an
     # empty row: a permanent "unknown" line is a question mark, not status.
     _print_all(_target_status(ctx))
-
-    # Not "Repo". Whether this checkout is a git repository is true and
-    # irrelevant; what the row answers is which copy of the tool is running,
-    # which matters the moment there are two on the machine.
-    print(rule())
 
 
 # ---------------------------------------------------------------------------
@@ -2886,7 +2880,7 @@ def _fact(value, label, there):
     kind of thing: a count where counting means something, a box where the
     answer is only yes or no.
     """
-    return _state_line("%s%s" % (_padded(value, 12), label), there)
+    return _state_line("%4s   %s" % (value, label), there)
 
 
 def _box(done):
@@ -2895,28 +2889,26 @@ def _box(done):
 
 def _imported_line(world):
     if not world.imports:
-        return _fact("no clips", "imported", False)
-    return _fact("%s clips" % _clip_total(clip_count(world.imports[0])),
-                 "imported", True)
+        return _fact("0", "clips imported", False)
+    return _fact(_clip_total(clip_count(world.imports[0])),
+                 "clips imported", True)
 
 
 def _excluded_line(world):
-    if not world.dropped_ids:
-        return _fact("no trips", "excluded", False)
-    return _fact("%d trips" % len(world.dropped_ids), "excluded", True)
+    return _fact("%d" % len(world.dropped_ids), "trips excluded",
+                 bool(world.dropped_ids))
 
 
 def _meta_line(world):
-    if not world.metas:
-        return _fact("no trips", "described", False)
-    return _fact("%d trips" % len(world.metas), "described", True)
+    return _fact("%d" % len(world.metas), "trips described",
+                 bool(world.metas))
 
 
 def _rendered_line(world):
     if not world.renders:
-        return _fact("no videos", "rendered", False)
+        return _fact("0", "videos rendered", False)
     size = human_bytes(sum(r.size for r in world.renders))
-    return _fact("%d videos" % len(world.renders), "rendered, %s" % size, True)
+    return _fact("%d" % len(world.renders), "videos rendered, %s" % size, True)
 
 
 def _preview_line(world):
