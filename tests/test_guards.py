@@ -80,6 +80,10 @@ class Workspace:
         self.ctx.cfg = {}
         self.ctx.out_dir = self.root / "out"
         self.ctx.final_root = self.root
+        # Its own, never the real one under $HOME: a clean-up test MOVES
+        # receipts there, and the next test would read them as evidence
+        # about a real card.
+        self.ctx.archive_dir = self.root / "archive"
         self.ctx.render_root = self.root / "import"
         self.ctx.import_root = self.root / "import"
         self.ctx.card = self.root / "card"
@@ -257,8 +261,16 @@ class TestWorkingAreaIsExpendable(GuardTest):
 # ---------------------------------------------------------------------------
 
 class TestPurgeKeepsState(GuardTest):
+    """RESTATED. Two of these asserted the receipts stay where they were.
 
-    def test_keeps_meta_ledger_logs_and_empties_the_rest(self):
+    They move now, to the archive outside every working area, and the sweep
+    then takes everything. Sparing them in place left the output tree holding
+    files that read as trips waiting to be rendered when what they record is
+    that the work is done — and the state they carry is unchanged, so what is
+    pinned here is where it went, not whether it survived.
+    """
+
+    def test_moves_the_receipts_out_and_keeps_ledger_and_logs(self):
         d = self.w.render("trip_A", size=4096)
         (d / "trip_A.gpx").write_text("gpx")
         (d / "trip_A.html").write_text("html")
@@ -272,17 +284,21 @@ class TestPurgeKeepsState(GuardTest):
 
         self.assertTrue((self.w.ctx.out_dir / P.LEDGER_FILE).is_file(), "ledger must survive")
         self.assertTrue((self.w.ctx.out_dir / "logs" / "run.log").is_file(), "logs must survive")
-        self.assertTrue((d / "trip_A_meta.json").is_file(), "metadata must survive")
+        self.assertFalse((d / "trip_A_meta.json").exists(), "the receipt must not stay here")
+        self.assertEqual(P.archived_trips(self.w.ctx), 1, "the receipt must be archived")
         self.assertFalse((d / "trip_A_h1080.mp4").exists(), "the render must go")
         self.assertFalse((d / "trip_A.gpx").exists())
         self.assertFalse((self.w.ctx.out_dir / "previews").exists())
 
-    def test_keeps_meta_in_the_import_namespace_too(self):
+    def test_the_import_namespace_is_emptied_too(self):
         """The render namespace is named after the import dir, so it hits the
-        keep-branch — the branch that empties the import folder."""
+        branch that empties the import folder. Its receipt is archived like any
+        other — that branch used to need its own exemption to spare them, and
+        the exemption is gone with the reason for it."""
         d = self.w.render("trip_A", ns=self.w.ctx.render_root.name)
         P.purge_published_renders(self.w.ctx, self.w.ctx.render_root)
-        self.assertTrue((d / "trip_A_meta.json").is_file())
+        self.assertFalse((d / "trip_A_meta.json").exists())
+        self.assertEqual(P.archived_trips(self.w.ctx), 1)
         self.assertFalse((d / "trip_A_h1080.mp4").exists())
 
     def test_final_folders_are_untouched(self):

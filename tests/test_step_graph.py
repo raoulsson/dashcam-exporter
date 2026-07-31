@@ -103,6 +103,10 @@ class MockState:
         c.cfg = {}
         c.out_dir = self.root / "out"
         c.final_root = self.root
+        # Its own, never the real one under $HOME: a clean-up test MOVES
+        # receipts there, and the next test would read them as evidence
+        # about a real card.
+        c.archive_dir = self.root / "archive"
         c.render_root = self.root / "import"
         c.import_root = self.root / "import"
         c.card = self.root / "card"

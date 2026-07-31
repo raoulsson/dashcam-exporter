@@ -58,6 +58,10 @@ class Bench:
         c.cfg = {}
         c.out_dir = self.root / "out"
         c.final_root = self.root
+        # Its own, never the real one under $HOME: a clean-up test MOVES
+        # receipts there, and the next test would read them as evidence
+        # about a real card.
+        c.archive_dir = self.root / "archive"
         c.render_root = self.root / "import"
         c.import_root = self.root / "import"
         c.card = self.root / "card"
@@ -461,8 +465,11 @@ class TestPostState(SpecTest):
         self.assertTrue(front.is_dir(), "folders must survive the wipe")
         self.assertEqual(list(front.glob("*.mp4")), [])
 
-    def test_deleting_the_workspace_keeps_logs_ledger_and_meta(self):
-        """What survives is the state, not the payload."""
+    def test_deleting_the_workspace_keeps_the_state_and_moves_the_receipts(self):
+        """What survives is the state, not the payload — and the receipts now
+        survive somewhere else. RESTATED: this asserted a _meta.json was still
+        under out_dir afterwards. They are archived outside every working area,
+        so the working area is left genuinely empty and the state is intact."""
         self.b.imported().sidecars().render(size=10)
         (self.b.ctx.out_dir / "logs").mkdir(exist_ok=True)
         (self.b.ctx.out_dir / "logs" / "run.log").write_text("log")
@@ -471,7 +478,8 @@ class TestPostState(SpecTest):
         out = self.b.ctx.out_dir
         self.assertTrue((out / "logs" / "run.log").is_file())
         self.assertTrue((out / P.LEDGER_FILE).is_file())
-        self.assertTrue(any(out.rglob("*_meta.json")))
+        self.assertFalse(any(out.rglob("*_meta.json")), "no receipt stays here")
+        self.assertEqual(P.archived_trips(self.b.ctx), 1, "it is archived")
         self.assertFalse(any(out.rglob("*.mp4")))
 
 

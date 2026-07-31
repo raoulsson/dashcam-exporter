@@ -336,6 +336,10 @@ class Ctx:
         # area that gets emptied, and a finished folder is the one thing that
         # must survive that.
         self.final_root = Path(fr).expanduser() if fr else self.out_dir.parent
+        # Outside every working area, because it outlives all of them. Not
+        # configurable: it is this machine's record of what it has finished,
+        # and a second copy under a second setting would be a second answer.
+        self.archive_dir = ARCHIVE_DIR
         self.speed_colour = as_bool(self.cfg.get("speed_colour"), True)
         # Still-frame knobs. Compiled-in numbers are the fallback, config wins.
         self.still_width = self.cfg_int("still_width", PREVIEW_STILL_W)
@@ -1191,6 +1195,34 @@ def last_imported_stamp(ctx):
 
 EXCLUDED_FILE = ".excluded.json"
 
+# The receipts of finished cycles, outside the working area entirely.
+#
+# A trip's _meta.json used to survive the clean-up in place, which left the
+# output tree holding six files that looked like six trips waiting to be
+# rendered. They are not work; they are the record that the work was done, and
+# the only thing still read from them is whether a card's clips are already
+# inside a trip that was published -- the question 9) Delete SIM Data asks
+# before erasing footage that has no second copy.
+#
+# So they move out on the way past, keeping their shape under the import they
+# belonged to, and the working area is left genuinely empty. Nothing writes
+# here except the clean-up and nothing reads it except that guard and the count
+# on the status screen.
+ARCHIVE_DIR = Path.home() / ".dashcam-exporter" / "processed"
+
+
+def archive_dir(ctx):
+    """Where THIS ctx keeps its receipts. No default, on purpose.
+
+    A module constant read directly is a path into the real home directory,
+    and a test that exercises the clean-up then MOVES ITS FIXTURES THERE. That
+    happened: three fixture receipts landed in ~/.dashcam-exporter and the next
+    test read them as evidence about a real card. A missing attribute raising
+    here is a fixture that has not said where its archive is, which is loud and
+    fixable; falling back to the home directory is silent and writes to it.
+    """
+    return ctx.archive_dir
+
 # In-memory view of the workspace's excluded stamps, for the callers that have
 # no ctx (card_split's signature is (card, after)). It is a CACHE of the file,
 # not the record: excluded_stamps(ctx) refreshes it from disk, and every path
@@ -1557,6 +1589,36 @@ def _answer_covers(target, out_dir, path) -> bool:
     return _is_under(_resolved(path), _resolved(out_dir / target.namespace))
 
 
+def archive_sidecars(ctx):
+    """Move every trip's receipt out of the working area, keeping its shape.
+
+    Before the sweep, so a crash between the two leaves the receipts safe
+    rather than deleted: they are the only record that survives a cycle, and
+    the guard that refuses to erase a card reads them.
+    """
+    return tuple(filter(None, map(lambda m: _archived(ctx, m),
+                                  _safe_rglob(ctx.out_dir, "trip_*_meta.json"))))
+
+
+def _archived(ctx, meta):
+    try:
+        return _move_under_archive(ctx, meta)
+    except OSError:
+        return None                 # a receipt left behind is not worth failing over
+
+
+def _move_under_archive(ctx, meta):
+    target = archive_dir(ctx) / meta.relative_to(ctx.out_dir)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(meta), str(target))
+    return target
+
+
+def archived_trips(ctx):
+    """How many trips have been through the whole cycle on this machine."""
+    return len(_safe_rglob(archive_dir(ctx), "trip_*_meta.json"))
+
+
 def purge_published_renders(ctx, root):
     """Empty the working area. Everything goes except a short keep-list.
 
@@ -1567,23 +1629,23 @@ def purge_published_renders(ctx, root):
     that are impossible to make a decision about later.
 
     Kept: logs/ (the history of what was done), the import directory itself so
-    the next copy has somewhere to land, the ledger, and every *_meta.json. Any
-    final_* folder is unaffected because it lives beside this tree, not in it.
+    the next copy has somewhere to land, and the ledger. Any final_* folder is
+    unaffected because it lives beside this tree, not in it.
 
-    The metadata stays because it IS the state, and it is nothing: ~1.4 KB per
-    trip against gigabytes released. It is what last_imported_stamp reads to
-    answer "have I already imported this card" once the footage is gone, what
-    an index rebuild carries forward for a trip whose render was deleted after
-    publishing, and what Delete SIM Data's evidence check reads to decide whether a
-    card's clips are inside a rendered trip. Earlier this swept them away while
-    two printed messages claimed they survived — the messages were right about
-    the intent and the code was wrong.
+    The trip receipts are not kept HERE any more — archive_sidecars moves them
+    to ARCHIVE_DIR first, and this then takes everything. Sparing them in place
+    left the output tree holding six files that read as six trips waiting to be
+    rendered, when what they record is that the work is finished. They are
+    still the state and are still read: what Delete SIM Data consults to decide
+    whether a card's clips already sit inside a published trip, which is the
+    question standing between a card and an erase that has no second copy.
 
     The ledger is written BEFORE anything is removed. It is the only fact here
     that cannot be recovered from somewhere else — how far the imports have
     reached — and a crash midway must not lose it.
     """
     write_ledger(ctx, last_imported_stamp(ctx), "cleanup after publish")
+    archive_sidecars(ctx)
 
     out = ctx.out_dir
     if not out.is_dir():
@@ -1605,7 +1667,7 @@ def purge_published_renders(ctx, root):
             # footage dir holds no _meta.json, so sparing them costs nothing.
             if child.name == root.name and child.is_dir():
                 for f in sorted(child.rglob("*")):
-                    if f.is_file() and not f.name.endswith("_meta.json"):
+                    if f.is_file():
                         try:
                             freed += f.stat().st_size
                             f.unlink()
@@ -1625,7 +1687,7 @@ def purge_published_renders(ctx, root):
                 # the directories that end up empty. rmtree would take the
                 # _meta.json with everything else.
                 for f in sorted(child.rglob("*")):
-                    if f.is_file() and not f.name.endswith("_meta.json"):
+                    if f.is_file():
                         freed += f.stat().st_size
                         f.unlink()
                         n += 1
@@ -1634,12 +1696,12 @@ def purge_published_renders(ctx, root):
                         try:
                             d.rmdir()
                         except OSError:
-                            pass          # still holds metadata — that is the point
+                            pass
                 try:
                     child.rmdir()
                 except OSError:
                     pass
-            elif not child.name.endswith("_meta.json"):
+            else:
                 freed += child.stat().st_size
                 child.unlink()
                 n += 1
@@ -1915,6 +1977,10 @@ def step_progress(ctx, world):
         else:
             print("  Nothing imported yet.")
             print(C.dim("  Run %d) %s to bring footage in." % (IMPORT, NAME[IMPORT])))
+        # The one thing there is still to say after a cycle closes: an empty
+        # working area is the finished state, not a fresh install.
+        _print_all(_processed_line(ctx))
+        print_summary(ctx, close=False)
         return record(ctx, NAME[PROGRESS], RAN, started, "no trips yet")
 
     renders = {}
@@ -1932,6 +1998,7 @@ def step_progress(ctx, world):
     print()
     print("  %d trips: %d rendered" % (len(trips), n_rendered))
     _print_all(_destination_line(world.target))
+    _print_all(_processed_line(ctx))
     if excluded:
         print(C.dim("  %d clip stamps excluded on purpose." % len(excluded)))
     # What this session has done, without waiting for the exit to say it. The
@@ -1941,6 +2008,20 @@ def step_progress(ctx, world):
     return record(ctx, NAME[PROGRESS], RAN, started,
                   "%d trips, %d rendered, destination %s"
                   % (len(trips), n_rendered, world.target.complete.value))
+
+
+def _processed_line(ctx):
+    """Everything finished on this machine, as one number.
+
+    The receipts of past cycles used to sit in the output tree, where Progress
+    listed them as trips with no render — six rows that read as work waiting,
+    when what they record is work completed. They live outside the working area
+    now, so all that is left to say about them is how many there have been.
+    """
+    n = archived_trips(ctx)
+    if not n:
+        return ()
+    return (C.dim("  Processed trips since installation: %d" % n),)
 
 
 def _destination_line(target):
@@ -4375,6 +4456,10 @@ def covered_stamps(ctx, stamps):
             for d in base.glob(FINAL_PREFIX + "*"):
                 metas += list(d.rglob("trip_*_meta.json"))
     metas += list(ctx.out_dir.rglob("trip_*_meta.json"))
+    # And the receipts of cycles already finished. Without them a card whose
+    # trips were published and cleaned up last week reads as footage that
+    # exists nowhere, and the erase is refused forever.
+    metas += _safe_rglob(archive_dir(ctx), "trip_*_meta.json")
     spans = _spans_of(metas)
     return {st for st in stamps if any(a <= st <= b for a, b in spans)}
 
