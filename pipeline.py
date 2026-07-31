@@ -6753,10 +6753,16 @@ class Runner:
 
         "does not follow 7) Upload Website" described the graph to someone who
         wanted to know whether they could press the key. The answer is that
-        they cannot, and the only other useful fact is which entry comes first.
+        they cannot, and one line says it.
+
+        It used to add "6) Build Website comes first" when exactly one entry
+        led here, and stay silent when several did. So the same refusal came
+        with an explanation or without one depending on the shape of the graph
+        at that point, which reads as the tool being arbitrary. `p` lists what
+        IS available, which is the same question answered once, in one place,
+        the same way every time.
         """
         print(C.yellow("  %d) %s is not available." % (number, self.menu[number].name())))
-        _print_all(_comes_after_line(self.menu, number))
 
     def run_one(self, number):
         """One item, against a world captured for ITS scope, right now.
@@ -6945,26 +6951,6 @@ def _where(menu_items, position):
     if position.current not in menu_items:
         return "the start"
     return menu_items[position.current].name()
-
-
-def _comes_after_line(menu_items, number):
-    """Which entry to pick first, but only when there is exactly one answer.
-
-    "Clean Workspace comes first" is worth saying. Listing the five entries
-    that all lead to Render Videos is not: it is longer than the refusal, it
-    reads as a puzzle, and the operator cannot act on it any better than on
-    silence. One unambiguous next step, or nothing.
-    """
-    first = _others(menu.leads_to(menu_items, number), number)
-    if len(first) != 1:
-        return []
-    return [C.dim("     %d) %s comes first."
-                  % (first[0], menu_items[first[0]].name()))]
-
-
-def _others(numbers, number):
-    """An entry that offers itself is a re-run, not a way in."""
-    return list(filter(lambda n: n != number, numbers))
 
 
 def _crash_log_line(path):
