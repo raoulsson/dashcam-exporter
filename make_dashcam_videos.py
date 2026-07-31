@@ -134,7 +134,13 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # INPUT / OUTPUT
 # ============================================================================
 
-# The workspace: the footage to render. Expects DCIM/200video/{front,rear} and
+# The root where you want your data during import and export. Everything that
+# belongs to a SESSION rather than to the footage lives here: pid.lock, which
+# says this workspace is busy, and logs/. import_dir and output_dir default
+# inside it, and all three can be pointed at different disks.
+#workspace = ~/dashcam-data
+
+# The footage to render. Expects DCIM/200video/{front,rear} and
 # optionally DCIM/203gps inside it, or inside a <YYYY-MM-DD> folder within it.
 # It defaults to the import workspace rather than the card, because the normal
 # path is to copy the card and render from the copy — that is what lets the card
@@ -142,8 +148,10 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # render off the card directly. Formerly `root`, which is still read.
 #import_dir = ~/dashcam-data/import
 
-# Where the rendered videos and sidecars get written.
-#out = ~/dashcam-data/output
+# Where meta data like sidecars for the website and the rendered drives are
+# stored. They are uploaded from here, or ready for you to pick up, before you
+# clean the workspace. Formerly `out`, which is still read.
+#output_dir = ~/dashcam-data/output
 
 
 # ============================================================================
