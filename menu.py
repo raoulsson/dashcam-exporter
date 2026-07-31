@@ -467,7 +467,7 @@ class Destructive(MenuItem, abstract=True):
     def _confirm(self, plan: Plan) -> Outcome:
         self._work.show(plan.banner)
         if self._work.ask_word(self.WORD) != self.WORD:
-            return stopped("by the user, before it ran (the word was not typed)")
+            return stopped("Aborted by user pre-run.")
         return self._commit(plan)
 
     def _commit(self, plan: Plan) -> Outcome:

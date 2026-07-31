@@ -2703,7 +2703,7 @@ def step_import(ctx):
         if not confirm("  Import anyway, on top of what is there?",
                        _same_card(ctx, leftovers)):
             return record(ctx, NAME[IMPORT], ABORTED, started,
-                          "by the user, before it ran (import area not empty)")
+                          "Aborted by user pre-run.")
 
     # Delta, always. A card left in the car accumulates: this one holds 1039
     # front clips of which 427 were already taken in last time, and copying
@@ -2731,7 +2731,7 @@ def step_import(ctx):
     # between runs, and it is what the y is answering.
     if not confirm("  Delta import: %s?" % C.yellow("%d new clips" % n_new), True):
         return record(ctx, NAME[IMPORT], ABORTED, started,
-                      "by the user, before it ran (declined the delta)")
+                      "Aborted by user pre-run.")
 
     # No prompt for this. It names the folder the copy lands in, which is an
     # implementation detail of where the tool puts things — asking put a question
@@ -4350,7 +4350,7 @@ def step_render(ctx):
         print(C.dim("  Maps, GPX and metadata beside them are left alone; only video goes."))
         if not confirm("  Delete and re-render?", True):
             return record(ctx, NAME[RENDER], ABORTED, started,
-                          "by the user, before it ran (declined the re-render)")
+                          "Aborted by user pre-run.")
         for f in doomed:
             try:
                 f.unlink()
@@ -6943,7 +6943,7 @@ class Runner:
         print()
         print(C.yellow("  Interrupted — %s stopped." % item.name()))
         self.ctx.results.append(StepResult(item.name(), ABORTED, 0,
-                                          "by the user, during the run"))
+                                          "Aborted by user mid-run."))
         return item.aborted("interrupted")
 
 
@@ -7051,17 +7051,25 @@ def _stayed_lines(item, outcome, menu_items, position):
     """
     if item.completed():
         return []
-    return [C.dim("  Did not complete%s. Still at %s."
-                  % (_because(outcome), _where(menu_items, position)))]
+    return [C.dim("  %s Still at %s." % (_because(outcome),
+                                        _where(menu_items, position)))]
 
 
 def _because(outcome):
-    """Flat, not nested. The note now carries its own detail in brackets --
-    "by the user, before it ran (declined the delta)" -- and wrapping that in
-    a second pair produced a sentence with two closing parens in a row."""
-    if not getattr(outcome, "note", ""):
-        return ""
-    return ": " + outcome.note
+    """The note, when it is already a sentence; a sentence about it when not.
+
+    "Aborted by user pre-run." says it. Wrapping that in "Did not complete
+    (...)" was the machine narrating a fact the sentence already carried, and
+    with the note's own brackets it closed two parens in a row. A note that is
+    not a sentence -- a crash carries "TypeError: ..." -- still gets one built
+    around it, because that one is a fragment.
+    """
+    note = getattr(outcome, "note", "")
+    if not note:
+        return "Did not complete."
+    if note.endswith("."):
+        return note
+    return "Did not complete: %s." % note
 
 
 def _where(menu_items, position):
