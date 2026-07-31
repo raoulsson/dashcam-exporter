@@ -586,11 +586,17 @@ class Waiting(Bar):
     """
 
     BLOCK, STEP = "###", 0.12
+    # Nothing on screen until the work has actually taken this long. Most
+    # captures return in a hundredth of a second, and a bar that appears and
+    # vanishes on every one of them is a flicker that says "slow" about work
+    # that was not -- which is the opposite of what it is for.
+    LEAD_IN = 0.4
 
     def __init__(self, label, width=None):
         super().__init__(label, width)
         self._stop = threading.Event()
         self._thread = None
+        self._drawn = False
 
     def __enter__(self):
         if sys.stdout.isatty():
@@ -605,12 +611,15 @@ class Waiting(Bar):
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=1.0)
-            _erase_line()
+            self._drawn and _erase_line()
         return False
 
     def _run(self):
         started, i = time.time(), 0
+        if self._stop.wait(self.LEAD_IN):
+            return
         while not self._stop.wait(self.STEP):
+            self._drawn = True
             _write_line(self.render_at(i, time.time() - started))
             i += 1
 
@@ -5192,8 +5201,7 @@ def _discard_lines(world):
     return (C.dim("  Nothing was made from this import: no sidecars, no renders,"),
             C.dim("  nothing published. All %d of its files are on the card in the"
                   % len(world.import_files)),
-            C.dim("  slot, checked one by one, by name and by size."),
-            "")
+            C.dim("  slot, checked one by one, by name and by size."))
 
 
 def _print_gate_detail(world):
