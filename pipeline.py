@@ -2615,6 +2615,32 @@ def _same_card(ctx, leftovers):
                    leftovers))
 
 
+def _delta_counts(ctx, after):
+    """(already here, still to copy) among the clips this import would take.
+
+    Not card_split's (new, below the mark). What is below the mark is a fact
+    about rounds long since rendered and swept; what the operator is deciding
+    is how much of THIS card is not on this machine yet, and an interrupted
+    copy left some of it here already.
+    """
+    new = _never_imported_stamps(frozenset(card_stamps(ctx)), after,
+                                 frozenset(excluded_stamps(ctx)))
+    here = workspace_stamps(ctx, new)
+    return len(here), len(new) - len(here)
+
+
+def _delta_lines(here, todo):
+    """What the y is answering, in one line above the prompt.
+
+    Amber on the figures: they are the only thing on this screen that changes
+    between runs, and the whole decision is what they say.
+    """
+    if here:
+        return ("  %s clips already imported, %s remaining"
+                % (C.yellow("%d" % here), C.yellow("%d" % todo)), "")
+    return ("  %s clips to import" % C.yellow("%d" % todo), "")
+
+
 def _leftover_lines():
     """Only the mixing case reaches this now: footage that is NOT off the card
     in the slot, so a second card's clips would be grouped into one set of
@@ -2718,16 +2744,15 @@ def step_import(ctx):
     # number that matters and one y/n. Winding the mark back is what makes a
     # clip new again, and item 8 does exactly that when it discards an import.
     after = last_imported_stamp(ctx)
-    excluded_stamps(ctx)                 # refresh the cache card_split reads
-    n_new, n_below = card_split(ctx.card, after)
+    excluded_stamps(ctx)                 # refresh the cache the split reads
+    here, todo = _delta_counts(ctx, after)
     delta = bool(after)
     print()
-    if not n_new:
+    if not (here + todo):
         print(C.green("  Nothing new at the source — it is already all imported."))
         return record(ctx, NAME[IMPORT], SATISFIED, started, "no new clips")
-    # Amber on the whole count: it is the one thing on the screen that changes
-    # between runs, and it is what the y is answering.
-    if not confirm("  Delta import: %s?" % C.yellow("%d new clips" % n_new), True):
+    _print_all(_delta_lines(here, todo))
+    if not confirm("  Run delta import", True):
         return record(ctx, NAME[IMPORT], ABORTED, started,
                       "Aborted by user pre-run.")
 
@@ -2749,8 +2774,7 @@ def step_import(ctx):
         # by a run that finished days ago, a fact recorded in a ledger the shell
         # script cannot read. Erasing them here would be a delete on somebody
         # else's evidence.
-        print(C.dim("  Source kept. Erasing it would also remove the %d clips this run"
-                    % n_below))
+        print(C.dim("  Source kept. Erasing it would also remove the clips this run"))
         print(C.dim("  skipped, and this run checked nothing about those — they were"))
         print(C.dim("  verified by the earlier import, not by this one. Erase the card"))
         print(C.dim("  yourself once these have rendered and uploaded."))
