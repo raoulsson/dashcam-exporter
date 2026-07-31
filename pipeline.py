@@ -1399,12 +1399,12 @@ EXCLUDED_FILE = ".excluded.json"
 ARCHIVE_DIR = Path.home() / ".dashcam-exporter" / "processed"
 
 BANNER = r"""
-  ____                  _                                              _____                                 _
- |  _ \    __ _   ___  | |__     ___    __ _   _ __ ___               | ____| __  __  _ __     ___    _ __  | |_    ___   _ __
- | | | |  / _` | / __| | '_ \   / __|  / _` | | '_ ` _ \     _____    |  _|   \ \/ / | '_ \   / _ \  | '__| | __|  / _ \ | '__|
- | |_| | | (_| | \__ \ | | | | | (__  | (_| | | | | | | |   |_____|   | |___   >  <  | |_) | | (_) | | |    | |_  |  __/ | |
- |____/   \__,_| |___/ |_| |_|  \___|  \__,_| |_| |_| |_|             |_____| /_/\_\ | .__/   \___/  |_|     \__|  \___| |_|
-                                                                                     |_|
+  ____            _                                   _____                       _            
+ |  _ \  __ _ ___| |__   ___ __ _ _ __ ___           | ____|_  ___ __   ___  _ __| |_ ___ _ __ 
+ | | | |/ _` / __| '_ \ / __/ _` | '_ ` _ \   _____  |  _| \ \/ / '_ \ / _ \| '__| __/ _ \ '__|
+ | |_| | (_| \__ \ | | | (_| (_| | | | | | | |_____| | |___ >  <| |_) | (_) | |  | ||  __/ |   
+ |____/ \__,_|___/_| |_|\___\__,_|_| |_| |_|         |_____/_/\_\ .__/ \___/|_|   \__\___|_|   
+                                                                |_|
 """
 
 BANNER_WIDTH = max(len(line) for line in BANNER.splitlines())
@@ -6136,7 +6136,7 @@ def _banner_lines(ctx):
     it says what the program is called and gets out of the way.
     """
     if term_width() < BANNER_WIDTH + 2:
-        return (C.bold("  dashcam-exporter") + C.dim("   " + _chain(ctx)),)
+        return (C.bold("  Dashcam-Exporter") + C.dim("   " + _chain(ctx)),)
     return _big_banner()
 
 
