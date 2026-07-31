@@ -7,7 +7,7 @@
 #
 # WHAT THIS TOOL DOES, IN ONE PASS
 #
-#   card  ->  import_dir  ->  renders + sidecars in output_dir  ->  published
+#   card  ->  import_dir  ->  renders + sidecars in export_dir  ->  published
 #
 # The menu walks that: 1) Import SIM copies the card, 2) Generate Meta writes a
 # sidecar per trip, 5) Render Videos encodes them, 6) Build Website makes what
@@ -19,7 +19,7 @@
 #
 #   LOCAL PAGE   -- nothing configured below under PUBLISHING.
 #                   6) Build Website writes one self-contained .html into
-#                   output_dir: every still embedded, every route drawn from
+#                   export_dir: every still embedded, every route drawn from
 #                   its .gpx, opens with no network. 7) Upload Website does not
 #                   exist. This is the whole tool for most people.
 #
@@ -36,7 +36,7 @@
 # WHERE THINGS LIVE
 #
 #   <workspace>/pid.lock        this workspace is busy right now
-#   <workspace>/logs/           one log per render
+#   <workspace>/logs/           one log per render RUN, covering every trip
 #   ~/.dashcam-exporter/state/  how far the card has been imported
 #   ~/.dashcam-exporter/processed/   a receipt per finished trip
 #
@@ -47,7 +47,7 @@
 # THE SETTINGS, IN THE ORDER YOU ARE LIKELY TO WANT THEM
 #
 #   1  THE CARD              where the footage comes from
-#   2  THE DIRECTORIES       workspace, import_dir, output_dir
+#   2  THE DIRECTORIES       workspace, import_dir, export_dir
 #   3  PUBLISHING            the plugin, if you have one
 #   4  TRIP GROUPING         what counts as one drive
 #   5  OUTPUT SIZE / QUALITY encoder settings
@@ -86,7 +86,7 @@ card = /Users/raoulsson/SimCard31
 #
 #   workspace  = /tmp
 #   import_dir = /Volumes/disk11/incoming
-#   output_dir = /Volumes/disk423/renders
+#   export_dir = /Volumes/disk423/renders
 #
 
 # The root where your data lives during import and export. What belongs to a
@@ -103,7 +103,7 @@ workspace = ~/dashcam-data
 # back in the car while the encode runs.
 #
 # Also accepts the older name `root`. import_dir wins if both are set.
-import_dir = ~/dashcam-data/import
+import_dir = ${workspace}/import
 
 # Where the sidecars and the rendered drives are written. They are published
 # from here, or yours to pick up, before you clean the workspace.
@@ -112,8 +112,8 @@ import_dir = ~/dashcam-data/import
 # the other's working area. The tool writes an owner marker and refuses to
 # sweep a directory another checkout claims, but the setting is the fix.
 #
-# Also accepts the older name `out`. output_dir wins if both are set.
-#output_dir = ~/dashcam-data/output
+# Also accepts the older names `output_dir` and `out`. export_dir wins.
+#export_dir = ${workspace}/export
 
 # ============================================================================
 # 3. PUBLISHING — all optional, all unset by default

@@ -136,7 +136,7 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 
 # The root where you want your data during import and export. Everything that
 # belongs to a SESSION rather than to the footage lives here: pid.lock, which
-# says this workspace is busy, and logs/. import_dir and output_dir default
+# says this workspace is busy, and logs/. import_dir and export_dir default
 # inside it, and all three can be pointed at different disks.
 #workspace = ~/dashcam-data
 
@@ -146,12 +146,12 @@ CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 # path is to copy the card and render from the copy — that is what lets the card
 # go back in the car while the encode runs. Point it at /Volumes/NO NAME to
 # render off the card directly. Formerly `root`, which is still read.
-#import_dir = ~/dashcam-data/import
+#import_dir = ${workspace}/import
 
 # Where meta data like sidecars for the website and the rendered drives are
 # stored. They are uploaded from here, or ready for you to pick up, before you
-# clean the workspace. Formerly `out`, which is still read.
-#output_dir = ~/dashcam-data/output
+# clean the workspace. Formerly `output_dir` and `out`, both still read.
+#export_dir = ${workspace}/export
 
 
 # ============================================================================
@@ -2952,7 +2952,20 @@ def concat_clips(intermediate_paths: list[Path], out_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def load_config_file(path: Path) -> dict[str, str]:
-    """Parse a key=value config file. # introduces a comment to end of line."""
+    """Parse a key=value config file. # introduces a comment to end of line.
+
+    A value may name an earlier setting as ${that}, so the three directories
+    can be written once and derived:
+
+        workspace  = ~/dashcam-data
+        import_dir = ${workspace}/import
+
+    Only settings already read are substituted, so a reference reads top to
+    bottom like the file does and cannot chase its own tail. An unknown name is
+    left exactly as written rather than silently becoming empty -- a path with
+    ${typo} still in it fails where you can see it, and an empty one would
+    quietly point at the filesystem root.
+    """
     if not path.is_file():
         return {}
     out: dict[str, str] = {}
@@ -2961,8 +2974,13 @@ def load_config_file(path: Path) -> dict[str, str]:
         if "=" not in line:
             continue
         key, value = line.split("=", 1)
-        out[key.strip()] = value.strip()
+        out[key.strip()] = _expanded(value.strip(), out)
     return out
+
+
+def _expanded(value: str, so_far: dict[str, str]) -> str:
+    return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}",
+                  lambda m: so_far.get(m.group(1), m.group(0)), value)
 
 
 def _cfg_bool(s: str) -> bool:

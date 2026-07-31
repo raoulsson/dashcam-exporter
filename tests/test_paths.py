@@ -922,12 +922,19 @@ class TestThePaintedMenuMatchesTheRealMachine(PainterTest):
         self.assertEqual(_names_in(out, DIM, b.menu),
                          {b.menu[n].name() for n in _refused(b)})
 
-    def test_the_menu_draws_one_entry_per_item_and_no_others(self):
-        """Ten items, ten entries, in the machine's own order. A number the
-        menu draws that no item holds is a number written into the painter."""
+    def test_the_menu_draws_one_entry_per_step_and_no_others(self):
+        """Every STEP gets an entry, in the machine's own order, and a number
+        the menu draws that no item holds is a number written into the painter.
+
+        Progress is not drawn: it is a view, it changes nothing, and it is
+        reached with `s` like the other keys that only show you something. It
+        is still in the machine and still reachable -- what changed is that the
+        grid lists steps, and looking at the workspace is not one."""
         b = Bench(UPLOADER, current=RENDER)
         out = self.paint(b.menu, b.position, b.world)
-        self.assertEqual(_numbers_drawn(out), sorted(b.menu))
+        steps = sorted(n for n in b.menu if not M.is_view(b.menu[n]))
+        self.assertEqual(_numbers_drawn(out), steps)
+        self.assertNotIn(PROGRESS, _numbers_drawn(out))
 
 
 def _numbers_drawn(out):

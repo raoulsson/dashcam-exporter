@@ -202,7 +202,21 @@ def rule(title="", ch="-"):
 # ---------------------------------------------------------------------------
 
 def load_config(path):
-    """key = value, '#' starts a comment to end of line, blank lines ignored."""
+    """key = value, '#' starts a comment to end of line, blank lines ignored.
+
+    A value may name an earlier setting as ${that}:
+
+        workspace  = ~/dashcam-data
+        import_dir = ${workspace}/import
+
+    Only settings already read are substituted, so a reference reads top to
+    bottom like the file does and cannot chase its own tail. An unknown name is
+    left exactly as written -- a path with ${typo} still in it fails where you
+    can see it, where an empty one would quietly point at the filesystem root.
+
+    Same rules as make_dashcam_videos.load_config_file, deliberately: two
+    parsers that disagree about one file is two answers to every question.
+    """
     out = {}
     if not path.is_file():
         return out
@@ -211,8 +225,13 @@ def load_config(path):
         if "=" not in line:
             continue
         k, v = line.split("=", 1)
-        out[k.strip()] = v.strip()
+        out[k.strip()] = _expand_refs(v.strip(), out)
     return out
+
+
+def _expand_refs(value, so_far):
+    return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}",
+                  lambda m: so_far.get(m.group(1), m.group(0)), value)
 
 
 # Settings that name a place belonging to one person. config.txt is tracked,
@@ -297,12 +316,13 @@ class Ctx:
         self.render_root = Path(self.cfg.get("import_dir")
                                 or self.cfg.get("root")
                                 or (self.workspace / "import")).expanduser()
-        # output_dir defaults inside the declared workspace. `out` is the name
-        # it had before there was a workspace to be inside of, and is still
-        # read: a config someone wrote last month should not stop working
-        # because the key grew a clearer name.
-        self.out_dir = Path(self.cfg.get("output_dir") or self.cfg.get("out")
-                            or (self.workspace / "output")).expanduser()
+        # export_dir, because that is what the tool does and what the project
+        # is called. `output_dir` and `out` are the names it had before and are
+        # still read: a config written last month should not stop working
+        # because a key got a better name.
+        self.out_dir = Path(self.cfg.get("export_dir") or self.cfg.get("output_dir")
+                            or self.cfg.get("out")
+                            or (self.workspace / "export")).expanduser()
         # Where import-sd-card.sh drops the card. It follows config's `root`,
         # because that is what every render, scan and delete is pointed at — when
         # the two diverged (renaming `root` while the script kept its own
@@ -947,21 +967,19 @@ def _edition_rows(ctx):
 
 
 def _plugin_rows(plugin):
-    return ("  Edition      %s  %s"
-            % (C.bold("uploader"),
-               C.dim("User plugin handles build and upload of website")),
-            "  Plugin       %s" % C.bold("%s + %s"
-                                          % (type(plugin.builder).__name__,
-                                             type(plugin.uploader).__name__)),
-            "               %s" % C.dim(tilde(Path(plugin.spec.split(":")[0]))),
-            "               %s" % C.dim(plugin.uploader.describe()))
+    return (_setting("Export-Mode", "uploader: User plugin handles build and "
+                                "upload of website"),
+            _setting("Plugin", "%s, %s" % (type(plugin.builder).__name__,
+                                       type(plugin.uploader).__name__)),
+            _setting("Location", tilde(Path(plugin.spec.split(":")[0])), indent=4),
+            _setting("Description", plugin.uploader.describe(), indent=4))
 
 
 def _local_site_rows(ctx):
     """The local edition's deliverable, which is a file on this machine."""
-    return ("  Edition      %s  %s" % (C.bold("local page"),
-                                       C.dim("no website_uploader configured")),
-            "  Local site   %s" % _built_or_not(_result_page(ctx)))
+    return (_setting("Export-Mode", "local page: one self-contained .html, "
+                                "no website_uploader configured"),
+            _setting("Local site", _built_or_not(_result_page(ctx))))
 
 
 def _result_page(ctx):
@@ -1009,15 +1027,39 @@ def _card_note(ctx):
     return C.dim("%s  (%s clips)" % (tilde(ctx.card), n if n is not None else "?"))
 
 
+def print_configuration(ctx):
+    """What this install IS, printed once at launch.
+
+    The settings, not the state: which card, which three directories, which
+    interpreter, which edition, which plugin. It answers "is this thing pointed
+    where I think it is", which is asked once on starting up and never again --
+    so it is printed once and the menu never repeats it.
+    """
+    print()
+    print(rule("configuration (read from %s)" % tilde(ctx.config_path)))
+    _print_all(_config_rows(ctx))
+    print(rule())
+
+
+def _config_rows(ctx):
+    return (_setting("SIM Card", tilde(ctx.card)),
+            _setting("Workspace Directory", tilde(ctx.workspace)),
+            _setting("Import Directory", tilde(ctx.import_root)),
+            _setting("Export Directory", tilde(ctx.out_dir)),
+            _setting("Running in", tilde(ctx.exporter)),
+            _setting("Python", "%s (%s)" % (platform.python_version(),
+                                        tilde(Path(sys.executable)))),
+            ) + _edition_rows(ctx)
+
+
+def _setting(label, value, indent=2):
+    return "%s%-*s %s" % (" " * indent, 22 - indent, label, C.dim(value))
+
+
 def print_status(ctx):
     print()
     print(rule("status"))
 
-    # THE CARD, whatever `card` points at. A mounted DDPAI, a folder someone
-    # copied it into, an external disk — the operator calls all of them the
-    # card, and the tool should not make him think about which kind he has
-    # today. "Source present" was the machine's word for it, and it left him
-    # translating a generic noun back into the object in his hand.
     _print_all(_card_rows(ctx))
 
     # Import sink
@@ -1042,7 +1084,6 @@ def print_status(ctx):
         C.bold("%d mp4" % len(mp4s)) if mp4s else C.yellow("none"),
         C.dim("%s in %s" % (human_bytes(size), tilde(ctx.out_dir)))))
 
-    _print_all(_edition_rows(ctx))
 
     # The publishing half, in the target's own words. Which rows those are, and
     # whether asking for them touches the network, is the implementation's
@@ -1054,11 +1095,6 @@ def print_status(ctx):
     # Not "Repo". Whether this checkout is a git repository is true and
     # irrelevant; what the row answers is which copy of the tool is running,
     # which matters the moment there are two on the machine.
-    print("  Running in   %s" % C.dim(tilde(ctx.exporter)))
-    # Which interpreter, spelled out. Four pythons can be on one PATH and only
-    # the one with opencv groups the trips the way the renderer will.
-    print("  Python       %s  %s" % (C.dim(platform.python_version()),
-                                     C.dim(tilde(Path(sys.executable)))))
     print(rule())
 
     # Disk goes below the rule, as a footnote rather than a status row.
@@ -5813,8 +5849,9 @@ def print_menu(ctx, menu_items, position, world):
     print(rule(ch="="))
     verdicts = _verdicts(menu_items, world)
     offered = position.selectable(menu_items)
-    cell = _cell_width(menu_items)
-    _print_all(_grid(menu_items, verdicts, offered, cell,
+    shown = _in_the_grid(menu_items)
+    cell = _cell_width(shown)
+    _print_all(_grid(shown, verdicts, offered, cell,
                      _grid_columns(term_width(), cell)))
     # The reasons entries are greyed have moved to `s`. They are the same eight
     # lines under every menu draw, and a block that never changes stops being
@@ -5842,6 +5879,16 @@ def _safe_verdict(item, world):
         return menu.blocked("guard error: %s" % e)
 
 
+def _in_the_grid(menu_items):
+    """The entries the grid draws: the steps.
+
+    Progress is not one. It changes nothing, it is reached with `s` like the
+    other things that only show you something, and a number beside it invited
+    the reading that looking at the workspace is a step in working through it.
+    """
+    return {n: item for n, item in menu_items.items() if not menu.is_view(item)}
+
+
 def _grid(menu_items, verdicts, offered, cell, cols):
     ordered = list(map(menu_items.get, sorted(menu_items)))
     rows = (len(ordered) + cols - 1) // cols
@@ -5865,18 +5912,18 @@ def _info_lines():
     """
     return ("",
             C.bold("  dashcam-exporter %s" % version()),
-            _info_row("Designed by", "Raoul Marc Schmidiger"),
-            _info_row("Implemented by", "Claude"),
-            _info_row("Repository", REPO_URL),
-            _info_row("Licence", "MIT"),
+            _info_setting("Designed by", "Raoul Marc Schmidiger"),
+            _info_setting("Implemented by", "Claude"),
+            _info_setting("Repository", REPO_URL),
+            _info_setting("Licence", "MIT"),
             "",
             C.bold("  Funding"),
-            _info_row("Sponsor", SPONSORS_URL),
-            _info_row("Buy a coffee", COFFEE_URL),
+            _info_setting("Sponsor", SPONSORS_URL),
+            _info_setting("Buy a coffee", COFFEE_URL),
             "")
 
 
-def _info_row(label, value):
+def _info_setting(label, value):
     return "    %-16s %s" % (label, C.dim(value))
 
 
@@ -6059,14 +6106,15 @@ class Runner:
         return self._select(sel)
 
     def _status(self):
-        """Status, then where we are, then why each greyed entry is greyed.
+        """`s` is Progress, plus where we are and why each entry is greyed.
 
-        The graph's refusal and the position are one thought -- these are not
-        offered, and this is where we stand -- so they lead. The per-entry
-        reasons are the detail under that, and they are the ones worth
-        reading: each says what is actually missing.
+        The two answered halves of one question -- what is here, and what can
+        be done about it -- and asking them separately meant reading two
+        screens to get one answer. Progress is no longer a numbered entry
+        because it is not a step: it changes nothing, and a key that shows you
+        something is not the same kind of thing as a key that does something.
         """
-        print_status(self.ctx)
+        self.run_one(PROGRESS)
         world = capture_world(self.ctx, menu.Scope.LOCAL)
         verdicts = _verdicts(self.menu, world)
         offered = self.position.selectable(self.menu)
@@ -6544,6 +6592,7 @@ def _start(ctx, launched):
     # numbers behind it would come from the wrong grouping.
     if not require_ego_motion(ctx):
         return 3
+    print_configuration(ctx)
     print_status(ctx)
     _run_menu(ctx, launched)
     return _exit_code(ctx)
