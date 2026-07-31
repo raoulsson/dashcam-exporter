@@ -536,59 +536,113 @@ class Live:
             self.enabled = False
 
 
-@contextlib.contextmanager
-def waiting(label):
-    """A bar for a wait whose length nobody can know.
+class Bar:
+    """One line of progress, drawn in place. The shape only -- who redraws it
+    and when is the caller's business.
 
-    The launch asks the plugin where the cycle got to, and what that costs is
-    the plugin's business -- an ssh round trip here, a dict somewhere else. So
-    there is no percentage to show and no honest estimate to make: the bar
-    moves to say the tool is alive, and the elapsed seconds say how long it has
-    been. Ten seconds of nothing is the only moment this tool looks hung.
-
-    Silent when stdout is not a terminal, so a piped run or a test is unchanged.
+    Two kinds, because there are two kinds of waiting. When the size of the
+    work is known a filled bar is a promise you can plan around: how far, how
+    long, how much is left. When it is NOT known -- a call into somebody
+    else's code, a network round trip -- a percentage would be a guess dressed
+    as a measurement, so Waiting says only that the tool is alive and how long
+    it has been.
     """
-    if not sys.stdout.isatty():
-        yield
-        return
-    stop = threading.Event()
-    spinner = threading.Thread(target=_wait_bar, args=(label, stop), daemon=True)
-    spinner.start()
-    try:
-        yield
-    finally:
-        stop.set()
-        spinner.join(timeout=1.0)
-        _erase_wait_line()
+
+    FILLED, EMPTY = "#", "."
+
+    def __init__(self, label, width=None):
+        self.label = label
+        self._width = width
+
+    def width(self, room_for=60):
+        if self._width:
+            return self._width
+        return max(8, min(24, term_width() - room_for))
+
+    def render(self, fraction, elapsed):
+        """`label [####......]  42%  0:12/0:30`."""
+        width = self.width()
+        filled = int(round(width * min(fraction, 1.0)))
+        bar = self.FILLED * filled + self.EMPTY * (width - filled)
+        return "%s [%s] %3d%% %s/%s" % (self.label, bar, int(fraction * 100),
+                                        human_secs(elapsed),
+                                        human_secs(_eta(fraction, elapsed)))
 
 
-def _wait_bar(label, stop):
-    started, i = time.time(), 0
-    while not stop.wait(0.12):
-        _draw_wait(label, i, time.time() - started)
-        i += 1
+def _eta(fraction, elapsed):
+    """None below a fiftieth, where the estimate is noise wearing a number."""
+    if fraction <= 0.02:
+        return None
+    return elapsed * (1 - fraction) / fraction
 
 
-def _draw_wait(label, i, elapsed):
-    """A block sliding back and forth: motion without a claim about progress."""
-    width = max(10, min(28, term_width() - 40))
-    pos = _bounce(i, width)
-    bar = "." * pos + "#" * 3 + "." * (width - pos - 3)
-    sys.stdout.write("\r  %s [%s] %s " % (label, bar, human_secs(elapsed)))
+class Waiting(Bar):
+    """A block sliding back and forth, for work whose length nobody can know.
+
+    Used as a context manager, and it runs itself: the work it wraps is a
+    blocking call with nothing to report until it returns, so there is no
+    caller to redraw the line. Silent when stdout is not a terminal, which is
+    every test and every piped run.
+    """
+
+    BLOCK, STEP = "###", 0.12
+
+    def __init__(self, label, width=None):
+        super().__init__(label, width)
+        self._stop = threading.Event()
+        self._thread = None
+
+    def __enter__(self):
+        if sys.stdout.isatty():
+            self._start()
+        return self
+
+    def _start(self):
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def __exit__(self, *_):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=1.0)
+            _erase_line()
+        return False
+
+    def _run(self):
+        started, i = time.time(), 0
+        while not self._stop.wait(self.STEP):
+            _write_line(self.render_at(i, time.time() - started))
+            i += 1
+
+    def render_at(self, i, elapsed):
+        """`label [.........###....] 0:03`."""
+        width = self.width(room_for=40)
+        at = self._bounce(i, width)
+        bar = self.EMPTY * at + self.BLOCK + self.EMPTY * (width - at - len(self.BLOCK))
+        return "  %s [%s] %s " % (self.label, bar, human_secs(elapsed))
+
+    def _bounce(self, i, width):
+        span = max(1, width - len(self.BLOCK))
+        step = i % (2 * span)
+        if step < span:
+            return step
+        return 2 * span - step
+
+
+def _write_line(text):
+    sys.stdout.write("\r" + text)
     sys.stdout.flush()
 
 
-def _bounce(i, width):
-    span = max(1, width - 3)
-    step = i % (2 * span)
-    if step < span:
-        return step
-    return 2 * span - step
-
-
-def _erase_wait_line():
+def _erase_line():
     sys.stdout.write("\r\x1b[2K")
     sys.stdout.flush()
+
+
+def waiting(label):
+    """The indeterminate bar, as a context manager. Kept as a function because
+    that is how every call site reads: `with waiting("..."):`."""
+    return Waiting(label)
 
 
 def show_cursor():
@@ -704,14 +758,9 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
         """
         elapsed = time.time() - started
         if frac is not None:
-            # narrower bar than before — the space now goes to the log tail,
-            # which is the part that tells you it is still alive
-            width = max(8, min(24, term_width() - 60))
-            filled = int(round(width * min(frac, 1.0)))
-            bar = "#" * filled + "." * (width - filled)
-            eta = (elapsed * (1 - frac) / frac) if frac > 0.02 else None
-            head = "%s [%s] %3d%% %s/%s" % (
-                label, bar, int(frac * 100), human_secs(elapsed), human_secs(eta))
+            # The bar is deliberately narrow: the room goes to the log tail
+            # below, which is the part that says it is still alive.
+            head = Bar(label).render(frac, elapsed)
         else:
             head = "%s %s %s" % (label, SPIN[spin % len(SPIN)], human_secs(elapsed))
         if note:
