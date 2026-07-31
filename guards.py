@@ -349,4 +349,4 @@ def nothing_to_build_from(world) -> Optional[str]:
     """
     if renders_exist(world):
         return None
-    return "no renders and no gathered folder to build a page from"
+    return "no meta or renders"

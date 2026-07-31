@@ -784,7 +784,7 @@ class TestRenderVideos(unittest.TestCase):
         world in which there is genuinely nothing to render."""
         verdict = evaluate(item_for(RENDER), world(card=full_card(), metas=(TRIP,)))
         self.assertTrue(verdict.blocked)
-        self.assertIn("not a workspace", verdict.reason)
+        self.assertIn("nothing to render", verdict.reason)
 
     def test_an_import_without_sidecars_is_refused(self):
         w = world(imports=IMPORTS, metas=())
@@ -815,7 +815,7 @@ class TestBuildWebsite(unittest.TestCase):
         never made or were deleted in Finder."""
         verdict = evaluate(item_for(BUILD), imported())
         self.assertTrue(verdict.blocked)
-        self.assertIn("no renders", verdict.reason)
+        self.assertIn("no meta or renders", verdict.reason)
 
     def test_it_hands_the_work_to_the_builder_it_was_constructed_with(self):
         """The whole body is passed in, not chosen. That is the strategy
@@ -833,7 +833,7 @@ class TestBuildWebsite(unittest.TestCase):
         cannot get a page built out of nothing."""
         work = FakeWork(build_reason="the target is not reachable")
         item = menu_for(UPLOADER, work)[BUILD]
-        self.assertIn("no renders", evaluate(item, imported()).reason)
+        self.assertIn("no meta or renders", evaluate(item, imported()).reason)
         self.assertIn("not reachable",
                       evaluate(item, imported(renders=(MP4,))).reason)
 

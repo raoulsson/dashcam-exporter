@@ -72,7 +72,12 @@ def _nothing_left_to_do(world) -> Verdict:
 
 
 def _no_import(world, reason: str):
-    """`reason` when the workspace holds no import, else None."""
+    """`reason` when there is no import, else None.
+
+    The reasons say "no import" rather than "the workspace holds no import".
+    Which container is empty is the machine's framing; the operator is looking
+    at a greyed entry and wants to know what is missing.
+    """
     if world.imports:
         return None
     return reason
@@ -192,7 +197,7 @@ class GenerateMeta(MenuItem):
         nothing however many times it is run.
         """
         return _first_block(
-            _no_import(world, "the workspace holds no import — nothing to build sidecars from"),
+            _no_import(world, "no import — nothing to build meta from"),
             guards.track_missing(world))
 
     def _perform(self, world):
@@ -220,7 +225,7 @@ class BuildPreview(MenuItem):
         than failing it.
         """
         return _first_block(
-            _no_import(world, "the workspace holds no import — nothing to preview"),
+            _no_import(world, "no import — nothing to preview"),
             guards.sidecars_missing(world))
 
     def _perform(self, world):
@@ -252,7 +257,7 @@ class ExcludeTrip(Destructive):
 
     def evaluate(self, world) -> Verdict:
         return _first_block(
-            _no_import(world, "the workspace holds no import — nothing to exclude"))
+            _no_import(world, "no import — nothing to exclude"))
 
     def _plan(self, world) -> Plan:
         return self._work.exclude_plan(world)
@@ -286,7 +291,7 @@ class RenderVideos(MenuItem):
         """
         return _first_block(
             _no_import(world,
-                       "the workspace holds no import — a mounted source is not a workspace"),
+                       "nothing to render"),
             guards.sidecars_missing(world))
 
     def _perform(self, world):

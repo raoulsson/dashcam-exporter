@@ -570,9 +570,13 @@ class TestTheMenuSaysWhichProductItIs(unittest.TestCase):
     """
 
     def test_the_item_with_no_edges_names_the_strategy(self):
+        """Asked for with `s` rather than printed under every draw, along with
+        every other reason an entry is greyed."""
         b = Bench(LOCAL)
-        out = b.type()
-        self.assertIn("not available for %s" % LOCAL.value, out)
+        b.type()
+        said = "\n".join(P._why_lines(b.menu, P._verdicts(b.menu, b.world),
+                                       b.position.selectable(b.menu)))
+        self.assertIn("not available for %s" % LOCAL.value, said)
 
     def test_it_is_not_reported_as_merely_not_reached_yet(self):
         b = Bench(LOCAL)
@@ -746,6 +750,18 @@ class PainterTest(unittest.TestCase):
             P.print_menu(FakeCtx(), built, position, world or W.World())
         return out.getvalue()
 
+    def reasons(self, built, position, world=None):
+        """What `s` says about the greyed entries.
+
+        They used to print under every menu draw. Eight lines that are the same
+        on every draw stop being read, which is a problem when the one that
+        changed is among them — so they are asked for now, and this is where
+        the tests ask.
+        """
+        w = world or W.World()
+        return "\n".join(P._why_lines(built, P._verdicts(built, w),
+                                       position.selectable(built)))
+
 
 DIM, RED, BOLD = "\x1b[2m%s\x1b[0m", "\x1b[31m%s\x1b[0m", "\x1b[1m%s\x1b[0m"
 
@@ -809,7 +825,7 @@ class TestTheMenuIsTheMachine(PainterTest):
         """Verbatim, and attached to its own number. The painter has no
         wording of its own for why an item cannot run."""
         built = invented_menu()
-        out = self.paint(built, invented_position(built))
+        out = self.reasons(built, invented_position(built))
         self.assertIn("%d) %s" % (YANKEE, YAK), out)
 
     def test_the_entries_the_position_does_not_offer_are_named_together(self):
@@ -818,34 +834,46 @@ class TestTheMenuIsTheMachine(PainterTest):
         taught the eye to skip the block that also holds the actionable ones.
         """
         built = invented_menu()
-        out = self.paint(built, invented_position(built))
+        out = self.reasons(built, invented_position(built))
         self.assertIn("%d,%d) not available from here" % (ZETA, WHISKEY), out)
         self.assertNotIn("%d) not available from here" % YANKEE, out)
 
     def test_where_we_are_is_said_in_the_items_own_words(self):
+        """RESTATED: the position moved off the menu footer onto the status
+        screen. Under the grid it was one more thing identical on every draw;
+        asked for, it answers a question."""
+        built = invented_menu()
+        said = "\n".join(P._where_lines(built, invented_position(built)))
+        self.assertIn("%d) Zeta" % ZETA, said)
+
+    def test_at_the_start_it_says_so_rather_than_naming_an_item(self):
+        built = invented_menu()
+        said = "\n".join(P._where_lines(built, invented_position(built, M.NOWHERE)))
+        self.assertIn("the start", said)
+
+    def test_the_destructive_entry_is_red_from_its_own_flag(self):
+        """RESTATED: the footer used to name them as well. That was the third
+        telling of one fact — they are red here, and each asks for a typed word
+        before it does anything — so the line went and the colour stayed.
+
+        The colour still comes from the item's own destr(), which is the part
+        that matters: the painter has no list of its own."""
         built = invented_menu()
         out = self.paint(built, invented_position(built))
-        self.assertIn("at: %d) Zeta" % ZETA, out)
-
-    def test_at_the_start_the_footer_says_so_rather_than_naming_an_item(self):
-        built = invented_menu()
-        out = self.paint(built, invented_position(built, M.NOWHERE))
-        self.assertIn("at: the start", out)
-
-    def test_the_footer_lists_the_destructive_items_from_their_own_flag(self):
-        built = invented_menu()
-        out = self.paint(built, invented_position(built))
-        self.assertIn("(%d destroy footage)" % XRAY, out)
+        self.assertIn(RED % "Xray", out)
+        self.assertNotIn("destroy footage", out)
 
     def test_a_guard_that_raises_greys_its_entry_instead_of_taking_the_menu_down(self):
         """A menu that cannot be drawn is a tool that cannot be used, and the
         item whose guard fell over is the only one that loses anything."""
         built = invented_menu()
         built[YANKEE].evaluate = _explode
-        out = self.paint(built, invented_position(built))
-        self.assertIn("Yankee", out)
-        self.assertIn("guard error: the guard fell over", out)
-        self.assertIn("Xray", out)
+        position = invented_position(built)
+        out = self.paint(built, position)
+        self.assertIn("Yankee", out, "the entry is still drawn")
+        self.assertIn("Xray", out, "and so is everything after it")
+        self.assertIn("guard error: the guard fell over",
+                      self.reasons(built, position))
 
 
 def _explode(world):

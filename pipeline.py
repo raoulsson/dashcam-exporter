@@ -846,7 +846,7 @@ def _target_status(ctx):
     """
     if ctx.plugin is None:
         return ()
-    return ("  Publishes    %s" % C.dim(ctx.plugin.uploader.describe()),)
+    return ()
 
 
 def _edition_rows(ctx):
@@ -872,9 +872,10 @@ def _plugin_rows(plugin):
     return ("  Edition      %s  %s"
             % (C.bold("uploader"),
                C.dim("User plugin handles build and upload of website")),
-            "  Registered   %s" % C.bold("%s + %s"
-                                         % (type(plugin.builder).__name__,
-                                            type(plugin.uploader).__name__)),
+            "  Registered   %s  %s" % (C.bold("%s + %s"
+                                              % (type(plugin.builder).__name__,
+                                                 type(plugin.uploader).__name__)),
+                                       C.dim(plugin.uploader.describe())),
             "               %s" % C.dim(tilde(Path(plugin.spec.split(":")[0]))))
 
 
@@ -972,7 +973,10 @@ def print_status(ctx):
     # empty row: a permanent "unknown" line is a question mark, not status.
     _print_all(_target_status(ctx))
 
-    print("  Repo         %s" % C.dim(tilde(ctx.exporter)))
+    # Not "Repo". Whether this checkout is a git repository is true and
+    # irrelevant; what the row answers is which copy of the tool is running,
+    # which matters the moment there are two on the machine.
+    print("  Running in   %s" % C.dim(tilde(ctx.exporter)))
     print(rule())
 
     # Disk goes below the rule, as a footnote rather than a status row.
@@ -1209,6 +1213,11 @@ EXCLUDED_FILE = ".excluded.json"
 # here except the clean-up and nothing reads it except that guard and the count
 # on the status screen.
 ARCHIVE_DIR = Path.home() / ".dashcam-exporter" / "processed"
+
+VERSION = "1.0"
+REPO_URL = "https://github.com/raoulsson/dashcam-exporter"
+SPONSORS_URL = "https://github.com/sponsors/raoulsson"
+COFFEE_URL = "https://www.buymeacoffee.com/raoulsson"
 
 
 def archive_dir(ctx):
@@ -5373,9 +5382,13 @@ def print_menu(ctx, menu_items, position, world):
     cell = _cell_width(menu_items)
     _print_all(_grid(menu_items, verdicts, offered, cell,
                      _grid_columns(term_width(), cell)))
-    _print_all(_why_lines(menu_items, verdicts, offered))
-    print(C.dim("   %s   s = status   q = quit    (%s destroy footage)"
-                % (_where_line(menu_items, position), _destructive_list(menu_items))))
+    # The reasons entries are greyed have moved to `s`. They are the same eight
+    # lines under every menu draw, and a block that never changes stops being
+    # read -- which is a problem when the one line that DID change is in it.
+    # The destructive entries are already red, and every one of them asks for
+    # a typed word before it does anything. A line naming them under every
+    # draw was a third telling of the same fact.
+    print(C.dim("   s = status   h = help   i = info   q = quit"))
 
 
 def _verdicts(menu_items, world):
@@ -5410,11 +5423,83 @@ def _row(ordered, verdicts, offered, cell, cols, rows, r):
                              ordered[i].number in offered, cell), here))
 
 
-def _where_line(menu_items, position):
-    """Where the pipeline is, in the item's own words."""
+def _info_lines():
+    """Who made it, what it is, and where the money goes if anyone wants to.
+
+    Its own screen rather than a banner, because it is the same every launch
+    and nobody needs it twice.
+    """
+    return ("",
+            C.bold("  dashcam-exporter %s" % VERSION),
+            "    Designed by  Raoul Marc Schmidiger",
+            "    Implemented by  Claude",
+            "",
+            "    Repository   %s" % C.dim(REPO_URL),
+            "    Licence      %s" % C.dim("MIT"),
+            "",
+            C.bold("  Funding"),
+            "    %s  %s" % ("\U0001F3C5", C.dim(SPONSORS_URL)),
+            "    %s  %s" % ("\U0001FA99", C.dim(COFFEE_URL)),
+            "")
+
+
+def _help_lines(menu_items, position, args):
+    """`h` for the keys, `h <n>` for one entry, in the entry's own words."""
+    if args:
+        return _entry_help(menu_items, position, args[0])
+    return _general_help(menu_items)
+
+
+def _general_help(menu_items):
+    return ("",
+            C.bold("  keys"),
+            "    <n>          run entry n",
+            "    h <n>        what entry n is, and why it is or is not offered",
+            "    s            status, and why each greyed entry is greyed",
+            "    q            quit",
+            "",
+            C.dim("  Entries erasing footage ask for a typed word first: %s."
+                  % _destructive_list(menu_items)),
+            "")
+
+
+def _entry_help(menu_items, position, arg):
+    if not arg.isdigit() or int(arg) not in menu_items:
+        return ("", C.yellow("  No entry %s. Try h <n> with a number from the menu." % arg), "")
+    return _about(menu_items, position, int(arg))
+
+
+def _about(menu_items, position, number):
+    item = menu_items[number]
+    return ("",
+            C.bold("  %d) %s" % (number, item.name())),
+            "    " + item.description(),
+            "",
+            "    leads to     %s" % (_named_list(menu_items, item.outbound().edges())),
+            "    reached from %s" % (_named_list(menu_items, item.inbound().edges())),
+            "    erases       %s" % ("yes, and asks for a typed word" if item.destr() else "no"),
+            "")
+
+
+def _named_list(menu_items, numbers):
+    if not numbers:
+        return C.dim("anywhere (it is a view)" )
+    return ", ".join("%d) %s" % (n, menu_items[n].name()) for n in sorted(numbers))
+
+
+def _where_lines(menu_items, position):
+    """Where the pipeline is. On the status screen, not under every menu.
+
+    Under the grid it was one more thing that looks the same every draw. Asked
+    for, it is the answer to a question.
+    """
+    return ("  Position     %s" % C.bold(_where(menu_items, position)),)
+
+
+def _where(menu_items, position):
     if position.current == menu.NOWHERE:
-        return "at: the start"
-    return "at: %d) %s" % (position.current, menu_items[position.current].name())
+        return "the start"
+    return "%d) %s" % (position.current, menu_items[position.current].name())
 
 
 def _destructive_list(menu_items):
@@ -5437,13 +5522,15 @@ def print_summary(ctx, close=True):
         return
     print()
     print(rule("summary"))
+    print(C.dim("  %-9s  %-37s %18s   %s"
+                % ("", "task", "CPU / Network time", "Description")))
     _print_all(map(_summary_line, ctx.results))
     _print_all((rule(),) if close else ())
 
 
 def _summary_line(r):
-    return "  %s  %-37s %9s   %s" % (_status_tag(r.status), _numbered(r.name),
-                                     _hms(r.seconds), C.dim(r.detail))
+    return "  %s  %-37s %18s   %s" % (_status_tag(r.status), _numbered(r.name),
+                                      _hms(r.seconds), C.dim(r.detail))
 
 
 def _hms(seconds):
@@ -5515,15 +5602,34 @@ class Runner:
 
     def _not_quit(self, sel):
         if sel in ("s", "status"):
-            print_status(self.ctx)
-            return True
+            return self._status()
+        if sel.split()[0] in ("h", "help", "?"):
+            return self._help(sel)
+        if sel in ("i", "info"):
+            return self._info()
         return self._select(sel)
+
+    def _status(self):
+        print_status(self.ctx)
+        world = capture_world(self.ctx, menu.Scope.LOCAL)
+        _print_all(_why_lines(self.menu, _verdicts(self.menu, world),
+                              self.position.selectable(self.menu)))
+        _print_all(_where_lines(self.menu, self.position))
+        return True
+
+    def _help(self, sel):
+        _print_all(_help_lines(self.menu, self.position, sel.split()[1:]))
+        return True
+
+    def _info(self):
+        _print_all(_info_lines())
+        return True
 
     def _select(self, sel):
         """One number. Batch selection went with the numbers it was keyed on:
         the second item's legality depends on the first one's outcome."""
         if not self._is_item(sel):
-            print(C.red("  Pick one item, or s for status, or q to quit."))
+            print(C.red('  Unknown option "%s"' % sel))
             return True
         return self._offered(int(sel))
 
