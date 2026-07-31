@@ -6559,13 +6559,20 @@ def _where_lines(menu_items, position):
     Under the grid it was one more thing that looks the same every draw. Asked
     for, it is the answer to a question.
     """
-    return ("  Position: %s" % C.bold(_where(menu_items, position)),)
+    return ("  Last: %s" % _last_name(menu_items, position),)
 
 
-def _where(menu_items, position):
-    if position.current == menu.NOWHERE:
-        return "the start"
-    return "%d) %s" % (position.current, menu_items[position.current].name())
+def _last_name(menu_items, position):
+    """The step just taken, by name and nothing else.
+
+    It was "Position: 8) Clean Workspace", bold. The number is already beside
+    that entry two lines down in the grid, bold is for something that wants
+    the eye, and "position" described the machine rather than answering what
+    the reader wants to know -- which is what he last did.
+    """
+    if position.current not in menu_items:
+        return "nothing yet"
+    return menu_items[position.current].name()
 
 
 def _destructive_list(menu_items):
@@ -6936,9 +6943,12 @@ def _because(outcome):
 
 
 def _where(menu_items, position):
+    """Where a refusal left the pipeline, for "still at ...". Named, not
+    numbered: the sentence reads as English and the number adds nothing to
+    it."""
     if position.current not in menu_items:
         return "the start"
-    return "%d) %s" % (position.current, menu_items[position.current].name())
+    return menu_items[position.current].name()
 
 
 def _comes_after_line(menu_items, number):

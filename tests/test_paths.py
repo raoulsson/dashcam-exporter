@@ -853,17 +853,21 @@ class TestTheMenuIsTheMachine(PainterTest):
         self.assertNotIn("%d) not available from here" % YANKEE, out)
 
     def test_where_we_are_is_said_in_the_items_own_words(self):
-        """RESTATED: the position moved off the menu footer onto the progress
-        screen. Under the grid it was one more thing identical on every draw;
-        asked for, it answers a question."""
+        """RESTATED TWICE: first the position moved off the menu footer onto
+        the progress screen -- under the grid it was one more thing identical
+        on every draw. Then it stopped being "Position: 8) Clean Workspace"
+        and became "Last: Clean Workspace". The number is already beside that
+        entry in the grid, and the reader is asking what he last did, not
+        where a machine is."""
         built = invented_menu()
         said = "\n".join(P._where_lines(built, invented_position(built)))
-        self.assertIn("%d) Zeta" % ZETA, said)
+        self.assertIn("Last: Zeta", said)
+        self.assertNotIn("%d)" % ZETA, said)
 
     def test_at_the_start_it_says_so_rather_than_naming_an_item(self):
         built = invented_menu()
         said = "\n".join(P._where_lines(built, invented_position(built, M.NOWHERE)))
-        self.assertIn("the start", said)
+        self.assertIn("nothing yet", said)
 
     def test_the_destructive_entry_is_red_from_its_own_flag(self):
         """RESTATED: the footer used to name them as well. That was the third
