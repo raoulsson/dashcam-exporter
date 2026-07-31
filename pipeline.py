@@ -1455,7 +1455,13 @@ def _version_of(count):
 def _countable(count):
     if not count:
         return False
-    return count.isdigit() and len(count) >= 3
+    return _three_digits(count)
+
+
+def _three_digits(count):
+    if not count.isdigit():
+        return False
+    return len(count) >= 3
 REPO_URL = "https://github.com/raoulsson/dashcam-exporter"
 SPONSORS_URL = "https://github.com/sponsors/raoulsson"
 COFFEE_URL = "https://www.buymeacoffee.com/raoulsson"
