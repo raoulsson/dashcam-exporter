@@ -2691,7 +2691,7 @@ def step_import(ctx):
         _print_all(_leftover_lines(ctx, leftovers))
         if not confirm("  Import anyway, on top of what is there?",
                        _same_card(ctx, leftovers)):
-            return record(ctx, NAME[IMPORT], SKIPPED, started,
+            return record(ctx, NAME[IMPORT], ABORTED, started,
                           "declined: import area not empty")
 
     # Delta, always. A card left in the car accumulates: this one holds 1039
@@ -2719,7 +2719,7 @@ def step_import(ctx):
     # Amber on the whole count: it is the one thing on the screen that changes
     # between runs, and it is what the y is answering.
     if not confirm("  Delta import: %s?" % C.yellow("%d new clips" % n_new), True):
-        return record(ctx, NAME[IMPORT], SKIPPED, started, "declined at the source")
+        return record(ctx, NAME[IMPORT], ABORTED, started, "declined at the source")
 
     # No prompt for this. It names the folder the copy lands in, which is an
     # implementation detail of where the tool puts things — asking put a question
@@ -4337,7 +4337,7 @@ def step_render(ctx):
                        % (len(doomed), human_bytes(size))))
         print(C.dim("  Maps, GPX and metadata beside them are left alone; only video goes."))
         if not confirm("  Delete and re-render?", True):
-            return record(ctx, NAME[RENDER], SKIPPED, started, "declined the clean")
+            return record(ctx, NAME[RENDER], ABORTED, started, "declined the clean")
         for f in doomed:
             try:
                 f.unlink()
@@ -6284,8 +6284,14 @@ def _logged(ctx, number, run):
 
 
 def _status_of(outcome):
+    """Not completing is not failing.
+
+    An act that stops because the operator did not type the word, or answered
+    n, has done exactly what he asked. FAILED is for something going wrong,
+    and a red line beside a decision he made teaches him to read past red.
+    """
     if not outcome.completed:
-        return FAILED
+        return ABORTED
     return _did_or_settled(outcome)
 
 
@@ -6694,7 +6700,7 @@ def print_summary(ctx, close=True):
 
 
 def _summary_line(r):
-    return "  %s  %-37s %18s   %s" % (_status_tag(r.status), _numbered(r.name),
+    return "  %s  %-37s %18s   %s" % (_status_tag(r.status), r.name,
                                       _hms(r.seconds), C.dim(r.detail))
 
 
@@ -6709,23 +6715,9 @@ def _hms(seconds):
     return "%02d:%02d:%02d" % (s // 3600, (s % 3600) // 60, s % 60)
 
 
-_NUMBER_OF = {name: number for number, name in NAME.items()}
-
-
-def _numbered(name):
-    """"5) Render Videos" -- the number the operator pressed, in front.
-
-    The log reads back as the session that happened, and what he pressed is
-    the number. A name alone makes him translate every line back into a
-    keystroke to see the shape of what he did.
-    """
-    number = _NUMBER_OF.get(name)
-    if number is None:
-        return name
-    return "%d) %s" % (number, name)
-
-
-_STATUS_TAGS = {RAN: lambda: C.green("ran      "),
+# "ran" is what the machine did; "processed" is what happened to the footage,
+# which is the sentence the operator is reading the summary for.
+_STATUS_TAGS = {RAN: lambda: C.green("processed"),
                 SATISFIED: lambda: C.green("satisfied"),
                 ABORTED: lambda: C.yellow("aborted  "),
                 FAILED: lambda: C.red("FAILED   ")}
