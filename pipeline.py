@@ -1189,7 +1189,7 @@ def _render_state(mp4s, size):
     that cannot take what is queued."""
     if not mp4s:
         return C.dim("none")
-    return "%d mp4, %s" % (len(mp4s), human_bytes(size))
+    return "%d videos, %s" % (len(mp4s), human_bytes(size))
 
 
 def _volume_rows(ctx):
@@ -2862,7 +2862,11 @@ def _counted(n):
 def _box_line(text, done):
     """A box for the three that are done or not done, a count for the four
     that are quantities. "no website preview" was a number pretending not to
-    be one, and "0 trips excluded" was a zero pretending to be news."""
+    be one, and "0 trips excluded" was a zero pretending to be news.
+
+    The label is what having done it is called -- "preview built", not
+    "preview" -- so the line reads the same whether the box is ticked or not,
+    and the box is the only thing that changes."""
     return _state_line("[%s] %s" % ("x" if done else " ", text), done)
 
 
@@ -2888,19 +2892,20 @@ def _meta_line(world):
 
 def _rendered_line(world):
     if not world.renders:
-        return _state_line("no mp4 rendered", False)
-    return _state_line("%d mp4 rendered, %s"
+        return _state_line("no videos rendered", False)
+    return _state_line("%d videos rendered, %s"
                        % (len(world.renders),
                           human_bytes(sum(r.size for r in world.renders))), True)
 
 
 def _preview_line(world):
-    return _box_line("website preview", world.stills_current)
+    return _box_line("preview built", world.stills_current)
 
 
 def _built_line(world):
     """The local page or a gathered folder -- whichever this edition makes."""
-    return _box_line("website build", world.local_page or bool(world.final_folders))
+    return _box_line("website built",
+                     world.local_page or bool(world.final_folders))
 
 
 def _uploaded_line(world):
@@ -2913,7 +2918,7 @@ def _uploaded_line(world):
     clips and no sidecar anywhere read as "website uploaded".
     """
     up = bool(world.trip_ids) and world.target.complete is menu.Evidence.YES
-    return _box_line("website upload", up)
+    return _box_line("website uploaded", up)
 
 
 def _processed_line(ctx):
@@ -4310,10 +4315,10 @@ def step_render(ctx):
         bases = [g.get("out_base") for g in groups if g.get("index") in picked]
         doomed = _videos([f for b in bases if b
                           for f in Path(b).parent.glob(Path(b).name + "*")])
-        what = "the mp4s of %d trips" % len(bases)
+        what = "the videos of %d trips" % len(bases)
     else:
         doomed = _videos(ns.rglob("*")) if ns.is_dir() else []
-        what = "every mp4 under %s" % tilde(ns)
+        what = "every video under %s" % tilde(ns)
     if doomed:
         size = sum(f.stat().st_size for f in doomed if f.exists())
         print()
@@ -4355,8 +4360,9 @@ def step_render(ctx):
     new = after - before
     if rc != 0:
         return record(ctx, NAME[RENDER], FAILED, started,
-                      "exit %d (%d new mp4 before the failure)" % (rc, len(new)))
-    detail = "%d new mp4, %s" % (len(new), human_bytes(sum(p.stat().st_size for p in new)))
+                      "exit %d (%d new videos before the failure)" % (rc, len(new)))
+    detail = "%d new videos, %s" % (len(new),
+                                    human_bytes(sum(p.stat().st_size for p in new)))
     # A finished render leaves renders and sidecars, not scratch.
     after_render(ctx)
 
