@@ -2464,11 +2464,14 @@ def require_ego_motion(ctx):
         rc, why = 1, "timeout"
     except KeyboardInterrupt:
         if live:
-            sys.stdout.write("\r" + " " * len(msg) + "\r")
+            sys.stdout.write("\r\x1b[2K")
         print(C.dim("  Cancelled."))
         return False
     if live:
-        sys.stdout.write("\r" + " " * len(msg) + "\r")
+        # Erase the line rather than paint spaces over it: spaces are still a
+        # line once the next print moves past them, and this one sits between
+        # the banner and the status block where it reads as a stray blank.
+        sys.stdout.write("\r\x1b[2K")
         sys.stdout.flush()
     if rc == 0:
         return True
