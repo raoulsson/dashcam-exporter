@@ -270,20 +270,17 @@ class TestPurgeKeepsState(GuardTest):
     pinned here is where it went, not whether it survived.
     """
 
-    def test_moves_the_receipts_out_and_keeps_ledger_and_logs(self):
+    def test_moves_the_receipts_out_and_keeps_the_ledger(self):
         d = self.w.render("trip_A", size=4096)
         (d / "trip_A.gpx").write_text("gpx")
         (d / "trip_A.html").write_text("html")
         (self.w.ctx.out_dir / "previews").mkdir()
         (self.w.ctx.out_dir / "previews" / "s.jpg").write_text("jpg")
-        (self.w.ctx.out_dir / "logs").mkdir()
-        (self.w.ctx.out_dir / "logs" / "run.log").write_text("log")
         self.w.ledger("20260728000000")
 
         P.purge_published_renders(self.w.ctx, self.w.ctx.render_root)
 
         self.assertTrue((self.w.ctx.out_dir / P.LEDGER_FILE).is_file(), "ledger must survive")
-        self.assertTrue((self.w.ctx.out_dir / "logs" / "run.log").is_file(), "logs must survive")
         self.assertFalse((d / "trip_A_meta.json").exists(), "the receipt must not stay here")
         self.assertEqual(P.archived_trips(self.w.ctx), 1, "the receipt must be archived")
         self.assertFalse((d / "trip_A_h1080.mp4").exists(), "the render must go")

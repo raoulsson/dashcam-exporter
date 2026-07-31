@@ -471,12 +471,9 @@ class TestPostState(SpecTest):
         under out_dir afterwards. They are archived outside every working area,
         so the working area is left genuinely empty and the state is intact."""
         self.b.imported().sidecars().render(size=10)
-        (self.b.ctx.out_dir / "logs").mkdir(exist_ok=True)
-        (self.b.ctx.out_dir / "logs" / "run.log").write_text("log")
         (self.b.ctx.out_dir / P.LEDGER_FILE).write_text('{"through":"20260728090000"}')
         P.purge_published_renders(self.b.ctx, self.b.ctx.render_root)
         out = self.b.ctx.out_dir
-        self.assertTrue((out / "logs" / "run.log").is_file())
         self.assertTrue((out / P.LEDGER_FILE).is_file())
         self.assertFalse(any(out.rglob("*_meta.json")), "no receipt stays here")
         self.assertEqual(P.archived_trips(self.b.ctx), 1, "it is archived")

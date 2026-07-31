@@ -350,6 +350,12 @@ class Ctx:
         # configurable: it is this machine's record of what it has finished,
         # and a second copy under a second setting would be a second answer.
         self.archive_dir = ARCHIVE_DIR
+        # Beside the imports rather than inside the output tree. The output
+        # tree is the thing Clean Workspace empties, so everything in it has to
+        # earn an exemption; a run log is a record of what happened and has no
+        # business being argued about by a sweep. The import ROOT survives --
+        # only the dated folders under it are erased.
+        self.log_dir = self.import_root / "logs"
         self.speed_colour = as_bool(self.cfg.get("speed_colour"), True)
         # Still-frame knobs. Compiled-in numbers are the fallback, config wins.
         self.still_width = self.cfg_int("still_width", PREVIEW_STILL_W)
@@ -1937,8 +1943,9 @@ def purge_published_renders(ctx, root):
     that names clips already deleted. Keeping any of it leaves exactly the files
     that are impossible to make a decision about later.
 
-    Kept: logs/ (the history of what was done), the import directory itself so
-    the next copy has somewhere to land, and the ledger. Any final_* folder is
+    Kept: the import directory itself so the next copy has somewhere to land,
+    and the ledger. The run logs moved out to the import root, where a record
+    of what happened is not something a sweep has to be told to spare. Any final_* folder is
     unaffected because it lives beside this tree, not in it.
 
     The trip receipts are not kept HERE any more — archive_sidecars moves them
@@ -1962,7 +1969,7 @@ def purge_published_renders(ctx, root):
     # EXCLUDED_FILE survives for the same reason the ledger does: it is state
     # ("these clips were dropped on purpose"), unrecoverable once gone, and
     # the delta import and the clean-up both read it after the footage is deleted.
-    keep_names = {"logs", LEDGER_FILE, OWNER_FILE, EXCLUDED_FILE, root.name}
+    keep_names = {LEDGER_FILE, OWNER_FILE, EXCLUDED_FILE, root.name}
     freed = n = 0
     for child in sorted(out.iterdir()):
         if child.name in keep_names or child.name.startswith(FINAL_PREFIX):
@@ -3752,6 +3759,7 @@ def step_render(ctx):
     print(C.dim("  %s" % " ".join(cmd)))
 
     rc, _lines = run_stream(cmd, ctx.exporter, "Render", parser=make_render_parser(),
+                            env_extra={"LOG_DIR": str(ctx.log_dir)},
                             keep=lambda l: l.startswith("[Trip ") or l.strip().startswith("✓ "))
     after = set(rendered_mp4s(ctx.out_dir))
     new = after - before
@@ -6189,7 +6197,7 @@ def _log_crash(ctx, item):
 
 
 def _write_crash(ctx, item):
-    path = ctx.out_dir / "logs" / "crashes.log"
+    path = ctx.log_dir / "crashes.log"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as fh:
         fh.write("%s  %s\n%s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"),
