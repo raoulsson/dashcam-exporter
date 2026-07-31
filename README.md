@@ -520,6 +520,15 @@ the outbounds, reporting every difference rather than reconciling it.
 - **[docs/sd-card-formatting/](docs/sd-card-formatting/FORMATTING_SD_HACK.md)** — patching the MBR when the card will not mount
 - **[CLAUDE.md](CLAUDE.md)** — architecture notes
 
+## 💚 Funding
+
+- 🏅 https://github.com/sponsors/raoulsson
+- 🪙 https://www.buymeacoffee.com/raoulsson
+
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+---
+
+Designed by Raoul Marc Schmidiger. Implemented by Claude.

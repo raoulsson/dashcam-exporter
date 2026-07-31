@@ -5431,16 +5431,19 @@ def _info_lines():
     """
     return ("",
             C.bold("  dashcam-exporter %s" % VERSION),
-            "    Designed by  Raoul Marc Schmidiger",
-            "    Implemented by  Claude",
-            "",
-            "    Repository   %s" % C.dim(REPO_URL),
-            "    Licence      %s" % C.dim("MIT"),
+            _info_row("Designed by", "Raoul Marc Schmidiger"),
+            _info_row("Implemented by", "Claude"),
+            _info_row("Repository", REPO_URL),
+            _info_row("Licence", "MIT"),
             "",
             C.bold("  Funding"),
-            "    %s  %s" % ("\U0001F3C5", C.dim(SPONSORS_URL)),
-            "    %s  %s" % ("\U0001FA99", C.dim(COFFEE_URL)),
+            _info_row("Sponsor", SPONSORS_URL),
+            _info_row("Buy a coffee", COFFEE_URL),
             "")
+
+
+def _info_row(label, value):
+    return "    %-16s %s" % (label, C.dim(value))
 
 
 def _help_lines(menu_items, position, args):
