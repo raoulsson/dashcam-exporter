@@ -249,6 +249,14 @@ def _subdirs_of(level):
     return out
 
 
+def _real_file(p):
+    """A real file. A symlink is unlinked as the name it is, never followed:
+    its size is not ours to count and its target is not ours to delete."""
+    if p.is_symlink():
+        return False
+    return p.is_file()
+
+
 def _real_dir(p):
     """A real directory. Symlinks are not followed: the walk would leave the
     place it was pointed at, and a link back up its own tree would not end."""
@@ -2212,9 +2220,9 @@ def purge_published_renders(ctx, root):
             # sweep destroyed exactly the metas the docstring promises to keep,
             # for exactly the trips whose footage was just deleted. A real
             # footage dir holds no _meta.json, so sparing them costs nothing.
-            if child.name == root.name and child.is_dir():
+            if child.name == root.name and _real_dir(child):
                 for f in sorted(child.rglob("*")):
-                    if f.is_file():
+                    if _real_file(f):
                         try:
                             freed += f.stat().st_size
                             f.unlink()
@@ -2229,12 +2237,13 @@ def purge_published_renders(ctx, root):
                             pass
             continue
         try:
-            if child.is_dir():
-                # Delete file by file so the metadata can be spared, then drop
-                # the directories that end up empty. rmtree would take the
-                # _meta.json with everything else.
+            if _real_dir(child):
+                # Delete file by file, then drop the directories that end up
+                # empty. A SYMLINK is not this branch: it is unlinked below
+                # like any other name, because walking one would delete through
+                # it into a tree the tool was never pointed at.
                 for f in sorted(child.rglob("*")):
-                    if f.is_file():
+                    if _real_file(f):
                         freed += f.stat().st_size
                         f.unlink()
                         n += 1

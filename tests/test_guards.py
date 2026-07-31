@@ -305,6 +305,26 @@ class TestPurgeKeepsState(GuardTest):
         self.assertEqual(P.archived_trips(self.w.ctx), 1)
         self.assertFalse((d / "trip_A_h1080.mp4").exists())
 
+    def test_a_symlink_is_unlinked_and_never_walked(self):
+        """The tool makes no symlinks. Someone else's may be in the tree --
+        pointing the output at a folder that is really somewhere else is an
+        ordinary thing to do -- and the sweep deletes file by file, so walking
+        one would delete THROUGH it into a tree this tool was never pointed at.
+
+        The link is removed as the name it is. What it pointed at is not ours.
+        """
+        elsewhere = self.w.root / "not-ours"
+        (elsewhere / "keep").mkdir(parents=True)
+        (elsewhere / "keep" / "family.jpg").write_text("irreplaceable")
+        (self.w.ctx.out_dir / "shortcut").symlink_to(elsewhere)
+
+        P.purge_published_renders(self.w.ctx, self.w.ctx.render_root)
+
+        self.assertTrue((elsewhere / "keep" / "family.jpg").is_file(),
+                        "the sweep deleted through a symlink")
+        self.assertFalse((self.w.ctx.out_dir / "shortcut").exists(),
+                         "the link itself is a name in the working area")
+
     def test_final_folders_are_untouched(self):
         self.w.gathered("trip_A")
         P.purge_published_renders(self.w.ctx, self.w.ctx.render_root)

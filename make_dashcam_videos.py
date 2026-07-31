@@ -83,7 +83,7 @@ from pathlib import Path
 # read from a mount that may not be there. The card's own mount point is the
 # separate `card` setting, used for importing.
 DEFAULT_IMPORT_DIR = "~/dashcam-data/import"
-DEFAULT_OUT  = "~/dashcam-data/output"       # where the site's `videos` symlink points
+DEFAULT_OUT  = "~/dashcam-data/export"       # <workspace>/export
                                              # (created on first run, parents included)
 DEFAULT_FONT = "/System/Library/Fonts/Supplemental/Courier New Bold.ttf"
 FALLBACK_FONT = "/System/Library/Fonts/Menlo.ttc"
