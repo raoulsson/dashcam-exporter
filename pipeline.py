@@ -1511,6 +1511,14 @@ def _help_command(second):
     return "h"
 
 
+def _hint_lines():
+    """Said once per step, by whichever prompt comes first."""
+    if _HINTED[0]:
+        return ()
+    _HINTED[0] = True
+    return (C.dim("  (q or ctrl-c to go back)"),)
+
+
 def ask(prompt, default="", quits=True):
     """quits: a bare q answers "take me back to the menu".
 
@@ -1520,9 +1528,7 @@ def ask(prompt, default="", quits=True):
     catches per item, so the item stops and the menu comes back. Off at the menu
     itself, where q is handled as a real answer.
     """
-    if not _HINTED[0]:
-        _HINTED[0] = True
-        print(C.dim("  (q or ctrl-c to go back)"))
+    _print_all(_hint_lines())
     # Ctrl-C at a prompt has to mean the same thing as Ctrl-C during a child
     # process: abort the step and let it be recorded, not slip out at exit 0.
     try:
@@ -1536,8 +1542,59 @@ def ask(prompt, default="", quits=True):
 
 
 def confirm(prompt, default=False):
+    """y, n, or Enter for the default -- one keypress, no return.
+
+    A yes/no question carries one bit and the answer to it is one character,
+    so asking for a character and then for return as well is a keystroke that
+    says nothing. The menu has read this way for a while; the prompts inside
+    the steps had not, which made them feel like a different tool.
+
+    Anything that is not y, n or Enter is asked again rather than taken as a
+    no. These sit in front of copies and erases, and a fat-fingered r reading
+    as "no" is a silent wrong answer to a question the operator thought he had
+    answered. q and ctrl-c still abort the step, as everywhere else.
+    """
     suffix = " [Y/n] " if default else " [y/N] "
-    s = ask(prompt + suffix).lower()      # q here aborts the step, as elsewhere
+    return _yes_or_no(prompt + suffix, default)
+
+
+def _yes_or_no(prompt, default):
+    while True:
+        answer = _read_answer(prompt, default)
+        if answer is not None:
+            return answer
+
+
+def _read_answer(prompt, default):
+    """None means "that was not an answer, ask again"."""
+    if not _raw_capable():
+        return _typed_answer(prompt, default)
+    _print_all(_hint_lines())
+    ch = _one_char_at(C.bold(prompt))
+    return _from_key(ch, default)
+
+
+def _from_key(ch, default):
+    if ch in ("\x03", "\x04", "q", "Q"):
+        print()
+        raise Aborted()
+    print(_printable(ch))
+    return _meaning(ch.strip().lower(), default)
+
+
+def _meaning(key, default):
+    if not key:
+        return default                       # Enter
+    return {"y": True, "n": False}.get(key)  # None -> ask again
+
+
+def _typed_answer(prompt, default):
+    """Not a terminal: a typed line, which is every test and every piped run.
+
+    It answers on the first line rather than looping, because a pipe that is
+    out of input would spin here forever.
+    """
+    s = ask(prompt).lower()
     if not s:
         return default
     return s in ("y", "yes")

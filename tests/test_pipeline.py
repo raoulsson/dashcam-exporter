@@ -247,6 +247,42 @@ class WhereWeLeftOffSurvivesARestart(unittest.TestCase):
         self.assertIsNone(P.remembered_step(ctx))
 
 
+class AYesNoQuestionTakesOneKey(unittest.TestCase):
+    """One bit of information, one keypress. And nothing else counted as an
+    answer: these prompts sit in front of copies and erases, and a
+    fat-fingered r read as "no" is a silent wrong answer to a question the
+    operator believed he had answered."""
+
+    def _confirm(self, keys, default):
+        with mock.patch.object(P, "_raw_capable", return_value=True), \
+                mock.patch.object(P, "_one_char_at", side_effect=list(keys)):
+            with redirect_stdout(io.StringIO()):
+                return P.confirm("  Go?", default)
+
+    def test_y_and_n(self):
+        self.assertIs(self._confirm(["y"], False), True)
+        self.assertIs(self._confirm(["n"], True), False)
+
+    def test_enter_takes_the_default(self):
+        self.assertIs(self._confirm(["\r"], True), True)
+        self.assertIs(self._confirm(["\r"], False), False)
+
+    def test_anything_else_asks_again_rather_than_meaning_no(self):
+        self.assertIs(self._confirm(["r", "x", "y"], False), True)
+
+    def test_q_aborts_the_step(self):
+        with self.assertRaises(P.Aborted):
+            self._confirm(["q"], True)
+
+    def test_a_pipe_answers_on_one_line_and_does_not_loop(self):
+        """Not a terminal is every test and every piped run. It must not wait
+        for a second key that is never coming."""
+        with mock.patch.object(P, "_raw_capable", return_value=False), \
+                mock.patch.object(P, "ask", return_value="r"):
+            with redirect_stdout(io.StringIO()):
+                self.assertIs(P.confirm("  Go?", False), False)
+
+
 class DiscardingAnImportUnclaimsIt(unittest.TestCase):
     """After throwing away the local copy, the ledger must stop saying it has
     it.
