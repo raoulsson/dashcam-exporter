@@ -185,7 +185,11 @@ class C:
 
 
 def rule(title=""):
-    w = term_width()
+    # One wider than the reported width. get_terminal_size answers the number
+    # of columns, and a rule of exactly that many stops one short of the right
+    # edge on this terminal; the extra character closes the gap without
+    # wrapping, because the newline lands on the column after the last one.
+    w = term_width() + 1
     if not title:
         return "-" * w
     head = "-- %s " % title
@@ -6141,7 +6145,9 @@ def _banner_lines(ctx):
 
 
 def _big_banner():
-    return tuple(map(C.bold, BANNER.strip("\n").splitlines()))
+    """A blank line either side, so the art is a header rather than the top of
+    a wall of text."""
+    return ("",) + tuple(map(C.bold, BANNER.strip("\n").splitlines())) + ("",)
 
 
 def _edition_line(ctx):
