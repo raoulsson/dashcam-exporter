@@ -2615,11 +2615,10 @@ def _same_card(ctx, leftovers):
                    leftovers))
 
 
-def _leftover_lines(ctx, leftovers):
-    if _same_card(ctx, leftovers):
-        return (C.dim("  All of it is off the card in the slot, so this looks like"),
-                C.dim("  a copy that was interrupted. Importing again finishes it;"),
-                C.dim("  only what is missing comes over."))
+def _leftover_lines():
+    """Only the mixing case reaches this now: footage that is NOT off the card
+    in the slot, so a second card's clips would be grouped into one set of
+    trips with no record afterwards of which came from which."""
     return (C.dim("  Importing now adds this card alongside that footage. Trips are"),
             C.dim("  grouped across everything found, so the two cards would be mixed"),
             C.dim("  and there is no record afterwards of which clip came from which."),
@@ -2686,16 +2685,21 @@ def step_import(ctx):
     # stays is the warning and the gate on this item's own job: importing on
     # top mixes two cards into one grouping and nothing afterwards records
     # which clip came from which.
+    # Footage in the way, and only when it is somebody else's. Leftovers that
+    # are all off the card in the slot are an interrupted copy of THIS card,
+    # and importing again finishes it -- rsync brings over what is missing and
+    # nothing else. Asking "import on top of what is there?" about that is a
+    # question with one answer, in front of the delta prompt that asks the
+    # same thing usefully.
     leftovers = import_candidates(ctx)
-    if leftovers:
+    if leftovers and not _same_card(ctx, leftovers):
         print()
         print(C.yellow("  The import area is not empty:"))
         for src in leftovers:
             print(C.yellow("    %s  %s clips, %s"
                            % (tilde(src), clip_count(src), human_bytes(tree_size(src / "DCIM")))))
-        _print_all(_leftover_lines(ctx, leftovers))
-        if not confirm("  Import anyway, on top of what is there?",
-                       _same_card(ctx, leftovers)):
+        _print_all(_leftover_lines())
+        if not confirm("  Import anyway, on top of what is there?", False):
             return record(ctx, NAME[IMPORT], ABORTED, started,
                           "Aborted by user pre-run.")
 
