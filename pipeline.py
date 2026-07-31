@@ -1937,7 +1937,7 @@ def step_progress(ctx, world):
     # What this session has done, without waiting for the exit to say it. The
     # table above is the workspace; this is the cycle, and the two answer
     # different questions -- "what is here" and "how did it get that way".
-    print_summary(ctx)
+    print_summary(ctx, close=False)
     return record(ctx, NAME[PROGRESS], RAN, started,
                   "%d trips, %d rendered, destination %s"
                   % (len(trips), n_rendered, world.target.complete.value))
@@ -5341,13 +5341,19 @@ def _destructive_list(menu_items):
 # The runner: one selection, one item, one world per dispatch.
 # ---------------------------------------------------------------------------
 
-def print_summary(ctx):
+def print_summary(ctx, close=True):
+    """The session log. `close` draws the rule under it.
+
+    Inside Progress it does not, because the menu draws its own rule
+    immediately afterwards and two in a row read as an empty section between
+    them. On the way out there is nothing after it, so it closes itself.
+    """
     if not ctx.results:
         return
     print()
     print(rule("summary"))
     _print_all(map(_summary_line, ctx.results))
-    print(rule())
+    _print_all((rule(),) if close else ())
 
 
 def _summary_line(r):
