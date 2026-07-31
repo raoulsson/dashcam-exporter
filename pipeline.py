@@ -485,7 +485,7 @@ def _bounce(i, width):
 
 
 def _erase_wait_line():
-    sys.stdout.write("\r" + " " * max(0, term_width() - 1) + "\r")
+    sys.stdout.write("\r\x1b[2K")
     sys.stdout.flush()
 
 
@@ -6147,7 +6147,7 @@ def _banner_lines(ctx):
 def _big_banner():
     """A blank line either side, so the art is a header rather than the top of
     a wall of text."""
-    return ("",) + tuple(map(C.bold, BANNER.strip("\n").splitlines())) + ("",)
+    return ("",) + tuple(map(C.bold, BANNER.strip("\n").splitlines()))
 
 
 def _edition_line(ctx):
@@ -6274,7 +6274,6 @@ def _uploader_broken(error):
 
 
 def _start(ctx, launched):
-    print()
     _print_all(_banner_lines(ctx))
     # Checked before the status screen: there is nothing useful to show if the
     # numbers behind it would come from the wrong grouping.
