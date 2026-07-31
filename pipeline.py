@@ -790,10 +790,15 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
             # The bar is deliberately narrow: the room goes to the log tail
             # below, which is the part that says it is still alive.
             head = _bar_line(label, frac, elapsed, note, note_first)
-            note = ""                      # note_first has already used it
+            # note_first has already put it in the line; appending it again
+            # would print it twice. NOT by rebinding `note` -- this is a
+            # closure over it, and an assignment here makes every read in this
+            # function local, including the one on the line above.
+            used = note_first and bool(note)
         else:
             head = "%s %s %s" % (label, SPIN[spin % len(SPIN)], human_secs(elapsed))
-        if note:
+            used = False
+        if note and not used:
             head += "  " + note
 
         # give whatever is left of the terminal to the child's latest line.

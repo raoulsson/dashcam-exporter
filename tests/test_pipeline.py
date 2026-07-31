@@ -304,6 +304,44 @@ class AYesNoQuestionTakesOneKey(unittest.TestCase):
                 self.assertIs(P.confirm("  Go?", False), False)
 
 
+class TheLiveProgressLineIsActuallyDrawn(unittest.TestCase):
+    """The one path the suite could not see, and it shipped a crash.
+
+    run_stream only renders when there IS a live area, and there is none when
+    stdout is piped -- which is every test. So the render closure was never
+    executed by anything but a real terminal, and an assignment inside it made
+    a name it reads from the enclosing scope local: UnboundLocalError on the
+    first parsed line of a real import.
+
+    Forcing the live area on is what makes it testable at all.
+    """
+
+    def _run(self, note_first):
+        cmd = ["/bin/sh", "-c", "printf 'one.mp4\\n  1024 100%% 9MB/s 0:00:01\\n'"]
+        buf = io.StringIO()
+        with mock.patch.object(P.C, "enabled", True):
+            with redirect_stdout(buf):
+                rc, lines = P.run_stream(cmd, str(REPO), "Import",
+                                         parser=P.make_import_parser(4096),
+                                         note_first=note_first)
+        return rc, buf.getvalue()
+
+    def test_the_note_goes_in_front_of_the_bar(self):
+        rc, out = self._run(True)
+        self.assertEqual(rc, 0)
+        self.assertIn("one.mp4 9MB/s", out)
+        drawn = [l for l in out.replace("\r", "\n").split("\n") if "9MB/s" in l]
+        self.assertTrue(drawn, "nothing was drawn")
+        for line in drawn:
+            self.assertEqual(line.count("9MB/s"), 1,
+                             "the note was appended a second time after the bar")
+
+    def test_the_label_leads_when_the_note_does_not(self):
+        rc, out = self._run(False)
+        self.assertEqual(rc, 0)
+        self.assertIn("Import", out)
+
+
 class DiscardingAnImportUnclaimsIt(unittest.TestCase):
     """After throwing away the local copy, the ledger must stop saying it has
     it.
