@@ -513,6 +513,7 @@ software = true
 # --src) and by 9) Delete SIM Data, which erases it. Nothing renders from here —
 # that is import_dir at the top.
 #card = /Volumes/NO NAME
+card = /Users/raoulsson/SimCard31
 
 # Tell your implementation this machine is on a bad connection, so it should
 # skip anything optional that would go and look. It arrives as `world.offline`.

@@ -5775,6 +5775,9 @@ def main(argv=None):
     path into somebody else's data. One source, and it is the file the person
     edits.
     """
+    # Before anything, including loading the plugin: the launch cost the
+    # operator waited through is the whole of it, not the part after setup.
+    launched = time.time()
     _no_colour()
     try:
         ctx = Ctx()
