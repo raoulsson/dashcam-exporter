@@ -326,7 +326,7 @@ OWNERS_TABLE = {
     META:       ("Generate Meta",   False, False, False),
     PREVIEW:    ("Build Preview",   False, False, False),
     EXCLUDE:    ("Exclude Trip",    False, False, True),
-    RENDER:     ("Render Videos",   False, False, False),
+    RENDER:     ("Render Trips",   False, False, False),
     BUILD:      ("Build Website",   False, False, False),
     UPLOAD:     ("Upload Website",  False, False, False),
     CLEAN_WS:   ("Clean Workspace", False, True,  True),
@@ -779,7 +779,7 @@ class TestExcludeTrip(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 5 — Render Videos
+# 5 — Render Trips
 # ---------------------------------------------------------------------------
 
 class TestRenderVideos(unittest.TestCase):

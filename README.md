@@ -62,7 +62,7 @@ deliberate — see [One source of truth](#one-source-of-truth).
 --------------------------------------------------------------------------------
 ================================================================================
   1) Import SIM           4) Exclude Trip         7) Upload Website
-  2) Generate Meta        5) Render Videos        8) Clean Workspace
+  2) Generate Meta        5) Render Trips        8) Clean Workspace
   3) Build Preview        6) Build Website        9) Delete SIM Data
   p = progress   h = help   i = info   q = quit
 
@@ -88,7 +88,7 @@ the workspace is not a step in working through it.
 | 2 | **Generate Meta** | Writes each trip's sidecars — `_meta.json`, `.gpx`, `.html` map. The metadata everything downstream reads. |
 | 3 | **Build Preview** | One still per trip and a local contact sheet, from the sidecars. No encoding. |
 | 4 | **Exclude Trip** &#9888; | Deletes one trip's source clips, its render and its site entry. |
-| 5 | **Render Videos** | Encodes the chosen trips. The slow step — hours for a full card. |
+| 5 | **Render Trips** | Encodes the chosen trips. The slow step — hours for a full card. |
 | 6 | **Build Website** | Builds what this installation publishes. With nothing configured: one self-contained HTML page from the renders, and nothing leaves the machine. |
 | 7 | **Upload Website** | Puts it online, through whatever you configured. One job — how many transports it takes is the implementation's business, not the menu's. |
 | 8 | **Clean Workspace** &#9888; | Erases the imported footage and the renders it produced, once this machine and the publishing target both say they are safe. |
@@ -370,7 +370,7 @@ Renders are restartable — a finished clip is not re-encoded, so an interrupted
 run picks up where it stopped. Every run logs to `<out>/logs/run-<stamp>.log`,
 and a copy lands beside each finished mp4.
 
-Re-running Render Videos (5) renders only the trips that have no video. Naming trips
+Re-running Render Trips (5) renders only the trips that have no video. Naming trips
 explicitly re-encodes those, and only those.
 
 ---

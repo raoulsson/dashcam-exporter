@@ -516,7 +516,7 @@ class TestMockedWork(GraphTest):
         try:
             m.with_import().with_sidecars()
             self.assertIn(BUILD, m.blocked(), "no renders yet")
-            m.with_render()                       # as if Render Videos had run
+            m.with_render()                       # as if Render Trips had run
             self.assertNotIn(BUILD, m.blocked())
         finally:
             m.cleanup()

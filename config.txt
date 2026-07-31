@@ -19,7 +19,7 @@
 #   card  ->  import_dir  ->  renders + sidecars in export_dir  ->  published
 #
 # The menu walks that: 1) Import SIM copies the card, 2) Generate Meta writes a
-# sidecar per trip, 5) Render Videos encodes them, 6) Build Website makes what
+# sidecar per trip, 5) Render Trips encodes them, 6) Build Website makes what
 # gets published, 7) Upload Website puts it online, 8) Clean Workspace erases
 # the copies once they are safely elsewhere.
 #

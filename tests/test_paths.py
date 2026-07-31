@@ -792,7 +792,7 @@ class TestTheMenuIsTheMachine(PainterTest):
         """Four items with invented numbers and invented names, drawn whole.
 
         A step number or a label written into the drawing code cannot survive
-        this: there is no item 5 here, and nothing is called Render Videos.
+        this: there is no item 5 here, and nothing is called Render Trips.
         """
         built = invented_menu()
         out = self.paint(built, invented_position(built))

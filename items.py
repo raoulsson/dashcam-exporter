@@ -266,12 +266,12 @@ class ExcludeTrip(Destructive):
 
 
 # ---------------------------------------------------------------------------
-# 5 — Render Videos
+# 5 — Render Trips
 # ---------------------------------------------------------------------------
 
 class RenderVideos(MenuItem):
     number = RENDER
-    NAME = "Render Videos"
+    NAME = "Render Trips"
     DESCRIPTION = "Encode the trips into watchable videos. Hours for a full card."
     # DEVIATION FROM THE OWNER'S TABLE: he gave item 5 an outbound edge to 7
     # under the uploader edition. Removed. Item 7 uploads the BUILT site, and reaching

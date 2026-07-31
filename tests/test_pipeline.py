@@ -1041,7 +1041,7 @@ class WhatCountsAsHavingDoneIt(unittest.TestCase):
         A render where the operator answered no to "delete and re-render?"
         reports SKIPPED, and so does one given a bad height. Nothing was
         encoded in either case, so treating them as completing would advance
-        the position past Render Videos on the strength of a declined prompt —
+        the position past Render Trips on the strength of a declined prompt —
         and the old `status != FAILED` convention did exactly that.
         """
         self.assertFalse(self.outcome_of(P.SKIPPED).completed)
