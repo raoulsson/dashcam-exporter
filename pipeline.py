@@ -2880,7 +2880,11 @@ def _fact(value, label, there):
     kind of thing: a count where counting means something, a box where the
     answer is only yes or no.
     """
-    return _state_line("%4s   %s" % (value, label), there)
+    # Five wide, which is one more than a full card ever needs. 1039 clips is
+    # a long session and 9999 is not reachable, so the column never shifts the
+    # labels sideways to fit a number -- and a column that moves is a column
+    # the eye has to re-find every launch.
+    return _state_line("%5s   %s" % (value, label), there)
 
 
 def _box(done):
@@ -2889,37 +2893,38 @@ def _box(done):
 
 def _imported_line(world):
     if not world.imports:
-        return _fact("0", "clips imported", False)
+        return _fact("0", "Clips imported", False)
     return _fact(_clip_total(clip_count(world.imports[0])),
-                 "clips imported", True)
+                 "Clips imported", True)
 
 
 def _excluded_line(world):
-    return _fact("%d" % len(world.dropped_ids), "trips excluded",
+    return _fact("%d" % len(world.dropped_ids), "Drives excluded",
                  bool(world.dropped_ids))
 
 
 def _meta_line(world):
-    return _fact("%d" % len(world.metas), "trips described",
+    return _fact("%d" % len(world.metas), "Drives described",
                  bool(world.metas))
 
 
 def _rendered_line(world):
-    if not world.renders:
-        return _fact("0", "videos rendered", False)
-    size = human_bytes(sum(r.size for r in world.renders))
-    return _fact("%d" % len(world.renders), "videos rendered, %s" % size, True)
+    # No size. It is on the Rendered row of the status block, where the
+    # question is whether the disk can take the next round; here the question
+    # is how far the cycle has got, and gigabytes do not answer it.
+    return _fact("%d" % len(world.renders), "Drives rendered",
+                 bool(world.renders))
 
 
 def _preview_line(world):
-    return _fact(_box(world.stills_current), "preview built",
+    return _fact(_box(world.stills_current), "Preview built",
                  world.stills_current)
 
 
 def _built_line(world):
     """The local page or a gathered folder -- whichever this edition makes."""
     built = world.local_page or bool(world.final_folders)
-    return _fact(_box(built), "website built", built)
+    return _fact(_box(built), "Website built", built)
 
 
 def _uploaded_line(world):
@@ -2932,7 +2937,7 @@ def _uploaded_line(world):
     clips and no sidecar anywhere read as "website uploaded".
     """
     up = bool(world.trip_ids) and world.target.complete is menu.Evidence.YES
-    return _fact(_box(up), "website uploaded", up)
+    return _fact(_box(up), "Website uploaded", up)
 
 
 def _processed_line(ctx):
