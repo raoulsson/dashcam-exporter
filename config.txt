@@ -27,21 +27,39 @@
 # Rendering straight off the card is still possible: point this at the card. It
 # is the exception, not the arrangement the tool assumes.
 #
+# THE WORKSPACE. The root where you want your data during import and export.
+# Everything that belongs to a SESSION rather than to the footage lives here:
+# pid.lock, which says this workspace is busy, and logs/.
+#
+# Declared rather than worked out, and that is the whole point of it. It used
+# to be inferred from the parent of the import directory, which is fine while
+# import sits in a folder made for it and nonsense the moment it does not --
+# import_dir=/usr/bin made /usr the workspace. Declared, you can point the two
+# trees at two different disks and the session still has somewhere to live:
+#
+#   workspace  = /tmp
+#   import_dir = /Volumes/disk11/incoming
+#   output_dir = /Volumes/disk423/renders
+#
+# is a sentence that means something.
+workspace = ~/dashcam-data
+
 # Was called `root`, which is still read so existing configs keep working.
 # import_dir wins if both are set.
 import_dir = ~/dashcam-data/import
 
-# Where the rendered videos and sidecars get written. Unset, it is derived from
-# `root` above — <parent of root>/output — so a second checkout that sets its own
-# root gets its own output without being told twice. It falls back to
-# ~/dashcam-data/output only when neither is set.
+# Where meta data like sidecars for the website and the rendered drives are
+# stored. They are uploaded from here, or ready for you to pick up, before you
+# clean the workspace. Unset, it is <workspace>/output.
 #
 # This matters more than it looks. Two checkouts sharing one output directory
-# means 8) Clean Workspace in either erases the other's working area, and it did: a clone
-# that had set `root` but not `out` inherited the first one's output and deleted
-# a render in progress. The tool now writes .owned-by into the directory and
-# refuses to sweep one another checkout claims, but the setting is the fix.
-#out = ~/dashcam-data/output
+# means 8) Clean Workspace in either erases the other's working area, and it
+# did: a clone that had set its import dir but not this inherited the first
+# one's output and deleted a render in progress.
+#
+# Was called `out`, which is still read so existing configs keep working.
+# output_dir wins if both are set.
+#output_dir = ~/dashcam-data/output
 
 
 # Re-encode even when the output already exists. Off by default: a finished mp4

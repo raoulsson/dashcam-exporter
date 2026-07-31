@@ -93,6 +93,7 @@ NAME = items.NAMES
 # person edits, not in the file they clone.
 FALLBACK_CARD = "/Volumes/NO NAME"                # make_dashcam_videos.DEFAULT_ROOT
 FALLBACK_OUT = "~/dashcam-data/output"            # make_dashcam_videos.FALLBACK_OUT
+FALLBACK_WORKSPACE = "~/dashcam-data"             # the declared root, if unset
 FALLBACK_IMPORT_ROOT = "~/dashcam-data/import"    # import-sd-card.sh DEST_ROOT
 # There is deliberately no default for `website_uploader`. A default would
 # mean a clone loading and running someone else's code on every launch.
@@ -285,19 +286,23 @@ class Ctx:
         # Its fallback is the workspace, NOT the card — the card is `card`, and
         # a root that defaulted to a mount point is what made "where does this
         # render from" have two plausible answers.
+        # The workspace is DECLARED, never inferred. Everything that belongs
+        # to a session rather than to the footage -- the lock and the run logs
+        # -- lives here, and working it out from import_dir's parent broke the
+        # moment someone pointed import somewhere real: import_dir=/usr/bin
+        # made /usr the workspace. Declared, `workspace=/tmp` with import and
+        # output on two other disks is a sentence that still means something.
+        self.workspace = Path(self.cfg.get("workspace")
+                              or FALLBACK_WORKSPACE).expanduser()
         self.render_root = Path(self.cfg.get("import_dir")
                                 or self.cfg.get("root")
-                                or FALLBACK_IMPORT_ROOT).expanduser()
-        # `out` defaults NEXT TO the workspace, not to a global constant.
-        # A second checkout that sets import_dir and leaves `out` alone otherwise
-        # inherits ~/dashcam-data/output — the first checkout's live working area
-        # — and Clean Workspace erases that. A clone set up to be
-        # independent has to actually be independent, and the setting the person
-        # did supply is the best evidence of where their data lives.
-        if self.cfg.get("out"):
-            self.out_dir = Path(self.cfg["out"]).expanduser()
-        else:
-            self.out_dir = self.render_root.parent / "output"
+                                or (self.workspace / "import")).expanduser()
+        # output_dir defaults inside the declared workspace. `out` is the name
+        # it had before there was a workspace to be inside of, and is still
+        # read: a config someone wrote last month should not stop working
+        # because the key grew a clearer name.
+        self.out_dir = Path(self.cfg.get("output_dir") or self.cfg.get("out")
+                            or (self.workspace / "output")).expanduser()
         # Where import-sd-card.sh drops the card. It follows config's `root`,
         # because that is what every render, scan and delete is pointed at — when
         # the two diverged (renaming `root` while the script kept its own
@@ -354,9 +359,9 @@ class Ctx:
         # holds renders; a record of what happened is neither, and both get
         # wiped wholesale to know the workspace is clean. Nothing but footage
         # lives under import now.
-        self.log_dir = self.import_root.parent / "logs"
+        self.log_dir = self.workspace / "logs"
         self.state_dir = state_dir_for()
-        self.lock_file = lock_path_for(self.import_root)
+        self.lock_file = lock_path_for(self.workspace)
         _migrate_state(self.out_dir, self.state_dir)
         self.speed_colour = as_bool(self.cfg.get("speed_colour"), True)
         # Still-frame knobs. Compiled-in numbers are the fallback, config wins.
@@ -1498,7 +1503,7 @@ def state_dir_for(_import_root=None):
     return HOME_DIR / "state"
 
 
-def lock_path_for(import_root):
+def lock_path_for(workspace):
     """In the tree, and visible.
 
     Everything else the tool remembers is in ~/.dashcam-exporter, because it
@@ -1507,12 +1512,13 @@ def lock_path_for(import_root):
     one file an operator has a reason to look for -- so it sits where he is
     already looking, under its own name rather than behind a dot.
 
-    Beside the trees rather than inside one, because you wipe import and
-    output in Finder to know you are clean and a lock is not something to have
-    to notice while doing that. One per data root, which is what lets two roots
-    run at once, and it falls out of living there rather than out of a key.
+    In the declared workspace, because that is what a session belongs to. You
+    wipe import and output in Finder to know you are clean, and a lock is not
+    something to have to notice while doing that. One per workspace, which is
+    what lets two run at once, and it falls out of living there rather than out
+    of a key.
     """
-    return import_root.parent / LOCK_FILE
+    return workspace / LOCK_FILE
 
 BANNER = r"""
   ____            _                                   _____                       _            
