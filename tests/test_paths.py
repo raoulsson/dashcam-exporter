@@ -314,7 +314,11 @@ def _patches(*applied):
 # items, because a test that derives its expectation from the thing under test
 # agrees with it whatever it says.
 START = [PROGRESS, IMPORT]                                     # nothing done yet
-AFTER_IMPORT = [PROGRESS, META, CLEAN_WS, ERASE_CARD]          # item 1's {2,8,9}
+AFTER_IMPORT = [PROGRESS, IMPORT, META, CLEAN_WS, ERASE_CARD]   # item 1's {1,2,8,9}
+# RESTATED: 1 is in its own outbound. A card holds more than one session's
+# worth and a copy can be interrupted, so importing again is an ordinary next
+# move -- the delta decides how much. Without it, landing on item 1 with
+# footage in the workspace took item 1 off the menu.
 MID_CYCLE = [PROGRESS, META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD]
 MID_CYCLE_PUBLISHING = sorted(MID_CYCLE + [UPLOAD])            # from 6 and 7 only
 AFTER_EXCLUDE = [PROGRESS, META, EXCLUDE, CLEAN_WS, ERASE_CARD]  # rule 6's {4,2,8,9}

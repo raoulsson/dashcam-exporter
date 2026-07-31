@@ -147,7 +147,14 @@ class ImportSim(MenuItem):
     DESCRIPTION = "Copy the card into the workspace and verify it file-for-file."
     START = True
     INBOUND_KIND = StartNode
-    OUT = _both(_e(META, CLEAN_WS, ERASE_CARD))
+    # IMPORT leads to itself, exactly as GenerateMeta does. A card holds more
+    # than one session's worth and the copy can be interrupted, so "import
+    # again" is an ordinary next move rather than a restart -- the delta
+    # decides how much, which is what evaluate() below already says. Without
+    # the self-edge, orienting onto item 1 with footage in the workspace took
+    # item 1 off the menu, and every entry it led to was blocked by its own
+    # guard for want of a GPS track.
+    OUT = _both(_e(IMPORT, META, CLEAN_WS, ERASE_CARD))
     IN_AUTHORED = _both(None)
 
     def evaluate(self, world) -> Verdict:
