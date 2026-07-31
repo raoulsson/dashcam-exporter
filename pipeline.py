@@ -1093,7 +1093,21 @@ def _state(label, state, where):
     state was, the eye has to find the one word that moved among three
     different-length paths.
     """
-    return "    %-12s %-18s (%s)" % (label, state, C.dim(where))
+    return "    %s%s(%s)" % (_padded(label, 13), _padded(state, 22), C.dim(where))
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _visible_len(text):
+    """How wide it prints. %-18s pads to the length of the STRING, and a
+    coloured one carries a dozen invisible bytes of escape -- so every column
+    holding colour came out short by however much colour was in it."""
+    return len(_ANSI.sub("", text))
+
+
+def _padded(text, width):
+    return text + " " * max(1, width - _visible_len(text))
 
 
 def _card_rows(ctx):
