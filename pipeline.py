@@ -567,16 +567,23 @@ class Bar:
 
     def render(self, fraction, elapsed):
         """`label [####......]  42%  0:12/0:30`."""
-        return "%s %s %3d%% %s/%s" % (self.label, self.bracket(fraction),
-                                      int(fraction * 100), human_secs(elapsed),
-                                      human_secs(_eta(fraction, elapsed)))
+        return "%s %s %s" % (C.yellow(self.label), self.bracket(fraction),
+                             C.yellow("%3d%% %s/%s"
+                                      % (int(fraction * 100), human_secs(elapsed),
+                                         human_secs(_eta(fraction, elapsed)))))
 
     def bracket(self, fraction):
-        """`[####......]`, violet, for a caller composing its own line."""
+        """`[####......]` -- brackets included, and violet like what is inside.
+
+        They belong to the bar. Left outside the colour they took whatever the
+        line around them had, which after the bar's own reset was nothing at
+        all: the opening bracket came out amber with the text before it and
+        the closing one came out bare.
+        """
         width = self.width()
         filled = int(round(width * min(fraction, 1.0)))
-        return "[%s]" % C.violet(self.FILLED * filled
-                                 + self.EMPTY * (width - filled))
+        return C.violet("[%s]" % (self.FILLED * filled
+                                  + self.EMPTY * (width - filled)))
 
 
 def _eta(fraction, elapsed):
@@ -638,7 +645,8 @@ class Waiting(Bar):
         width = self.width(room_for=40)
         at = self._bounce(i, width)
         bar = self.EMPTY * at + self.BLOCK + self.EMPTY * (width - at - len(self.BLOCK))
-        return "  %s [%s] %s " % (self.label, C.violet(bar), human_secs(elapsed))
+        return "  %s %s %s " % (C.yellow(self.label), C.violet("[%s]" % bar),
+                                C.yellow(human_secs(elapsed)))
 
     def _bounce(self, i, width):
         span = max(1, width - len(self.BLOCK))
@@ -796,10 +804,11 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
             # function local, including the one on the line above.
             used = note_first and bool(note)
         else:
-            head = "%s %s %s" % (label, SPIN[spin % len(SPIN)], human_secs(elapsed))
+            head = C.yellow("%s %s %s" % (label, SPIN[spin % len(SPIN)],
+                                          human_secs(elapsed)))
             used = False
         if note and not used:
-            head += "  " + note
+            head += "  " + C.yellow(note)
 
         # give whatever is left of the terminal to the child's latest line.
         # _visible_len, not len: the bar inside `head` carries colour now, and
@@ -827,7 +836,11 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
                 # MiB/20.0 MiB"); the ends are filenames and units that repeat.
                 t = t[:room - 1] + "…"
             tail = "  " + C.dim(t)
-        live.draw([C.yellow(head) + tail])
+        # No wrapper round the whole line: every piece carries its own colour
+        # now, and a colour that spans a nested one ends at the nested one's
+        # reset -- which is how the closing bracket and everything after it
+        # lost the amber the opening bracket had.
+        live.draw([head + tail])
 
     try:
         while not done:
@@ -1009,7 +1022,8 @@ def _bar_line(label, frac, elapsed, note, note_first):
     bar = Bar(label)
     if not (note_first and note):
         return bar.render(frac, elapsed)
-    return "%s    %s %d%%" % (note, bar.bracket(frac), int(frac * 100))
+    return "%s    %s %s" % (C.yellow(note), bar.bracket(frac),
+                            C.yellow("%d%%" % int(frac * 100)))
 
 
 def make_scan_parser():
