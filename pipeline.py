@@ -1226,10 +1226,12 @@ def _disk_row(mount):
 
 def _free_state(usage):
     free = "%s free of %s" % (human_bytes(usage.free), human_bytes(usage.total))
-    # 15 GB is roughly a full card's renders; below that, say so plainly.
+    # 15 GB is roughly a full card's renders; below that, say so plainly. Plain
+    # otherwise: bold is for the one thing on the screen that wants the eye,
+    # and a number that is fine every launch is not it.
     if usage.free < 15 * 1024 ** 3:
         return C.red(free + "  — low")
-    return C.bold(free)
+    return free
 
 
 def _volume_path(mount):
