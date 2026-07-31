@@ -84,8 +84,8 @@ class LocalWebSiteBuilderPlugin(Builder):
         staged = self._staged(workspace)
         trips = self._carried(workspace)
         self._write_pages(staged, trips)
-        workspace.ui.say("  staged %d trip(s) in %s" % (len(trips), staged))
-        return did("%d trip(s) staged in %s" % (len(trips), staged))
+        workspace.ui.say("  staged %d trips in %s" % (len(trips), staged))
+        return did("%d trips staged in %s" % (len(trips), staged))
 
     def _staged(self, workspace) -> Path:
         """A clean staging dir, and the renders copied into it.
@@ -265,5 +265,5 @@ def _yes_no(ok: bool) -> Evidence:
 
 def _sent(sent, dest: Path) -> Outcome:
     if sent:
-        return did("%d file(s) sent to %s" % (len(sent), dest))
+        return did("%d files sent to %s" % (len(sent), dest))
     return stopped("nothing was staged to send")

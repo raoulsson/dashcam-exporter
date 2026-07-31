@@ -91,7 +91,7 @@ def print_disagreements(strategy):
     if not found:
         print("  inbound as authored vs derived: agrees on every item")
         return
-    print("  inbound as authored vs derived: %d item(s) differ" % len(found))
+    print("  inbound as authored vs derived: %d items differ" % len(found))
     print("\n".join(map(_difference, found)))
 
 

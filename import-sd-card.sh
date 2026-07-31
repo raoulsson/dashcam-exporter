@@ -82,7 +82,7 @@ if [ -n "${AFTER_STAMP:-}" ]; then
             printf '%s\n' "$rel" >> "$tmp_list"
         fi
     done < <( cd "$SRC" && find DCIM -type f )
-    echo ">>> $(wc -l < "$tmp_list" | tr -d ' ') of $( ( cd "$SRC" && find DCIM -type f ) | wc -l | tr -d ' ') file(s) selected"
+    echo ">>> $(wc -l < "$tmp_list" | tr -d ' ') of $( ( cd "$SRC" && find DCIM -type f ) | wc -l | tr -d ' ') files selected"
     # --files-from paths are relative to the SOURCE root, so the source has to
     # be $SRC (the list already says DCIM/...); pairing it with $SRC/DCIM would
     # copy into DEST/DCIM/DCIM.
@@ -133,14 +133,14 @@ fi
 pending=$(grep -c '^>f' "$verify_out" || true)
 dest_files=$(find "$DEST/DCIM" -type f | wc -l | tr -d ' ')
 if [ "$pending" -ne 0 ]; then
-    echo "ERROR: verify found $pending file(s) not yet copied. NOT deleting source." >&2
+    echo "ERROR: verify found $pending files not yet copied. NOT deleting source." >&2
     exit 1
 fi
 if [ "$dest_files" -lt "$expect_files" ]; then
     echo "ERROR: dest has $dest_files files but this run should have copied $expect_files. NOT deleting source." >&2
     exit 1
 fi
-echo "Verified: $dest_files file(s) in dest ($expect_files expected from this run)."
+echo "Verified: $dest_files files in dest ($expect_files expected from this run)."
 
 # --- clean the card (files only, keep the folder tree) ----------------------
 if [ "$DELETE_SOURCE" -eq 1 ] && [ -n "${AFTER_STAMP:-}" ]; then
@@ -160,5 +160,5 @@ else
     echo "result, erase it with:  $0 --delete ${DAY}"
 fi
 
-echo "Done. Imported $dest_files file(s) to $DEST/DCIM"
+echo "Done. Imported $dest_files files to $DEST/DCIM"
 echo "Render with: ./make-trips-rendered.sh --root \"$DEST\" --out \"${DASHCAM_OUT_ROOT:-$HOME/dashcam-data/output}\""

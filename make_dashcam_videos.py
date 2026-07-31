@@ -3755,11 +3755,11 @@ def main() -> int:
         if skipped_small:
             note = ", ".join(f"#{i} ({n} clip{'s' if n != 1 else ''})"
                              for i, n in skipped_small)
-            print(f"\nAuto-skipping {len(skipped_small)} fragment {group_kind}(s): "
+            print(f"\nAuto-skipping {len(skipped_small)} fragment {group_kind}s: "
                   f"{note}\n(force-encode by naming the index via --drives.)")
         if skipped_still:
             note = ", ".join(f"#{i}" for i in skipped_still)
-            print(f"\nAuto-skipping {len(skipped_still)} stationary {group_kind}(s) "
+            print(f"\nAuto-skipping {len(skipped_still)} stationary {group_kind}s "
                   f"(GPS shows no real drive): {note}\n"
                   f"(force-encode by naming the index via --drives.)")
 
@@ -4255,7 +4255,7 @@ def main() -> int:
                     span = (run_end - run_start + 1) * group[run_start].duration
                 saved += int(span - args.parking_entry_pad
                              - args.parking_exit_pad - TRANSITION_SECS)
-            print(f"  parking: {len(parking_runs)} run(s) skipped, "
+            print(f"  parking: {len(parking_runs)} runs skipped, "
                   f"~{fmt_secs(max(saved, 0))} cut from the output")
 
         entry_pad = args.parking_entry_pad

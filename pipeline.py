@@ -4234,7 +4234,7 @@ def step_render(ctx):
         bases = [g.get("out_base") for g in groups if g.get("index") in picked]
         doomed = _videos([f for b in bases if b
                           for f in Path(b).parent.glob(Path(b).name + "*")])
-        what = "the mp4(s) of %d trips" % len(bases)
+        what = "the mp4s of %d trips" % len(bases)
     else:
         doomed = _videos(ns.rglob("*")) if ns.is_dir() else []
         what = "every mp4 under %s" % tilde(ns)
