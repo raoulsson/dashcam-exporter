@@ -2859,53 +2859,61 @@ def _counted(n):
     return "%d" % n
 
 
-def _box_line(text, done):
-    """A box for the three that are done or not done, a count for the four
-    that are quantities. "no website preview" was a number pretending not to
-    be one, and "0 trips excluded" was a zero pretending to be news.
+def _fact(value, label, there):
+    """One progress line: what there is, then what it is.
 
-    The label is what having done it is called -- "preview built", not
-    "preview" -- so the line reads the same whether the box is ticked or not,
-    and the box is the only thing that changes."""
-    return _state_line("[%s] %s" % ("x" if done else " ", text), done)
+    Two columns, because the seven lines answer the same question seven times
+    and the answer is the part that moves. Down one column the eye reads
+    118 / 2 / 6 / 6 / [x] without picking it out of seven sentences of
+    different lengths. Dim when there is nothing yet, exactly as the status
+    block marks an absent state.
+
+    The box sits in the value column with the counts, because it is the same
+    kind of thing: a count where counting means something, a box where the
+    answer is only yes or no.
+    """
+    return _state_line("%s%s" % (_padded(value, 12), label), there)
+
+
+def _box(done):
+    return "[%s]" % ("x" if done else " ")
 
 
 def _imported_line(world):
     if not world.imports:
-        return _state_line("nothing imported", False)
-    where = world.imports[0]
-    return _state_line("%s clips imported into %s"
-                       % (_counted(clip_count(where)), tilde(where)), True)
+        return _fact("no clips", "imported", False)
+    return _fact("%s clips" % _counted(clip_count(world.imports[0])),
+                 "imported", True)
 
 
 def _excluded_line(world):
     if not world.dropped_ids:
-        return _state_line("no trips excluded", False)
-    return _state_line("%d trips excluded" % len(world.dropped_ids), True)
+        return _fact("no trips", "excluded", False)
+    return _fact("%d trips" % len(world.dropped_ids), "excluded", True)
 
 
 def _meta_line(world):
     if not world.metas:
-        return _state_line("no meta, no sidecars", False)
-    return _state_line("%d trips with meta and sidecars" % len(world.metas), True)
+        return _fact("no trips", "described", False)
+    return _fact("%d trips" % len(world.metas), "described", True)
 
 
 def _rendered_line(world):
     if not world.renders:
-        return _state_line("no videos rendered", False)
-    return _state_line("%d videos rendered, %s"
-                       % (len(world.renders),
-                          human_bytes(sum(r.size for r in world.renders))), True)
+        return _fact("no videos", "rendered", False)
+    size = human_bytes(sum(r.size for r in world.renders))
+    return _fact("%d videos" % len(world.renders), "rendered, %s" % size, True)
 
 
 def _preview_line(world):
-    return _box_line("preview built", world.stills_current)
+    return _fact(_box(world.stills_current), "preview built",
+                 world.stills_current)
 
 
 def _built_line(world):
     """The local page or a gathered folder -- whichever this edition makes."""
-    return _box_line("website built",
-                     world.local_page or bool(world.final_folders))
+    built = world.local_page or bool(world.final_folders)
+    return _fact(_box(built), "website built", built)
 
 
 def _uploaded_line(world):
@@ -2918,7 +2926,7 @@ def _uploaded_line(world):
     clips and no sidecar anywhere read as "website uploaded".
     """
     up = bool(world.trip_ids) and world.target.complete is menu.Evidence.YES
-    return _box_line("website uploaded", up)
+    return _fact(_box(up), "website uploaded", up)
 
 
 def _processed_line(ctx):
