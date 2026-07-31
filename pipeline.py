@@ -7263,21 +7263,7 @@ def _undone_since(at, world):
     return at == CLEAN_WS and bool(world.imports)
 
 
-def _startup_note(ctx):
-    """What the launch actually paid for.
-
-    Config, the lock, the ego-motion check and the status screen are all
-    cheap. The one that is not is the world captured to work out where the
-    cycle had got to, which asks the plugin — and what THAT costs is the
-    plugin's business, which is exactly why it belongs in the log where it can
-    be seen rather than assumed about.
-    """
-    if getattr(ctx, "plugin", None) is None:
-        return "read the workspace"
-    return "read the workspace and queried %s" % ctx.plugin.name
-
-
-def _run_menu(ctx, launched):
+def _run_menu(ctx):
     """The menu loop IS the state machine: it draws from the position and the
     world, and dispatches one item at a time.
 
@@ -7287,9 +7273,7 @@ def _run_menu(ctx, launched):
     habit the typed word exists to defeat.
     """
     try:
-        runner = build_runner(ctx)
-        record(ctx, "Startup", RAN, launched, _startup_note(ctx))
-        runner.loop()
+        build_runner(ctx).loop()
     except (KeyboardInterrupt, Aborted):
         print()
         print(C.yellow("  Interrupted."))
@@ -7297,6 +7281,7 @@ def _run_menu(ctx, launched):
         show_cursor()
         release_single_instance_lock(ctx)
         print_summary(ctx)
+        print("Bye!")
 
 
 def main(argv=None):
@@ -7308,13 +7293,6 @@ def main(argv=None):
     path into somebody else's data. One source, and it is the file the person
     edits.
     """
-    # Before anything, including loading the plugin: the launch cost the
-    # operator waited through is the whole of it, not the part after setup.
-    # And it starts before this process does -- the launcher probes a Python
-    # for opencv by importing it in a throwaway interpreter, which is a wait
-    # he sits through and time.time() here cannot see. It hands the moment
-    # over when it has one.
-    launched = _launched_at()
     _no_colour()
     try:
         ctx = Ctx()
@@ -7326,15 +7304,7 @@ def main(argv=None):
     # cannot strand it.
     if not acquire_single_instance_lock(ctx):
         return _lock_taken(ctx)
-    return _start(ctx, launched)
-
-
-def _launched_at():
-    """When the operator started this, which is not when python started."""
-    try:
-        return min(float(os.environ["DASHCAM_LAUNCHED"]), time.time())
-    except (KeyError, ValueError):
-        return time.time()
+    return _start(ctx)
 
 
 def _uploader_broken(error):
@@ -7353,7 +7323,7 @@ def _uploader_broken(error):
     return 4
 
 
-def _start(ctx, launched):
+def _start(ctx):
     _print_all(_banner_lines(ctx))
     # Checked before the status screen: there is nothing useful to show if the
     # numbers behind it would come from the wrong grouping.
@@ -7361,7 +7331,7 @@ def _start(ctx, launched):
         return 3
     print_configuration(ctx)
     print_status(ctx)
-    _run_menu(ctx, launched)
+    _run_menu(ctx)
     return _exit_code(ctx)
 
 

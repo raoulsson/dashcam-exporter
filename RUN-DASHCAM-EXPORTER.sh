@@ -65,10 +65,4 @@ fi
 
 echo "${DIM}python: $PY${OFF}"
 
-# The clock the summary reports starts HERE, not inside main(). What the
-# operator waits through includes this script: the dependency probe above
-# starts a throwaway interpreter and imports cv2, numpy, staticmap and PIL
-# before the real one starts at all. Timed from inside python, that wait is
-# invisible and the Startup row reports less than it cost him.
-export DASHCAM_LAUNCHED="$(date +%s)"
 exec "$PY" pipeline.py "$@"
