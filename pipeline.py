@@ -1115,8 +1115,12 @@ def read_key(prompt):
     return _echoed(ch)
 
 
+def _raw_capable():
+    return sys.stdin.isatty() and termios is not None
+
+
 def _one_char_at(prompt):
-    if not (sys.stdin.isatty() and termios is not None):
+    if not _raw_capable():
         return None
     sys.stdout.write(C.bold(prompt))
     sys.stdout.flush()
@@ -1125,8 +1129,12 @@ def _one_char_at(prompt):
 
 def _one_char():
     """A single character in raw mode, or None when that is not possible."""
-    if not (sys.stdin.isatty() and termios is not None):
+    if not _raw_capable():
         return None
+    return _raw_read()
+
+
+def _raw_read():
     fd = sys.stdin.fileno()
     saved = termios.tcgetattr(fd)
     try:
@@ -1141,18 +1149,34 @@ def _echoed(ch):
     if ch in ("\x03", "\x04"):
         print()
         raise Aborted()
-    if ch.lower() != "h":
-        print(ch if ch.isprintable() else "")
-        return ch.strip().lower()
-    return _help_key()
+    return _key_or_help(ch)
+
+
+def _key_or_help(ch):
+    if ch.lower() == "h":
+        return _help_key()
+    print(_printable(ch))
+    return ch.strip().lower()
+
+
+def _printable(ch):
+    if ch.isprintable():
+        return ch
+    return ""
 
 
 def _help_key():
     sys.stdout.write("h")
     sys.stdout.flush()
     second = _one_char() or ""
-    print(second if second.isprintable() else "")
-    return ("h " + second).strip() if second.strip() else "h"
+    print(_printable(second))
+    return _help_command(second)
+
+
+def _help_command(second):
+    if second.strip():
+        return "h " + second.strip()
+    return "h"
 
 
 def ask(prompt, default="", quits=True):
@@ -5767,6 +5791,9 @@ class Runner:
         """
         if not sel:
             return True
+        return self._chosen(sel)
+
+    def _chosen(self, sel):
         if sel in ("q", "quit", "exit"):
             return False
         return self._not_quit(sel)
