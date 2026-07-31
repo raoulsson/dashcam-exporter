@@ -406,7 +406,7 @@ OUTBOUND = {
                    ERASE_CARD},
         UPLOAD:   {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD, CLEAN_WS,
                    ERASE_CARD},
-        CLEAN_WS: {IMPORT},
+        CLEAN_WS: {IMPORT, CLEAN_WS},
     },
     LOCAL: {
         IMPORT:   {IMPORT, META, CLEAN_WS, ERASE_CARD},
@@ -416,7 +416,7 @@ OUTBOUND = {
         RENDER:   {META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD},
         BUILD:    {META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD},
         UPLOAD:   set(),
-        CLEAN_WS: {IMPORT},
+        CLEAN_WS: {IMPORT, CLEAN_WS},
     },
 }
 
@@ -428,7 +428,8 @@ INBOUND = {
         RENDER:   {META, PREVIEW, RENDER, BUILD, UPLOAD},
         BUILD:    {META, PREVIEW, RENDER, BUILD, UPLOAD},
         UPLOAD:   {BUILD, UPLOAD},
-        CLEAN_WS: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD},
+        CLEAN_WS: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD,
+                   CLEAN_WS},
         ERASE_CARD: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD},
     },
     LOCAL: {
@@ -438,7 +439,7 @@ INBOUND = {
         RENDER:   {META, PREVIEW, RENDER, BUILD},
         BUILD:    {META, PREVIEW, RENDER, BUILD},
         UPLOAD:   set(),
-        CLEAN_WS: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD},
+        CLEAN_WS: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS},
         ERASE_CARD: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD},
     },
 }
@@ -500,9 +501,19 @@ class TestWhereEachItemSits(unittest.TestCase):
     def test_cleaning_the_workspace_offers_only_a_new_cycle(self):
         """Once the workspace is gone only an import remains — which is what
         makes "clean up, then erase the card" impossible to express: the card's
-        evidence is partly that its clips are in the workspace."""
+        evidence is partly that its clips are in the workspace.
+
+        RESTATED: the outbound is {1,8}, not {1}. The 8 is itself, and it does
+        not weaken the rule this test is for — 8 leading to 8 still reaches
+        nothing but 1, and the assertion below says so directly rather than by
+        the proxy of an exact set. A sink can hold several dated imports and
+        the erase narrows to one, so cleaning the next is an ordinary move;
+        and declining the import that 8 offers used to leave the position on 8
+        with 8 off the menu.
+        """
         item = item_for(CLEAN_WS)
-        self.assertEqual(item.outbound().edges(), frozenset({IMPORT}))
+        self.assertEqual(item.outbound().edges(), frozenset({IMPORT, CLEAN_WS}))
+        self.assertNotIn(ERASE_CARD, item.outbound().edges())
         self.assertEqual(item.settles_at(RENDER), CLEAN_WS)
 
     def test_publishing_has_no_edges_at_all_under_the_local_product(self):

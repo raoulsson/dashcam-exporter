@@ -580,10 +580,17 @@ class Advancing(unittest.TestCase):
     def test_clean_workspace_ends_the_cycle_at_import(self):
         """Once the workspace is gone only a new cycle remains, so Delete SIM
         Data cannot follow Clean Workspace in the same round — the order that
-        erased the evidence and then refused the card is now unsayable."""
+        erased the evidence and then refused the card is now unsayable.
+
+        RESTATED: it also offers itself, because a sink can hold several dated
+        imports and the erase narrows to one of them. What this test is for is
+        the absence of 9, and that is now asserted directly rather than by an
+        exact set that happened to exclude it.
+        """
         menu_items, position = machine(at=RENDER)
         position.advance(menu_items[CLEAN_WS])
-        self.assertEqual(offered(menu_items, position), [PROGRESS, IMPORT])
+        self.assertEqual(offered(menu_items, position),
+                         [PROGRESS, IMPORT, CLEAN_WS])
         self.assertNotIn(ERASE_CARD, position.selectable(menu_items))
 
 
@@ -638,11 +645,16 @@ class SteppingBack(unittest.TestCase):
         self.assertNotEqual(position.current, RENDER)
 
     def test_stepping_back_onto_a_position_that_is_no_longer_reachable(self):
-        """Clean Workspace offers only Import, so from there the pipeline
-        stands somewhere it could not select again. A refused Import must
-        still step back onto it — the position is a place we are, not a
-        choice we could re-make."""
+        """The position is a place we are, not a choice we could re-make.
+
+        RESTATED: every standable entry now leads to itself, so the real graph
+        no longer produces this shape — which is why the outbound is narrowed
+        here by hand rather than borrowed from an item. The rule outlives the
+        graph that first showed it: a refusal steps back onto where we were
+        even when the menu would not offer to go there.
+        """
         menu_items, position = machine(at=CLEAN_WS)
+        menu_items[CLEAN_WS].outbound.return_value = M.Edges(frozenset({IMPORT}))
         self.assertNotIn(CLEAN_WS, position.selectable(menu_items))
         position.advance(self._refuses(menu_items, IMPORT))
         self.assertEqual(position.current, CLEAN_WS)

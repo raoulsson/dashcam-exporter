@@ -83,6 +83,9 @@ EXPLAINED = {
     EXCLUDE: "adds the back-edges from 5, 6 and 7",
     RENDER: "drops 4, for the same rule-6 reason as 3",
     BUILD: "drops 4, for the same rule-6 reason as 3",
+    CLEAN_WS: "adds 8: the entry leads to itself, which he did not write into "
+              "its own inbound column. A sink can hold several dated imports "
+              "and the erase narrows to one of them",
 }
 
 
@@ -316,7 +319,9 @@ class TestTheUnfoldIsStructural(GraphTest):
             built = M.build_menu(strategy, NullWork())
             offered = built[CLEAN_WS].outbound().offers(frozenset(built))
             with self.subTest(strategy=strategy.value):
-                self.assertEqual(set(offered), {IMPORT})
+                # RESTATED: {1,8}. The 8 is itself; what this test exists
+                # for is that 9 is not there, and that is asserted directly.
+                self.assertEqual(set(offered), {IMPORT, CLEAN_WS})
                 self.assertNotIn(ERASE_CARD, offered)
 
     def test_erasing_the_card_hands_the_position_back(self):

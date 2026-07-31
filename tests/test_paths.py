@@ -314,6 +314,9 @@ def _patches(*applied):
 # items, because a test that derives its expectation from the thing under test
 # agrees with it whatever it says.
 START = [PROGRESS, IMPORT]                                     # nothing done yet
+# After a clean-up: a new cycle, or cleaning the next import in the sink.
+# 9 is deliberately absent — that is the order the unfold exists to forbid.
+AFTER_CLEAN = [PROGRESS, IMPORT, CLEAN_WS]
 AFTER_IMPORT = [PROGRESS, IMPORT, META, CLEAN_WS, ERASE_CARD]   # item 1's {1,2,8,9}
 # RESTATED: 1 is in its own outbound. A card holds more than one session's
 # worth and a copy can be interrupted, so importing again is an ordinary next
@@ -346,7 +349,7 @@ class TestTheNormalCycle(unittest.TestCase):
                          [START, AFTER_IMPORT,
                           MID_CYCLE, MID_CYCLE, MID_CYCLE,
                           MID_CYCLE_PUBLISHING, MID_CYCLE_PUBLISHING,
-                          START])
+                          AFTER_CLEAN])
 
     def test_the_local_cycle_ends_at_the_built_page(self):
         """The same walk without the publishing item, which the local product
@@ -355,7 +358,7 @@ class TestTheNormalCycle(unittest.TestCase):
         b = Bench(LOCAL)
         b.type("1", "2", "3", "5", "6", "8")
         self.assertEqual(b.work.done, [IMPORT, META, PREVIEW, RENDER, BUILD, CLEAN_WS])
-        self.assertEqual(b.offered_at[-1], START)
+        self.assertEqual(b.offered_at[-1], AFTER_CLEAN)
         self.assertNotIn(UPLOAD, set().union(*map(set, b.offered_at)))
 
     def test_the_early_loop_the_owner_works_in(self):
@@ -421,13 +424,15 @@ class TestThePathsThatMustNotExist(unittest.TestCase):
         """The defect the unfold closes, expressed as a path that does not
         exist. The folded step gathered the card's evidence from the
         workspace, erased the workspace, then asked about the card — refusing
-        after the irreversible half had run. Clean Workspace's outbound is {1},
-        so there is no position from which that order can be typed.
+        after the irreversible half had run. Clean Workspace's outbound is
+        {1,8} — itself and a new cycle, never 9 — so there is no position from
+        which that order can be typed.
         """
         b = Bench(UPLOADER)
         b.type("1", "2", "8", "9")
         self.assertEqual(b.work.done, [IMPORT, META, CLEAN_WS])
-        self.assertEqual(b.offered_at[3], START)
+        self.assertEqual(b.offered_at[3], AFTER_CLEAN)
+        self.assertNotIn(ERASE_CARD, AFTER_CLEAN)
 
     def test_freeing_the_card_first_leaves_the_workspace_still_cleanable(self):
         """The safe order is the permitted one. Erasing the card steps back by

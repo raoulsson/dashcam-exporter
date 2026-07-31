@@ -462,9 +462,18 @@ class CleanWorkspace(Destructive):
     checks the card refuses AFTER the irreversible half has run, having
     already printed that the card was verified.
 
-    Its outbound is {1}: once the workspace is gone only a new cycle remains,
-    so it can never precede Delete SIM Data and that sequence cannot be
-    expressed in this graph at all.
+    Its outbound is {1,8}: once the workspace is gone only a new cycle
+    remains, so it can never precede Delete SIM Data and that sequence cannot
+    be expressed in this graph at all. The 8 is itself, and it does not weaken
+    that -- 8 leading to 8 still reaches nothing but 1.
+
+    It is there because standing on 8 does not mean the workspace is empty. It
+    means 8 was the last step that COMPLETED, and an import that ran after it
+    and did not finish -- interrupted, or declined at the prompt -- leaves the
+    position where it was with footage on disk that nobody can now clear. That
+    is a dead end reached by pressing n. A sink holding several dated imports
+    is the same shape: the erase narrows to one of them, and cleaning the next
+    is an ordinary move.
     """
 
     number = CLEAN_WS
@@ -474,7 +483,7 @@ class CleanWorkspace(Destructive):
     DESTR = True
     WORD = "CLEAN"
     SCOPE = Scope.FULL
-    OUT = _both(_e(IMPORT))
+    OUT = _both(_e(IMPORT, CLEAN_WS))
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({IMPORT, META, PREVIEW, EXCLUDE, RENDER,
                                           BUILD, UPLOAD}),
