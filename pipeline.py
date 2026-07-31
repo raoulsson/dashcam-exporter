@@ -1171,10 +1171,16 @@ def _render_state(mp4s, size):
     """Dim, not amber. Nothing rendered yet is the ordinary state at the start
     of a cycle, exactly like an empty import -- and a colour that says "look at
     this" about the normal case has spent itself by the time something is
-    actually wrong."""
+    actually wrong.
+
+    Nor bold when there is something: no value in this block is. Bold is the
+    screen saying "this one" and every row saying it is the same as none of
+    them saying it. What survives is colour that MEANS something -- green for
+    a card in the slot, dim for a state that is simply absent, red for a disk
+    that cannot take what is queued."""
     if not mp4s:
         return C.dim("none")
-    return C.bold("%d mp4, %s" % (len(mp4s), human_bytes(size)))
+    return "%d mp4, %s" % (len(mp4s), human_bytes(size))
 
 
 def _volume_rows(ctx):
@@ -1352,9 +1358,9 @@ def print_status(ctx):
     if cands:
         for p in cands:
             n = clip_count(p)
-            print(_state("Import", C.bold("%s clips, %s"
-                                          % (n if n is not None else "?",
-                                             human_bytes(tree_size(p)))), tilde(p)))
+            print(_state("Import", "%s clips, %s"
+                         % (n if n is not None else "?",
+                            human_bytes(tree_size(p))), tilde(p)))
     else:
         # Name the folder the config actually points at — import_root is only a
         # fallback, and showing it sends you to create the wrong directory.
