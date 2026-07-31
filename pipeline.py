@@ -2899,12 +2899,12 @@ def _imported_line(world):
 
 
 def _excluded_line(world):
-    return _fact("%d" % len(world.dropped_ids), "Drives excluded",
+    return _fact("%d" % len(world.dropped_ids), "Trips excluded",
                  bool(world.dropped_ids))
 
 
 def _meta_line(world):
-    return _fact("%d" % len(world.metas), "Drives described",
+    return _fact("%d" % len(world.metas), "Trips described",
                  bool(world.metas))
 
 
@@ -2912,7 +2912,7 @@ def _rendered_line(world):
     # No size. It is on the Rendered row of the status block, where the
     # question is whether the disk can take the next round; here the question
     # is how far the cycle has got, and gigabytes do not answer it.
-    return _fact("%d" % len(world.renders), "Drives rendered",
+    return _fact("%d" % len(world.renders), "Trips rendered",
                  bool(world.renders))
 
 
