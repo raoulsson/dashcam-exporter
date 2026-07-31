@@ -5916,6 +5916,20 @@ def capture_world(ctx, scope=menu.Scope.LOCAL):
                      working_area_is_expendable(ctx, target))
 
 
+def looked_at(ctx, scope):
+    """Every capture the operator sits through, under one bar.
+
+    A capture reads the workspace and asks the plugin, and what the second
+    half costs is not knowable from here -- a dict, an ssh session, a bucket
+    listing, a mock. Most of the time the plugin has an answer in hand and
+    this is instant; after a step that told it to forget, it is not. One
+    helper so there is one answer to "what does the operator see while it
+    happens", rather than four call sites of which three showed nothing.
+    """
+    with waiting("Reading the workspace and querying the plugin..."):
+        return capture_world(ctx, scope)
+
+
 def _meta_paths(metas):
     return list(filter(None, map(_path_of, metas)))
 
@@ -6260,7 +6274,7 @@ class Work:
         destination is wrong, and reaching in to defeat its cache would be this
         module compensating for a contract it should be relying on.
         """
-        return capture_world(self.ctx, scope)
+        return looked_at(self.ctx, scope)
 
     def refuse(self, reason):
         print(C.red("  Refusing after the re-check: %s." % reason))
@@ -6652,8 +6666,7 @@ class Runner:
         nothing happen for a minute reads as a hang, and the fix for that is
         to say what is going on, not to ask less often.
         """
-        with waiting("Reading the workspace and querying the plugin..."):
-            return capture_world(self.ctx, menu.Scope.LOCAL)
+        return looked_at(self.ctx, menu.Scope.LOCAL)
 
     def _dispatch(self, sel):
         """Empty is Enter on its own, which is not a choice and not an error.
@@ -6690,7 +6703,7 @@ class Runner:
         something is not the same kind of thing as a key that does something.
         """
         self.run_one(PROGRESS)
-        world = capture_world(self.ctx, menu.Scope.LOCAL)
+        world = looked_at(self.ctx, menu.Scope.LOCAL)
         verdicts = _verdicts(self.menu, world)
         offered = self.position.selectable(self.menu)
         _print_all(_next_steps(self.menu, verdicts, offered))
@@ -6757,7 +6770,7 @@ class Runner:
 
     def _execute(self, item):
         try:
-            return item.execute(capture_world(self.ctx, item.SCOPE))
+            return item.execute(looked_at(self.ctx, item.SCOPE))
         except Exception as exc:
             return self._after_exception(item, exc)
 
@@ -6986,8 +6999,7 @@ def build_runner(ctx, classes=None):
     # a test -- so budgeting on a guess about someone else's implementation is
     # the one thing this seam exists to stop. Startup is a defined moment an
     # implementor can plan for; what it costs there is theirs to manage.
-    with waiting("Reading the workspace and querying the plugin..."):
-        world = capture_world(ctx, menu.Scope.FULL)
+    world = looked_at(ctx, menu.Scope.FULL)
     _resume(ctx, position, world)
     return Runner(ctx, menu_items, position)
 
