@@ -914,19 +914,28 @@ def _age_phrase(page):
     return "built %s ago" % age
 
 
+def _card_rows(ctx):
+    """Mounted or not, and where. One row, one question answered."""
+    if not (ctx.card / "DCIM").is_dir():
+        return ("  SIM Card     %s  %s" % (C.dim("not mounted"), C.dim(tilde(ctx.card))),)
+    return ("  SIM Card     %s  %s" % (C.green("mounted"), _card_note(ctx)),)
+
+
+def _card_note(ctx):
+    n = clip_count(ctx.card)
+    return C.dim("%s  (%s clips)" % (tilde(ctx.card), n if n is not None else "?"))
+
+
 def print_status(ctx):
     print()
     print(rule("status"))
 
-    # The footage source: the mounted card, or any folder holding a DCIM tree.
-    card_dcim = ctx.card / "DCIM"
-    if card_dcim.is_dir():
-        n = clip_count(ctx.card)
-        print("  Source       %s  %s" % (
-            C.green("present"),
-            C.dim("%s  (%s clips)" % (tilde(ctx.card), n if n is not None else "?"))))
-    else:
-        print("  Source       %s  %s" % (C.dim("not found"), C.dim(tilde(ctx.card))))
+    # THE CARD, whatever `card` points at. A mounted DDPAI, a folder someone
+    # copied it into, an external disk — the operator calls all of them the
+    # card, and the tool should not make him think about which kind he has
+    # today. "Source present" was the machine's word for it, and it left him
+    # translating a generic noun back into the object in his hand.
+    _print_all(_card_rows(ctx))
 
     # Import sink
     cands = import_candidates(ctx)

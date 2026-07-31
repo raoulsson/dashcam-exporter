@@ -48,6 +48,43 @@ import_dir = ~/dashcam-data/import
 # is not rebuilt, which is what makes an interrupted render restartable.
 #force = false
 
+# ---------------------------------------------------------------------------
+# THE SD CARD AND THE INTERACTIVE CLI
+#
+# pipeline.py takes no command line arguments at all — everything is a setting
+# here. A flag and a setting are two answers to one question, and the
+# compiled-in default is the one that quietly wins.
+# ---------------------------------------------------------------------------
+
+# The footage source: any directory holding a DCIM tree. The mounted SD card
+# is the common case (the DDPAI mounts as NO NAME unless you renamed it), but a
+# card copied onto an external disk, or a folder someone handed over, works the
+# same. Read by 1) Import SIM (status screen, passed to import-sd-card.sh as
+# --src) and by 9) Delete SIM Data, which erases it. Nothing renders from here —
+# that is import_dir at the top.
+#card = /Volumes/NO NAME
+card = /Users/raoulsson/SimCard31
+
+# Tell your implementation this machine is on a bad connection, so it should
+# skip anything optional that would go and look. It arrives as `world.offline`.
+# Nothing in this repo reads it — there is no networked code left here to skip
+# — so with no website_uploader configured it does nothing at all. It exists so
+# that "am I offline" has ONE name across every target, instead of each one
+# inventing its own and the two spellings disagreeing.
+#offline = false
+
+# Still frames: the preview sheet and the local result page both pull a frame
+# out of each trip. Width is a cap and never upscales.
+#still_width = 1600
+#still_seconds = 1.0
+
+# The result page's frame comes from further in, because the first second of a
+# dashcam clip is often the car still rolling to a stop or a dark garage.
+#site_still_seconds = 2.0
+
+# Colour is off when NO_COLOR is set in the environment. That is a convention
+# every tool honours, not a setting of this one, so it has no key here.
+
 # ============================================================================
 # TRIP GROUPING
 # ============================================================================
@@ -498,39 +535,3 @@ software = true
 # same name wins over .env. See .env.example for the full block.
 
 
-# ---------------------------------------------------------------------------
-# THE SD CARD AND THE INTERACTIVE CLI
-#
-# pipeline.py takes no command line arguments at all — everything is a setting
-# here. A flag and a setting are two answers to one question, and the
-# compiled-in default is the one that quietly wins.
-# ---------------------------------------------------------------------------
-
-# The footage source: any directory holding a DCIM tree. The mounted SD card
-# is the common case (the DDPAI mounts as NO NAME unless you renamed it), but a
-# card copied onto an external disk, or a folder someone handed over, works the
-# same. Read by 1) Import SIM (status screen, passed to import-sd-card.sh as
-# --src) and by 9) Delete SIM Data, which erases it. Nothing renders from here —
-# that is import_dir at the top.
-#card = /Volumes/NO NAME
-card = /Users/raoulsson/SimCard31
-
-# Tell your implementation this machine is on a bad connection, so it should
-# skip anything optional that would go and look. It arrives as `world.offline`.
-# Nothing in this repo reads it — there is no networked code left here to skip
-# — so with no website_uploader configured it does nothing at all. It exists so
-# that "am I offline" has ONE name across every target, instead of each one
-# inventing its own and the two spellings disagreeing.
-#offline = false
-
-# Still frames: the preview sheet and the local result page both pull a frame
-# out of each trip. Width is a cap and never upscales.
-#still_width = 1600
-#still_seconds = 1.0
-
-# The result page's frame comes from further in, because the first second of a
-# dashcam clip is often the car still rolling to a stop or a dark garage.
-#site_still_seconds = 2.0
-
-# Colour is off when NO_COLOR is set in the environment. That is a convention
-# every tool honours, not a setting of this one, so it has no key here.
