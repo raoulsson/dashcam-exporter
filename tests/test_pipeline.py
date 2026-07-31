@@ -240,6 +240,27 @@ class WhereWeLeftOffSurvivesARestart(unittest.TestCase):
         run = drive(menu_items, position, [str(RENDER), "q"])
         self.assertIsNone(P.remembered_step(run.ctx))
 
+    def test_a_remembered_clean_that_the_disk_contradicts_is_dropped(self):
+        """8 completing means the working area was emptied. Footage in it now
+        arrived after — an import that was interrupted or declined does not
+        complete, so the position stays on 8 while the disk fills up behind
+        it, and from 8 the menu offers 1 and 8 but never 2."""
+        ctx = a_ctx()
+        P.remember_step(ctx, CLEAN_WS)
+        position = M.position_for(fake_menu())
+        with mock.patch.object(P.items, "COLD_START_RULES",
+                               ((IMPORT, lambda w: bool(w.imports)),)):
+            P._resume(ctx, position, W.World(imports=(Path("/w/import"),)))
+        self.assertEqual(position.current, IMPORT)
+
+    def test_a_remembered_clean_with_an_empty_workspace_stands(self):
+        """Nothing contradicts it, so it is where he is."""
+        ctx = a_ctx()
+        P.remember_step(ctx, CLEAN_WS)
+        position = M.position_for(fake_menu())
+        P._resume(ctx, position, W.World())
+        self.assertEqual(position.current, CLEAN_WS)
+
     def test_a_nowhere_already_on_disk_is_ignored(self):
         """The ledgers written before that fix still say -1."""
         ctx = a_ctx()

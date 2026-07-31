@@ -1369,13 +1369,13 @@ def print_status(ctx):
     if cands:
         for p in cands:
             n = clip_count(p)
-            print(_state("Import", "%s clips, %s"
+            print(_state("Imported", "%s clips, %s"
                          % (n if n is not None else "?",
                             human_bytes(tree_size(p))), tilde(p)))
     else:
         # Name the folder the config actually points at — import_root is only a
         # fallback, and showing it sends you to create the wrong directory.
-        print(_state("Import", C.dim("empty"),
+        print(_state("Imported", C.dim("empty"),
                      tilde(ctx.render_root if ctx.render_root else ctx.import_root)))
 
     # Renders
@@ -7162,12 +7162,34 @@ def _failed(result):
 
 
 def _resume(ctx, position, world):
-    """Pick up where the operator left off, and only guess when he never was."""
+    """Pick up where the operator left off, and only guess when he never was.
+
+    Or when what he left is no longer true. A remembered position is a fact
+    about what completed, and the world can move past it without anything
+    completing at all.
+    """
     at = remembered_step(ctx)
-    if at is None:
+    if at is None or _undone_since(at, world):
         position.orient(world, items.COLD_START_RULES)
         return
     position.current = at
+
+
+def _undone_since(at, world):
+    """Has the world undone the step the position remembers.
+
+    One case is provable and this is it. 8 completing means the working area
+    was emptied, so footage sitting in it now arrived AFTER — an import that
+    was interrupted or declined does not complete, so the position stays on 8
+    while the disk fills up behind it. From 8 the menu offers 1 and 8, and the
+    operator with 118 clips imported cannot reach 2) Generate Meta.
+
+    Orientation is right for exactly this. It reads the disk, and the disk
+    cannot be older than the position; what made it wrong as a general rule
+    was overriding a position the operator had actually reached, which is not
+    what a contradicted one is.
+    """
+    return at == CLEAN_WS and bool(world.imports)
 
 
 def _startup_note(ctx):
