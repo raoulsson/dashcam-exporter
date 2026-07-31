@@ -2626,19 +2626,32 @@ def _delta_counts(ctx, after):
     new = _never_imported_stamps(frozenset(card_stamps(ctx)), after,
                                  frozenset(excluded_stamps(ctx)))
     here = workspace_stamps(ctx, new)
-    return len(here), len(new) - len(here)
+    return len(here), len(new) - len(here), _bytes_of(ctx.card, new - here)
 
 
-def _delta_lines(here, todo):
+def _bytes_of(card, stamps):
+    """What those clips weigh on the card, both cameras."""
+    return sum(_size_of(p) for p in _card_clips(card)
+               if _stamp_of_name(p.name) in stamps)
+
+
+def _stamp_of_name(name):
+    m = STAMP_RE.search(name)
+    return m.group(1) if m else None
+
+
+def _delta_lines(here, todo, size):
     """What the y is answering, in one line above the prompt.
 
-    Amber on the figures: they are the only thing on this screen that changes
-    between runs, and the whole decision is what they say.
+    Every figure is about the clips IN SCOPE -- newer than the high-water
+    mark, not excluded -- so they add up to what a delta would take and never
+    to what the card holds. Amber, because they are the only thing on this
+    screen that changes between runs and the whole decision is what they say.
     """
     if here:
-        return ("  %s clips already imported, %s remaining"
-                % (C.yellow("%d" % here), C.yellow("%d" % todo)), "")
-    return ("  %s clips to import" % C.yellow("%d" % todo), "")
+        return ("  %s clips already imported, %s remaining (%s)"
+                % (C.yellow("%d" % here), C.yellow("%d" % todo), size), "")
+    return ("  %s clips to import (%s)" % (C.yellow("%d" % todo), size), "")
 
 
 def _leftover_lines():
@@ -2686,9 +2699,11 @@ def step_import(ctx):
         print(C.dim("  holding a DCIM tree (a copied card works the same)."))
         return record(ctx, NAME[IMPORT], SKIPPED, started, "no source, no import")
 
-    clips = clip_count(ctx.card)
-    size = tree_size(ctx.card / "DCIM")
-    print("  Source: %s  (%s clips, %s)" % (tilde(ctx.card), clips, human_bytes(size)))
+    # The path only. It used to carry the card's whole contents -- "131 clips,
+    # 26.2 GB" -- which is a number nothing here acts on: 13 of those belong to
+    # a round already rendered, published and swept, and quoting them next to
+    # the figures that decide this run invites adding the two together.
+    print("  Source: %s" % tilde(ctx.card))
 
     other = claim_out_dir(ctx)
     if other:
@@ -2745,13 +2760,13 @@ def step_import(ctx):
     # clip new again, and item 8 does exactly that when it discards an import.
     after = last_imported_stamp(ctx)
     excluded_stamps(ctx)                 # refresh the cache the split reads
-    here, todo = _delta_counts(ctx, after)
+    here, todo, size = _delta_counts(ctx, after)
     delta = bool(after)
     print()
     if not (here + todo):
         print(C.green("  Nothing new at the source — it is already all imported."))
         return record(ctx, NAME[IMPORT], SATISFIED, started, "no new clips")
-    _print_all(_delta_lines(here, todo))
+    _print_all(_delta_lines(here, todo, human_bytes(size)))
     if not confirm("  Run delta import", True):
         return record(ctx, NAME[IMPORT], ABORTED, started,
                       "Aborted by user pre-run.")
@@ -2823,7 +2838,7 @@ def step_import(ctx):
     record_import(ctx, ctx.card)
 
     return record(ctx, NAME[IMPORT], RAN, started,
-                  "%s clips, %s -> %s" % (clips, human_bytes(size), dest))
+                  "%d clips, %s -> %s" % (todo, human_bytes(size), dest))
 
 
 class ScanResult:
