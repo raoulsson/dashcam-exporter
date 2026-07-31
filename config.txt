@@ -44,10 +44,10 @@
 #
 # WHERE THINGS LIVE
 #
-#   <workspace>/pid.lock        this workspace is busy right now
-#   <workspace>/logs/           one log per render RUN, covering every trip
-#   ~/.dashcam-exporter/state/  how far the card has been imported
-#   ~/.dashcam-exporter/processed/   a receipt per finished trip
+#   <workspace>/pid.lock        		this workspace is busy right now
+#   <workspace>/logs/           		one log per render RUN, covering every trip
+#   ~/.dashcam-exporter/state/  		how far the card has been imported
+#   ~/.dashcam-exporter/processed/   	a receipt per finished trip
 #
 # Nothing the tool needs to remember is inside import_dir or output_dir, so you
 # can delete both in Finder and lose nothing.

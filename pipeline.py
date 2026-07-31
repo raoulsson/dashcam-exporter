@@ -201,6 +201,69 @@ def rule(title="", ch="-"):
 # setting means here exactly what it means there.
 # ---------------------------------------------------------------------------
 
+def card_root(configured):
+    """The directory that actually holds DCIM, at or under what was configured.
+
+    A card copied off with Finder usually arrives wrapped: SimCard31/this/DCIM
+    rather than SimCard31/DCIM, and pointing the setting one level too high is
+    then indistinguishable from an empty card. Everything downstream says
+    `card / "DCIM"`, so resolving it once here keeps every one of those right,
+    including the erase.
+
+    Breadth-first and shallow: the first DCIM found wins, and the walk gives up
+    after a few levels rather than searching a disk somebody pointed this at by
+    accident. Nothing found means the configured path, unchanged -- which reads
+    as "not mounted", which is what an empty folder is.
+    """
+    found = _find_dcim([configured], depth=4)
+    return found or configured
+
+
+def _find_dcim(level, depth):
+    if not level:
+        return None
+    return _found_or_deeper(level, depth)
+
+
+def _found_or_deeper(level, depth):
+    found = _holding_dcim(level)
+    if found:
+        return found
+    return _find_dcim(_next_level(level, depth), depth - 1)
+
+
+def _next_level(level, depth):
+    if depth <= 1:
+        return []
+    return _subdirs_of(level)
+
+
+def _holding_dcim(level):
+    return next(filter(lambda d: (d / "DCIM").is_dir(), level), None)
+
+
+def _subdirs_of(level):
+    out = []
+    for d in level:
+        out += sorted(filter(_real_dir, _safe_iterdir(d)))
+    return out
+
+
+def _real_dir(p):
+    """A real directory. Symlinks are not followed: the walk would leave the
+    place it was pointed at, and a link back up its own tree would not end."""
+    if p.is_symlink():
+        return False
+    return p.is_dir()
+
+
+def _safe_iterdir(d):
+    try:
+        return list(d.iterdir())
+    except OSError:
+        return []
+
+
 def load_config(path):
     """key = value, '#' starts a comment to end of line, blank lines ignored.
 
@@ -329,7 +392,7 @@ class Ctx:
         # nothing said so. DASHCAM_IMPORT_ROOT still wins for a one-off.
         self.import_root = Path(os.environ.get("DASHCAM_IMPORT_ROOT")
                                 or self.render_root).expanduser()
-        self.card = Path(self.cfg.get("card", FALLBACK_CARD)).expanduser()
+        self.card = card_root(Path(self.cfg.get("card", FALLBACK_CARD)).expanduser())
 
         try:
             self.output_height = int(self.cfg.get("output_height", "1080"))
@@ -1014,16 +1077,34 @@ def _age_phrase(page):
     return "built %s ago" % age
 
 
+def _state(label, state, where):
+    """One status row: what it is, what state it is in, and where that is.
+
+    The path in brackets at the end, in its own column, because it is the same
+    path every launch and the state is the part that changed. Left where the
+    state was, the eye has to find the one word that moved among three
+    different-length paths.
+    """
+    return "    %-12s %-18s (%s)" % (label, state, C.dim(where))
+
+
 def _card_rows(ctx):
     """Mounted or not, and where. One row, one question answered."""
     if not (ctx.card / "DCIM").is_dir():
-        return ("  SIM Card     %s  %s" % (C.dim("not mounted"), C.dim(tilde(ctx.card))),)
-    return ("  SIM Card     %s  %s" % (C.green("mounted"), _card_note(ctx)),)
+        return (_state("SIM Card", C.dim("not mounted"), tilde(ctx.card)),)
+    return (_state("SIM Card", C.green("mounted") + "  " + _card_note(ctx),
+                   tilde(ctx.card)),)
+
+
+def _render_state(mp4s, size):
+    if not mp4s:
+        return C.yellow("none")
+    return C.bold("%d mp4, %s" % (len(mp4s), human_bytes(size)))
 
 
 def _card_note(ctx):
     n = clip_count(ctx.card)
-    return C.dim("%s  (%s clips)" % (tilde(ctx.card), n if n is not None else "?"))
+    return C.dim("%s clips" % (n if n is not None else "?"))
 
 
 def print_configuration(ctx):
@@ -1066,22 +1147,19 @@ def print_status(ctx):
     if cands:
         for p in cands:
             n = clip_count(p)
-            print("  Import       %s  %s" % (
-                C.bold(tilde(p)),
-                C.dim("%s clips, %s" % (n if n is not None else "?", human_bytes(tree_size(p))))))
+            print(_state("Import", C.bold("%s clips, %s"
+                                          % (n if n is not None else "?",
+                                             human_bytes(tree_size(p)))), tilde(p)))
     else:
         # Name the folder the config actually points at — import_root is only a
         # fallback, and showing it sends you to create the wrong directory.
-        print("  Import       %s  %s" % (C.dim("empty"),
-                                         C.dim(tilde(ctx.render_root if ctx.render_root
-                                                     else ctx.import_root))))
+        print(_state("Import", C.dim("empty"),
+                     tilde(ctx.render_root if ctx.render_root else ctx.import_root)))
 
     # Renders
     mp4s = rendered_mp4s(ctx.out_dir)
     size = sum(p.stat().st_size for p in mp4s) if mp4s else 0
-    print("  Rendered     %s  %s" % (
-        C.bold("%d mp4" % len(mp4s)) if mp4s else C.yellow("none"),
-        C.dim("%s in %s" % (human_bytes(size), tilde(ctx.out_dir)))))
+    print(_state("Rendered", _render_state(mp4s, size), tilde(ctx.out_dir)))
 
 
     # The publishing half, in the target's own words. Which rows those are, and
