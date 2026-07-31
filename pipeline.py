@@ -6938,10 +6938,12 @@ class Runner:
         which is what "steps back by one" means for a move that never took
         effect."""
         print()
-        print(C.yellow("  Interrupted — %s stopped." % item.name()))
-        self.ctx.results.append(StepResult(item.name(), ABORTED, 0,
-                                          "Aborted by user mid-run."))
-        return item.aborted("interrupted")
+        note = "Aborted by user mid-run."
+        self.ctx.results.append(StepResult(item.name(), ABORTED, 0, note))
+        # The same words to the item, because the outcome's note is what the
+        # line under this one prints. Two spellings of one event gave the
+        # summary "Aborted by user mid-run." and the screen "interrupted".
+        return item.aborted(note)
 
 
 def _nothing_to_do_lines(outcome):

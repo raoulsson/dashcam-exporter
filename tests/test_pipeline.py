@@ -982,7 +982,7 @@ class TheRunner(unittest.TestCase):
         menu_items, position = machine(at=M.NOWHERE)
         menu_items[IMPORT].execute.side_effect = P.Aborted()
         run = drive(menu_items, position, ["1", "q"])
-        menu_items[IMPORT].aborted.assert_called_once_with("interrupted")
+        menu_items[IMPORT].aborted.assert_called_once_with("Aborted by user mid-run.")
         self.assertEqual(run.position.current, M.NOWHERE)
         self.assertEqual([r.status for r in run.ctx.results], [P.ABORTED])
         self.assertEqual(P._exit_code(run.ctx), 0, "stopping on purpose is not a failure")
