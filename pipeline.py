@@ -2708,62 +2708,90 @@ def parse_scan(root, lines):
 
 
 def step_progress(ctx, world):
-    """Progress: the files on disk and what has been done to them. Read-only.
+    """Progress: one line per stage, saying what exists. Read-only.
 
-    An observation of state, not a transition in the flow: which trips exist,
-    which are excluded, which are rendered. It generates nothing and writes
-    nothing.
+    An observation of state, not a transition: it generates nothing and writes
+    nothing. Seven lines in the order the pipeline runs, each answering the
+    same question about its own stage -- is there anything, and how much.
 
-    The destination gets ONE line under the table rather than two columns in
-    it. There is one answer about the whole import now, and repeating the same
-    word down a column of trips would draw it as a per-trip fact that nobody
-    can act on. It is read off the world already captured for this dispatch
-    rather than asked again here — a report that goes and looks a second time
-    can disagree with the gates the operator just read.
+    It used to be a table of trips with a sidecars/rendered column, plus the
+    destination's answer, plus the count of everything ever processed, plus
+    the session summary. Every one of those was true and none of them was the
+    question being asked: the operator presses p to see where the workspace
+    got to, and a table that grows with the card buried that in rows. The
+    trip ids are still in the sidecars for anyone who wants them.
     """
     started = time.time()
-    trips = listed_trips(ctx)
-    excluded = excluded_stamps(ctx)
-    if not trips:
-        cands = import_candidates(ctx)
-        if cands:
-            n = clip_count(cands[0])
-            print("  %s clips imported in %s — no sidecars yet." % (n, tilde(cands[0])))
-            print(C.dim("  Run %d) %s to write them." % (META, NAME[META])))
-        else:
-            print("  Nothing imported yet.")
-            print(C.dim("  Run %d) %s to bring footage in." % (IMPORT, NAME[IMPORT])))
-        # The one thing there is still to say after a cycle closes: an empty
-        # working area is the finished state, not a fresh install.
-        _print_all(_processed_line(ctx))
-        print_summary(ctx, close=False)
-        return record(ctx, NAME[PROGRESS], RAN, started, "no trips yet")
-
-    renders = {}
-    for p in rendered_mp4s(ctx.out_dir):
-        try:
-            renders[p.name] = p.stat().st_size
-        except OSError:
-            continue
-    n_rendered = 0
-    print("  %-38s %-9s %s" % ("trip", "sidecars", "rendered"))
-    for t in trips:
-        mp4 = next((n for n in sorted(renders) if n.startswith(t["id"] + "_h")), None)
-        n_rendered += 1 if mp4 else 0
-        print("  %-38s %-9s %s" % (t["id"], "yes", "yes" if mp4 else "-"))
-    print()
-    print("  %d trips: %d rendered" % (len(trips), n_rendered))
-    _print_all(_destination_line(world.target))
-    _print_all(_processed_line(ctx))
-    if excluded:
-        print(C.dim("  %d clip stamps excluded on purpose." % len(excluded)))
-    # What this session has done, without waiting for the exit to say it. The
-    # table above is the workspace; this is the cycle, and the two answer
-    # different questions -- "what is here" and "how did it get that way".
-    print_summary(ctx, close=False)
+    _print_all(_progress_lines(ctx, world))
     return record(ctx, NAME[PROGRESS], RAN, started,
-                  "%d trips, %d rendered, destination %s"
-                  % (len(trips), n_rendered, world.target.complete.value))
+                  "%d trips, %d rendered" % (len(world.metas), len(world.renders)))
+
+
+def _progress_lines(ctx, world):
+    return (_imported_line(world), _excluded_line(world), _meta_line(world),
+            _rendered_line(world), _preview_line(world), _built_line(world),
+            _uploaded_line(world))
+
+
+def _state_line(text, there):
+    """Dim when the answer is "nothing yet", exactly as the status block does
+    it: absent is the ordinary state at the start of a cycle, and a colour
+    that shouts about the normal case has nothing left for the odd one."""
+    if there:
+        return "  " + text
+    return C.dim("  " + text)
+
+
+def _imported_line(world):
+    if not world.imports:
+        return _state_line("nothing imported", False)
+    where = world.imports[0]
+    return _state_line("%s clips imported into %s"
+                       % (clip_count(where), tilde(where)), True)
+
+
+def _excluded_line(world):
+    return _state_line("%d trips excluded" % len(world.dropped_ids),
+                       bool(world.dropped_ids))
+
+
+def _meta_line(world):
+    if not world.metas:
+        return _state_line("no meta, no sidecars", False)
+    return _state_line("%d trips with meta and sidecars" % len(world.metas), True)
+
+
+def _rendered_line(world):
+    if not world.renders:
+        return _state_line("no mp4 rendered", False)
+    return _state_line("%d mp4 rendered, %s"
+                       % (len(world.renders),
+                          human_bytes(sum(r.size for r in world.renders))), True)
+
+
+def _preview_line(world):
+    if not world.stills_current:
+        return _state_line("no website preview", False)
+    return _state_line("website preview built", True)
+
+
+def _built_line(world):
+    """The local page or a gathered folder -- whichever this edition makes."""
+    built = world.local_page or bool(world.final_folders)
+    return _state_line("website built" if built else "no website build", built)
+
+
+def _uploaded_line(world):
+    """The destination's own answer, and only its own. UNKNOWN and NA are both
+    "not said to be up there", which is what the negative line says.
+
+    With no trips there is no answer worth printing either. The question put
+    to the plugin is "are all of THESE trips complete", and an empty list
+    makes a yes vacuous -- which is how an untouched workspace, two stray
+    clips and no sidecar anywhere read as "website uploaded".
+    """
+    up = bool(world.trip_ids) and world.target.complete is menu.Evidence.YES
+    return _state_line("website uploaded" if up else "no website upload", up)
 
 
 def _processed_line(ctx):
@@ -6669,7 +6697,7 @@ class Runner:
         item = self.menu[number]
         print()
         print(rule(item.name(), ch="="))
-        print(C.dim("  " + item.description()))
+        _print_all(_description_line(item))
         hint_reset()
         started, already = time.time(), len(self.ctx.results)
         outcome = self._execute(item)
@@ -6777,6 +6805,18 @@ def _reset_quietly(plugin):
         # Its own cache is its own problem. A step that just finished must not
         # be reported as failed because a notification about it went wrong.
         print(C.dim("  (%s.reset() raised: %s)" % (plugin.name, e)))
+
+
+def _description_line(item):
+    """What the step is about to do, under its rule.
+
+    Not for a view. Progress opens on its own first line -- what is here --
+    and a sentence explaining that the read-only screen is read-only is one
+    more line between the key and the answer.
+    """
+    if menu.is_view(item):
+        return ()
+    return (C.dim("  " + item.description()),)
 
 
 def _remember_position(ctx, item, position):
