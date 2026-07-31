@@ -2609,7 +2609,6 @@ def step_import(ctx):
                        _same_card(ctx, leftovers)):
             return record(ctx, NAME[IMPORT], SKIPPED, started,
                           "declined: import area not empty")
-        print()
 
     # Delta copy is the default. A card left in the car accumulates: this one
     # holds 1039 front clips of which 427 were already taken in last time, and
@@ -2628,8 +2627,12 @@ def step_import(ctx):
         # taken in AT SOME POINT -- a round since rendered, published and swept
         # has none of its clips here at all. Two in the import and thirteen
         # "already here" is what that sentence produced.
-        print("  At the source: %s new, %s imported before" % (
-            C.bold("%d clips" % n_new), C.dim("%d" % n_old)))
+        # Both plain. Dim said "this one matters less", which is not true of
+        # the count that decides whether a delta copy is worth taking, and the
+        # words either side already tell them apart. Amber was the alternative
+        # and it means "look at this" everywhere else in here; neither number
+        # is a problem.
+        print("  At the source: %d clips new, %d imported before" % (n_new, n_old))
         if not n_new:
             print(C.green("  Nothing new at the source — it is already all imported."))
             return record(ctx, NAME[IMPORT], SATISFIED, started, "no new clips")
@@ -6630,11 +6633,27 @@ class Runner:
             pass
 
     def _turn(self):
-        world = capture_world(self.ctx, menu.Scope.LOCAL)
+        world = self._look()
         print_menu(self.ctx, self.menu, self.position, world)
         print()
         _HINTED[0] = True                      # no hint on the menu itself
         return self._dispatch(read_key("Select> "))
+
+    def _look(self):
+        """The capture behind every menu draw, and it is not always cheap.
+
+        Every capture asks the plugin -- deliberately, because the exporter
+        has no idea what is behind that interface and budgeting on a guess
+        about someone else's code is what this seam exists to prevent. The
+        plugin caches or does not, as it sees fit. But a step that performed
+        work has just told it to forget, so the draw right after an import,
+        an exclude or a clean-up is the one that pays full price for the
+        answer -- and it did that in silence. Aborting an import and watching
+        nothing happen for a minute reads as a hang, and the fix for that is
+        to say what is going on, not to ask less often.
+        """
+        with waiting("Reading the workspace and querying the plugin..."):
+            return capture_world(self.ctx, menu.Scope.LOCAL)
 
     def _dispatch(self, sel):
         """Empty is Enter on its own, which is not a choice and not an error.
