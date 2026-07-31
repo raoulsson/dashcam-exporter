@@ -1300,11 +1300,13 @@ def _free_state(usage, needed):
     # eye, and a figure that reads the same every launch is not it. Red is
     # earned by a number that says the next step cannot finish.
     free = "%s free of %s" % (human_bytes(usage.free), human_bytes(usage.total))
-    if not needed:
-        return free
-    if usage.free < needed:
-        return C.red("%s — %s queued, will not fit" % (free, human_bytes(needed)))
-    return free + C.dim("  — %s queued" % human_bytes(needed))
+    # The queued figure only earns its place when it does not fit. Printed on
+    # every launch beside a disk with 140 GB free it was a second number to
+    # read past to get to the one that answers the question, and it moved --
+    # so it looked like news every time it changed, about nothing.
+    if needed and usage.free < needed:
+        return C.red("%s — will not fit the %s queued" % (free, human_bytes(needed)))
+    return free
 
 
 def _volume_path(mount):
