@@ -21,6 +21,26 @@ echo "=== guards (python) ==="
 "$PY" -m unittest discover -s tests -q 2>&1 | tail -5 || RC=1
 
 echo
+echo "=== undefined names (pyflakes) ==="
+# Only this class, and only because it costs nothing to catch and everything to
+# miss: a name that does not exist is a crash the moment the line runs, and the
+# suite can be entirely green over one. It was -- 408 tests passed while main()
+# referred to a variable nobody assigned, because not one of them starts the
+# program. The other pyflakes warnings are style and some are deliberate
+# (uploader.py re-exports on purpose), so they are not a reason to fail a build.
+if [ -x ".venv/bin/pyflakes" ]; then
+    UNDEF="$(.venv/bin/pyflakes ./*.py tests/*.py 2>&1 | grep "undefined name" || true)"
+    if [ -n "$UNDEF" ]; then
+        echo "$UNDEF"
+        RC=1
+    else
+        echo "  none"
+    fi
+else
+    echo "  pyflakes not installed - skipped"
+fi
+
+echo
 echo "=== import-sd-card.sh (shell) ==="
 bash tests/test_import_sh.sh || RC=1
 

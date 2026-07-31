@@ -34,6 +34,7 @@ import functools
 import importlib.util
 import io
 import sys
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -243,6 +244,9 @@ class ThePluginIsToldWhenItsInputChanged(unittest.TestCase):
 # How long it took, measured where the operator waited
 # ---------------------------------------------------------------------------
 
+SLEPT = 0.05
+
+
 class TheClockRunsFromTheMenusSideOfTheCall(unittest.TestCase):
     """Each body used to time itself from its own first line.
 
@@ -271,11 +275,16 @@ class TheClockRunsFromTheMenusSideOfTheCall(unittest.TestCase):
         """The body logs a duration of zero, as one that times itself after the
         work has finished would. The dispatch is what decides."""
         def slow(ctx):
-            time.sleep(0.05)
+            time.sleep(SLEPT)
             ctx.results.append(P.StepResult("Upload Website", P.RAN, 0.0, "deployed"))
             return M.did("deployed")
         results = self._dispatch(slow)
-        self.assertGreater(results[0].seconds, 0.0)
+        # Not "> 0". A body that RAISES also produces a small positive
+        # duration, so that assertion passed while this test's sleep was
+        # never reached — an undefined name, swallowed by the runner's
+        # catch-all. It has to be at least as long as the sleep.
+        self.assertGreaterEqual(results[0].seconds, SLEPT)
+        self.assertTrue(results[0].status is not P.FAILED, "the body did not run")
 
     def test_a_body_that_logs_twice_gets_one_wait_on_both(self):
         """They are one dispatch, so they are one wait — not a duration split

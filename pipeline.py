@@ -38,7 +38,6 @@ code left here.
 from __future__ import annotations
 
 import base64
-import functools
 import html
 import itertools
 import json
