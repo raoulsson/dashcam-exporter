@@ -1570,7 +1570,7 @@ def _read_answer(prompt, default):
     if not _raw_capable():
         return _typed_answer(prompt, default)
     _print_all(_hint_lines())
-    ch = _one_char_at(C.bold(prompt))
+    ch = _one_char_at(prompt)
     return _from_key(ch, default)
 
 
@@ -2716,7 +2716,9 @@ def step_import(ctx):
     if not n_new:
         print(C.green("  Nothing new at the source — it is already all imported."))
         return record(ctx, NAME[IMPORT], SATISFIED, started, "no new clips")
-    if not confirm("  Import %d new clips?" % n_new, True):
+    # Amber on the whole count: it is the one thing on the screen that changes
+    # between runs, and it is what the y is answering.
+    if not confirm("  Delta import: %s?" % C.yellow("%d new clips" % n_new), True):
         return record(ctx, NAME[IMPORT], SKIPPED, started, "declined at the source")
 
     # No prompt for this. It names the folder the copy lands in, which is an
