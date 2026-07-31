@@ -2799,10 +2799,10 @@ def step_import(ctx):
         # by a run that finished days ago, a fact recorded in a ledger the shell
         # script cannot read. Erasing them here would be a delete on somebody
         # else's evidence.
-        print(C.dim("  Source kept. Erasing it would also remove the clips this run"))
-        print(C.dim("  skipped, and this run checked nothing about those — they were"))
-        print(C.dim("  verified by the earlier import, not by this one. Erase the card"))
-        print(C.dim("  yourself once these have rendered and uploaded."))
+        # Said in the comment above rather than on screen: it explains a
+        # question that is no longer asked, and a paragraph of reasoning about
+        # an option nobody was offered is four lines between the operator and
+        # the copy he started.
         erase = False
     else:
         print(C.dim("  The source is NOT erased by default; import-sd-card.sh only deletes"))
@@ -2819,16 +2819,17 @@ def step_import(ctx):
     if str(ctx.card) != FALLBACK_CARD:
         cmd[1:1] = ["--src", str(ctx.card)]
 
-    # No "Run: ... ?" either. Copying only the new clips was already answered,
-    # and so was erasing the card; the command line adds nothing you can act on.
-    # It is echoed so it is on screen and in the log.
+    # Not echoed. The command line is this module's business -- which flags it
+    # composed, where the script lives -- and the operator answered the only
+    # question in it two lines ago. What is worth keeping from the run is what
+    # it CONCLUDED, which is the keep list below; the script's own preamble
+    # ("only clips newer than ...", "306 of 888 files selected") restates the
+    # delta decision he just made, in the script's numbers rather than his.
     prepare_for_import(ctx)
-    print(C.dim("  %s" % " ".join(cmd)))
-
     rc, lines = run_stream(cmd, ctx.exporter, "Import", parser=rsync_parser,
                            env_extra=env,
-                           keep=lambda l: l.startswith(("Verified:", "Card cleaned", "Done.",
-                                                        ">>> only clips newer", ">>> ")))
+                           keep=lambda l: l.startswith(("Verified:", "Card cleaned",
+                                                        "Done.")))
     if rc != 0:
         return record(ctx, NAME[IMPORT], FAILED, started, "exit %d" % rc)
 
