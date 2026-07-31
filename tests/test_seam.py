@@ -706,12 +706,18 @@ class TestNothingUnprovenErasesFootage(SeamTest):
     def test_the_erase_says_whose_answer_it_acted_on(self):
         """Attribution, in the record that outlives the screen. Not a
         safeguard — a component inside the trust boundary needs none — but the
-        question "who said the footage was safe" gets asked weeks later."""
+        question "who said the footage was safe" gets asked weeks later.
+
+        RESTATED: it was on the exit summary, which is a screen, and a screen
+        is read once and then scrolls. Worse, it was printed on a DISCARD too,
+        naming a plugin that was never asked and had no part in the decision.
+        It is now the ledger's note for that sweep — a file, beside the
+        high-water mark, which is the one thing here designed to outlive
+        everything else.
+        """
         b, ran = self._erased(Recorder())
-        cleaned = [r for r in b.ctx.results if r.name == items.NAMES[CLEAN_WS]]
-        self.assertTrue(cleaned)
-        self.assertIn("/a/test/plugin.py:RecordingBuilder:RecordingUploader",
-                      cleaned[-1].detail)
+        note = P.read_ledger(b.ctx)["history"][-1]["note"]
+        self.assertIn("/a/test/plugin.py:RecordingBuilder:RecordingUploader", note)
 
     def test_anything_but_the_word_erases_nothing(self):
         b, ran = self._erased(Recorder(), typed="yes")

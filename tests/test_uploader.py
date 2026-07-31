@@ -467,11 +467,18 @@ class TestTheEraseSaysWhoseAnswerItActedOn(unittest.TestCase):
         self.assertIn("NOT verified", said)
         self.assertNotIn("Proceeding on", said)
 
-    def test_the_recorded_step_outlives_the_screen(self):
-        """A screen is read once, by one person. The question "who said this
-        was safe" gets asked after the session is over."""
-        self.assertIn("fortknox", self.P._on_whose_word(self.target))
-        self.assertEqual(self.P._on_whose_word(W.TargetFacts()), "")
+    def test_the_summary_line_does_not_attribute_the_erase(self):
+        """REMOVED: the exit summary used to carry "(on <name> (<spec>)\'s
+        answer)".
+
+        Two reasons it went. It named the plugin on a DISCARD, where the
+        destination was not asked and had no part in the decision -- an
+        attribution that is simply false. And on a sweep it printed the whole
+        loader spec, path and both class names, which is most of a line to say
+        one thing. The banner still names the origin on screen at the moment
+        the word is typed, which is where the decision is actually made.
+        """
+        self.assertFalse(hasattr(self.P, "_on_whose_word"))
 
 
 class TestTheToolStopsRatherThanDegrading(unittest.TestCase):

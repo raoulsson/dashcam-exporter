@@ -2384,6 +2384,14 @@ def archived_trips(ctx):
     return len(_safe_rglob(archive_dir(ctx), "trip_*_meta.json"))
 
 
+def _swept_on(ctx):
+    """Who vouched for the renders this sweep is about to remove."""
+    plugin = getattr(ctx, "plugin", None)
+    if plugin is None:
+        return "cleanup after a local build"
+    return "cleanup on %s's answer (%s)" % (plugin.name, plugin.origin)
+
+
 def purge_published_renders(ctx, root):
     """Empty the working area. Everything goes except a short keep-list.
 
@@ -2409,9 +2417,13 @@ def purge_published_renders(ctx, root):
 
     The ledger is written BEFORE anything is removed. It is the only fact here
     that cannot be recovered from somewhere else — how far the imports have
-    reached — and a crash midway must not lose it.
+    reached — and a crash midway must not lose it. Its note carries WHOSE
+    answer the sweep acted on, which used to be tacked onto the exit summary:
+    a screen is read once and then scrolls, and "who said the footage was
+    safe" is a question asked weeks later, so it belongs in the file that
+    outlives the session rather than on the line that does not.
     """
-    write_ledger(ctx, last_imported_stamp(ctx), "cleanup after publish")
+    write_ledger(ctx, last_imported_stamp(ctx), _swept_on(ctx))
     archive_sidecars(ctx)
 
     out = ctx.out_dir
@@ -5259,9 +5271,8 @@ def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
     else:
         _keeping_the_renders(why, stragglers)
     return _outcome(record(ctx, NAME[CLEAN_WS], RAN, started,
-                           "%d files, %s freed%s"
-                           % (files + n, human_bytes(size + freed),
-                              _on_whose_word(fresh.target))))
+                           "%d files, %s freed"
+                           % (files + n, human_bytes(size + freed))))
 
 
 def _unclaim_the_discarded(ctx, world):
@@ -5301,18 +5312,6 @@ def _stamps_in(files):
 def _stamp_in_name(name):
     m = STAMP_RE.search(name)
     return m.group(1) if m else None
-
-
-def _on_whose_word(target):
-    """The origin, carried into the summary line and the crash log.
-
-    The banner said it on screen; this is the copy that outlives the session.
-    A screen is read once and by one person, and the question "who said the
-    footage was safe to erase" gets asked weeks later.
-    """
-    if not target.configured:
-        return ""
-    return " (on %s's answer)" % target.origin
 
 
 def _keeping_the_renders(why, stragglers):
