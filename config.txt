@@ -1,427 +1,122 @@
 # dashcam-exporter — config.txt
 #
-# Every setting here is OPTIONAL. Uncomment the lines you want to change.
-# Precedence: command-line flag  >  this file  >  built-in default.
-# Booleans accept: true / false / yes / no / 1 / 0.
-#
-# Pass --config /path/to/this.txt to use a non-default location, or run
+# Every setting is OPTIONAL: uncomment what you want to change. Booleans accept
+# true / false / yes / no / 1 / 0. Regenerate this file any time with
 #   python3 make_dashcam_videos.py --write-config ./config.txt
-# to regenerate this template anytime.
+#
+#
+# WHAT THIS TOOL DOES, IN ONE PASS
+#
+#   card  ->  import_dir  ->  renders + sidecars in output_dir  ->  published
+#
+# The menu walks that: 1) Import SIM copies the card, 2) Generate Meta writes a
+# sidecar per trip, 5) Render Videos encodes them, 6) Build Website makes what
+# gets published, 7) Upload Website puts it online, 8) Clean Workspace erases
+# the copies once they are safely elsewhere.
+#
+#
+# TWO EDITIONS, AND YOU ARE IN ONE OF THEM
+#
+#   LOCAL PAGE   -- nothing configured below under PUBLISHING.
+#                   6) Build Website writes one self-contained .html into
+#                   output_dir: every still embedded, every route drawn from
+#                   its .gpx, opens with no network. 7) Upload Website does not
+#                   exist. This is the whole tool for most people.
+#
+#   UPLOADER     -- `website_uploader` names a plugin you supply.
+#                   6) and 7) become that plugin's: it decides what a website
+#                   is and where it goes -- S3, rsync, FTP, a folder on a NAS.
+#                   The tool never learns what your destination is; it asks the
+#                   plugin whether the trips are there before it erases
+#                   anything. examples/local_website.py is a working one.
+#
+# The status screen names which edition you are in at launch.
+#
+#
+# WHERE THINGS LIVE
+#
+#   <workspace>/pid.lock        this workspace is busy right now
+#   <workspace>/logs/           one log per render
+#   ~/.dashcam-exporter/state/  how far the card has been imported
+#   ~/.dashcam-exporter/processed/   a receipt per finished trip
+#
+# Nothing the tool needs to remember is inside import_dir or output_dir, so you
+# can delete both in Finder and lose nothing.
+#
+#
+# THE SETTINGS, IN THE ORDER YOU ARE LIKELY TO WANT THEM
+#
+#   1  THE CARD              where the footage comes from
+#   2  THE DIRECTORIES       workspace, import_dir, output_dir
+#   3  PUBLISHING            the plugin, if you have one
+#   4  TRIP GROUPING         what counts as one drive
+#   5  OUTPUT SIZE / QUALITY encoder settings
+#   6  THE RESULT PAGE       the local edition's page
+#   7  OVERLAYS              text burned into the video
+#   8  MAP WIDGET PANEL      the moving map
+#   9  REAR PiP              the rear camera inset
+#  10  FRONT CAMERA CROP
+#  11  AUDIO
+#  12  PARKING SKIP          long standstills
+#  13  ODDS AND ENDS
+#
 
 
 # ============================================================================
-# INPUT / OUTPUT
+# 1. THE CARD
 # ============================================================================
 
-# The WORKSPACE: where the footage you are working on lives. Imports land here
-# as <import_dir>/<YYYY-MM-DD>/DCIM/..., and rendering, previewing and dropping
-# all read from it. It must contain (or contain a day folder containing)
-# DCIM/200video/{front,rear} and optionally DCIM/203gps.
+# The footage source: any directory holding a DCIM tree. A mounted SD card is
+# the usual case (a DDPAI mounts as NO NAME unless you renamed it), but a card
+# copied onto an external disk, or a folder someone handed you, works the same
+# — the tool calls all of them the card and the status screen says `mounted` or
+# `not mounted` for any of them.
 #
-# The card is NOT this. It is `card`, further down, and it is only read by
-# 1) Import SIM. Keeping them apart is what lets the card go back in the car while
-# a render runs for hours off the copy — and it removes a real ambiguity: when
-# one setting meant both, "where does this render from" had two answers, and an
-# install that had configured neither read from a mount that might not be there.
-#
-# Rendering straight off the card is still possible: point this at the card. It
-# is the exception, not the arrangement the tool assumes.
-#
-# THE WORKSPACE. The root where you want your data during import and export.
-# Everything that belongs to a SESSION rather than to the footage lives here:
-# pid.lock, which says this workspace is busy, and logs/.
-#
-# Declared rather than worked out, and that is the whole point of it. It used
-# to be inferred from the parent of the import directory, which is fine while
-# import sits in a folder made for it and nonsense the moment it does not --
-# import_dir=/usr/bin made /usr the workspace. Declared, you can point the two
-# trees at two different disks and the session still has somewhere to live:
+# Read by 1) Import SIM, which copies from here, and by 9) Delete SIM Data,
+# which erases it. Nothing renders from here: that is import_dir.
+#card = /Volumes/NO NAME
+card = /Users/raoulsson/SimCard31
+
+# ============================================================================
+# 2. THE DIRECTORIES
+# ============================================================================
+
+# Three paths, and the tool never guesses any of them from the others. They can
+# sit on three different disks:
 #
 #   workspace  = /tmp
 #   import_dir = /Volumes/disk11/incoming
 #   output_dir = /Volumes/disk423/renders
 #
-# is a sentence that means something.
+
+# The root where your data lives during import and export. What belongs to a
+# SESSION rather than to the footage goes here: pid.lock, which says this
+# workspace is busy, and logs/. import_dir and output_dir default inside it.
 workspace = ~/dashcam-data
 
-# Was called `root`, which is still read so existing configs keep working.
-# import_dir wins if both are set.
+# Where a copy of the card is kept. Change this only to use a bigger disk
+# during import. Its contents are deleted by 8) Clean Workspace, once the trips
+# are confirmed published — nothing else in here is the tool's.
+#
+# Rendering straight off the card is possible: point this at the card. That is
+# the exception, not what the tool assumes, and it means the card cannot go
+# back in the car while the encode runs.
+#
+# Also accepts the older name `root`. import_dir wins if both are set.
 import_dir = ~/dashcam-data/import
 
-# Where meta data like sidecars for the website and the rendered drives are
-# stored. They are uploaded from here, or ready for you to pick up, before you
-# clean the workspace. Unset, it is <workspace>/output.
+# Where the sidecars and the rendered drives are written. They are published
+# from here, or yours to pick up, before you clean the workspace.
 #
-# This matters more than it looks. Two checkouts sharing one output directory
-# means 8) Clean Workspace in either erases the other's working area, and it
-# did: a clone that had set its import dir but not this inherited the first
-# one's output and deleted a render in progress.
+# Two checkouts must not share one: 8) Clean Workspace in either would erase
+# the other's working area. The tool writes an owner marker and refuses to
+# sweep a directory another checkout claims, but the setting is the fix.
 #
-# Was called `out`, which is still read so existing configs keep working.
-# output_dir wins if both are set.
+# Also accepts the older name `out`. output_dir wins if both are set.
 #output_dir = ~/dashcam-data/output
 
-
-# Re-encode even when the output already exists. Off by default: a finished mp4
-# is not rebuilt, which is what makes an interrupted render restartable.
-#force = false
-
-# ---------------------------------------------------------------------------
-# THE SD CARD AND THE INTERACTIVE CLI
-#
-# pipeline.py takes no command line arguments at all — everything is a setting
-# here. A flag and a setting are two answers to one question, and the
-# compiled-in default is the one that quietly wins.
-# ---------------------------------------------------------------------------
-
-# The footage source: any directory holding a DCIM tree. The mounted SD card
-# is the common case (the DDPAI mounts as NO NAME unless you renamed it), but a
-# card copied onto an external disk, or a folder someone handed over, works the
-# same. Read by 1) Import SIM (status screen, passed to import-sd-card.sh as
-# --src) and by 9) Delete SIM Data, which erases it. Nothing renders from here —
-# that is import_dir at the top.
-#card = /Volumes/NO NAME
-card = /Users/raoulsson/SimCard31
-
-# Tell your implementation this machine is on a bad connection, so it should
-# skip anything optional that would go and look. It arrives as `world.offline`.
-# Nothing in this repo reads it — there is no networked code left here to skip
-# — so with no website_uploader configured it does nothing at all. It exists so
-# that "am I offline" has ONE name across every target, instead of each one
-# inventing its own and the two spellings disagreeing.
-#offline = false
-
-# Still frames: the preview sheet and the local result page both pull a frame
-# out of each trip. Width is a cap and never upscales.
-#still_width = 1600
-#still_seconds = 1.0
-
-# The result page's frame comes from further in, because the first second of a
-# dashcam clip is often the car still rolling to a stop or a dark garage.
-#site_still_seconds = 2.0
-
-# Colour is off when NO_COLOR is set in the environment. That is a convention
-# every tool honours, not a setting of this one, so it has no key here.
-
 # ============================================================================
-# TRIP GROUPING
-# ============================================================================
-#
-# The publishing unit is a "trip": a park-to-park unit anchored on where the car
-# last parked (a configured home is an extra park target).
-#   DEPART (drive away from the anchor) -> drive -> ARRIVE + PARK (return and
-#   come to a stop). The departure and arrival are found by VIDEO ego-motion, so
-#   they land on the real pull-out / pull-in, not on a GPS radius crossing.
-# A stop ELSEWHERE (not the anchor) never closes a trip, so A -> B -> hang out
-# ANY length of time -> A is ONE trip with the stop at B cut out. Between trips
-# the car sits parked at the anchor; those idle clips belong to no trip. A
-# ROLLOVER across trip_day_rollover:00 (04:00, not midnight) also force-closes,
-# bounding a one-way relocation (drive to a base, sleep, drive back = two trips).
-# Every interior stop becomes a 'Fast forwarding...' slide (no duration split).
-# Video needs numpy + opencv; without them it falls back to the GPS radius.
-#
-# Each trip is written as trip_<day>_<HH-MM>_<idx> with a _meta.json sidecar
-# carrying its day label, so a publishing UI can group a day's trips together.
-#
-# YOUR HOME. Set these two to where you park and you are done — a trip closes
-# when the car comes back within home_radius_m of this point. Leave them unset
-# and the exporter simply has no home anchor: trips still work, they just close
-# on returning to wherever each one started.
-#
-# Zurich is here as a working example. Replace it with your own coordinates
-# (right-click a spot in Google Maps -> the first entry is "lat, lon").
-#home_lat = 47.3769
-#home_lon = 8.5417
-#
-# PRIVACY, only if you care: this file is committed. If you plan to push your
-# fork and would rather not publish where you live, put the same two values in
-# a gitignored .env instead —
-#     SET_HOME_LAT=47.3769
-#     SET_HOME_LON=8.5417
-# — and they override whatever is here. Nothing else is needed; .env always
-# wins for the coordinates, precisely so a public file can hold an example.
-#
-# The RADIUS is not private, just a tuning knob like trip_return_m, so it stays
-# here. Metres from home that still count as "at home". Default 100.
-#home_radius_m = 100
-
-# Return-to-anchor distance in metres. Back within this of where the trip
-# started closes the trip. Default 100.
-#trip_return_m = 100
-
-# How far (metres) the car must travel from the anchor before a return can
-# close the trip — stops it closing on the driveway. Default 150.
-#trip_leave_m = 150
-
-# Hour of day the trip/day label rolls over instead of midnight. A trip
-# starting before this hour is labelled the previous date. Default 4 (04:00).
-#trip_day_rollover = 4
-
-# Minimum distance (metres) the noise-pruned GPS track must reach from the
-# anchor for a group to count as a real trip. Closer clusters are near-home
-# puttering or parking-mode motion events (and a single phantom GPS fix can't
-# fake it — it's dropped as noise first) and are auto-skipped. Default 500.
-#trip_min_m = 500
-
-
-# ============================================================================
-# OVERLAYS
-# ============================================================================
-
-# Burn date/time into the bottom-left of the main video frame.
-#timestamp = true
-
-# Burn GPS speed into the bottom-right corner of the main video frame.
-#speed = true
-# Display unit on the overlay + stats panel + HTML legend + links.txt.
-#   kmh  -> "NN km/h"
-#   mph  -> "NN mph"  (with distance shown in miles, max/avg in mph)
-# GPX export always stays in m/s per the spec.
-#speed_unit = kmh
-#speed_font_size = 24
-# Distance from the bottom edge / right edge in pixels. Lower = closer to corner.
-# Default 32 leaves room for the watermark BELOW the speed in the same corner.
-#speed_margin_v = 32
-#speed_margin_r = 12
-
-# Render the per-day side panel (stats + map widget with moving marker).
-#map_widget = true
-
-# Burn the stats block (Trip title, Distance, Moving, Max speed, Avg, segments
-# / GPS points) into the top of the side panel. When false, the panel just
-# shows the map widget centred vertically.
-#panel_stats = true
-
-# Save .html (Leaflet), .gpx (standard GPX), and _links.txt next to each video.
-#map_sidecars = true
-
-# OPT-IN: look up place names for each trip's start/end (OSM Nominatim) and
-# add start_place/end_place to _meta.json. Off by default because it calls a
-# public, rate-limited service; results are cached in .geocode_cache.json and
-# it fails silently offline. All other metadata is computed locally.
-#geocode = false
-
-# Small watermark on the main video.
-# Leave watermark_text empty to disable. Position one of:
-#   bottom-right (default), bottom-left, top-right, top-left
-# Bottom-right sits BELOW the speed readout in the same corner.
-# NOTE: font_size is in literal pixels (unlike the speed overlay, which is
-# libass-scaled ~3.75x at 1080p). On 1080p: 16 is barely visible, 28 is
-# comfortably readable, 36-40 is prominent.
-#watermark_text = https://github.com/raoulsson/dashcam-exporter
-#watermark_font_size = 28
-#watermark_position = bottom-right
-# Distance from the closest horizontal / vertical edge in pixels.
-#watermark_margin_h = 8
-#watermark_margin_v = 6
-
-
-# ============================================================================
-# AUDIO
-# ============================================================================
-
-# audio=false strips audio from the output. Useful when passenger conversation
-# is on the recording and you don't want it shared.
-#audio = true
-
-
-# ============================================================================
-# FRONT CAMERA CROP
-# ============================================================================
-
-# The front camera's resolution is DETECTED from the clips, and the default
-# crop is derived from it: whatever height exceeds the 16:9 output aspect is
-# removed, split top/bottom (2560x1600 -> 80/80; 1920x1080 -> 0/0, i.e. no
-# crop and no vertical stretch). Set these only to override — e.g. to crop
-# more bonnet away. Cropping beyond the 16:9 excess WILL stretch the image.
-#front_crop_top    = 80
-#front_crop_bottom = 80
-
-
-# ============================================================================
-# REAR PiP (picture-in-picture)
-# ============================================================================
-
-# Set to false if your dashcam has no rear camera (also auto-disabled when the
-# DCIM/200video/rear folder is missing or empty).
-#rear_pip = true
-
-# Where the PiP sits inside the main video frame:
-#   bottom-middle (default), top-left, top-middle, top-right
-# (the bottom-left/right corners are reserved for timestamp + speed/watermark
-# so those positions aren't offered)
-#rear_pip_position = bottom-middle
-
-# Set both, or set just one and the other auto-computes from the rear
-# camera's 16:9 native aspect (so you don't accidentally squash the picture).
-#rear_pip_w      = 662
-#rear_pip_h      = 372
-#rear_pip_margin = 24
-
-
-# ============================================================================
-# MAP WIDGET PANEL
-# ============================================================================
-
-# Side panel width in pixels. The map itself is square at this width.
-#map_panel_w = 480
-
-# Where the panel sits relative to the main video: 'right' (default) or 'left'.
-#map_panel_position = right
-
-# Black gutter between the main video and the panel.
-#map_panel_gutter_px = 2
-
-# Padding (px) reserved around the route's bounding box inside the map panel.
-# Smaller values produce a tighter frame around the route. Default 12.
-#map_track_pad = 12
-
-# Bump the auto-chosen OSM tile zoom by this many integer steps. staticmap's
-# auto-zoom rounds DOWN to fit the bbox; the smaller map_track_pad already
-# tightens the frame, so 0 (default) keeps a comfortable amount of context.
-# Set to 1 for ~2x detail (route endpoints may sit right at the panel edges),
-# 2 for very tight crops (endpoints may clip outside the panel).
-#map_zoom_boost = 0
-
-# Drop GPS segments shorter than this many consecutive fixes (= seconds at the
-# dashcam's 1 Hz sample rate). Tiny segments are usually phantom fixes — the
-# GPS briefly reports a position kilometers away, then snaps back — and would
-# otherwise bloat the map's bounding box so the auto-zoom shows a regional
-# view rather than the actual drive. Default 5. Raise to be stricter, lower
-# to 1 to keep every fix.
-#gps_segment_min_points = 5
-
-# Per-clip GPX time-window. The DDPAI dashcam sometimes dumps stale GPS data
-# from a previous drive into the start of a new clip's GPX file (parking-mode
-# buffer leftovers). When the parsed points span much more than this many
-# seconds, only the densest window of this length is kept — which is the
-# actual clip's data. Default 60 (one clip duration). Set to 0 to disable.
-#clip_gpx_window_seconds = 60
-
-
-# ============================================================================
-# PARKING SKIP — drop long standstills, replace with a 'Fast forwarding…' slide
-# ============================================================================
-
-# Default true: when the car is parked for a long time AND the dashcam keeps
-# recording, the script keeps 10s at each end and slides through the middle.
-#skip_parking = true
-
-# ADVANCED: how the drive-away after a parking slide is found. Default true =
-# video ego-motion (median optical flow; robust to passing people/cars, needs
-# numpy + opencv). false = GPS speed only. Most people never touch this; the
-# real choice is skip_parking above. Has a real effect, so the knob exists.
-#video_drive_detect = true
-
-# Minimum length (s) of a parked run before we trigger the skip.
-# 300 = 5 minutes. Shorter values are more aggressive.
-#parking_min_secs = 300
-
-# Seconds of "stopped" footage to keep AFTER park onset before the FF slide
-# kicks in. Park onset = first sustained drop below ~3 km/h in the smoothed
-# GPS speed (detected per-clip via find_park_second). Default 3 keeps a
-# brief "you've parked" beat so the FF doesn't feel jarring.
-#parking_entry_pad = 3
-
-# How much pre-drive padding to keep AFTER the Fast-forwarding slide.
-# Larger = you see more "about to drive" before the actual drive-away.
-#parking_exit_pad = 10
-
-# Drive-mode head-trim padding (in seconds). When the first clip of a drive
-# has GPS that proves the car only started moving partway in, the video is
-# trimmed to start this many seconds BEFORE the detected motion. Default 8 —
-# GPS only reports speeds reliably ≥5 km/h, so the car is typically visibly
-# rolling for ~3 seconds before GPS catches up; 8s of pad lands you with a
-# few visibly-parked seconds before the rollout, which reads as a natural
-# "about to drive" intro. Lower for a tighter drop-in, higher for more
-# pre-drive context.
-#drive_first_clip_pad_secs = 8
-
-# Legacy combined knob — kept for back-compat. If parking_entry_pad /
-# parking_exit_pad above aren't set, this value is used for both.
-#parking_pad_secs = 5
-
-# Exit-clip handling after a parking gap.
-#
-# Drive-resume detection looks for N consecutive seconds of GPS motion
-# (>5 km/h, see drive_resume_sustain_secs). When found, the exit slice
-# anchors `parking_exit_pad` seconds before that moment.
-#
-# When the exit clip's GPS is too sparse / noisy for drive-resume detection
-# to find a sustained moving window (e.g., GPS still acquiring lock at the
-# start of a drive), we fall back to seeking this many seconds in. Set to 0
-# to play the exit clip from second 0. Default 15 — lands you 10-20 seconds
-# after the actual drive-away on a typical 60-second clip, which matches
-# what feels natural after the FF transition.
-#exit_skip_secs = 15
-
-# How long a moving GPS block must be to count as "real drive" rather than
-# parking-mode jitter. Higher = stricter (more often falls through to
-# exit_skip_secs). Try 60 if 30 still fires on passing traffic.
-#drive_resume_sustain_secs = 30
-
-# Inter-clip gap detection: insert a 'Fast forwarding…' slide whenever the
-# wall-clock distance between consecutive clips is longer than this. Catches
-# engine-off intervals that AREN'T preceded by parked footage, so the
-# parking-run detector doesn't fire for them. Default 60 (1 minute).
-#inter_clip_gap_secs = 60
-
-# How long the 'Fast forwarding...' slide stays on screen, in seconds.
-# It also reports how much wall-clock time was elided. Default 3.
-#transition_secs = 3
-
-# Auto-skip groups that have fewer than this many clips. These are typically
-# loop-recording fragments left over after the SD card rolled around — a
-# minute or two of footage from a session whose first portion has been
-# overwritten. To force-encode a fragment, pass its index via --drives (the
-# min-clips check is bypassed when --drives is explicit).
-#min_clips_per_group = 4
-
-# Cache housekeeping: files in .gpx_cache/ older than this many days are
-# auto-deleted at the start of each run. Stops the disk from filling up
-# silently over weeks of usage. Set to 0 to disable. (.intermediates/ is
-# always wiped at the start of every run; it's scratch, not cache.)
-#cache_max_age_days = 20
-
-
-# ============================================================================
-# OUTPUT SIZE / QUALITY
-# ============================================================================
-
-# Final-output downscale of the composite for web/mobile delivery.
-# 1080 (default) is native — no downscale at all, the full 2402x1080
-# composite (~3.5–4 GB per hour of source, archive size). 720 is the
-# quality / size sweet spot, still detail-rich enough to read plates and
-# signs (~1.5–2 GB per hour); 540 is web/phone-friendly (~400–500 MB per
-# hour). Aspect ratio is preserved; VT bitrate auto-scales.
-#output_height = 1080
-
-# Encoder selection. libx264 (software) is the DEFAULT: ~2-3x smaller files than
-# hardware VideoToolbox at the same quality (far better bits-per-pixel via CRF),
-# and portable. Trade-off: slower to encode. Set false to use Mac hardware (bigger
-# files, much faster). For a further ~2x, also set output_height = 720 above.
-software = true
-
-# Keep the per-clip intermediate .mp4 files after concat.
-#keep_intermediates = false
-
-# Hardware H.264 (VideoToolbox) bitrates. These are tuned for 1080p; when
-# output_height is lower, both values are scaled down by (output_height/1080)^2
-# automatically (e.g. 540p → 2M / 2.5M) so smaller frames produce smaller
-# files instead of over-allocating bits. Libx264 uses CRF and self-adjusts.
-#vt_bitrate = 8M
-#vt_maxrate = 10M
-
-# Software H.264 (libx264) tuning.
-#x264_preset = veryfast
-# Constant quality, so bitrate follows how hard the footage is: 23 gave 5.5-20.8
-# Mbps across one card. Default 26 sits near a 7.1 Mbps library; each +3 is
-# roughly half the bitrate. Lower for archival, higher for a slow uplink.
-#x264_crf    = 26
-
-
-# ============================================================================
-# PUBLISHING — all optional, all unset by default
+# 3. PUBLISHING — all optional, all unset by default
 # ============================================================================
 #
 # Nothing below is needed to use this repo. Unset (a fresh clone) the pipeline
@@ -519,8 +214,106 @@ software = true
 # gates above reason about, and a mv leaves them judging a workspace that
 # shifted underneath.
 
+
 # ============================================================================
-# THE RESULT PAGE
+# 4. TRIP GROUPING
+# ============================================================================
+#
+# The publishing unit is a "trip": a park-to-park unit anchored on where the car
+# last parked (a configured home is an extra park target).
+#   DEPART (drive away from the anchor) -> drive -> ARRIVE + PARK (return and
+#   come to a stop). The departure and arrival are found by VIDEO ego-motion, so
+#   they land on the real pull-out / pull-in, not on a GPS radius crossing.
+# A stop ELSEWHERE (not the anchor) never closes a trip, so A -> B -> hang out
+# ANY length of time -> A is ONE trip with the stop at B cut out. Between trips
+# the car sits parked at the anchor; those idle clips belong to no trip. A
+# ROLLOVER across trip_day_rollover:00 (04:00, not midnight) also force-closes,
+# bounding a one-way relocation (drive to a base, sleep, drive back = two trips).
+# Every interior stop becomes a 'Fast forwarding...' slide (no duration split).
+# Video needs numpy + opencv; without them it falls back to the GPS radius.
+#
+# Each trip is written as trip_<day>_<HH-MM>_<idx> with a _meta.json sidecar
+# carrying its day label, so a publishing UI can group a day's trips together.
+#
+# YOUR HOME. Set these two to where you park and you are done — a trip closes
+# when the car comes back within home_radius_m of this point. Leave them unset
+# and the exporter simply has no home anchor: trips still work, they just close
+# on returning to wherever each one started.
+#
+# Zurich is here as a working example. Replace it with your own coordinates
+# (right-click a spot in Google Maps -> the first entry is "lat, lon").
+#home_lat = 47.3769
+#home_lon = 8.5417
+#
+# PRIVACY, only if you care: this file is committed. If you plan to push your
+# fork and would rather not publish where you live, put the same two values in
+# a gitignored .env instead —
+#     SET_HOME_LAT=47.3769
+#     SET_HOME_LON=8.5417
+# — and they override whatever is here. Nothing else is needed; .env always
+# wins for the coordinates, precisely so a public file can hold an example.
+#
+# The RADIUS is not private, just a tuning knob like trip_return_m, so it stays
+# here. Metres from home that still count as "at home". Default 100.
+#home_radius_m = 100
+
+# Return-to-anchor distance in metres. Back within this of where the trip
+# started closes the trip. Default 100.
+#trip_return_m = 100
+
+# How far (metres) the car must travel from the anchor before a return can
+# close the trip — stops it closing on the driveway. Default 150.
+#trip_leave_m = 150
+
+# Hour of day the trip/day label rolls over instead of midnight. A trip
+# starting before this hour is labelled the previous date. Default 4 (04:00).
+#trip_day_rollover = 4
+
+# Minimum distance (metres) the noise-pruned GPS track must reach from the
+# anchor for a group to count as a real trip. Closer clusters are near-home
+# puttering or parking-mode motion events (and a single phantom GPS fix can't
+# fake it — it's dropped as noise first) and are auto-skipped. Default 500.
+#trip_min_m = 500
+
+
+# ============================================================================
+# 5. OUTPUT SIZE / QUALITY
+# ============================================================================
+
+# Final-output downscale of the composite for web/mobile delivery.
+# 1080 (default) is native — no downscale at all, the full 2402x1080
+# composite (~3.5–4 GB per hour of source, archive size). 720 is the
+# quality / size sweet spot, still detail-rich enough to read plates and
+# signs (~1.5–2 GB per hour); 540 is web/phone-friendly (~400–500 MB per
+# hour). Aspect ratio is preserved; VT bitrate auto-scales.
+#output_height = 1080
+
+# Encoder selection. libx264 (software) is the DEFAULT: ~2-3x smaller files than
+# hardware VideoToolbox at the same quality (far better bits-per-pixel via CRF),
+# and portable. Trade-off: slower to encode. Set false to use Mac hardware (bigger
+# files, much faster). For a further ~2x, also set output_height = 720 above.
+software = true
+
+# Keep the per-clip intermediate .mp4 files after concat.
+#keep_intermediates = false
+
+# Hardware H.264 (VideoToolbox) bitrates. These are tuned for 1080p; when
+# output_height is lower, both values are scaled down by (output_height/1080)^2
+# automatically (e.g. 540p → 2M / 2.5M) so smaller frames produce smaller
+# files instead of over-allocating bits. Libx264 uses CRF and self-adjusts.
+#vt_bitrate = 8M
+#vt_maxrate = 10M
+
+# Software H.264 (libx264) tuning.
+#x264_preset = veryfast
+# Constant quality, so bitrate follows how hard the footage is: 23 gave 5.5-20.8
+# Mbps across one card. Default 26 sits near a 7.1 Mbps library; each +3 is
+# roughly half the bitrate. Lower for archival, higher for a slow uplink.
+#x264_crf    = 26
+
+
+# ============================================================================
+# 6. THE RESULT PAGE
 # ============================================================================
 
 # Each drive on the result page is drawn from its own .gpx. By default the line
@@ -553,3 +346,248 @@ software = true
 # same name wins over .env. See .env.example for the full block.
 
 
+# ============================================================================
+# 7. OVERLAYS
+# ============================================================================
+
+# Burn date/time into the bottom-left of the main video frame.
+#timestamp = true
+
+# Burn GPS speed into the bottom-right corner of the main video frame.
+#speed = true
+# Display unit on the overlay + stats panel + HTML legend + links.txt.
+#   kmh  -> "NN km/h"
+#   mph  -> "NN mph"  (with distance shown in miles, max/avg in mph)
+# GPX export always stays in m/s per the spec.
+#speed_unit = kmh
+#speed_font_size = 24
+# Distance from the bottom edge / right edge in pixels. Lower = closer to corner.
+# Default 32 leaves room for the watermark BELOW the speed in the same corner.
+#speed_margin_v = 32
+#speed_margin_r = 12
+
+# Render the per-day side panel (stats + map widget with moving marker).
+#map_widget = true
+
+# Burn the stats block (Trip title, Distance, Moving, Max speed, Avg, segments
+# / GPS points) into the top of the side panel. When false, the panel just
+# shows the map widget centred vertically.
+#panel_stats = true
+
+# Save .html (Leaflet), .gpx (standard GPX), and _links.txt next to each video.
+#map_sidecars = true
+
+# OPT-IN: look up place names for each trip's start/end (OSM Nominatim) and
+# add start_place/end_place to _meta.json. Off by default because it calls a
+# public, rate-limited service; results are cached in .geocode_cache.json and
+# it fails silently offline. All other metadata is computed locally.
+#geocode = false
+
+# Small watermark on the main video.
+# Leave watermark_text empty to disable. Position one of:
+#   bottom-right (default), bottom-left, top-right, top-left
+# Bottom-right sits BELOW the speed readout in the same corner.
+# NOTE: font_size is in literal pixels (unlike the speed overlay, which is
+# libass-scaled ~3.75x at 1080p). On 1080p: 16 is barely visible, 28 is
+# comfortably readable, 36-40 is prominent.
+#watermark_text = https://github.com/raoulsson/dashcam-exporter
+#watermark_font_size = 28
+#watermark_position = bottom-right
+# Distance from the closest horizontal / vertical edge in pixels.
+#watermark_margin_h = 8
+#watermark_margin_v = 6
+
+
+# ============================================================================
+# 8. MAP WIDGET PANEL
+# ============================================================================
+
+# Side panel width in pixels. The map itself is square at this width.
+#map_panel_w = 480
+
+# Where the panel sits relative to the main video: 'right' (default) or 'left'.
+#map_panel_position = right
+
+# Black gutter between the main video and the panel.
+#map_panel_gutter_px = 2
+
+# Padding (px) reserved around the route's bounding box inside the map panel.
+# Smaller values produce a tighter frame around the route. Default 12.
+#map_track_pad = 12
+
+# Bump the auto-chosen OSM tile zoom by this many integer steps. staticmap's
+# auto-zoom rounds DOWN to fit the bbox; the smaller map_track_pad already
+# tightens the frame, so 0 (default) keeps a comfortable amount of context.
+# Set to 1 for ~2x detail (route endpoints may sit right at the panel edges),
+# 2 for very tight crops (endpoints may clip outside the panel).
+#map_zoom_boost = 0
+
+# Drop GPS segments shorter than this many consecutive fixes (= seconds at the
+# dashcam's 1 Hz sample rate). Tiny segments are usually phantom fixes — the
+# GPS briefly reports a position kilometers away, then snaps back — and would
+# otherwise bloat the map's bounding box so the auto-zoom shows a regional
+# view rather than the actual drive. Default 5. Raise to be stricter, lower
+# to 1 to keep every fix.
+#gps_segment_min_points = 5
+
+# Per-clip GPX time-window. The DDPAI dashcam sometimes dumps stale GPS data
+# from a previous drive into the start of a new clip's GPX file (parking-mode
+# buffer leftovers). When the parsed points span much more than this many
+# seconds, only the densest window of this length is kept — which is the
+# actual clip's data. Default 60 (one clip duration). Set to 0 to disable.
+#clip_gpx_window_seconds = 60
+
+
+# ============================================================================
+# 9. REAR PiP (picture-in-picture)
+# ============================================================================
+
+# Set to false if your dashcam has no rear camera (also auto-disabled when the
+# DCIM/200video/rear folder is missing or empty).
+#rear_pip = true
+
+# Where the PiP sits inside the main video frame:
+#   bottom-middle (default), top-left, top-middle, top-right
+# (the bottom-left/right corners are reserved for timestamp + speed/watermark
+# so those positions aren't offered)
+#rear_pip_position = bottom-middle
+
+# Set both, or set just one and the other auto-computes from the rear
+# camera's 16:9 native aspect (so you don't accidentally squash the picture).
+#rear_pip_w      = 662
+#rear_pip_h      = 372
+#rear_pip_margin = 24
+
+
+# ============================================================================
+# 10. FRONT CAMERA CROP
+# ============================================================================
+
+# The front camera's resolution is DETECTED from the clips, and the default
+# crop is derived from it: whatever height exceeds the 16:9 output aspect is
+# removed, split top/bottom (2560x1600 -> 80/80; 1920x1080 -> 0/0, i.e. no
+# crop and no vertical stretch). Set these only to override — e.g. to crop
+# more bonnet away. Cropping beyond the 16:9 excess WILL stretch the image.
+#front_crop_top    = 80
+#front_crop_bottom = 80
+
+
+# ============================================================================
+# 11. AUDIO
+# ============================================================================
+
+# audio=false strips audio from the output. Useful when passenger conversation
+# is on the recording and you don't want it shared.
+#audio = true
+
+
+# ============================================================================
+# 12. PARKING SKIP — drop long standstills, replace with a 'Fast forwarding…' slide
+# ============================================================================
+
+# Default true: when the car is parked for a long time AND the dashcam keeps
+# recording, the script keeps 10s at each end and slides through the middle.
+#skip_parking = true
+
+# ADVANCED: how the drive-away after a parking slide is found. Default true =
+# video ego-motion (median optical flow; robust to passing people/cars, needs
+# numpy + opencv). false = GPS speed only. Most people never touch this; the
+# real choice is skip_parking above. Has a real effect, so the knob exists.
+#video_drive_detect = true
+
+# Minimum length (s) of a parked run before we trigger the skip.
+# 300 = 5 minutes. Shorter values are more aggressive.
+#parking_min_secs = 300
+
+# Seconds of "stopped" footage to keep AFTER park onset before the FF slide
+# kicks in. Park onset = first sustained drop below ~3 km/h in the smoothed
+# GPS speed (detected per-clip via find_park_second). Default 3 keeps a
+# brief "you've parked" beat so the FF doesn't feel jarring.
+#parking_entry_pad = 3
+
+# How much pre-drive padding to keep AFTER the Fast-forwarding slide.
+# Larger = you see more "about to drive" before the actual drive-away.
+#parking_exit_pad = 10
+
+# Drive-mode head-trim padding (in seconds). When the first clip of a drive
+# has GPS that proves the car only started moving partway in, the video is
+# trimmed to start this many seconds BEFORE the detected motion. Default 8 —
+# GPS only reports speeds reliably ≥5 km/h, so the car is typically visibly
+# rolling for ~3 seconds before GPS catches up; 8s of pad lands you with a
+# few visibly-parked seconds before the rollout, which reads as a natural
+# "about to drive" intro. Lower for a tighter drop-in, higher for more
+# pre-drive context.
+#drive_first_clip_pad_secs = 8
+
+# Legacy combined knob — kept for back-compat. If parking_entry_pad /
+# parking_exit_pad above aren't set, this value is used for both.
+#parking_pad_secs = 5
+
+# Exit-clip handling after a parking gap.
+#
+# Drive-resume detection looks for N consecutive seconds of GPS motion
+# (>5 km/h, see drive_resume_sustain_secs). When found, the exit slice
+# anchors `parking_exit_pad` seconds before that moment.
+#
+# When the exit clip's GPS is too sparse / noisy for drive-resume detection
+# to find a sustained moving window (e.g., GPS still acquiring lock at the
+# start of a drive), we fall back to seeking this many seconds in. Set to 0
+# to play the exit clip from second 0. Default 15 — lands you 10-20 seconds
+# after the actual drive-away on a typical 60-second clip, which matches
+# what feels natural after the FF transition.
+#exit_skip_secs = 15
+
+# How long a moving GPS block must be to count as "real drive" rather than
+# parking-mode jitter. Higher = stricter (more often falls through to
+# exit_skip_secs). Try 60 if 30 still fires on passing traffic.
+#drive_resume_sustain_secs = 30
+
+# Inter-clip gap detection: insert a 'Fast forwarding…' slide whenever the
+# wall-clock distance between consecutive clips is longer than this. Catches
+# engine-off intervals that AREN'T preceded by parked footage, so the
+# parking-run detector doesn't fire for them. Default 60 (1 minute).
+#inter_clip_gap_secs = 60
+
+# How long the 'Fast forwarding...' slide stays on screen, in seconds.
+# It also reports how much wall-clock time was elided. Default 3.
+#transition_secs = 3
+
+# Auto-skip groups that have fewer than this many clips. These are typically
+# loop-recording fragments left over after the SD card rolled around — a
+# minute or two of footage from a session whose first portion has been
+# overwritten. To force-encode a fragment, pass its index via --drives (the
+# min-clips check is bypassed when --drives is explicit).
+#min_clips_per_group = 4
+
+# Cache housekeeping: files in .gpx_cache/ older than this many days are
+# auto-deleted at the start of each run. Stops the disk from filling up
+# silently over weeks of usage. Set to 0 to disable. (.intermediates/ is
+# always wiped at the start of every run; it's scratch, not cache.)
+#cache_max_age_days = 20
+
+
+# ============================================================================
+# 13. ODDS AND ENDS
+# ============================================================================
+
+# pipeline.py takes no command-line arguments: everything is a setting here.
+
+# Tells your plugin this machine is on a bad connection, so it should skip
+# anything optional that would go and look. It arrives as `world.offline`.
+# Nothing in this repo reads it — there is no networked code left here — so
+# with no plugin configured it does nothing. It exists so "am I offline" has
+# one name across every plugin instead of each inventing its own.
+#offline = false
+
+# Still frames: the preview sheet and the local result page both pull a frame
+# out of each trip. Width is a cap and never upscales.
+#still_width = 1600
+#still_seconds = 1.0
+
+# The result page's frame comes from further in, because the first second of a
+# dashcam clip is often the car rolling to a stop, or a dark garage.
+#site_still_seconds = 2.0
+
+# Re-encode even when the output already exists. Off by default: a finished mp4
+# is not rebuilt, which is what makes an interrupted render restartable.
+#force = false
