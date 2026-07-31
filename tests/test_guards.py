@@ -85,7 +85,7 @@ class Workspace:
         # about a real card.
         self.ctx.archive_dir = self.root / "archive"
         self.ctx.state_dir = self.root / "state"
-        self.ctx.lock_file = self.root / "import" / P.LOCK_FILE
+        self.ctx.lock_file = self.root / P.LOCK_FILE
         self.ctx.render_root = self.root / "import"
         self.ctx.import_root = self.root / "import"
         self.ctx.card = self.root / "card"

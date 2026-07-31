@@ -350,12 +350,11 @@ class Ctx:
         # configurable: it is this machine's record of what it has finished,
         # and a second copy under a second setting would be a second answer.
         self.archive_dir = ARCHIVE_DIR
-        # Beside the imports rather than inside the output tree. The output
-        # tree is the thing Clean Workspace empties, so everything in it has to
-        # earn an exemption; a run log is a record of what happened and has no
-        # business being argued about by a sweep. The import ROOT survives --
-        # only the dated folders under it are erased.
-        self.log_dir = self.import_root / "logs"
+        # Beside the trees, not inside either. Import holds footage and output
+        # holds renders; a record of what happened is neither, and both get
+        # wiped wholesale to know the workspace is clean. Nothing but footage
+        # lives under import now.
+        self.log_dir = self.import_root.parent / "logs"
         self.state_dir = state_dir_for()
         self.lock_file = lock_path_for(self.import_root)
         _migrate_state(self.out_dir, self.state_dir)
@@ -1408,7 +1407,30 @@ EXCLUDED_FILE = "excluded.json"
 # belonged to, and the working area is left genuinely empty. Nothing writes
 # here except the clean-up and nothing reads it except that guard and the count
 # on the status screen.
-HOME_DIR = Path.home() / ".dashcam-exporter"
+def home_dir_for(exporter):
+    """The hidden directory this checkout remembers things in.
+
+    Named after the checkout, so a second clone is a second edition with its
+    own memory. `git clone ... dashcam-exporter-jondoe` gets
+    ~/.dashcam-exporter-jondoe and shares nothing with the first -- its own
+    high-water mark, its own receipts -- which is what lets someone run two
+    without either one thinking the other's card was already imported.
+
+    A name that already says what this is keeps it; anything else gets the
+    prefix, so a directory called `myfork` does not put a bare ~/.myfork in
+    somebody's home and leave them guessing what left it there.
+    """
+    return Path.home() / ("." + _home_name(Path(exporter).name))
+
+
+def _home_name(dirname):
+    name = re.sub(r"\s+", "-", dirname.strip())
+    if name.startswith("dashcam-exporter"):
+        return name
+    return "dashcam-exporter-" + name
+
+
+HOME_DIR = home_dir_for(EXPORTER_DIR)
 ARCHIVE_DIR = HOME_DIR / "processed"
 
 
@@ -1485,10 +1507,12 @@ def lock_path_for(import_root):
     one file an operator has a reason to look for -- so it sits where he is
     already looking, under its own name rather than behind a dot.
 
-    One per tree, which is what lets two trees run at once, and it falls out of
-    living in the tree rather than out of a key.
+    Beside the trees rather than inside one, because you wipe import and
+    output in Finder to know you are clean and a lock is not something to have
+    to notice while doing that. One per data root, which is what lets two roots
+    run at once, and it falls out of living there rather than out of a key.
     """
-    return import_root / LOCK_FILE
+    return import_root.parent / LOCK_FILE
 
 BANNER = r"""
   ____            _                                   _____                       _            
@@ -1841,7 +1865,7 @@ def acquire_single_instance_lock(ctx):
     """
     lock = ctx.lock_file
     try:
-        ctx.import_root.mkdir(parents=True, exist_ok=True)
+        lock.parent.mkdir(parents=True, exist_ok=True)
         if lock.is_file():
             try:
                 pid = int(lock.read_text().split()[0])

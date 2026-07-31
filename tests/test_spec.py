@@ -63,7 +63,7 @@ class Bench:
         # about a real card.
         c.archive_dir = self.root / "archive"
         c.state_dir = self.root / "state"
-        c.lock_file = self.root / "import" / P.LOCK_FILE
+        c.lock_file = self.root / P.LOCK_FILE
         c.render_root = self.root / "import"
         c.import_root = self.root / "import"
         c.card = self.root / "card"
