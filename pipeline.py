@@ -1414,6 +1414,7 @@ BANNER_WIDTH = max(len(line) for line in BANNER.splitlines())
 
 
 VERSION_FALLBACK = "0.0.0"
+VERSION_FILE = "VERSION"
 
 
 def version(exporter=None):
@@ -1427,7 +1428,60 @@ def version(exporter=None):
     A copy without git -- an archive, an install -- has no history to count and
     says so rather than inventing one.
     """
-    return _version_of(_commit_count(exporter or EXPORTER_DIR))
+    where = exporter or EXPORTER_DIR
+    return _counted_or_recalled(where, _version_of(_commit_count(where)))
+
+
+def _counted_or_recalled(where, counted):
+    if counted == VERSION_FALLBACK:
+        return _recalled(where)
+    return _remembered(where, counted)
+
+
+def _remembered(where, counted):
+    """Leave it on disk, so a copy of this folder knows what it is.
+
+    A deployed app is decoupled from the repository it was built from -- there
+    is no history to count in a zip, an rsync or a Docker layer -- and a tool
+    that cannot say which build it is is a tool nobody can report a bug
+    against. Written whenever git CAN answer, so the file is never staler than
+    the last run in a checkout, and carried along by whatever copies the
+    folder.
+    """
+    _write_version(where / VERSION_FILE, counted)
+    return counted
+
+
+def _write_version(path, counted):
+    if _already_says(path, counted):
+        return
+    _try_write(path, counted)
+
+
+def _try_write(path, counted):
+    try:
+        path.write_text(counted + "\n")
+    except OSError:
+        pass                                # read-only install: it still runs
+
+
+def _already_says(path, counted):
+    try:
+        return path.read_text().strip() == counted
+    except OSError:
+        return False
+
+
+def _recalled(where):
+    """What the last checkout that ran here wrote down, or nothing."""
+    return _read_version(where / VERSION_FILE) or VERSION_FALLBACK
+
+
+def _read_version(path):
+    try:
+        return path.read_text().strip()
+    except OSError:
+        return ""
 
 
 def _commit_count(where):
