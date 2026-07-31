@@ -1074,7 +1074,7 @@ def _final_dirs(froot):
 
 def _built_or_not(page):
     if not page.is_file():
-        return "%s  %s" % (C.yellow("not built"), C.dim(tilde(page)))
+        return "%s  %s" % (C.dim("not built"), C.dim(tilde(page)))
     return "%s  %s" % (C.bold(tilde(page)), C.dim(_age_phrase(page)))
 
 
@@ -1119,8 +1119,12 @@ def _card_rows(ctx):
 
 
 def _render_state(mp4s, size):
+    """Dim, not amber. Nothing rendered yet is the ordinary state at the start
+    of a cycle, exactly like an empty import -- and a colour that says "look at
+    this" about the normal case has spent itself by the time something is
+    actually wrong."""
     if not mp4s:
-        return C.yellow("none")
+        return C.dim("none")
     return C.bold("%d mp4, %s" % (len(mp4s), human_bytes(size)))
 
 
