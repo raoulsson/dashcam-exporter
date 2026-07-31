@@ -62,6 +62,8 @@ class Bench:
         # receipts there, and the next test would read them as evidence
         # about a real card.
         c.archive_dir = self.root / "archive"
+        c.state_dir = self.root / "state"
+        c.lock_file = self.root / "import" / P.LOCK_FILE
         c.render_root = self.root / "import"
         c.import_root = self.root / "import"
         c.card = self.root / "card"
@@ -471,10 +473,10 @@ class TestPostState(SpecTest):
         under out_dir afterwards. They are archived outside every working area,
         so the working area is left genuinely empty and the state is intact."""
         self.b.imported().sidecars().render(size=10)
-        (self.b.ctx.out_dir / P.LEDGER_FILE).write_text('{"through":"20260728090000"}')
+        P.state_path(self.b.ctx, P.LEDGER_FILE).write_text('{"through":"20260728090000"}')
         P.purge_published_renders(self.b.ctx, self.b.ctx.render_root)
         out = self.b.ctx.out_dir
-        self.assertTrue((out / P.LEDGER_FILE).is_file())
+        self.assertTrue((self.b.ctx.state_dir / P.LEDGER_FILE).is_file())
         self.assertFalse(any(out.rglob("*_meta.json")), "no receipt stays here")
         self.assertEqual(P.archived_trips(self.b.ctx), 1, "it is archived")
         self.assertFalse(any(out.rglob("*.mp4")))

@@ -175,6 +175,7 @@ def a_ctx():
     ctx = mock.Mock()
     ctx.results = []
     ctx.out_dir = Path(tempfile.mkdtemp(prefix="dashcam-runner-"))
+    ctx.state_dir = ctx.out_dir / "state"
     return ctx
 
 

@@ -253,6 +253,7 @@ class FakeCtx:
     def __init__(self):
         self.results = []
         self.out_dir = Path(tempfile.mkdtemp(prefix="dashcam-paths-"))
+        self.state_dir = self.out_dir / "state"
         self.plugin = None
 
 

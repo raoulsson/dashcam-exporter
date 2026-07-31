@@ -84,6 +84,8 @@ class Workspace:
         # receipts there, and the next test would read them as evidence
         # about a real card.
         self.ctx.archive_dir = self.root / "archive"
+        self.ctx.state_dir = self.root / "state"
+        self.ctx.lock_file = self.root / "import" / P.LOCK_FILE
         self.ctx.render_root = self.root / "import"
         self.ctx.import_root = self.root / "import"
         self.ctx.card = self.root / "card"
@@ -120,7 +122,8 @@ class Workspace:
         return front
 
     def ledger(self, through):
-        (self.ctx.out_dir / P.LEDGER_FILE).write_text(json.dumps({"through": through}))
+        P.state_path(self.ctx, P.LEDGER_FILE).write_text(
+            json.dumps({"through": through}))
 
     def target_has_everything(self):
         """The configured plugin says every trip of this import is at the
@@ -280,7 +283,11 @@ class TestPurgeKeepsState(GuardTest):
 
         P.purge_published_renders(self.w.ctx, self.w.ctx.render_root)
 
-        self.assertTrue((self.w.ctx.out_dir / P.LEDGER_FILE).is_file(), "ledger must survive")
+        self.assertTrue((self.w.ctx.state_dir / P.LEDGER_FILE).is_file(),
+                        "the ledger lives outside the swept tree now")
+        left = sorted(p.name for p in self.w.ctx.out_dir.iterdir())
+        self.assertEqual(left, [self.w.ctx.render_root.name],
+                         "only the import namespace stays, and it is empty")
         self.assertFalse((d / "trip_A_meta.json").exists(), "the receipt must not stay here")
         self.assertEqual(P.archived_trips(self.w.ctx), 1, "the receipt must be archived")
         self.assertFalse((d / "trip_A_h1080.mp4").exists(), "the render must go")

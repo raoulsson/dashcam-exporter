@@ -356,6 +356,9 @@ class Ctx:
         # business being argued about by a sweep. The import ROOT survives --
         # only the dated folders under it are erased.
         self.log_dir = self.import_root / "logs"
+        self.state_dir = state_dir_for()
+        self.lock_file = lock_path_for(self.import_root)
+        _migrate_state(self.out_dir, self.state_dir)
         self.speed_colour = as_bool(self.cfg.get("speed_colour"), True)
         # Still-frame knobs. Compiled-in numbers are the fallback, config wins.
         self.still_width = self.cfg_int("still_width", PREVIEW_STILL_W)
@@ -1284,12 +1287,12 @@ def record(ctx, name, status, started, detail=""):
 # Steps
 # ---------------------------------------------------------------------------
 
-LEDGER_FILE = ".imported.json"
+LEDGER_FILE = "imported.json"
 
 
 def read_ledger(ctx):
     try:
-        return json.loads((ctx.out_dir / LEDGER_FILE).read_text())
+        return json.loads((ctx.state_dir / LEDGER_FILE).read_text())
     except Exception:
         return {}
 
@@ -1323,7 +1326,7 @@ def remembered_step(ctx):
 
 def _write_ledger(ctx, d):
     try:
-        (ctx.out_dir / LEDGER_FILE).write_text(json.dumps(d, indent=1))
+        state_path(ctx, LEDGER_FILE).write_text(json.dumps(d, indent=1))
     except OSError:
         pass
 
@@ -1346,7 +1349,7 @@ def write_ledger(ctx, stamp, note=""):
         {"through": stamp, "at": time.strftime("%Y-%m-%d %H:%M"), "note": note})
     d["history"] = d["history"][-20:]
     try:
-        (ctx.out_dir / LEDGER_FILE).write_text(json.dumps(d, indent=1))
+        state_path(ctx, LEDGER_FILE).write_text(json.dumps(d, indent=1))
     except OSError:
         pass
 
@@ -1390,7 +1393,7 @@ def last_imported_stamp(ctx):
     return best or None
 
 
-EXCLUDED_FILE = ".excluded.json"
+EXCLUDED_FILE = "excluded.json"
 
 # The receipts of finished cycles, outside the working area entirely.
 #
@@ -1405,7 +1408,87 @@ EXCLUDED_FILE = ".excluded.json"
 # belonged to, and the working area is left genuinely empty. Nothing writes
 # here except the clean-up and nothing reads it except that guard and the count
 # on the status screen.
-ARCHIVE_DIR = Path.home() / ".dashcam-exporter" / "processed"
+HOME_DIR = Path.home() / ".dashcam-exporter"
+ARCHIVE_DIR = HOME_DIR / "processed"
+
+
+def _migrate_state(out_dir, state_dir):
+    """Carry the four files out of an older workspace, once.
+
+    Best effort and fail-safe: a file that does not arrive reads as "never
+    imported", which refuses a card wipe rather than permitting one.
+    """
+    try:
+        _move_state(out_dir, state_dir)
+    except OSError:
+        pass
+
+
+def _move_state(out_dir, state_dir):
+    stale = list(filter(lambda p: _worth_moving(out_dir, state_dir, p),
+                        WAS_CALLED.items()))
+    if stale:
+        _move_all(out_dir, state_dir, stale)
+
+
+def _move_all(out_dir, state_dir, stale):
+    state_dir.mkdir(parents=True, exist_ok=True)
+    for now, before in stale:
+        shutil.move(str(out_dir / before), str(state_dir / now))
+
+
+def _worth_moving(out_dir, state_dir, pair):
+    now, before = pair
+    if (state_dir / now).exists():
+        return False
+    return (out_dir / before).is_file()
+
+
+def state_path(ctx, name):
+    """A state file's path, with its directory made. Writers only.
+
+    Readers take the plain path and treat a missing file as "nothing recorded
+    yet", which is the honest reading and the safe one: no ledger means no
+    record that this footage exists anywhere else, and that refuses an erase.
+    """
+    ctx.state_dir.mkdir(parents=True, exist_ok=True)
+    return ctx.state_dir / name
+
+
+def state_dir_for(_import_root=None):
+    """Where the bookkeeping lives: one place, for this machine.
+
+    The files are ABOUT a working area rather than part of one, and leaving
+    them in it meant the tree Clean Workspace empties could never actually be
+    empty -- each needed an exemption from the sweep, which is a rule that has
+    to stay right in the one place where being wrong deletes footage.
+
+    NOT keyed by any path. The main thing recorded here is how far the imports
+    have reached, and that is a fact about the CARD: point the import dir
+    somewhere new -- which is the ordinary way to start clean -- and it is
+    still the same card with the same clips already taken off it. Keyed by a
+    path, that answer would be forgotten exactly when it matters, and the card
+    would read as never imported.
+
+    The pid lock is the exception and is keyed, because two trees genuinely can
+    run at once and must not share one.
+    """
+    return HOME_DIR / "state"
+
+
+def lock_path_for(import_root):
+    """In the tree, and visible.
+
+    Everything else the tool remembers is in ~/.dashcam-exporter, because it
+    outlives any working area. The lock is the opposite: it says THIS tree is
+    busy right now, it is meaningless once the process is gone, and it is the
+    one file an operator has a reason to look for -- so it sits where he is
+    already looking, under its own name rather than behind a dot.
+
+    One per tree, which is what lets two trees run at once, and it falls out of
+    living in the tree rather than out of a key.
+    """
+    return import_root / LOCK_FILE
 
 BANNER = r"""
   ____            _                                   _____                       _            
@@ -1555,7 +1638,7 @@ def _excluded_record(ctx):
     dropped by a rewrite.
     """
     try:
-        return json.loads((ctx.out_dir / EXCLUDED_FILE).read_text())
+        return json.loads((ctx.state_dir / EXCLUDED_FILE).read_text())
     except Exception:
         return {}
 
@@ -1563,7 +1646,7 @@ def _excluded_record(ctx):
 def _write_excluded(ctx, record):
     try:
         ctx.out_dir.mkdir(parents=True, exist_ok=True)
-        (ctx.out_dir / EXCLUDED_FILE).write_text(json.dumps(record, indent=1))
+        state_path(ctx, EXCLUDED_FILE).write_text(json.dumps(record, indent=1))
     except OSError:
         pass
 
@@ -1717,8 +1800,16 @@ def _confirmed_for(root, target) -> bool:
     return target.namespace == root.name and target.complete is menu.Evidence.YES
 
 
-OWNER_FILE = ".owned-by"
-LOCK_FILE = ".pipeline.lock"
+OWNER_FILE = "owned-by"
+LOCK_FILE = "pid.lock"
+
+# The four names above are plain now: they sit in a directory of their own, and
+# a leading dot inside a hidden directory hides a file from the one person who
+# went looking for it. What they were called in the working area is mapped
+# below, once, so an existing workspace does not lose its high-water mark.
+WAS_CALLED = {"imported.json": ".imported.json",
+              "excluded.json": ".excluded.json",
+              "owned-by": ".owned-by"}
 
 
 def _pid_alive(pid):
@@ -1748,9 +1839,9 @@ def acquire_single_instance_lock(ctx):
     being able to write the lock at all is not a reason to refuse either —
     the lock is extra safety, not a gate the tool can die behind.
     """
-    lock = ctx.out_dir / LOCK_FILE
+    lock = ctx.lock_file
     try:
-        ctx.out_dir.mkdir(parents=True, exist_ok=True)
+        ctx.import_root.mkdir(parents=True, exist_ok=True)
         if lock.is_file():
             try:
                 pid = int(lock.read_text().split()[0])
@@ -1766,7 +1857,7 @@ def acquire_single_instance_lock(ctx):
 
 def release_single_instance_lock(ctx):
     """Remove the lock, but only if it is ours — never someone else's."""
-    lock = ctx.out_dir / LOCK_FILE
+    lock = ctx.lock_file
     try:
         if lock.is_file() and int(lock.read_text().split()[0]) == os.getpid():
             lock.unlink()
@@ -1783,14 +1874,13 @@ def claim_out_dir(ctx):
     purpose or by a copied config. The sweep is silent and total, so "whose
     files are these" has to be answerable before it runs, not after.
     """
-    marker = ctx.out_dir / OWNER_FILE
+    marker = ctx.state_dir / OWNER_FILE
     mine = str(ctx.exporter)
     try:
         if marker.is_file():
             owner = marker.read_text(encoding="utf-8").strip()
             return None if owner == mine else owner
-        ctx.out_dir.mkdir(parents=True, exist_ok=True)
-        marker.write_text(mine + "\n", encoding="utf-8")
+        state_path(ctx, OWNER_FILE).write_text(mine + "\n", encoding="utf-8")
     except OSError:
         pass          # unwritable is not a reason to refuse; it is a reason to
     return None       # carry on without the extra proof
@@ -1943,9 +2033,10 @@ def purge_published_renders(ctx, root):
     that names clips already deleted. Keeping any of it leaves exactly the files
     that are impossible to make a decision about later.
 
-    Kept: the import directory itself so the next copy has somewhere to land,
-    and the ledger. The run logs moved out to the import root, where a record
-    of what happened is not something a sweep has to be told to spare. Any final_* folder is
+    Kept: the import directory itself, so the next copy has somewhere to land.
+    Nothing else -- the run logs went to the import root and the four state
+    files to ~/.dashcam-exporter, so there is no longer a keep-list to get
+    right in the one place where being wrong deletes footage. Any final_* folder is
     unaffected because it lives beside this tree, not in it.
 
     The trip receipts are not kept HERE any more — archive_sidecars moves them
@@ -1966,10 +2057,7 @@ def purge_published_renders(ctx, root):
     out = ctx.out_dir
     if not out.is_dir():
         return 0, 0
-    # EXCLUDED_FILE survives for the same reason the ledger does: it is state
-    # ("these clips were dropped on purpose"), unrecoverable once gone, and
-    # the delta import and the clean-up both read it after the footage is deleted.
-    keep_names = {LEDGER_FILE, OWNER_FILE, EXCLUDED_FILE, root.name}
+    keep_names = {root.name}
     freed = n = 0
     for child in sorted(out.iterdir()):
         if child.name in keep_names or child.name.startswith(FINAL_PREFIX):
@@ -2121,7 +2209,7 @@ def step_import(ctx):
         print(C.red("    %s" % tilde(Path(other))))
         print(C.dim("  Not touching it. Set `out` in config.txt to a directory of"))
         print(C.dim("  your own, or delete %s if that claim is stale."
-                    % tilde(ctx.out_dir / OWNER_FILE)))
+                    % tilde(ctx.state_dir / OWNER_FILE)))
         return record(ctx, NAME[IMPORT], SKIPPED, started,
                       "output dir owned by %s" % other)
 
@@ -5250,7 +5338,7 @@ def _page_exists(ctx):
 
 def _excluded_at(ctx):
     try:
-        return (ctx.out_dir / EXCLUDED_FILE).stat().st_mtime
+        return (ctx.state_dir / EXCLUDED_FILE).stat().st_mtime
     except OSError:
         return 0.0
 
@@ -6244,7 +6332,7 @@ def _lock_taken(ctx):
     print()
     print(C.red("  Another instance is already running against %s." % tilde(ctx.out_dir)))
     print(C.dim("  Quit it first. (Lock: %s — a crashed instance's lock clears"
-                % tilde(ctx.out_dir / LOCK_FILE)))
+                % tilde(ctx.lock_file)))
     print(C.dim("  itself; this one's owner is still running.)"))
     return 2
 
