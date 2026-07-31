@@ -121,13 +121,24 @@ X264_CRF     = "26"
 # Default config.txt template, dumped by `--write-config PATH`
 CONFIG_TEMPLATE = """# dashcam-exporter — config.txt
 #
-# Every setting here is OPTIONAL. Uncomment the lines you want to change.
-# Precedence: command-line flag  >  this file  >  built-in default.
-# Booleans accept: true / false / yes / no / 1 / 0.
 #
-# Pass --config /path/to/this.txt to use a non-default location, or run
+# QUICKSTART — YOU DO NOT NEED THIS FILE
+#
+#   ./INSTALLER.sh              once: builds .venv, checks ffmpeg
+#   ./RUN-DASHCAM-EXPORTER.sh   the tool
+#
+# That is the whole thing. It opens a numbered menu, tells you what each step
+# is about to do and what it will cost before it does it, and works with every
+# setting below left exactly as it is. Put the card in and press 1.
+#
+# Come back here when you want the footage somewhere other than
+# ~/dashcam-data, or when you want to publish to a website.
+#
+# Every setting is OPTIONAL: uncomment the ones you want to change. Booleans
+# accept true / false / yes / no / 1 / 0, and a value may name an earlier
+# setting as ${workspace}. Regenerate this file any time with
+#
 #   python3 make_dashcam_videos.py --write-config ./config.txt
-# to regenerate this template anytime.
 
 
 # ============================================================================

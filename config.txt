@@ -1,8 +1,17 @@
 # dashcam-exporter — config.txt
 #
-# Every setting is OPTIONAL: uncomment what you want to change. Booleans accept
-# true / false / yes / no / 1 / 0. Regenerate this file any time with
-#   python3 make_dashcam_videos.py --write-config ./config.txt
+#
+# QUICKSTART — YOU DO NOT NEED THIS FILE
+#
+#   ./INSTALLER.sh              once: builds .venv, checks ffmpeg
+#   ./RUN-DASHCAM-EXPORTER.sh   the tool
+#
+# That is the whole thing. It opens a numbered menu, tells you what each step
+# is about to do and what it will cost before it does it, and works with every
+# setting below left exactly as it is. Put the card in and press 1.
+#
+# Come back here when you want the footage somewhere other than
+# ~/dashcam-data, or when you want to publish to a website.
 #
 #
 # WHAT THIS TOOL DOES, IN ONE PASS
@@ -59,6 +68,13 @@
 #  11  AUDIO
 #  12  PARKING SKIP          long standstills
 #  13  ODDS AND ENDS
+#
+#
+# Every setting is OPTIONAL: uncomment the ones you want to change. Booleans
+# accept true / false / yes / no / 1 / 0, and a value may name an earlier
+# setting as ${that}. Regenerate this file any time with
+#
+#   python3 make_dashcam_videos.py --write-config ./config.txt
 #
 
 
