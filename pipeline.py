@@ -6895,7 +6895,7 @@ class Runner:
         _print_all(_nothing_to_do_lines(outcome))
         self.position.advance(item)
         _remember_position(self.ctx, item, self.position)
-        _print_all(_stayed_lines(item, outcome, self.menu, self.position))
+        _print_all(_stayed_lines(item, outcome))
         return outcome
 
     def _execute(self, item, world):
@@ -7038,18 +7038,18 @@ def _stamp_elapsed(results, seconds):
         result.seconds = seconds
 
 
-def _stayed_lines(item, outcome, menu_items, position):
+def _stayed_lines(item, outcome):
     """One line when a run did not complete.
 
-    The body says what went wrong; this says what it meant for where we are.
-    Those are different facts and the second one is the machine's: the
-    position did not move, so the next menu is the same menu, and without
-    saying so a failure looks like it might have half-advanced.
+    It used to add "Still at Clean Workspace." -- the machine's half, that the
+    position had not moved. The menu redraws underneath it a line later and
+    `p` says where we are on request, so the clause was a third telling of
+    something the screen shows anyway, on the line whose job is to say what
+    happened.
     """
     if item.completed():
         return []
-    return [C.dim("  %s Still at %s." % (_because(outcome),
-                                        _where(menu_items, position)))]
+    return [C.dim("  %s" % _because(outcome))]
 
 
 def _because(outcome):
@@ -7067,15 +7067,6 @@ def _because(outcome):
     if note.endswith("."):
         return note
     return "Did not complete: %s." % note
-
-
-def _where(menu_items, position):
-    """Where a refusal left the pipeline, for "still at ...". Named, not
-    numbered: the sentence reads as English and the number adds nothing to
-    it."""
-    if position.current not in menu_items:
-        return "the start"
-    return menu_items[position.current].name()
 
 
 def _crash_log_line(path):
