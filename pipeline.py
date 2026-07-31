@@ -184,15 +184,15 @@ class C:
         return cls._w("36", s)
 
 
-def rule(title=""):
+def rule(title="", ch="-"):
     # Exactly the reported width. A character wider reaches the right edge and
     # then wraps a blank line onto the next one, which reads as a gap between
     # sections rather than as a rule.
     w = term_width()
     if not title:
-        return "-" * w
-    head = "-- %s " % title
-    return C.bold(head) + "-" * max(0, w - len(head))
+        return ch * w
+    head = "%s %s " % (ch * 2, title)
+    return C.bold(head) + ch * max(0, w - len(head))
 
 
 # ---------------------------------------------------------------------------
@@ -5678,8 +5678,13 @@ def _guard_reason(verdict):
 
 
 def print_menu(ctx, menu_items, position, world):
-    """The grid, painted from the state machine and nothing else."""
-    print(rule())
+    """The grid, painted from the state machine and nothing else.
+
+    Opened with a heavy rule, because everything above it is whatever the last
+    step printed -- a render's log, a deploy's output, an erase's banner -- and
+    a line of the same dashes those use does not separate them from it.
+    """
+    print(rule(ch="="))
     verdicts = _verdicts(menu_items, world)
     offered = position.selectable(menu_items)
     cell = _cell_width(menu_items)
