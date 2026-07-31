@@ -666,7 +666,17 @@ def show_cursor():
 # ---------------------------------------------------------------------------
 
 class Aborted(Exception):
-    """Ctrl-C during a child process. Carries no message; the runner prints."""
+    """The operator stopping the step, from a prompt or during the work.
+
+    `mid_run` is the difference between the two, and it is the only thing a
+    reader of the log a week later needs: nothing was touched before the work
+    started, and something was part way through once it had. A prompt raises
+    it plain; the child-process streamer raises it mid_run.
+    """
+
+    def __init__(self, mid_run=False):
+        super().__init__()
+        self.mid_run = mid_run
 
 
 def _reader(stream, q):
@@ -859,7 +869,7 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
             except Exception:
                 pass
         live.close()
-        raise Aborted()
+        raise Aborted(mid_run=True)
     finally:
         # A finished step should leave a line behind saying so. live.close()
         # erases the live area, so without this the progress simply vanishes and
@@ -6390,6 +6400,14 @@ class Work:
 
     # -- what Destructive needs between the plan and the act ---------------
     def show(self, banner):
+        """Nothing at all when there is nothing to show.
+
+        The blank line belongs to the banner, not to the act of showing one.
+        A discard has no banner, and printing the separator anyway put two
+        blank lines between the file count and the prompt.
+        """
+        if not banner:
+            return
         print()
         for line in banner:
             print(line)
@@ -6935,7 +6953,7 @@ class Runner:
         """Which kind of not-completing this was. Both leave the position where
         it is; only the wording and the log differ."""
         if isinstance(exc, Aborted):
-            return self._interrupted(item)
+            return self._interrupted(item, exc)
         return self._crashed(item, exc)
 
     def _crashed(self, item, exc):
@@ -6960,12 +6978,16 @@ class Runner:
             item.name(), FAILED, 0, "%s: %s" % (type(exc).__name__, exc)))
         return item.aborted("failed: %s" % exc)
 
-    def _interrupted(self, item):
+    def _interrupted(self, item, exc):
         """An abort does NOT complete the item, so the position stays put —
         which is what "steps back by one" means for a move that never took
-        effect."""
-        print()
-        note = "Aborted by user mid-run."
+        effect.
+
+        Pre-run or mid-run comes off the exception rather than being assumed.
+        Typing q at the DELETE prompt reported "mid-run" about a step that had
+        not started, which is the one thing the two words exist to tell apart.
+        """
+        note = "Aborted by user %s-run." % ("mid" if exc.mid_run else "pre")
         self.ctx.results.append(StepResult(item.name(), ABORTED, 0, note))
         # The same words to the item, because the outcome's note is what the
         # line under this one prints. Two spellings of one event gave the

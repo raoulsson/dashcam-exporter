@@ -980,12 +980,23 @@ class TheRunner(unittest.TestCase):
         position still holds.
         """
         menu_items, position = machine(at=M.NOWHERE)
-        menu_items[IMPORT].execute.side_effect = P.Aborted()
+        menu_items[IMPORT].execute.side_effect = P.Aborted(mid_run=True)
         run = drive(menu_items, position, ["1", "q"])
         menu_items[IMPORT].aborted.assert_called_once_with("Aborted by user mid-run.")
         self.assertEqual(run.position.current, M.NOWHERE)
         self.assertEqual([r.status for r in run.ctx.results], [P.ABORTED])
         self.assertEqual(P._exit_code(run.ctx), 0, "stopping on purpose is not a failure")
+
+    def test_a_prompt_abort_is_pre_run_not_mid_run(self):
+        """q at a typed-word prompt stops a step that never started. Reported
+        mid-run it claims something was part way through, which is the one
+        thing the two words exist to tell apart."""
+        menu_items, position = machine(at=M.NOWHERE)
+        menu_items[IMPORT].execute.side_effect = P.Aborted()
+        run = drive(menu_items, position, ["1", "q"])
+        menu_items[IMPORT].aborted.assert_called_once_with("Aborted by user pre-run.")
+        self.assertEqual([r.detail for r in run.ctx.results],
+                         ["Aborted by user pre-run."])
 
     def test_the_menu_is_repainted_from_the_position_every_loop(self):
         """The greying is recomputed, never remembered: the painter is handed
