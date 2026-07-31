@@ -6261,10 +6261,26 @@ def _big_banner():
     return tuple(map(C.bold, _with_version(BANNER.strip("\n").splitlines())))
 
 
+DESIGNED_BY = "--- designed by Raoul Marc Schmidiger"
+IMPLEMENTED_BY = "--- implemented by Claude"
+
+
+def _credited(tail):
+    """The two names, either side of the descender the art ends on.
+
+    The last line of the letterforms is one glyph and a lot of empty space,
+    which is the only room a header has for anything else -- and this is the
+    one thing worth putting in it.
+    """
+    at = tail.index("|_|")
+    return "%s|_|   %s" % (("      " + DESIGNED_BY).ljust(at), IMPLEMENTED_BY)
+
+
 def _with_version(lines):
     at = len(lines) - 2                     # the last line of the letterforms
     tagged = list(lines)
     tagged[at] = "%s v%s" % (tagged[at].rstrip(), version())
+    tagged[-1] = _credited(tagged[-1])
     return tagged
 
 
