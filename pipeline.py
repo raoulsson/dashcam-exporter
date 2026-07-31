@@ -1398,6 +1398,18 @@ EXCLUDED_FILE = ".excluded.json"
 # on the status screen.
 ARCHIVE_DIR = Path.home() / ".dashcam-exporter" / "processed"
 
+BANNER = r"""
+  ____                  _                                              _____                                 _
+ |  _ \    __ _   ___  | |__     ___    __ _   _ __ ___               | ____| __  __  _ __     ___    _ __  | |_    ___   _ __
+ | | | |  / _` | / __| | '_ \   / __|  / _` | | '_ ` _ \     _____    |  _|   \ \/ / | '_ \   / _ \  | '__| | __|  / _ \ | '__|
+ | |_| | | (_| | \__ \ | | | | | (__  | (_| | | | | | | |   |_____|   | |___   >  <  | |_) | | (_) | | |    | |_  |  __/ | |
+ |____/   \__,_| |___/ |_| |_|  \___|  \__,_| |_| |_| |_|             |_____| /_/\_\ | .__/   \___/  |_|     \__|  \___| |_|
+                                                                                     |_|
+"""
+
+BANNER_WIDTH = max(len(line) for line in BANNER.splitlines())
+
+
 VERSION = "1.0"
 REPO_URL = "https://github.com/raoulsson/dashcam-exporter"
 SPONSORS_URL = "https://github.com/sponsors/raoulsson"
@@ -6116,6 +6128,22 @@ def _lock_taken(ctx):
     return 2
 
 
+def _banner_lines(ctx):
+    """The name, big, or the one-line version when the terminal is narrow.
+
+    Which edition this is and what the chain does both live on the status
+    screen a few lines below, so the header does not have to carry them too --
+    it says what the program is called and gets out of the way.
+    """
+    if term_width() < BANNER_WIDTH + 2:
+        return (C.bold("  dashcam-exporter") + C.dim("   " + _chain(ctx)),)
+    return _big_banner()
+
+
+def _big_banner():
+    return tuple(map(C.bold, BANNER.strip("\n").splitlines()))
+
+
 def _edition_line(ctx):
     """Which of the two editions this install is, named once, at the top.
 
@@ -6241,8 +6269,7 @@ def _uploader_broken(error):
 
 def _start(ctx, launched):
     print()
-    print(C.bold("  dashcam pipeline") + C.dim("   " + _chain(ctx)))
-    print(_edition_line(ctx))
+    _print_all(_banner_lines(ctx))
     # Checked before the status screen: there is nothing useful to show if the
     # numbers behind it would come from the wrong grouping.
     if not require_ego_motion(ctx):
