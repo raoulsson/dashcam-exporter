@@ -255,14 +255,43 @@ class TestAvailability(SpecTest):
         self.assertBlocked(UPLOAD)
 
     def test_sidecars_are_required_before_the_items_that_consume_them(self):
-        """You have to create sidecars before preview / publish / render /
-        clear the workspace. Upload Website carries the rule the folded-in
-        deploy step used to: with no sidecar anywhere there is no metadata to
-        put online."""
+        """You have to create sidecars before preview / publish / render.
+        Upload Website carries the rule the folded-in deploy step used to: with
+        no sidecar anywhere there is no metadata to put online.
+
+        RESTATED: Clean Workspace was in this list and is not any more. It
+        consumed sidecars in the sense that its gates are about renders, so
+        with none it refused -- and an interrupted first import, which leaves
+        clips and nothing else, could then neither go forward nor be cleared.
+        It now has a second way in that the others do not have and cannot:
+        an import nothing was made from, every clip of which is still on the
+        card. The test below holds that line, and the one after it shows the
+        refusal is per clip and still there.
+        """
         self.b.card_in().imported().publishes()
         blocked = self.b.blocked()
-        for item in (PREVIEW, RENDER, UPLOAD, CLEAN_WS):
+        for item in (PREVIEW, RENDER, UPLOAD):
             self.assertIn(item, blocked, "item %d must wait for sidecars" % item)
+
+    def test_an_import_nothing_was_made_from_can_be_discarded(self):
+        """The clips are on the card, so this deletes a copy, not footage."""
+        self.b.card_in().imported().publishes()
+        self.assertAvailable(CLEAN_WS)
+
+    def test_but_not_when_the_card_no_longer_holds_it(self):
+        """Same import, no card in the slot: this copy is the only one, and
+        nothing downstream vouches for it either. A discard here would be the
+        footage-loss path the sidecar rule was standing in for."""
+        self.b.imported().publishes()               # imported, card gone
+        self.assertBlocked(CLEAN_WS)
+
+    def test_nor_when_one_clip_of_it_is_missing_from_the_card(self):
+        """Per clip, not a headcount: a card holding two of the three still
+        leaves one whose only copy is the import."""
+        self.b.card_in(stamps=("20260728090000", "20260728100000"))
+        self.b.imported(stamps=("20260728090000", "20260728100000",
+                                "20260728110000")).publishes()
+        self.assertBlocked(CLEAN_WS)
 
     def test_cannot_create_sidecars_without_gpx(self):
         """You cannot create sidecars without gpx. Generate Meta is what

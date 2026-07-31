@@ -308,6 +308,78 @@ def sidecars_missing(world) -> Optional[str]:
     return "no sidecars on disk for the import"
 
 
+def nothing_to_clean_up(world) -> Optional[str]:
+    """Item 8's cheap half: is there anything here it could be asked about.
+
+    Sidecars are the usual answer -- an import with sidecars is an import the
+    cycle has started on, and the heavy gates below decide whether it may go.
+    But an import with none is not automatically untouchable, and treating it
+    so is what made an interrupted first import a dead end: item 1 refused to
+    import on top of two stray clips and pointed at item 8, and item 8 refused
+    them for having no sidecars. Nothing had been made from those clips and
+    the card still held every one; there was nothing to protect.
+
+    So a disposable import passes here, and its own evidence is checked again
+    where it counts, in the plan and after the typed word.
+    """
+    if import_is_disposable(world):
+        return None
+    return sidecars_missing(world)
+
+
+def import_is_disposable(world) -> bool:
+    """This import produced nothing and the source still holds all of it.
+
+    Both halves are required and neither is a formality. "Produced nothing"
+    means the footage has not been described, encoded or published, so no
+    later step is relying on it and no copy of it exists anywhere downstream.
+    "The source still holds it" is per clip against the card in the slot, not
+    a count and not the ledger: the ledger records that a copy was made once,
+    which is exactly the claim that cannot notice the card has since been
+    wiped or swapped.
+
+    An empty import is not disposable by this route. It is the settled case
+    sidecars_missing already lets through, and an empty set of clips would
+    otherwise satisfy "the source holds them all" vacuously.
+    """
+    if _something_was_made_from_it(world):
+        return False
+    return _every_clip_is_on_the_card(world)
+
+
+def _something_was_made_from_it(world) -> bool:
+    return bool(world.metas or world.renders or world.final_folders)
+
+
+def _every_clip_is_on_the_card(world) -> bool:
+    return bool(world.import_stamps) and not world.unsourced_stamps
+
+
+def clean_is_allowed(world) -> Verdict:
+    """Item 8's heavy gate, either way in.
+
+    Two acts wear one number. Sweeping a finished cycle erases footage whose
+    renders are published, and is decided by workspace_is_expendable. Throwing
+    away an import nothing was made from erases footage the card still has,
+    and is decided by import_is_disposable. The second is not a weakening of
+    the first: it is available only when every gate the first would ask about
+    has nothing to be asked about, and it refuses the moment one clip of that
+    import is missing from the source.
+    """
+    if import_is_disposable(world):
+        return go()
+    return workspace_is_expendable(world)
+
+
+def unsourced_lines(world) -> Tuple[str, ...]:
+    """Why a discard is refused, per clip rather than as a headcount."""
+    missing = sorted(world.unsourced_stamps)
+    if not missing:
+        return ()
+    return ("%d of the %d clips in the import are not on the card: %s"
+            % (len(missing), len(world.import_stamps), ", ".join(missing[:4])),)
+
+
 def no_sidecars_at_all(world) -> Optional[str]:
     """Stricter than sidecars_missing: NOTHING has been written, anywhere.
 

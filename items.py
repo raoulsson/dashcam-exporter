@@ -487,7 +487,7 @@ class CleanWorkspace(Destructive):
         """
         return _first_block(
             _no_import(world, "nothing imported — nothing to clean up"),
-            guards.sidecars_missing(world))
+            guards.nothing_to_clean_up(world))
 
     def _plan(self, world) -> Plan:
         return self._work.clean_workspace_plan(world)

@@ -153,6 +153,12 @@ class World:
     # published-then-cleaned-up trip are indistinguishable afterwards, so this
     # is recorded at the only moment that knows which it was.
     dropped_ids: Tuple[str, ...] = ()
+    # The working import's own clips, and which of them the source in the slot
+    # no longer holds. Two fields rather than one flag because an import with
+    # no clips at all and an import whose every clip is still on the card both
+    # leave "unsourced" empty, and only one of them is footage worth keeping.
+    import_stamps: FrozenSet[str] = frozenset()
+    unsourced_stamps: FrozenSet[str] = frozenset()
     final_folders: Tuple[Path, ...] = ()
     expected_trips: Optional[int] = None         # None = grouping unreadable
     has_track: bool = False

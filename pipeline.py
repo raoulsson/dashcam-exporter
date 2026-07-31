@@ -4963,8 +4963,25 @@ def _evidence_colour(e):
 
 def _clean_banner(ctx, world, target, size):
     """The last thing on screen before the word is asked for."""
+    if guards.import_is_disposable(world):
+        return _discard_banner(world, target, size)
     return (C.red("  Deleting %s removes %s of original footage permanently."
                   % (target, human_bytes(size))),) + _what_survives(ctx, world)
+
+
+def _discard_banner(world, target, size):
+    """A discard is still destructive and still asks for the word.
+
+    What it is not is irreversible: it deletes this machine's copy of clips
+    the card still has, and re-importing them is item 1. So the banner says
+    what is true rather than borrowing the sweep's sentence -- a red line that
+    overstates on the harmless case is a red line nobody believes on the other.
+    """
+    return (C.red("  Deleting %s removes %s from this machine."
+                  % (target, human_bytes(size))),
+            C.dim("  The %d clips stay on the card, so 1) %s brings them back."
+                  % (len(world.import_stamps), NAME[IMPORT])),
+            C.dim("  Nothing else was made from them, so nothing else goes."))
 
 
 def _what_survives(ctx, world):
@@ -5032,20 +5049,56 @@ def clean_workspace_plan(ctx, world):
     print()
     print(rule("erase the imported footage"))
     print("  Target: %s" % C.bold(str(target)))
-    print("  %d files, %s — this is the ORIGINAL footage and it is not recoverable."
-          % (files, C.bold(human_bytes(size))))
+    _print_all(_what_goes_lines(world, files, size))
     print()
-    _print_gates(world)
-    verdict = guards.workspace_is_expendable(world)
+    _print_all(_why_it_may_go(world))
+    verdict = guards.clean_is_allowed(world)
     if verdict.blocked:
         print(C.red("  Refusing: %s." % verdict.reason))
+        _print_all(guards.unsourced_lines(world))
         _print_gate_detail(world)
         return _nothing(ctx, CLEAN_WS, started, "refused: %s" % verdict.reason)
 
-    return menu.Plan(guards.workspace_is_expendable,
+    return menu.Plan(guards.clean_is_allowed,
                      lambda fresh: _clean_workspace_commit(ctx, fresh, root, target,
                                                            size, files, started),
                      banner=_clean_banner(ctx, world, target, size))
+
+
+def _what_goes_lines(world, files, size):
+    """What the delete costs, which is not the same sentence in both cases.
+
+    Sweeping a finished cycle destroys the only copy of the raw footage. A
+    discard does not: the clips are still on the card, which is the whole
+    reason it is allowed. Saying "not recoverable" over a copy would be the
+    sort of warning that gets ignored where it is true.
+    """
+    if guards.import_is_disposable(world):
+        return ("  %d files, %s — a second copy. The card still holds all %d clips."
+                % (files, C.bold(human_bytes(size)), len(world.import_stamps)),)
+    return ("  %d files, %s — this is the ORIGINAL footage and it is not"
+            " recoverable." % (files, C.bold(human_bytes(size))),)
+
+
+def _why_it_may_go(world):
+    """The publish gates, or the discard's own evidence -- never both.
+
+    Printing the two destination gates over a discard would read as a refusal
+    being overridden: they answer "no" because there is nothing to publish,
+    not because anything is wrong.
+    """
+    if guards.import_is_disposable(world):
+        return _discard_lines(world)
+    _print_gates(world)
+    return ()
+
+
+def _discard_lines(world):
+    return (C.dim("  Nothing was made from this import: no sidecars, no renders,"),
+            C.dim("  nothing published. Every one of its %d clips is on the card in"
+                  % len(world.import_stamps)),
+            C.dim("  the slot, checked clip by clip."),
+            "")
 
 
 def _print_gate_detail(world):
@@ -5730,6 +5783,8 @@ def _path_of(meta):
 def _world_of(ctx, scope, imports, root, metas, renders, trip_ids, target,
               expendable):
     settled, why, stragglers = expendable
+    card = _card_facts(ctx)
+    mine = _import_stamps(root)
     return W.World(
         at=time.time(), scope=scope, strategy=menu.Strategy.of(ctx.plugin),
         offline=ctx.offline,
@@ -5740,13 +5795,38 @@ def _world_of(ctx, scope, imports, root, metas, renders, trip_ids, target,
         imports=imports, selected_import=root, metas=metas,
         renders=renders, renders_here=_renders_here(ctx, root),
         trip_ids=trip_ids, dropped_ids=dropped_trip_ids(ctx),
+        import_stamps=mine, unsourced_stamps=mine - card.stamps,
         final_folders=_final_folders(ctx), expected_trips=_expected_trips(ctx, root, metas),
         has_track=_has_track(imports), stills_current=_stills_current(ctx),
         local_page=_page_exists(ctx), ledger_mark=last_imported_stamp(ctx),
         excluded=frozenset(excluded_stamps(ctx)), excluded_at=_excluded_at(ctx),
         newest_meta_at=_newest_mtime(_meta_paths(metas)),
         workspace_settled=settled, workspace_note=why,
-        stragglers=tuple(stragglers), card=_card_facts(ctx), target=target)
+        stragglers=tuple(stragglers), card=card, target=target)
+
+
+def _import_stamps(root):
+    """Every clip in ONE import, by stamp. Empty when there is no import.
+
+    The front camera only, exactly as the card accounting counts it: front and
+    rear are recorded as a pair under one stamp, so counting both would compare
+    two clips against one and report footage the card does not hold.
+    """
+    if root is None:
+        return frozenset()
+    front = root / "DCIM" / "200video" / "front"
+    return frozenset(filter(None, map(_stamp_of, _safe_glob(front, "*.mp4"))))
+
+
+def _safe_glob(d, pattern):
+    if not d.is_dir():
+        return []
+    return d.glob(pattern)
+
+
+def _stamp_of(path):
+    m = STAMP_RE.search(path.name)
+    return m.group(1) if m else None
 
 
 # ---------------------------------------------------------------------------

@@ -825,5 +825,71 @@ class TestTheLocalRenderGateHasNoWayToAbstain(unittest.TestCase):
                                     "the floor abstained, so nothing holds the rule up")
 
 
+class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
+    """The second way into item 8, and the only one that does not go through
+    the publish gates.
+
+    It exists because the first way cannot cover the state it is for: an
+    import that was interrupted before anything read it has no sidecars, no
+    renders and nothing at any destination, so every gate about publishing
+    answers "no" and the footage can neither move forward nor be cleared. The
+    evidence it stands on instead is that the card in the slot still holds the
+    clips, per clip, so what is being deleted is a copy.
+    """
+
+    def _import(self, mine=("A", "B"), on_card=("A", "B"), **rest):
+        return W.World(imports=(Path("/w/import"),),
+                       import_stamps=frozenset(mine),
+                       unsourced_stamps=frozenset(mine) - frozenset(on_card),
+                       **rest)
+
+    def test_a_bare_import_whose_clips_are_all_on_the_card(self):
+        self.assertTrue(guards.import_is_disposable(self._import()))
+        self.assertFalse(guards.clean_is_allowed(self._import()).blocked)
+
+    def test_one_clip_short_and_it_is_not_disposable(self):
+        """Per clip, because a headcount cannot tell a card holding two of the
+        three from a card holding three others."""
+        world = self._import(mine=("A", "B", "C"), on_card=("A", "B"))
+        self.assertFalse(guards.import_is_disposable(world))
+        self.assertTrue(guards.clean_is_allowed(world).blocked)
+
+    def test_no_card_at_all_and_it_is_not_disposable(self):
+        world = self._import(on_card=())
+        self.assertFalse(guards.import_is_disposable(world))
+        self.assertTrue(guards.clean_is_allowed(world).blocked)
+
+    def test_an_empty_import_is_not_disposable_by_this_route(self):
+        """Vacuous truth is the failure mode: no clips means no clip is
+        missing from the card, and "all of them are safe" would be a yes about
+        nothing. sidecars_missing already settles the empty case."""
+        self.assertFalse(guards.import_is_disposable(self._import(mine=())))
+
+    def test_anything_made_from_it_takes_this_route_away(self):
+        """A sidecar, a render or a gathered folder each mean something
+        downstream is built on this footage, and then the publish gates are
+        the only way through -- the card holding the clips says nothing about
+        whether the renders got out."""
+        for made in ({"metas": (W.TripMeta("t", "2026", "2026"),)},
+                     {"renders": (W.Render("t.mp4", 10),)},
+                     {"final_folders": (Path("/w/out/final_2026-07-28"),)}):
+            with self.subTest(**made):
+                world = self._import(**made)
+                self.assertFalse(guards.import_is_disposable(world))
+                self.assertTrue(guards.clean_is_allowed(world).blocked)
+
+    def test_the_cheap_half_lets_a_disposable_import_through(self):
+        """Item 8's evaluate, which is what decides whether the entry is even
+        offered. Blocked there, the operator never reaches the evidence."""
+        self.assertIsNone(guards.nothing_to_clean_up(self._import()))
+        self.assertIsNotNone(guards.nothing_to_clean_up(self._import(on_card=())))
+
+    def test_the_refusal_names_the_clips(self):
+        said = guards.unsourced_lines(self._import(mine=("A", "B", "C"),
+                                                   on_card=("A",)))
+        self.assertIn("B", said[0])
+        self.assertIn("C", said[0])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
