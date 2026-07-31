@@ -1334,7 +1334,7 @@ def print_configuration(ctx):
     so it is printed once and the menu never repeats it.
     """
     print()
-    print(rule("configuration (read from %s)" % tilde(ctx.config_path)))
+    print(rule("Configuration (read from %s)" % tilde(ctx.config_path)))
     _print_all(_config_rows(ctx))
     print(rule())
 
@@ -1360,7 +1360,7 @@ def _setting(label, value, indent=2):
 
 def print_status(ctx):
     print()
-    print(rule("status"))
+    print(rule("Status"))
 
     _print_all(_card_rows(ctx))
 
@@ -3697,7 +3697,7 @@ def step_preview(ctx):
 def _print_trip_table(ctx, root, trips):
     """List the trips, and return them by index."""
     print()
-    print(rule("trips in %s" % root.name))
+    print(rule("Trips in %s" % root.name))
     by_index = {}
     for t in trips:
         by_index[t["index"]] = t
@@ -3971,7 +3971,7 @@ def _drop_plan_for(ctx, world, payload, by_index, picked, started):
     files = [p for i in picked for p in trip_files(by_index[i])] + render_files
     total = sum(_size_of(p) for p in files)
     print()
-    print(rule("drop from import"))
+    print(rule("Drop from Import"))
     for i in picked:
         t = by_index[i]
         print("  Trip %d  %s  %s -> %s  %d clips  %s" % (
@@ -5250,7 +5250,7 @@ def clean_workspace_plan(ctx, world):
 
     size, files = tree_size(target), count_files(target)
     print()
-    print(rule("erase the imported footage"))
+    print(rule("Erase the Imported Footage"))
     print("  Target: %s" % C.bold(str(target)))
     _print_all(_what_goes_lines(world, files, size))
     print()
@@ -6692,7 +6692,7 @@ def print_summary(ctx, close=True):
     if not ctx.results:
         return
     print()
-    print(rule("summary"))
+    print(rule("Summary"))
     print(C.dim("  %-9s  %-37s %18s   %s"
                 % ("", "task", "CPU / Network time", "Description")))
     _print_all(map(_summary_line, ctx.results))
