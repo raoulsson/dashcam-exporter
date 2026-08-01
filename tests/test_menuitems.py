@@ -853,7 +853,17 @@ class TestBuildWebsite(unittest.TestCase):
         never made or were deleted in Finder."""
         verdict = evaluate(item_for(BUILD), imported())
         self.assertTrue(verdict.blocked)
-        self.assertIn("no meta or renders", verdict.reason)
+        self.assertIn("no rendered trips yet", verdict.reason)
+
+    def test_it_does_not_claim_the_sidecars_are_missing_too(self):
+        """The old wording was "no meta or renders" over a workspace whose
+        sidecars were sitting right there, which sent the operator back to
+        item 2 to make the thing he already had."""
+        self.assertNotIn("meta", evaluate(item_for(BUILD), imported()).reason)
+
+    def test_with_nothing_described_either_it_says_so(self):
+        verdict = evaluate(item_for(BUILD), imported(metas=()))
+        self.assertIn("nothing described or rendered", verdict.reason)
 
     def test_it_hands_the_work_to_the_builder_it_was_constructed_with(self):
         """The whole body is passed in, not chosen. That is the strategy
@@ -871,7 +881,8 @@ class TestBuildWebsite(unittest.TestCase):
         cannot get a page built out of nothing."""
         work = FakeWork(build_reason="the target is not reachable")
         item = menu_for(UPLOADER, work)[BUILD]
-        self.assertIn("no meta or renders", evaluate(item, imported()).reason)
+        self.assertIn("no rendered trips yet",
+                      evaluate(item, imported()).reason)
         self.assertIn("not reachable",
                       evaluate(item, imported(renders=(MP4,))).reason)
 

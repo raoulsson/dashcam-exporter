@@ -512,7 +512,7 @@ class TestBuildWebsiteDelegates(SeamTest):
         b = self.bench(target).imported().sidecars()      # no render anywhere
         ran = b.run(BUILD)
         self.assertFalse(ran.completed)
-        self.assertIn("no meta or renders", ran.note)
+        self.assertIn("no rendered trips yet", ran.note)
         self.assertEqual(target.times("build"), 0,
                          "the target was asked to build from nothing")
 

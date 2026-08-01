@@ -428,7 +428,14 @@ def nothing_to_build_from(world) -> Optional[str]:
     than of the target because it is a fact about this machine: a target that
     answers yes to everything still cannot get a page built out of an empty
     tree.
+
+    Two messages because there are two states, and the single "no meta or
+    renders" was wrong in the commoner one: it fired over a workspace whose
+    sidecars were sitting right there, told the operator he had no meta, and
+    sent him back to item 2 to make the thing he already had.
     """
     if renders_exist(world):
         return None
-    return "no meta or renders"
+    if world.metas:
+        return "no rendered trips yet"
+    return "nothing described or rendered yet"
