@@ -6,9 +6,29 @@ watermark), a moving-marker map widget + stats panel, automatic parking-skip,
 and per-trip HTML / GPX / links / meta sidecars. DDPAI-specific (tested on Mola
 N3 Pro). macOS-first (hardware VideoToolbox); Linux works via libx264.
 
-Almost everything lives in one file: `make_dashcam_videos.py` (~4500 lines).
-There is no package, no tests — it's a prototype script. Reshaping it is fine;
-less code is better.
+Two layers, and they do not know much about each other.
+
+`make_dashcam_videos.py` (~4200 lines) is the RENDERER: scanning, trip grouping,
+GPS, sidecars, encoding. It has a full command line and is what the rest of this
+file is mostly about.
+
+The other modules are the OPERATOR TOOL, a nine-item menu that runs the renderer
+as a child process and decides what may run when:
+
+| module | lines | what is in it |
+|---|---|---|
+| `pipeline.py` | ~8300 | the step bodies, the terminal output, the world capture |
+| `menu.py`     | ~700  | the item base classes, the step graph, the position machine |
+| `items.py`    | ~700  | one class per menu item: what it is, where it leads, what blocks it |
+| `guards.py`   | ~440  | pure predicates over a captured world — every refusal lives here |
+| `world.py`    | ~200  | the frozen facts a guard is allowed to look at |
+| `uploader.py` | ~480  | the seam an outside publisher implements |
+
+`./run-tests.sh` runs 506 Python tests and 7 shell tests and prints `all green`;
+it also fails on pyflakes undefined names and redefinitions. Anything touching
+`guards.py`, `items.py` or `menu.py` is expected to come with a test, because
+those decide whether footage may be deleted. The renderer itself stays a
+prototype: reshaping it is fine, less code is better.
 
 ## The trip model (core concept)
 
@@ -94,14 +114,34 @@ pip install -r requirements.txt`); the wrapper scripts auto-prefer `.venv/bin/
 python` when it exists. Without Pillow the render still works but silently drops
 the map-widget panel (prints a warning). `.venv/` and `.env` are gitignored.
 
+## The operator tool, and what must not be broken in it
+
+Four rules hold the delete gates together. Everything else in these modules can
+be reshaped; break one of these and footage goes.
+
+- **A guard is a pure function of a frozen `World`.** It never touches the disk
+  and never calls the plugin. Two reads of one world give one answer, which is
+  what makes the re-check after a typed word meaningful.
+- **Outbound edges are authored on the item; inbound is derived** by
+  `menu.derive_inbound` from every other item's outbound. Never hand-write an
+  inbound set — `menu.disagreements()` exists to report where the derivation
+  parts company with the owner's table, and a hand-edit hides that.
+- **Destructive items ask for a typed word, then capture the world AGAIN** and
+  re-ask the same guard callable before acting. Items 4, 8 and 9 ask `DELETE`;
+  the way past item 9's own refusal asks `ERASE`, so habit cannot carry anyone
+  through a guard.
+- **`is_complete()` is three-valued and fails closed.** A destination that
+  cannot be reached answers UNKNOWN, never NO and never YES, because the next
+  thing the operator does is erase the only local copy.
+
 ## Data layout (outside the repo)
 
 - Inputs:  `~/dashcam-data/import/<label>/DCIM/{200video/{front,rear},203gps,...}`
   — one folder per import (folder name is arbitrary, usually the import date;
   grouping is timestamp-driven and one folder can span several days of clips).
-- Outputs: `~/dashcam-data/output/` — the `--out` target. Output is
-  **namespaced by import**: `output/<import-name>/<extract-day>/`, e.g.
-  `output/2026-07-19/2026-07-15/`. The import folder (`root.name`) is the
+- Outputs: `~/dashcam-data/export/` — the `--out` target. Output is
+  **namespaced by import**: `export/<import-name>/<extract-day>/`, e.g.
+  `export/2026-07-19/2026-07-15/`. The import folder (`root.name`) is the
   top namespace; the extract day (04:00-rollover) groups a card's trips beneath
   it. This is what makes cross-card clobbering **impossible**: DDPAI cards hoard
   old event clips, so two different cards routinely contain the same calendar day
@@ -118,8 +158,8 @@ them per-run, in the wrapper-script OPTS, or a local uncommitted config.
 
 Importing a card: `./import-sd-card.sh [YYYY-MM-DD] [--delete] [--checksum] [--src PATH]` copies
 the card's `DCIM` into `<import_dir>/<day>/`, verifies file-for-file, and KEEPS
-the card — deletion is opt-in via `--delete`, and `--keep` survives only as a
-back-compat no-op. With `--delete` it removes the card's files and keeps the
+the card — deletion is opt-in via `--delete`, and `--keep` is a no-op that
+means the same thing. With `--delete` it removes the card's files and keeps the
 folder tree so the camera can record. Nothing is deleted until the verify pass
 succeeds, and the verify refuses if rsync itself failed. `AFTER_STAMP` in the
 environment makes it a delta copy; `--delete` is refused after one, because the
@@ -127,6 +167,11 @@ skipped clips were verified by an earlier run this script cannot see.
 
 ## Running
 
+- `./RUN-DASHCAM-EXPORTER.sh` — the operator tool. Picks an interpreter that has
+  cv2, numpy, staticmap and PIL, then execs `pipeline.py`, which takes no
+  arguments at all: every value comes from `config.txt` and the gitignored
+  `.env`. A flag would be a second answer to a question `config.txt` already
+  answers, and the compiled-in default wins silently when the two disagree.
 - `./list-trips-data.sh` — dry-run; list trips with index, day label, span, clips.
 - `./make-trips-rendered.sh [N …]` — encode; leading ints select trip indices
   (via `--drives`, alias `--trips`), rest passes through. A FULL render (no
