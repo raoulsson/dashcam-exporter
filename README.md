@@ -62,8 +62,8 @@ deliberate — see [One source of truth](#one-source-of-truth).
 --------------------------------------------------------------------------------
 ================================================================================
   1) Import SIM           4) Exclude Trip         7) Upload Website
-  2) Generate Meta        5) Render Trips        8) Clean Workspace
-  3) Build Preview        6) Build Website        9) Delete SIM Data
+  2) Generate Meta        6) Render Trips        8) Clean Workspace
+  3) Build Preview        5) Build Website        9) Delete SIM Data
   p = progress   h = help   i = info   q = quit
 
 Select>
@@ -265,7 +265,7 @@ one setting:
 | Configured | You get |
 |---|---|
 | nothing | Import, render, and `dashcam_export_data_site.html` — one self-contained page, every still embedded, every route drawn from its GPX. Opens from `file://` with no network. |
-| `website_uploader` | Item 6 builds what YOUR plugin publishes instead of the local page, and item 7, Upload Website, wakes up. |
+| `website_uploader` | Item 5 builds what YOUR plugin publishes instead of the local page, and item 7, Upload Website, wakes up. |
 
 Unconfigured, item 7 stays in the menu, greyed out, with the reason printed
 underneath. Run the cycle and the result is gathered into `final_<date>/` —
@@ -407,7 +407,7 @@ SET_WEBSITE_UPLOADER=~/dev/my-site/my_plugin.py:MySiteBuilder:MySiteUploader
 ```
 
 `<path to a .py>:<BuilderClass>:<UploaderClass>`. One plugin, two classes: the
-builder is item 6, the uploader is item 7. A file path rather than a dotted
+builder is item 5, the uploader is item 7. A file path rather than a dotted
 module name, because your implementation lives somewhere that is not installed
 and must not have to be — and when the path is wrong, the error names your file
 instead of Python's search path.

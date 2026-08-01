@@ -7,7 +7,7 @@ SET_WEBSITE_UPLOADER in .env, which is the same setting and stays out of git):
 
     website_uploader = ~/dev/dashcam-exporter/examples/local_website.py:LocalWebSiteBuilderPlugin:LocalWebSiteUploader
 
-One plugin, two classes: the builder is item 6, the uploader is item 7. Where
+One plugin, two classes: the builder is item 5, the uploader is item 7. Where
 things go is this file's own business, not the exporter's — the two directories
 below come from the environment, and the exporter has exactly one setting about
 publishing, which is which plugin to load.
@@ -55,7 +55,7 @@ STYLE = "body{font:16px/1.5 system-ui;margin:3rem auto;max-width:40rem}\n"
 
 
 class LocalWebSiteBuilderPlugin(Builder):
-    """Item 6: stage a tiny site from the renders and sidecars."""
+    """Item 5: stage a tiny site from the renders and sidecars."""
 
     def describe(self) -> str:
         return "Build a small HTML site in %s from the renders." % _staging()

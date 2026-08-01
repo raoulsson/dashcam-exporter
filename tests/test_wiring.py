@@ -8,14 +8,14 @@ catch a collaborator that is built with one shape and called with another,
 because none of them calls the real body: the mock files deliberately run
 nothing real, and the path files stop at the item boundary.
 
-That gap let item 6 ship crashing on every single run under both strategies.
+That gap let item 5 ship crashing on every single run under both strategies.
 The constructor bound ctx into the gatherer, build_result_page passed ctx again,
 and a two-argument function got three. Two hundred and seventy-one tests were
 green over it.
 
 The gap got WIDER when the publishing half became an interface. There is a
 surface an outsider implements and this repo calls, and the call sites are
-spread across capture_world, item 6 and item 7. So the question is asked here
+spread across capture_world, item 5 and item 7. So the question is asked here
 for every method on the interface, and the table of call sites is checked
 against the abstract methods of Builder and Uploader — a method added later
 fails this file until someone writes down where it is called from. Binding the
@@ -106,7 +106,7 @@ CALL_SITES = {
     # pipeline.TargetBuild/TargetPublish.describe, for the menu row, and
     # pipeline._target_status once at launch
     "describe": (),
-    # pipeline.TargetBuild/TargetPublish.evaluate, from item 6's and item 7's
+    # pipeline.TargetBuild/TargetPublish.evaluate, from item 5's and item 7's
     # evaluate, on every menu draw
     "evaluate": (A_WORKSPACE,),
     # pipeline.TargetBuild/TargetPublish.execute, from the items' _perform
@@ -172,7 +172,7 @@ class TestTheInterfaceAcceptsWhatItsCallSitesPass(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestTheBuilderFitsItsCallSite(unittest.TestCase):
-    """Item 6 asks its builder three things, all by name.
+    """Item 5 asks its builder three things, all by name.
 
     There is no gatherer any more: only the MOVER used to be the strategy
     branch, so the page writer ran under both editions and a publishing install
@@ -208,7 +208,7 @@ class TestTheBuilderFitsItsCallSite(unittest.TestCase):
 
 
 class TestThePublisherFitsItsCallSite(unittest.TestCase):
-    """Item 7 asks its publisher the same three things item 6 asks its
+    """Item 7 asks its publisher the same three things item 5 asks its
     builder, which is what "one act, twice" means at the wiring."""
 
     def _publishers(self):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The seam itself, driven: the real items 6, 7 and 8 against a plugin this
+"""The seam itself, driven: the real items 5, 7 and 8 against a plugin this
 repo does not own.
 
 The other files stop short of this on purpose. test_uploader.py states what an
@@ -13,9 +13,9 @@ this file does: a plugin under the test's control is handed to a real
 pipeline.Work over a real temporary workspace, and the ten real items are then
 run at it. What it pins, that nothing pinned before:
 
-  * item 6 under a configured plugin writes NO local page and gathers nothing
+  * item 5 under a configured plugin writes NO local page and gathers nothing
     — the reported bug, as a property of a run rather than of the wiring;
-  * item 6 and item 7 take their reasons, their descriptions and their
+  * item 5 and item 7 take their reasons, their descriptions and their
     "is there anything left to do" from the plugin and not from the disk;
   * the local edition still builds its page, and item 7 is unreachable there
     by the edges rather than by a refusal in a body;
@@ -449,7 +449,7 @@ class SeamTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Item 6 — the work is the target's, and so is the sentence about it
+# Item 5 — the work is the target's, and so is the sentence about it
 # ---------------------------------------------------------------------------
 
 class TestBuildWebsiteDelegates(SeamTest):
@@ -484,7 +484,7 @@ class TestBuildWebsiteDelegates(SeamTest):
         self.assertTrue(all(isinstance(w.ui, U.Ui) for w in target.handed))
 
     def test_the_menu_row_is_the_targets_own_sentence(self):
-        """Item 6's description differs between the two products because the
+        """Item 5's description differs between the two products because the
         job genuinely differs, and the entry asks the thing that does the job
         rather than restating how the tool is installed."""
         b = self.bench(Recorder(describes="Push to the shelf."))
@@ -504,7 +504,7 @@ class TestBuildWebsiteDelegates(SeamTest):
         self.assertEqual(target.times("build"), 0)
 
     def test_the_exporter_still_answers_its_own_question_first(self):
-        """Requirement A at item 6. A target that says yes to everything still
+        """Requirement A at item 5. A target that says yes to everything still
         cannot get a page built out of an empty tree, because "is there
         anything here to build from" is a fact about this machine and is never
         delegated."""
@@ -823,7 +823,7 @@ class TestTheRecheckAsksTheTargetAgain(SeamTest):
 class TestIdempotence(SeamTest):
 
     def test_building_twice_asks_the_target_twice_and_remembers_nothing(self):
-        """Item 6 reaches itself in the graph, so a second run is a path the
+        """Item 5 reaches itself in the graph, so a second run is a path the
         machine offers rather than one it tolerates. Each run is answered by
         the world it is handed, so the second is worth exactly what the first
         was."""
@@ -983,7 +983,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
 
 class TestAFailureToLoadIsLoud(unittest.TestCase):
     """Silently becoming the local edition is how someone's renders quietly
-    stop being published. The menu would look normal, item 6 would write a
+    stop being published. The menu would look normal, item 5 would write a
     local page, and item 8 would go on refusing for a reason that reads like a
     network problem.
 
@@ -2080,8 +2080,8 @@ class TestTheLocalEditionsOwnArc(SeamTest):
         """LEFT FAILING ON PURPOSE — a dead end in the local edition's graph,
         and the fix is a design call rather than a test's to assume.
 
-        Item 6's outbound offers item 8 under LOCAL_PAGE, and the owner's own
-        inbound column for item 8 lists item 6. But gather_into_final moves the
+        Item 5's outbound offers item 8 under LOCAL_PAGE, and the owner's own
+        inbound column for item 8 lists item 5. But gather_into_final moves the
         whole day folder — renders AND sidecars — into final_<day>, so after a
         local build the working area has no sidecars (item 8's cheap guard
         refuses) and no renders under this import's namespace (the floor,
@@ -2100,7 +2100,7 @@ class TestTheLocalEditionsOwnArc(SeamTest):
             is the same evidence working_area_is_expendable already accepts;
           * gather leaves the sidecars in the working area, where the card
             guard and the delta import read them from anyway;
-          * item 6 stops offering item 8 under the local edition, which admits
+          * item 5 stops offering item 8 under the local edition, which admits
             the arc does not exist rather than fixing it.
         When one is taken this test starts passing, and unittest reports an
         unexpected success as a FAILURE — so the tripwire is loud in the

@@ -414,14 +414,14 @@ def track_missing(world) -> Optional[str]:
 def renders_exist(world) -> bool:
     """Renders to build a page from. A gathered final_ folder counts.
 
-    The rebuild case: once item 6 has gathered, the loose renders are gone and
+    The rebuild case: once item 5 has gathered, the loose renders are gone and
     the page must still be rebuildable from what is in final_.
     """
     return bool(world.renders or world.final_folders)
 
 
 def nothing_to_build_from(world) -> Optional[str]:
-    """The exporter's OWN question in front of item 6's delegation.
+    """The exporter's OWN question in front of item 5's delegation.
 
     A DESCRIBED trip is enough. Everything a page says about a drive — its
     route, its distance, its places, its map — comes from the sidecars item 2
@@ -435,7 +435,7 @@ def nothing_to_build_from(world) -> Optional[str]:
     answers yes to everything still cannot get a page built out of an empty
     tree.
 
-    This is NOT the floor for the local edition, whose item 6 also gathers —
+    This is NOT the floor for the local edition, whose item 5 also gathers —
     see pipeline.LocalPage, which keeps the renders floor of its own.
     """
     if renders_exist(world) or world.metas:

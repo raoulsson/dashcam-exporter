@@ -296,8 +296,8 @@ class TestGraphConsistency(GraphTest):
     def test_publishing_is_reached_from_building_and_nowhere_else(self):
         """The edge the owner's table was missing.
 
-        He wrote 6 into item 7's inbound and never put 7 into any outbound, so
-        Upload Website was unreachable by its own natural route. Item 5 offered
+        He wrote Build into item 7's inbound and never put 7 into any outbound,
+        Upload Website was unreachable by its own natural route. Item 6 offered
         it instead, which skips building the site item 7 uploads.
         """
         built = M.build_menu(M.Strategy.UPLOADER, NullWork())
@@ -348,7 +348,7 @@ class TestTheOwnersWorkedExample(GraphTest):
         position = M.position_for(built)
         position.current = PREVIEW
         self.assertEqual(sorted(position.selectable(built)),
-                         [PROGRESS, META, PREVIEW, EXCLUDE, RENDER, BUILD,
+                         [PROGRESS, META, PREVIEW, EXCLUDE, BUILD, RENDER,
                           CLEAN_WS, ERASE_CARD])
         position.current = EXCLUDE
         self.assertEqual(sorted(position.selectable(built)),
@@ -446,7 +446,7 @@ class TestStrategySplit(GraphTest):
     def test_only_the_publishing_items_declare_different_edges(self):
         """The AUTHORED column — outbound — differs for exactly two items.
 
-        Item 6 gains the edge to publishing, and item 7 has no edges at all
+        Item 5 gains the edge to publishing, and item 7 has no edges at all
         under the local product. Every other difference in the table is in the
         DERIVED inbound and follows from these two.
         """

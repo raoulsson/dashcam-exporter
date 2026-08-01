@@ -77,9 +77,9 @@ class Act:
 
 
 class FakeBuilder:
-    """Item 6's collaborator: the one the constructor installs.
+    """Item 5's collaborator: the one the constructor installs.
 
-    Item 6's WHOLE body is the strategy branch now, not merely its mover, so
+    Item 5's WHOLE body is the strategy branch now, not merely its mover, so
     what a test checks is that the item asks whichever builder it was given —
     for its menu row, for its refusal, and for the work.
     """
@@ -466,7 +466,7 @@ class TestWhereEachItemSits(unittest.TestCase):
 
     def test_outbound_is_what_the_item_offers_next(self):
         """Read off the owner's table, with the three item-7 corrections he was
-        told about: 6 offers 7 (publishing was otherwise unreachable), 5 does
+        told about: 5 offers 7 (publishing was otherwise unreachable), 6 does
         not (uploading from Render skips the build it uploads), and 7 offers 6
         back (fix a caption, rebuild)."""
         self._both_products(M.MenuItem.outbound, OUTBOUND)
@@ -558,7 +558,7 @@ class TestTheStrategyIsSettledWhenTheMenuIsBuilt(unittest.TestCase):
         self.assertEqual(work.publisher_asked, [UPLOADER])
 
     def test_executing_never_asks_which_product_this_is(self):
-        """Running item 6 forty times must not re-decide which builder it
+        """Running item 5 forty times must not re-decide which builder it
         uses: the constructor settled it, and asking again is the `if` this
         design removed coming back through the side door."""
         work = FakeWork()
@@ -569,7 +569,7 @@ class TestTheStrategyIsSettledWhenTheMenuIsBuilt(unittest.TestCase):
         self.assertEqual(len(work.builders[0].worlds), 2)
 
     def test_the_local_product_installs_a_different_builder(self):
-        """Under the local product item 6 writes the one-file page and gathers
+        """Under the local product item 5 writes the one-file page and gathers
         the render tree into final_; with an uploader configured neither
         happens here, and the page is not written at all."""
         work = FakeWork()
@@ -806,7 +806,7 @@ class TestExcludeTrip(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 5 — Render Trips
+# 6 — Render Trips
 # ---------------------------------------------------------------------------
 
 class TestRenderVideos(unittest.TestCase):
@@ -830,7 +830,7 @@ class TestRenderVideos(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 6 — Build Website
+# 5 — Build Website
 # ---------------------------------------------------------------------------
 
 class TestBuildWebsite(unittest.TestCase):

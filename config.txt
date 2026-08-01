@@ -19,7 +19,7 @@
 #   card  ->  import_dir  ->  renders + sidecars in export_dir  ->  published
 #
 # The menu walks that: 1) Import SIM copies the card, 2) Generate Meta writes a
-# sidecar per trip, 5) Render Trips encodes them, 6) Build Website makes what
+# sidecar per trip, 6) Render Trips encodes them, 5) Build Website makes what
 # gets published, 7) Upload Website puts it online, 8) Clean Workspace erases
 # the copies once they are safely elsewhere.
 #
@@ -27,7 +27,7 @@
 # TWO EDITIONS, AND YOU ARE IN ONE OF THEM
 #
 #   LOCAL PAGE   -- nothing configured below under PUBLISHING.
-#                   6) Build Website writes one self-contained .html into
+#                   5) Build Website writes one self-contained .html into
 #                   export_dir: every still embedded, every route drawn from
 #                   its .gpx, opens with no network. 7) Upload Website does not
 #                   exist. This is the whole tool for most people.
@@ -151,14 +151,14 @@
 # rather than describing a destination. Where the videos end up, what serves
 # them, whether that involves a bucket, a second repo, a rack in a cupboard or
 # a folder on an external disk, is that implementation's business and not this
-# repo's. Set it and 6) Build Website builds what YOUR plugin publishes and
+# repo's. Set it and 5) Build Website builds what YOUR plugin publishes and
 # 7) Upload Website lights up. Leave it and both stay exactly as a fresh clone
-# has them: item 6 writes the local page, item 7 sits in the menu greyed out
+# has them: item 5 writes the local page, item 7 sits in the menu greyed out
 # with the reason printed underneath. The item NUMBERS never move, so a note
 # saying "run 5" means the same thing on every machine.
 
 # The plugin that publishes, as "<path to a .py>:<Builder>:<Uploader>". One
-# file, two classes: the builder subclasses uploader.Builder and is 6) Build
+# file, two classes: the builder subclasses uploader.Builder and is 5) Build
 # Website, the uploader subclasses uploader.Uploader and is 7) Upload Website.
 # Each answers three questions — describe(), evaluate(workspace),
 # execute(workspace) — and the uploader answers one more, is_complete(trip_ids).

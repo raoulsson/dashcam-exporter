@@ -126,7 +126,7 @@ def every_item_can_run(strategy, **override):
 
 
 class FakeBuilder:
-    """Item 6's collaborator. Both products build; what differs is what gets
+    """Item 5's collaborator. Both products build; what differs is what gets
     built, which is the implementation's business and not this file's."""
 
     def __init__(self, done):
@@ -331,8 +331,8 @@ AFTER_IMPORT = [PROGRESS, IMPORT, META, CLEAN_WS, ERASE_CARD]   # item 1's {1,2,
 # worth and a copy can be interrupted, so importing again is an ordinary next
 # move -- the delta decides how much. Without it, landing on item 1 with
 # footage in the workspace took item 1 off the menu.
-MID_CYCLE = [PROGRESS, META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD]
-MID_CYCLE_PUBLISHING = sorted(MID_CYCLE + [UPLOAD])            # from 6 and 7 only
+MID_CYCLE = [PROGRESS, META, PREVIEW, EXCLUDE, BUILD, RENDER, CLEAN_WS, ERASE_CARD]
+MID_CYCLE_PUBLISHING = sorted(MID_CYCLE + [UPLOAD])            # from 5 and 7 only
 # RESTATED: rule 6's {4,2,8,9} plus 3. After a drop the sidecars described
 # trips that no longer existed, so the only way on was to write them again;
 # item 4 removes those sidecars with the footage now, so looking at what is
@@ -348,24 +348,44 @@ class TestTheNormalCycle(unittest.TestCase):
     """One card from the slot to the site and back to an empty workspace."""
 
     def test_the_full_publishing_cycle_offers_the_owners_table_at_every_hop(self):
-        """Import, meta, preview, render, build, upload, clean.
+        """Import, meta, preview, build, upload, render, build, upload, clean.
+
+        The pages-first cycle, and the site goes up twice on purpose: once
+        while the trips are only described, once more when their videos exist.
+        Rendering does NOT offer Upload -- the manifest a render invalidates is
+        the one that says those videos are not there, so the way from an encode
+        to the site is back through Build. That is the graph enforcing it, not
+        an ordering rule written anywhere.
 
         Each expected set is the item's own outbound column plus Progress,
         which neighbours everything. Cleaning the workspace ends the cycle:
         its outbound is {1}, so what is left is a new import and nothing else.
         """
         b = Bench(UPLOADER)
-        b.type("1", "2", "3", "5", "6", "7", "8")
+        b.type("1", "2", "3", "5", "7", "6", "5", "7", "8")
         # No IMPORT: this world's card is fully accounted for, so item 1
         # completes without performing. It still advances the position, which
         # is what the offer table below is asserting.
         self.assertEqual(b.work.done,
-                         [META, PREVIEW, RENDER, BUILD, UPLOAD, CLEAN_WS])
+                         [META, PREVIEW, BUILD, UPLOAD, RENDER,
+                          BUILD, UPLOAD, CLEAN_WS])
         self.assertEqual(b.offered_at,
                          [START, AFTER_IMPORT,
-                          MID_CYCLE, MID_CYCLE, MID_CYCLE,
+                          MID_CYCLE, MID_CYCLE,
                           MID_CYCLE_PUBLISHING, MID_CYCLE_PUBLISHING,
-                          AFTER_CLEAN])
+                          MID_CYCLE, MID_CYCLE_PUBLISHING,
+                          MID_CYCLE_PUBLISHING, AFTER_CLEAN])
+
+    def test_rendering_does_not_offer_the_upload_it_invalidates(self):
+        """The one edge pages-first depends on. A finished encode makes the
+        published manifest wrong -- it still carries the empty video path that
+        put the "not available to play yet" state on the page -- so uploading
+        straight off a render would push the videos under an index saying they
+        do not exist. Build is the only way back to the site."""
+        b = Bench(UPLOADER)
+        b.type("1", "2", "3", "5", "7", "6")
+        self.assertNotIn(UPLOAD, b.offered_at[-1])
+        self.assertIn(BUILD, b.offered_at[-1])
 
     def test_the_local_cycle_ends_at_the_built_page(self):
         """The same walk without the publishing item, which the local product
@@ -373,7 +393,7 @@ class TestTheNormalCycle(unittest.TestCase):
         follows 6 directly."""
         b = Bench(LOCAL)
         b.type("1", "2", "3", "5", "6", "8")
-        self.assertEqual(b.work.done, [META, PREVIEW, RENDER, BUILD, CLEAN_WS])
+        self.assertEqual(b.work.done, [META, PREVIEW, BUILD, RENDER, CLEAN_WS])
         self.assertEqual(b.offered_at[-1], AFTER_CLEAN)
         self.assertNotIn(UPLOAD, set().union(*map(set, b.offered_at)))
 
@@ -387,7 +407,7 @@ class TestTheNormalCycle(unittest.TestCase):
         forward is to write them again.
         """
         b = Bench(UPLOADER)
-        b.type("1", "2", "6", "7", "0", "4", "2")
+        b.type("1", "2", "5", "7", "0", "4", "2")
         self.assertEqual(b.work.done, [META, BUILD, UPLOAD, PROGRESS,
                                        EXCLUDE, META])
         self.assertEqual(b.offered_at[4], b.offered_at[5],
@@ -817,7 +837,7 @@ class TestTheMenuIsTheMachine(PainterTest):
         """Four items with invented numbers and invented names, drawn whole.
 
         A step number or a label written into the drawing code cannot survive
-        this: there is no item 5 here, and nothing is called Render Trips.
+        this: there is no item 6 here, and nothing is called Render Trips.
         """
         built = invented_menu()
         out = self.paint(built, invented_position(built))

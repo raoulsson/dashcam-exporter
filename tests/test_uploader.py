@@ -507,7 +507,7 @@ class TestTheToolStopsRatherThanDegrading(unittest.TestCase):
     edition by accident.
 
     Silently becoming local is how someone's renders quietly stop being
-    published: the menu looks normal, item 6 writes a local page, and item 8
+    published: the menu looks normal, item 5 writes a local page, and item 8
     refuses for a reason that reads like a network problem.
     """
 

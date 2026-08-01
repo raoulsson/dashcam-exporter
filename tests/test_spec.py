@@ -129,7 +129,7 @@ class Bench:
         return self
 
     def built(self):
-        """As if item 6 had run: the plugin has staged a site of its own.
+        """As if item 5 had run: the plugin has staged a site of its own.
 
         Written through the plugin rather than by hand, because where it stages
         and what it stages are its business — the bench only knows that the
@@ -241,7 +241,7 @@ class TestAvailability(SpecTest):
 
         It used to be an edge from Generate Meta: publish the page hours early
         and find out then that the publish path is broken. His item 2 outbound
-        is {2,3,4,5,6,8,9} — no 7 — and item 7's inbound is {7,6}, so the route
+        is {2,3,4,5,6,8,9} — no 7 — and item 7's inbound is {7,5}, so the route
         is gone. Nothing about the world blocks it; the graph does, which is
         why this is asserted on the edges and not on a verdict.
         """

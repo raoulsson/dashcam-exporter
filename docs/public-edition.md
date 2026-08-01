@@ -13,7 +13,7 @@ this repo used to reach for one operator's arrangement in nine places: a
 sibling checkout, a bucket, two deploy scripts, a manifest builder and a live
 URL. All of it is gone. What replaced it is one interface — an ACT of publishing
 work, `uploader.Act` — and one setting that names a file and the two classes in
-it that implement it: a `Builder` for item 6 and an `Uploader` for item 7.
+it that implement it: a `Builder` for item 5 and an `Uploader` for item 7.
 
 So the seam is a **type**, not a set of config keys, and it is worth being
 precise about why that matters: config keys describe a destination, and a
@@ -22,7 +22,7 @@ about. A type describes a question. Where your videos go, what serves them,
 and whether "published" means an object in a bucket or a file on a disk is your
 implementation's business and this repo has no opinion about it.
 
-Everything before item 6 — import, sidecars, preview, exclude, render — is
+Everything but items 5 and 7 — import, sidecars, preview, exclude, render — is
 generic and runs with nothing configured. **With nothing configured, no code in
 this repo contacts a network host at any point.** That used to be a property
 maintained by one setting being unset; it is now a property of there being no
@@ -70,7 +70,7 @@ fixed numbers; item 7 is greyed out with the reason printed underneath —
 ```
 
 Two reasons, and both are worth more than the tidiness of a shorter menu. The
-numbering never shifts between setups, so anything anyone writes about "item 5"
+numbering never shifts between setups, so anything anyone writes about "item 6"
 is true on every machine. And the greyed line is the discovery path: a stranger
 can see that publishing exists, in the place they are already looking.
 
@@ -90,7 +90,7 @@ comes back the moment the world changes.
 
 Loudly, before the menu is drawn, with the reason and no fallback. Never a
 quiet degradation to the local edition, because that failure is invisible from
-the outside: the menu looks normal, item 6 writes a local page, item 7 sits
+the outside: the menu looks normal, item 5 writes a local page, item 7 sits
 greyed out, and the renders quietly stop reaching the world. The shape check
 happens at startup for the same reason — an uploader missing `is_complete()`
 would otherwise raise at the moment item 8 asks, which is after the operator
@@ -98,7 +98,7 @@ has typed CLEAN.
 
 ## The Build Website item
 
-Item 6 builds **what this installation publishes**, and which builder is
+Item 5 builds **what this installation publishes**, and which builder is
 installed is the constructor's business, not an `if` in the body.
 
 With nothing configured it writes `dashcam_export_data_site.html` from what the
@@ -146,6 +146,6 @@ See the README's [Publishing](../README.md#publishing--plugging-in-your-own)
 section for the method-by-method table, and
 [examples/local_website.py](../examples/local_website.py) for a complete plugin
 that stages a site in `/tmp` and sends it, with the transport itself sketched
-as pseudo code. The test suite drives the real menu — items 6, 7 and 8,
+as pseudo code. The test suite drives the real menu — items 5, 7 and 8,
 including the erase gates — through that example, twice, so it cannot rot into
 a lie and the already-done path is proven rather than described.

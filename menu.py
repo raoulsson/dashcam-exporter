@@ -51,7 +51,7 @@ class Strategy(Enum):
 
 # Item numbers, named once so the graph reads as sentences rather than integers.
 PROGRESS, IMPORT, META, PREVIEW, EXCLUDE = 0, 1, 2, 3, 4
-RENDER, BUILD, UPLOAD, CLEAN_WS, ERASE_CARD = 5, 6, 7, 8, 9
+BUILD, RENDER, UPLOAD, CLEAN_WS, ERASE_CARD = 5, 6, 7, 8, 9
 
 
 # ---------------------------------------------------------------------------

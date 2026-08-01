@@ -1,9 +1,9 @@
 """The seam an outside publisher implements: one act of publishing work, twice.
 
-The exporter builds a website at item 6 and puts it online at item 7. What
+The exporter builds a website at item 5 and puts it online at item 7. What
 those two mean — a static page in a folder, an S3 sync and an rsync, a Docker
 push, an FTP session — is nobody's business here. So this module declares the
-shape of ONE act, and a plugin supplies two of them: a builder for item 6 and
+shape of ONE act, and a plugin supplies two of them: a builder for item 5 and
 an uploader for item 7.
 
 An act answers what a menu item already answers, and nothing more:
@@ -19,7 +19,7 @@ owns the connection to the destination:
 
 NOTHING IS REGISTERED AND NOTHING CALLS BACK. The exporter calls; the plugin
 returns. The graph in menu.py already decides when each act may run — item 7 is
-unreachable until item 6 has run, and item 6 is unreachable until there is
+unreachable until item 5 has run, and item 5 is unreachable until there is
 something to build from — so a readiness callback would have no work to do.
 
 THE ONE CONDITION OF TRUST: AN IMPLEMENTATION READS THE WORKSPACE AND NEVER
@@ -208,7 +208,8 @@ class Act(ABC):
 
 
 class Builder(Act):
-    """Item 6: produce whatever this installation publishes, from the renders.
+    """Item 5: produce whatever this installation publishes, from the trips
+    the exporter has described.
 
     It stages a site; it never speaks to the far end. That is why it is not
     the half that answers is_complete().
@@ -304,7 +305,7 @@ class UploaderNotLoaded(Exception):
 
     Never caught into a fallback. Silently becoming the local edition is how
     someone's renders quietly stop being published — the menu would look
-    normal, item 6 would write a local page, and item 8 would go on refusing
+    normal, item 5 would write a local page, and item 8 would go on refusing
     for a reason that reads like a network problem.
     """
 

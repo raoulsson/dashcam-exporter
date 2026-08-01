@@ -478,15 +478,15 @@ software = true
 #
 # There is exactly ONE setting about publishing, and it names an implementation
 # rather than describing a destination. Where the videos end up and what serves
-# them is that implementation's business, not this repo's. Set it and 6) Build
+# them is that implementation's business, not this repo's. Set it and 5) Build
 # Website builds what YOUR plugin publishes and 7) Upload Website lights up.
-# Leave it and both stay as a fresh clone has them: item 6 writes the local
+# Leave it and both stay as a fresh clone has them: item 5 writes the local
 # page, item 7 sits greyed out with the reason printed underneath. The item
 # NUMBERS never move, so a note saying "run 5" means the same thing on every
 # machine.
 
 # The plugin that publishes, as "<path to a .py>:<Builder>:<Uploader>". Two
-# classes: the builder subclasses uploader.Builder and is item 6, the uploader
+# classes: the builder subclasses uploader.Builder and is item 5, the uploader
 # subclasses uploader.Uploader and is item 7. Each answers describe(),
 # evaluate(workspace) and execute(workspace); the uploader also answers
 # is_complete(trip_ids).

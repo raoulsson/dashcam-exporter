@@ -646,7 +646,7 @@ class Advancing(unittest.TestCase):
         menu_items, position = machine(at=IMPORT)
         self.assertEqual(position.advance(menu_items[META]), META)
         self.assertEqual(offered(menu_items, position),
-                         [PROGRESS, META, PREVIEW, EXCLUDE, RENDER, BUILD,
+                         [PROGRESS, META, PREVIEW, EXCLUDE, BUILD, RENDER,
                           CLEAN_WS, ERASE_CARD])
 
     def test_the_pipeline_asks_the_item_itself_whether_it_completed(self):
@@ -672,7 +672,7 @@ class Advancing(unittest.TestCase):
         menu_items, position = machine(at=META)
         position.advance(menu_items[PREVIEW])
         self.assertEqual(offered(menu_items, position),
-                         [PROGRESS, META, PREVIEW, EXCLUDE, RENDER, BUILD,
+                         [PROGRESS, META, PREVIEW, EXCLUDE, BUILD, RENDER,
                           CLEAN_WS, ERASE_CARD])
         position.advance(menu_items[EXCLUDE])
         self.assertEqual(offered(menu_items, position),
@@ -1044,7 +1044,7 @@ class TheRunner(unittest.TestCase):
         by the runner having read the declaration."""
         menu_items, position = machine(at=PREVIEW)
         menu_items[RENDER].SCOPE = M.Scope.FULL
-        run = drive(menu_items, position, ["5", "q"])
+        run = drive(menu_items, position, [str(RENDER), "q"])
         self.assertEqual(run.captured.call_args_list[0].args[1], M.Scope.LOCAL)
         self.assertEqual(run.captured.call_args_list[1].args[1], M.Scope.FULL)
 

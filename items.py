@@ -59,8 +59,8 @@ def _nothing_to_send(world):
     destination about no trips at all.
 
     Evidence, not order, as before: the old wording was "nothing rendered to
-    upload — run 6 first", and only the second half of that was an ordering
-    claim. The fact survives an operator deleting the renders in Finder.
+    upload — run Build Website first", and only the second half of that was an
+    ordering claim. The fact survives an operator deleting them in Finder.
     """
     if world.renders or world.trip_ids:
         return None
@@ -302,19 +302,19 @@ class ExcludeTrip(Destructive):
 
 
 # ---------------------------------------------------------------------------
-# 5 — Render Trips
+# 6 — Render Trips
 # ---------------------------------------------------------------------------
 
 class RenderVideos(MenuItem):
     number = RENDER
     NAME = "Render Trips"
     DESCRIPTION = "Encode the trips into watchable videos. Hours for a full card."
-    # DEVIATION FROM THE OWNER'S TABLE: he gave item 5 an outbound edge to 7
+    # DEVIATION FROM THE OWNER'S TABLE: he gave item 6 an outbound edge to 7
     # under the uploader edition. Removed. Item 7 uploads the BUILT site, and reaching
     # it from Render skips the building — item 7's own inbound column says
-    # {7,6}, so the edge was one-sided in his table too. Item 6 gained 7 in
+    # {7,5}, so the edge was one-sided in his table too. Item 5 gained 7 in
     # exchange (see BuildWebsite), and the two changes only make sense
-    # together: 5 was the sole route to 7 before them.
+    # together: Build was the sole route to 7 before them.
     OUT = _both(_e(RENDER, META, PREVIEW, EXCLUDE, BUILD, CLEAN_WS, ERASE_CARD))
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({RENDER, META, PREVIEW, EXCLUDE, BUILD, UPLOAD}),
@@ -337,7 +337,7 @@ class RenderVideos(MenuItem):
 
 
 # ---------------------------------------------------------------------------
-# 6 — Build Website
+# 5 — Build Website
 # ---------------------------------------------------------------------------
 
 class BuildWebsite(MenuItem):
@@ -360,9 +360,9 @@ class BuildWebsite(MenuItem):
 
     number = BUILD
     NAME = "Build Website"
-    DESCRIPTION = "Build the website from the rendered trips."
+    DESCRIPTION = "Build the website from the described trips."
     # DEVIATION FROM THE OWNER'S TABLE: 7 added to the outbound under the
-    # publishing edition. His inbound column for item 7 says {7,6} — build the
+    # publishing edition. His inbound column for item 7 says {7,5} — build the
     # site, then put it online — but no outbound set anywhere offered 7, so
     # Upload Website was unreachable by its own natural route. This is the edge
     # that makes publishing work.
@@ -428,7 +428,7 @@ class UploadWebsite(MenuItem):
     DESCRIPTION = "Put the website online. Resumes where it left off."
     SCOPE = Scope.FULL
     # DEVIATION FROM THE OWNER'S TABLE: 6 added to the outbound under the
-    # publishing edition. He wrote 7 into item 6's INBOUND column — after
+    # publishing edition. He wrote 7 into item 5's INBOUND column — after
     # uploading you fix a caption and rebuild — and left it out of item 7's
     # outbound. Deriving the inbound would have silently deleted an edge he
     # authored.
@@ -449,7 +449,7 @@ class UploadWebsite(MenuItem):
     def description(self) -> str:
         """What THIS installation's upload does, asked of the thing that does it.
 
-        The same rule as item 6's row: the entry answers for its own job rather
+        The same rule as item 5's row: the entry answers for its own job rather
         than restating how the tool is installed.
         """
         return self._publish.describe()

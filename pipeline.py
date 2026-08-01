@@ -28,8 +28,8 @@ elapsed-time spinner rather than inventing a percentage.
 
 This repo does import, render and a local page on its own. Publishing is
 supplied from outside: `website_uploader` names a file and the two classes in
-it — a uploader.Builder for item 6 and a uploader.Uploader for item 7 — and
-where they send things is their business, not this module's. Set it and items 6
+it — a uploader.Builder for item 5 and a uploader.Uploader for item 7 — and
+where they send things is their business, not this module's. Set it and items 5
 and 7 do what they do; leave it unset (what a fresh clone gets) and item 7 stays
 greyed out with the reason printed underneath. Nothing in this repo contacts a
 network host at any point — not as a setting, but because there is no networked
@@ -1296,7 +1296,7 @@ def _edition_rows(ctx):
 
     The two editions have different deliverables, so they report different
     rows. A "Local site: not built" line on an install that publishes is not
-    status — item 6 does not write that page here and never will, so the row
+    status — item 5 does not write that page here and never will, so the row
     is a permanent complaint about a file nobody wants.
 
     What matters instead is the thing that WOULD be hard to find out: that a
@@ -3345,7 +3345,7 @@ def _preview_line(world):
 def _built_line(world):
     """The local page or a gathered folder -- whichever this edition makes.
 
-    Only the local edition makes either. Under an uploader, item 6 hands the
+    Only the local edition makes either. Under an uploader, item 5 hands the
     build to the plugin, which stages wherever it likes and is not asked
     afterwards whether it did -- so the box could never tick, and a workspace
     with everything published read "[x] Website uploaded" one line under
@@ -4769,7 +4769,7 @@ def _record_the_drop(ctx, by_index, picked):
     made the exporter run a stranger's code immediately after an irreversible
     delete, and told only the plugin that happened to be configured at that
     moment. As a fact in the workspace it survives a restart, reaches a plugin
-    installed next week, and arrives where a builder can act on it: item 6
+    installed next week, and arrives where a builder can act on it: item 5
     hands it over as Workspace.dropped_ids.
     """
     ids = _picked_ids(by_index, picked)
@@ -6958,7 +6958,7 @@ def _handed_over(ctx, world):
 
 
 class LocalPage:
-    """Item 6 under the local edition: write the page, and gather.
+    """Item 5 under the local edition: write the page, and gather.
 
     Gathering is what makes the local edition's workspace expendable, so the
     two belong to one job. Under a plugin neither happens here.
@@ -6990,7 +6990,7 @@ class LocalPage:
 
 
 class TargetBuild:
-    """Item 6 with a plugin configured: whatever its builder builds.
+    """Item 5 with a plugin configured: whatever its builder builds.
 
     The local page is not written and gather_into_final does not run. Moving
     the render tree would rename every published trip out from under whatever
@@ -7015,7 +7015,7 @@ class TargetBuild:
 class TargetPublish(TargetBuild):
     """Item 7 with a plugin configured: one job, however many transports.
 
-    The same three calls as item 6's collaborator against a different act,
+    The same three calls as item 5's collaborator against a different act,
     which is the whole point of the acts having one shape — the only thing that
     differs is which step the outcome is logged against.
     """
@@ -7030,7 +7030,7 @@ class NoPublisher:
 
     Constructed rather than omitted so that every number means the same thing
     on every installation — a menu that renumbers itself makes every sentence
-    anyone writes about "item 5" true only locally.
+    anyone writes about "item 6" true only locally.
     """
 
     def describe(self):
@@ -7111,7 +7111,7 @@ class Work:
 
     # -- the collaborators the constructor installs ------------------------
     def builder(self, strategy):
-        """Item 6's whole body, not merely its mover.
+        """Item 5's whole body, not merely its mover.
 
         Only the MOVER used to be the branch, so the page writer ran under
         both editions and a publishing install got a local page announcing
@@ -7727,7 +7727,7 @@ class Runner:
         wanted to know whether they could press the key. The answer is that
         they cannot, and one line says it.
 
-        It used to add "6) Build Website comes first" when exactly one entry
+        It used to add "5) Build Website comes first" when exactly one entry
         led here, and stay silent when several did. So the same refusal came
         with an explanation or without one depending on the shape of the graph
         at that point, which reads as the tool being arbitrary. `p` lists what
@@ -8212,7 +8212,7 @@ def _uploader_broken(error):
     """A configured uploader that will not load stops the tool before the menu.
 
     Not a fallback to the local edition. That fallback is silent by nature: the
-    menu would look normal, item 6 would write a local page, and item 8 would
+    menu would look normal, item 5 would write a local page, and item 8 would
     go on refusing for a reason that reads like a network problem — while
     nothing was being published at all.
     """
