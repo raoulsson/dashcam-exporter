@@ -3603,11 +3603,60 @@ def trip_renders(ctx, payload, trip):
 # ---------------------------------------------------------------------------
 
 PREVIEW_DIRNAME = "previews"
+CLIP_REVIEW_DIRNAME = "clip_review"
 # Defaults for the still-frame knobs; config.txt's still_width / still_seconds
 # override both the preview sheet and the site page, which is the only sane
 # arrangement — a still that is right for one is right for the other.
 PREVIEW_STILL_W = 1600      # wide enough to be a poster frame, not just a thumb
 PREVIEW_STILL_T = 1.0       # seconds into the clip; see extract_still
+
+
+def write_clip_review(ctx, trips):
+    """A still from every CLIP, in a folder per trip. Returns (stills, root).
+
+    The trip still answers "what is this drive"; this answers "where does the
+    grouping think each clip sits", which is the question when the boundaries
+    themselves are suspect. A three-hour drive that came back as five
+    fragments is not judged from one frame per fragment -- it is judged by
+    walking the clip starts and seeing where the run really breaks.
+
+    Trips the scanner will not render go under not_renderable/, together
+    rather than mixed in: they are the ones under suspicion, and the point is
+    to be able to look at exactly those.
+    """
+    root = ctx.out_dir / CLIP_REVIEW_DIRNAME
+    bar, made, total = Bar("Clips"), 0, sum(len(t.get("front") or []) for t in trips)
+    for trip in trips:
+        folder = _review_folder(root, trip)
+        for n, clip in enumerate(trip.get("front") or [], 1):
+            made += 1
+            _still_bar(bar, made, total, Path(clip).name)
+            _one_clip_still(Path(clip), folder, n)
+    _erase_line()
+    return made, root
+
+
+def _review_folder(root, trip):
+    """<clip_review>/[not_renderable/]trip_NN_<day>_<hh-mm>."""
+    name = "trip_%02d_%s_%s" % (trip["index"], trip.get("day", ""),
+                                str(trip.get("start", ""))[11:16].replace(":", "-"))
+    if trip.get("renderable", True):
+        return root / name
+    return root / "not_renderable" / name
+
+
+def _one_clip_still(src, folder, n):
+    """Kept if it is already there and not older than its clip -- a second
+    look at a big card is a glance rather than a wait."""
+    dst = folder / ("%02d_%s.jpg" % (n, src.stem))
+    if dst.is_file() and src.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
+        return
+    extract_still(src, dst, seconds=CLIP_REVIEW_T, width=PREVIEW_STILL_W)
+
+
+# A beat in, not frame zero: a dashcam's first frame is often still
+# auto-exposing, and a black square says nothing about where the clip starts.
+CLIP_REVIEW_T = 1.0
 
 
 def extract_still(src, dst, seconds=PREVIEW_STILL_T, width=PREVIEW_STILL_W):
@@ -3992,6 +4041,7 @@ def step_preview(ctx):
                        % (len(failed), ", ".join(str(i) for i in failed))))
 
     index = write_contact_sheet(ctx, root, payload, previews_dir, stills)
+    shots, review = write_clip_review(ctx, trips)
 
     # No trips.json refresh here any more. Preview used to re-index the site
     # manifest "while we're here", which made a looking-step write into the
@@ -4001,6 +4051,8 @@ def step_preview(ctx):
     done_line("%s stills for %s trips, contact sheet at %s"
               % (C.yellow("%d" % len(stills)), C.yellow("%d" % len(trips)),
                  tilde(index)))
+    print(C.green("  100%% - %s clip stills to walk the boundaries by, under %s."
+                  % (C.yellow("%d" % shots), tilde(review))))
     return record(ctx, NAME[PREVIEW], RAN, started,
                   "%d trips, %d stills in %s" % (len(trips), len(stills), previews_dir))
 
