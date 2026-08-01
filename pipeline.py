@@ -7817,8 +7817,12 @@ class Runner:
             self._not_available(number, verdict)
             return None
         print()
+        # The heading, and then whatever the step itself says. The description
+        # used to sit between them, restating in a sentence what the rule above
+        # already names and what the menu showed a keypress ago — and at item 7
+        # it was the same two facts the step's own first two lines give. It
+        # earns its place where a step is CHOSEN, not after it has been.
         print(rule(item.name(), ch="="))
-        _print_all(_description_line(item))
         hint_reset()
         started, already = time.time(), len(self.ctx.results)
         outcome = self._execute(item, world)
@@ -7945,18 +7949,6 @@ def _reset_quietly(plugin):
         # Its own cache is its own problem. A step that just finished must not
         # be reported as failed because a notification about it went wrong.
         print(C.dim("  (%s.reset() raised: %s)" % (plugin.name, e)))
-
-
-def _description_line(item):
-    """What the step is about to do, under its rule.
-
-    Not for a view. Progress opens on its own first line -- what is here --
-    and a sentence explaining that the read-only screen is read-only is one
-    more line between the key and the answer.
-    """
-    if menu.is_view(item):
-        return ()
-    return (C.dim("  " + item.description()),)
 
 
 def _remember_position(ctx, item, position):
