@@ -531,7 +531,11 @@ class DeleteSimData(Destructive):
     # strays, a fragment the scanner would never render, footage the operator
     # has looked at and does not want. He is shown every path and the file
     # they were written to before he is asked.
-    OVERRIDE_WORD = "ERASE"
+    #
+    # DELETE and not ERASE, which is this item's own word. Stepping past a
+    # guard should not be reachable by the muscle memory of the erase it is
+    # guarding: typing the usual word out of habit gets you nowhere here.
+    OVERRIDE_WORD = "DELETE"
     DESCRIPTION = "Erase the card, once every clip is accounted for elsewhere."
     END = True
     DESTR = True

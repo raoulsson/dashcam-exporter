@@ -7278,7 +7278,7 @@ class Runner:
         if not (item.OVERRIDE_WORD and getattr(verdict, "evidence", ())):
             return
         print()
-        if ask("  Type %s to drop them and erase anyway: " % item.OVERRIDE_WORD) \
+        if ask("  Type %s to drop anyway: " % item.OVERRIDE_WORD) \
                 != item.OVERRIDE_WORD:
             print(C.dim("  Aborted by user pre-run."))
             return

@@ -1339,7 +1339,7 @@ class TestTheWayPastTheCardRefusal(SeamTest):
     def test_it_records_the_drop_and_then_erases(self):
         b, w = self._carded()
         self.assertTrue(P.guards.card_is_expendable(w).blocked)
-        with quiet(), mock.patch.object(P, "ask", return_value="ERASE"):
+        with quiet(), mock.patch.object(P, "ask", return_value="DELETE"):
             out = P.drop_unaccounted_then_erase(b.ctx, w)
         self.assertTrue(out.completed, out.note)
         self.assertIn("20260502102459", P.excluded_stamps(b.ctx))
@@ -1361,7 +1361,10 @@ class TestTheWayPastTheCardRefusal(SeamTest):
 
     def test_only_an_item_that_declares_a_word_offers_one(self):
         built = M.build_menu(M.Strategy.LOCAL_PAGE, P.Work(self.bench().ctx))
-        self.assertEqual(built[ERASE_CARD].OVERRIDE_WORD, "ERASE")
+        self.assertEqual(built[ERASE_CARD].OVERRIDE_WORD, "DELETE")
+        self.assertNotEqual(built[ERASE_CARD].OVERRIDE_WORD,
+                            built[ERASE_CARD].WORD,
+                            "the way past a guard is reachable by habit")
         self.assertEqual([n for n, i in built.items() if i.OVERRIDE_WORD],
                          [ERASE_CARD], "a second item grew a way past its guard")
 
