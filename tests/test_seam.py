@@ -1314,6 +1314,61 @@ class TestThePreviewBoxTicksWhenThereIsAPreview(SeamTest):
         self.assertTrue(P._stills_current(b.ctx))
 
 
+class TestWipingAWorkspaceWhoseSourceIsStillInTheSlot(SeamTest):
+    """"If the original data is still around I have to be able to wipe it."
+
+    The guard exists for footage that lives in one place only. Once the card
+    still holds every file, the workspace is a second copy — and what was
+    MADE from it does not change that: sidecars cost seconds, renders cost
+    hours but come back from the same clips.
+
+    Before this, any step having run made the workspace unclearable without
+    publishing first. Scan a card that turns out to be fragments and you could
+    neither use it nor empty it.
+    """
+
+    def test_sidecars_and_renders_do_not_block_it(self):
+        b = self.bench().imported().sidecars().render()
+        for st in (CLIP,):
+            f = b.ctx.card / "DCIM" / "200video" / "front"
+            f.mkdir(parents=True, exist_ok=True)
+            (f / ("%s_0060.mp4" % st)).write_text("clip")
+        w = b.world(M.Scope.LOCAL)
+        self.assertTrue(P.guards.import_is_disposable(w),
+                        "the card holds it, so it is a second copy")
+        self.assertFalse(P.guards.clean_is_allowed(w).blocked)
+
+    def test_the_renders_go_with_it(self):
+        """He asked for everything gone. Leaving the renders leaves a
+        workspace he asked to be empty half full."""
+        b = self.bench().imported().sidecars().render()
+        f = b.ctx.card / "DCIM" / "200video" / "front"
+        f.mkdir(parents=True, exist_ok=True)
+        (f / ("%s_0060.mp4" % CLIP)).write_text("clip")
+        ran = b.run(CLEAN_WS)
+        self.assertTrue(ran.completed, ran.note)
+        self.assertFalse(b.footage_on_disk())
+        self.assertEqual(b.renders_on_disk(), [])
+
+    def test_but_not_by_this_route_when_the_card_is_gone(self):
+        """The half that stayed. With no card there is no second copy, so the
+        discard route is closed and the publish gates decide — which is the
+        path that says "this is the ORIGINAL footage" before it asks."""
+        b = self.bench().imported().sidecars().render()
+        w = b.world(M.Scope.LOCAL)
+        self.assertFalse(P.guards.import_is_disposable(w))
+        self.assertIn("ORIGINAL footage", "\n".join(P._what_goes_lines(w)))
+
+    def test_and_the_original_warning_is_not_shown_when_it_is_a_copy(self):
+        b = self.bench().imported().sidecars().render()
+        f = b.ctx.card / "DCIM" / "200video" / "front"
+        f.mkdir(parents=True, exist_ok=True)
+        (f / ("%s_0060.mp4" % CLIP)).write_text("clip")
+        said = "\n".join(P._what_goes_lines(b.world(M.Scope.LOCAL)))
+        self.assertNotIn("ORIGINAL", said)
+        self.assertIn("renders go too", said)
+
+
 class TestWhatIsOfferedIsWhatIsFetched(SeamTest):
     """The screen's count and the script's filter have to mean one thing.
 

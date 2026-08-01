@@ -930,18 +930,34 @@ class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
         nothing. sidecars_missing already settles the empty case."""
         self.assertFalse(guards.import_is_disposable(self._import(mine=())))
 
-    def test_anything_made_from_it_takes_this_route_away(self):
-        """A sidecar, a render or a gathered folder each mean something
-        downstream is built on this footage, and then the publish gates are
-        the only way through -- the card holding the clips says nothing about
-        whether the renders got out."""
+    def test_what_was_made_from_it_does_not_take_this_route_away(self):
+        """RESTATED: a sidecar, a render or a gathered folder used to block it.
+
+        The reasoning was that something downstream is built on this footage.
+        True, and not what the guard protects: sidecars and stills are derived
+        and cost seconds, renders cost hours but come back from the same
+        clips. What must never go is footage that exists in one place only,
+        and the card holding every file answers exactly that.
+
+        The old rule made a workspace unclearable the moment any step had run
+        — scan a card that turns out to be fragments and you could neither use
+        it nor empty it without publishing first.
+        """
         for made in ({"metas": (W.TripMeta("t", "2026", "2026"),)},
                      {"renders": (W.Render("t.mp4", 10),)},
                      {"final_folders": (Path("/w/out/final_2026-07-28"),)}):
             with self.subTest(**made):
                 world = self._import(**made)
-                self.assertFalse(guards.import_is_disposable(world))
-                self.assertTrue(guards.clean_is_allowed(world).blocked)
+                self.assertTrue(guards.import_is_disposable(world))
+                self.assertFalse(guards.clean_is_allowed(world).blocked)
+
+    def test_but_the_card_must_still_hold_every_file(self):
+        """The half that stayed. One file short and no amount of derived work
+        makes the workspace expendable."""
+        world = self._import(mine=("a.mp4", "b.mp4"), on_card=("a.mp4",),
+                             renders=(W.Render("t.mp4", 10),))
+        self.assertFalse(guards.import_is_disposable(world))
+        self.assertTrue(guards.clean_is_allowed(world).blocked)
 
     def test_the_cheap_half_lets_a_disposable_import_through(self):
         """Item 8's evaluate, which is what decides whether the entry is even

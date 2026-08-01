@@ -328,27 +328,31 @@ def nothing_to_clean_up(world) -> Optional[str]:
 
 
 def import_is_disposable(world) -> bool:
-    """This import produced nothing and the source still holds all of it.
+    """The source still holds every file of this import.
 
-    Both halves are required and neither is a formality. "Produced nothing"
-    means the footage has not been described, encoded or published, so no
-    later step is relying on it and no copy of it exists anywhere downstream.
-    "The source still holds it" is per FILE against the card in the slot, not
-    a count and not the ledger: the ledger records that a copy was made once,
-    which is exactly the claim that cannot notice the card has since been
-    wiped or swapped.
+    That is the whole question, and it is asked per FILE against the card in
+    the slot -- not a count, and never the ledger, which records that a copy
+    was made once and cannot notice the card has since been wiped or swapped.
 
-    An empty import is not disposable by this route. It is the settled case
-    sidecars_missing already lets through, and an empty set of files would
-    otherwise satisfy "the source holds them all" vacuously.
+    It used to require, as well, that nothing had been MADE from the import:
+    no sidecars, no renders, no gathered folder. That was the wrong second
+    half. Sidecars and stills are derived and cost seconds; renders cost hours
+    but are reproducible from the same footage. None of them is what the guard
+    exists to protect, which is footage that exists in one place only. Once a
+    step had run, the workspace could not be cleared at all without publishing
+    first -- a scan of a card that turned out to be fragments left the operator
+    holding a workspace he could neither use nor empty.
+
+    So: the card has it, or it does not. Nothing downstream is weakened,
+    because item 9 asks the same question from the other side -- wipe this
+    workspace and its clips are owed again, so the card cannot be erased until
+    they are somewhere else.
+
+    An empty import is still not disposable by this route: no files means no
+    file is missing from the card, and "all of it is safe" would be a yes
+    about nothing.
     """
-    if _something_was_made_from_it(world):
-        return False
     return _every_file_is_on_the_card(world)
-
-
-def _something_was_made_from_it(world) -> bool:
-    return bool(world.metas or world.renders or world.final_folders)
 
 
 def _every_file_is_on_the_card(world) -> bool:

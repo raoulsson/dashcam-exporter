@@ -5643,17 +5643,23 @@ def clean_workspace_plan(ctx, world):
 
 
 def _what_goes_lines(world):
-    """A discard says nothing more; a sweep says the one thing that matters.
+    """A discard names what else goes; a sweep says the one thing that matters.
 
     They are not the same act. A discard deletes a second copy of clips the
-    card still holds, checked file by file, and there is nothing to warn
-    about -- the count above says it all. A sweep destroys the only copy of
-    the raw footage there will ever be, and that sentence stays however tidy
-    the screen gets.
+    card still holds, checked file by file -- but it takes the sidecars and
+    the renders with it, and a render is hours even though the footage it
+    came from is safe. Worth one line, not a warning.
+
+    A sweep destroys the only copy of the raw footage there will ever be, and
+    that sentence stays however tidy the screen gets.
     """
-    if guards.import_is_disposable(world):
+    if not guards.import_is_disposable(world):
+        return ("", C.red("  This is the ORIGINAL footage and it is not recoverable."))
+    made = len(world.renders)
+    if not made:
         return ()
-    return ("", C.red("  This is the ORIGINAL footage and it is not recoverable."))
+    return ("", C.dim("  %d renders go too; the clips they came from are on the"
+                      " card." % made))
 
 
 def _why_it_may_go(world):
@@ -5714,13 +5720,17 @@ def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
     if discarding:
         _unclaim_the_discarded(ctx, fresh)
 
-    # The renders go too — but only when that is separately proven. The gates
-    # above approved deleting the FOOTAGE; with nothing configured to publish to,
-    # banner has just finished saying these renders are the only copy of it,
-    # and deleting them anyway would contradict the sentence above it. What
-    # survives either way: the ledger's high-water mark, written before any of
-    # this runs, and every _meta.json.
+    # The renders go too — when that is separately proven, OR when the card
+    # still holds every clip they were made from. The second case is the one
+    # the operator means by "wipe it, I want to start over": the footage is on
+    # the card, so what an encode costs to redo is time, and leaving the
+    # renders behind leaves a workspace he asked to be empty half full.
+    #
+    # What survives either way: the ledger's high-water mark and the archived
+    # receipts of finished cycles.
     ok, why, stragglers = working_area_is_expendable(ctx, fresh.target)
+    if discarding:
+        ok, why, stragglers = True, "", []
     n = freed = 0
     if ok:
         n, freed = purge_published_renders(ctx, root)
