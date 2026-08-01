@@ -7234,20 +7234,25 @@ class Work:
 # ---------------------------------------------------------------------------
 
 def _paint_body(item, verdict, offered):
-    """Grey means unselectable, red means it destroys, bold means go.
+    """Grey means unselectable, bold means go. Two states, and that is all.
 
-    Each of the three comes from the item or its verdict, never from a table
-    of numbers: destructive is item.destr(), unselectable is the position not
-    offering it or its own guard blocking it.
+    Destructive entries used to be red here. Nothing was gained by it: Exclude
+    Trip, Clean Workspace and Delete SIM Data say what they do in their own
+    names, and every one of them asks for a typed word before it erases
+    anything. What red bought was three alarming entries on screen at all
+    times, in a menu where the ordinary end of a cycle is to clean up — so the
+    colour that should mean "stop and read" was the colour of the resting
+    state, and stopped meaning anything.
+
+    It still means that where it is earned: the only-copy banner in front of a
+    drop, and a step that failed. Neither of those is on screen unless
+    something is genuinely wrong.
+
+    Unselectable comes from the item or its verdict, never from a table of
+    numbers: the position not offering it, or its own guard blocking it.
     """
     if _why_not(item, verdict, offered):
         return C.dim(item.name())
-    return _paint_live(item)
-
-
-def _paint_live(item):
-    if item.destr():
-        return C.red(item.name())
     return C.bold(item.name())
 
 

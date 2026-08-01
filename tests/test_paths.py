@@ -851,13 +851,15 @@ class TestTheMenuIsTheMachine(PainterTest):
         out = self.paint(built, invented_position(built))
         self.assertEqual(_names_in(out, DIM, built), {"Zeta", "Yankee", "Whiskey"})
 
-    def test_red_is_exactly_the_items_whose_destr_is_true(self):
-        """And only while they can be picked: an entry the position does not
-        offer is grey, because unpickable outranks dangerous."""
+    def test_bold_is_every_entry_that_can_be_picked_destructive_or_not(self):
+        """REVERSED: Xray was red for being destructive. Two states is all the
+        grid has now — grey cannot be picked, bold can — and unpickable still
+        outranks everything, so an entry the position does not offer is grey
+        whatever its flag says."""
         built = invented_menu()
         out = self.paint(built, invented_position(built))
-        self.assertEqual(_names_in(out, RED, built), {"Xray"})
-        self.assertEqual(_names_in(out, BOLD, built), set())
+        self.assertEqual(_names_in(out, BOLD, built), {"Xray"})
+        self.assertEqual(_names_in(out, RED, built), set())
 
     def test_a_blocked_entry_gives_the_reason_the_item_itself_gave(self):
         """Verbatim, and attached to its own number. The painter has no
@@ -893,16 +895,20 @@ class TestTheMenuIsTheMachine(PainterTest):
         said = "\n".join(P._where_lines(built, invented_position(built, M.NOWHERE)))
         self.assertIn("nothing yet", said)
 
-    def test_the_destructive_entry_is_red_from_its_own_flag(self):
-        """RESTATED: the footer used to name them as well. That was the third
-        telling of one fact — they are red here, and each asks for a typed word
-        before it does anything — so the line went and the colour stayed.
+    def test_nothing_in_the_grid_is_red(self):
+        """RESTATED TWICE, and the second time undoes the first. The footer
+        used to name the destructive entries as well; that was the third
+        telling of one fact, so the line went and the colour stayed. The colour
+        has now gone after it, for the same reason it was always the weakest of
+        the three: Exclude Trip, Clean Workspace and Delete SIM Data say what
+        they do in their own names, and each asks for a typed word first.
 
-        The colour still comes from the item's own destr(), which is the part
-        that matters: the painter has no list of its own."""
+        Red on a resting menu is red that has stopped meaning anything. It is
+        kept for the only-copy banner and for a step that failed, neither of
+        which appears unless something is genuinely wrong."""
         built = invented_menu()
         out = self.paint(built, invented_position(built))
-        self.assertIn(RED % "Xray", out)
+        self.assertNotIn("\x1b[31m", out)
         self.assertNotIn("destroy footage", out)
 
     def test_a_guard_that_raises_greys_its_entry_instead_of_taking_the_menu_down(self):
