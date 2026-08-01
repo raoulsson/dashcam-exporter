@@ -597,6 +597,20 @@ class Bar:
         sys.stdout.write("\n")
         sys.stdout.flush()
 
+    def close(self):
+        """Erase the bar and take its blank line back with it.
+
+        The same rule the live area follows: the blank was there to separate a
+        bar that is now gone. Two bars in one step -- the stills pass and then
+        the clip review -- each left one behind, so the sentence after them sat
+        two blank lines below the line that introduced them.
+        """
+        _erase_line()
+        if self.opened and C.enabled:
+            sys.stdout.write("\x1b[1A\x1b[J")
+            sys.stdout.flush()
+        self.opened = False
+
     def width(self, room_for=60):
         if self._width:
             return self._width
@@ -3796,7 +3810,7 @@ def write_clip_review(ctx, trips):
             made += 1
             _still_bar(bar, made, total, Path(clip).name)
             _one_clip_still(Path(clip), folder, n)
-    _erase_line()
+    bar.close()
     return made, root
 
 
@@ -4198,7 +4212,7 @@ def step_preview(ctx):
             stills[t["index"]] = dst
         else:
             failed.append(t["index"])
-    _erase_line()
+    bar.close()
     if failed:
         # Not "ffmpeg could not read it": one of these two reasons is that the
         # trip has no front clip at all, and ffmpeg was never asked.
