@@ -482,7 +482,7 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
         b.work.answer = "yes"
         b.type("4")
         self.assertEqual(b.work.done, [])
-        self.assertEqual(b.work.asked, ["DROP"])
+        self.assertEqual(b.work.asked, ["DELETE"])
         self.assertEqual(b.offered_at[1], MID_CYCLE)
 
     def test_a_world_that_changes_while_the_prompt_is_on_screen_stops_the_act(self):
@@ -502,12 +502,17 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
         self.assertEqual(len(b.work.refused), 1)
         self.assertIn("new clips", b.work.refused[0])
 
-    def test_the_three_destructive_items_ask_three_different_words(self):
-        """Two identical prompts is how the second one gets typed from muscle
-        memory, and 4, 8 and 9 are now three prompts on one path."""
+    def test_the_card_asks_for_a_word_the_workspace_does_not(self):
+        """RESTATED: DROP, ERASE, DELETE — three distinct words on one path.
+
+        4 and 8 now share DELETE: both erase from the workspace, where a
+        second copy is the ordinary case. 9 erases the card, which is the one
+        target with nothing behind it, so it keeps a word of its own.
+        """
         b = Bench(UPLOADER, current=PREVIEW)
         b.type("4", "2", "9", "8")
-        self.assertEqual(b.work.asked, ["DROP", "ERASE", "DELETE"])
+        self.assertEqual(b.work.asked, ["DELETE", "ERASE", "DELETE"])
+        self.assertNotIn("ERASE", [b.work.asked[0], b.work.asked[2]])
 
 
 class TestIdempotence(unittest.TestCase):

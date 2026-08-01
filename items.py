@@ -266,7 +266,10 @@ class ExcludeTrip(Destructive):
     NAME = "Exclude Trip"
     DESCRIPTION = "Select which trips to exclude from meta and render."
     DESTR = True
-    WORD = "DROP"
+    # DELETE, like item 8. The two erase different things and both erase from
+    # the WORKSPACE; the card keeps its own word, because that is the one with
+    # no second copy behind it.
+    WORD = "DELETE"
     SCOPE = Scope.FULL          # the only-copy warning has to ask the target
     OUT = _both(_e(EXCLUDE, META, CLEAN_WS, ERASE_CARD))
     IN_AUTHORED = _both_sets(EXCLUDE, META, PREVIEW)

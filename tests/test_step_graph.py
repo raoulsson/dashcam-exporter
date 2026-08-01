@@ -375,12 +375,22 @@ class TestInterfaceMatchesBehaviour(GraphTest):
         self.assertEqual({n for n, i in built.items() if i.destr()},
                          {EXCLUDE, CLEAN_WS, ERASE_CARD})
 
-    def test_every_destructive_item_asks_for_a_distinct_word(self):
-        """Two identical prompts is how the second one gets typed from muscle
-        memory, and items 8 and 9 are now two prompts."""
+    def test_the_card_asks_for_a_word_the_workspace_does_not(self):
+        """RESTATED: the three were distinct, so a second prompt could not be
+        answered from muscle memory.
+
+        Two of the three erase from the WORKSPACE, where a second copy is the
+        ordinary case — the card still holds the clips, or the renders are
+        published — and they ask the same word. The card is the one target
+        with nothing behind it, so it keeps its own; and item 9's way past its
+        guard asks a different word again, which is where habit would cost
+        something.
+        """
         built = M.build_menu(M.Strategy.UPLOADER, NullWork())
-        words = [i.word() for i in built.values() if i.destr()]
-        self.assertEqual(sorted(words), ["DELETE", "DROP", "ERASE"])
+        words = {n: i.word() for n, i in built.items() if i.destr()}
+        self.assertEqual(sorted(set(words.values())), ["DELETE", "ERASE"])
+        self.assertEqual(words[ERASE_CARD], "ERASE")
+        self.assertNotEqual(built[ERASE_CARD].OVERRIDE_WORD, words[ERASE_CARD])
 
     def test_the_items_that_end_the_cycle_say_so(self):
         built = M.build_menu(M.Strategy.UPLOADER, NullWork())

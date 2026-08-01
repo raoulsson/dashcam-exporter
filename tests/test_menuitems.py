@@ -386,11 +386,22 @@ class TestWhatEachItemDeclares(unittest.TestCase):
                 item = self.menu[number]
                 self.assertEqual(item.destr(), bool(item.word()))
 
-    def test_the_three_words_are_distinct(self):
-        """DROP, CLEAN and ERASE. Two prompts asking for the same word is how
-        the second one gets typed from muscle memory."""
-        words = [self.menu[n].word() for n in (EXCLUDE, CLEAN_WS, ERASE_CARD)]
-        self.assertEqual(words, ["DROP", "DELETE", "ERASE"])
+    def test_the_card_asks_for_a_word_of_its_own(self):
+        """RESTATED: it was DROP, DELETE, ERASE — three distinct words, so a
+        second prompt could not be answered from muscle memory.
+
+        Items 4 and 8 now both ask DELETE. They erase different things and
+        both erase from the WORKSPACE, where a second copy is the ordinary
+        case: the card still holds the clips, or the renders are published.
+        The card keeps a word of its own, because that is the one target with
+        nothing behind it — and item 9's way past its own guard asks for a
+        third word again, which is where habit would actually cost something.
+        """
+        words = {n: self.menu[n].word() for n in (EXCLUDE, CLEAN_WS, ERASE_CARD)}
+        self.assertEqual(words[EXCLUDE], words[CLEAN_WS], "both erase the workspace")
+        self.assertNotIn(words[ERASE_CARD], (words[EXCLUDE], words[CLEAN_WS]))
+        self.assertNotEqual(self.menu[ERASE_CARD].OVERRIDE_WORD,
+                            self.menu[ERASE_CARD].word())
 
 
 # ---------------------------------------------------------------------------
@@ -750,7 +761,7 @@ class TestExcludeTrip(unittest.TestCase):
         """The owner's own sentence: Exclude Trip is complete IFF a trip was
         removed."""
         act = Act("dropped trip t1")
-        work = FakeWork(plan=a_plan(act=act), word="DROP")
+        work = FakeWork(plan=a_plan(act=act), word="DELETE")
         item = menu_for(UPLOADER, work)[EXCLUDE]
         outcome = item.execute(imported())
         self.assertTrue(outcome.completed)
@@ -1275,7 +1286,7 @@ class TestIdempotence(unittest.TestCase):
         """The plan finds no target, so no word is asked for and neither half
         of it is called."""
         act = Act()
-        work = FakeWork(plan=a_plan(act=act), word="DROP")
+        work = FakeWork(plan=a_plan(act=act), word="DELETE")
         item = menu_for(UPLOADER, work)[EXCLUDE]
         item.execute(imported())
         work.plan = M.Plan.nothing_to_do("that trip is already gone")
@@ -1319,7 +1330,7 @@ class TestIdempotence(unittest.TestCase):
 
 
 def _word_for(number):
-    return {EXCLUDE: "DROP", CLEAN_WS: "DELETE", ERASE_CARD: "ERASE"}.get(number, "")
+    return {EXCLUDE: "DELETE", CLEAN_WS: "DELETE", ERASE_CARD: "ERASE"}.get(number, "")
 
 
 # ---------------------------------------------------------------------------

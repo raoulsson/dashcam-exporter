@@ -877,7 +877,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         up, and an operator who sees it wrongly once stops reading it."""
         target = Recorder(complete=YES)
         b = self._published_then_cleaned_up(target)
-        ran = b.run(EXCLUDE, typed=["1", "DROP"])
+        ran = b.run(EXCLUDE, typed=["1", "DELETE"])
         # Twice, not once: item 4 captures a full world to plan with and
         # another after the word, because Destructive re-derives whatever the
         # guard it was given happens to read.
@@ -899,7 +899,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         of the two produced it.
         """
         b = self._published_then_cleaned_up(Recorder(complete=UNKNOWN))
-        ran = b.run(EXCLUDE, typed=["1", "DROP"])
+        ran = b.run(EXCLUDE, typed=["1", "DELETE"])
         self.assertIn("ONLY copy", ran.printed)
         self.assertIn("gave no answer covering these trips", ran.printed)
 
@@ -908,7 +908,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         one that timed out, and saying so wrongly in a delete prompt is a lie
         the operator acts on."""
         b = self.bench().imported().sidecars().grouped()
-        ran = b.run(EXCLUDE, typed=["1", "DROP"])
+        ran = b.run(EXCLUDE, typed=["1", "DELETE"])
         self.assertIn("ONLY copy", ran.printed)
         self.assertIn("No website_uploader is configured", ran.printed)
 
@@ -921,7 +921,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         looser question those states needed.
         """
         b = self.bench(Recorder(complete=YES)).complete()
-        ran = b.run(EXCLUDE, typed=["1", "DROP"])
+        ran = b.run(EXCLUDE, typed=["1", "DELETE"])
         self.assertIn("stay there", ran.printed)
         self.assertIn("Deleting locally does not remove them", ran.printed)
 
@@ -930,7 +930,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         destination with nothing for this trip must not produce it — the
         operator would go looking for a copy that was never there."""
         b = self.bench(Recorder(complete=NO)).complete()
-        ran = b.run(EXCLUDE, typed=["1", "DROP"])
+        ran = b.run(EXCLUDE, typed=["1", "DELETE"])
         self.assertNotIn("stay there", ran.printed)
 
     def test_dropping_a_trip_records_that_it_was_on_purpose(self):
@@ -943,7 +943,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         installed next week.
         """
         b = self.bench(Recorder()).complete()
-        ran = b.run(EXCLUDE, typed=["1", "DROP"])
+        ran = b.run(EXCLUDE, typed=["1", "DELETE"])
         self.assertTrue(ran.completed, ran.note)
         self.assertEqual(P.dropped_trip_ids(b.ctx), (TRIP,))
 
@@ -953,7 +953,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         output is gone, and this is the one thing that tells it not to."""
         target = Recorder()
         b = self.bench(target).complete()
-        b.run(EXCLUDE, typed=["1", "DROP"])
+        b.run(EXCLUDE, typed=["1", "DELETE"])
         b.sidecars().render()               # something to build from again
         b.run(BUILD)
         self.assertEqual(target.handed[-1].dropped_ids, (TRIP,))
@@ -1439,6 +1439,43 @@ class TestWipingAWorkspaceWhoseSourceIsStillInTheSlot(SeamTest):
         self.assertNotIn("ORIGINAL", said)
         self.assertIn("removes 1 trips and the metadata", said)
         self.assertIn("still on the SIM card", said)
+
+
+class TestDroppingWhatTheCardStillHolds(SeamTest):
+    """The last-copy banner is true when it is true.
+
+    Excluding a trip whose clips are still on the card takes a second copy,
+    and the SIM can be read again until it is erased. Printing "these files
+    are the ONLY copy of that footage" over that is how a warning stops being
+    read where it counts.
+    """
+
+    def _picked(self, on_card):
+        b = self.bench().imported()
+        b.ctx.selected_import = b.ctx.render_root
+        if on_card:
+            f = b.ctx.card / "DCIM" / "200video" / "front"
+            f.mkdir(parents=True, exist_ok=True)
+            (f / ("%s_0060.mp4" % CLIP)).write_text("clip")
+        return b, [b.ctx.render_root / "DCIM" / "200video" / "front" /
+                   ("%s_0060.mp4" % CLIP)]
+
+    def test_the_card_still_has_it(self):
+        b, files = self._picked(on_card=True)
+        self.assertTrue(P._all_still_on_the_card(b.ctx, files))
+        said = "\n".join(P._safe_to_drop_lines())
+        self.assertIn("ignored in future attempts", said)
+        self.assertIn("copied off the SIM card", said)
+
+    def test_the_card_does_not(self):
+        b, files = self._picked(on_card=False)
+        self.assertFalse(P._all_still_on_the_card(b.ctx, files),
+                         "a file the card does not have read as a second copy")
+
+    def test_one_file_short_is_not_a_second_copy(self):
+        b, files = self._picked(on_card=True)
+        files.append(b.ctx.render_root / "DCIM" / "200video" / "front" / "gone.mp4")
+        self.assertFalse(P._all_still_on_the_card(b.ctx, files))
 
 
 class TestAutoSkippedIsNotAutoExcluded(SeamTest):

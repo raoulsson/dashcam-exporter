@@ -4406,6 +4406,8 @@ def _only_copy_lines(ctx, world, payload, by_index, picked):
     target at all. Saying "not consulted" when the question actually failed is
     a lie in a delete prompt.
     """
+    if _all_still_on_the_card(ctx, files_picked(by_index, picked)):
+        return _safe_to_drop_lines()
     only_copy, elsewhere, consulted = [], [], Consulted()
     for i in picked:
         (elsewhere if _exists_elsewhere(ctx, world, payload, by_index[i], consulted)
@@ -4418,6 +4420,40 @@ def _only_copy_lines(ctx, world, payload, by_index, picked):
     if only_copy:
         lines.extend(_last_copy_banner(world, only_copy, consulted))
     return tuple(lines)
+
+
+def files_picked(by_index, picked):
+    return [p for i in picked for p in trip_files(by_index[i])]
+
+
+def _all_still_on_the_card(ctx, files):
+    """Is every file about to go still sitting on the card, by path and size.
+
+    The strongest form of "there is another copy", and the cheapest to check:
+    it does not depend on a render, a destination, or anybody's answer about
+    either. When it holds, the warning below would be false.
+    """
+    root = ctx.selected_import
+    if not (files and root):
+        return False
+    try:
+        rel = [f.relative_to(root) for f in files]
+    except ValueError:
+        return False
+    return all(_also_on_the_card(root / r, ctx.card / r) for r in rel)
+
+
+def _safe_to_drop_lines():
+    """What excluding means, when the footage is demonstrably still on the card.
+
+    Not the last-copy banner: that one is true when it is true, and printing
+    it over a delete that takes a second copy is how a warning stops being
+    read where it counts.
+    """
+    return (C.dim("  They will be ignored in future attempts to read the same"
+                  " data from the SIM card."),
+            C.dim("  They can still be copied off the SIM card before the card"
+                  " is erased."))
 
 
 def _exists_elsewhere(ctx, world, payload, trip, consulted):
@@ -4555,7 +4591,7 @@ def _drop_plan_for(ctx, world, payload, by_index, picked, started):
     # files one per line in full, is the same screen twice and then some -- and
     # the figure the typed word answers was the one thing not standing out.
     print()
-    print("  Dropping trips %s: %s files (%s)"
+    print("  Dropping trips %s: %s files (%s) from workspace."
           % (", ".join(str(i) for i in picked), C.yellow("%d" % len(files)),
              C.yellow(human_bytes(total))))
 
