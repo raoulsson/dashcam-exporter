@@ -6141,20 +6141,20 @@ def _card_advisory(ctx, world):
 def erase_card_plan(ctx, world):
     """Item 9's plan."""
     started = time.time()
-    # ONE number, and it is the clip count, so this line and the accounting
-    # under it are about the same thing. The erase does take more than the
-    # clips -- the rear camera, the GPS archives, the photos, the thumbnails,
-    # the event log, roughly seven files for every clip -- and "including
-    # related data" is what says so. A second figure here would be the only
-    # number on the screen that the line below could not account for.
+    # One sentence, one colour. The erase takes more than the clips -- the rear
+    # camera, the GPS archives, the photos, the thumbnails, the event log --
+    # and "including related data" is what says so without putting a second
+    # figure on a screen where every number should reconcile.
     #
-    # Two colours, not three. Red is the sentence that says footage goes, dim
-    # is the evidence under it. The clip count used to be amber INSIDE the red
-    # sentence, painting the one number nobody should skim as a warning within
-    # a warning.
+    # The accounting breakdown that used to sit under it is GONE FROM THE
+    # SCREEN ONLY. card_is_expendable still decides, per clip, and still
+    # refuses when anything is accounted for by nothing -- both before the
+    # word and again after it. What was removed is a reassurance printed at
+    # the moment of maximum attention, directly under the sentence that says
+    # footage is about to go; the refusal, when there is one, still names what
+    # is owed and why.
     lines = [C.red("  %d clips will be deleted from the SIM card"
-                   " (including related data)." % len(world.card.stamps)),
-             C.dim("  Accounted for: %s." % world.card.note)]
+                   " (including related data)." % len(world.card.stamps))]
     lines.extend(_card_advisory(ctx, world))
     return menu.Plan(guards.card_is_expendable,
                      lambda fresh: _erase_card_commit(ctx, started),
