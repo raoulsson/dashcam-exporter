@@ -2849,18 +2849,22 @@ def _stamp_of_name(name):
     return m.group(1) if m else None
 
 
-def _delta_lines(here, todo, size):
+def _delta_lines(here, todo, size, files):
     """What the y is answering, in one line above the prompt.
 
-    Every figure is about the clips IN SCOPE -- newer than the high-water
-    mark, not excluded -- so they add up to what a delta would take and never
-    to what the card holds. Amber, because they are the only thing on this
-    screen that changes between runs and the whole decision is what they say.
+    Clips AND files, because they are different numbers and both are true: a
+    clip is one recording and the camera writes it twice, with its GPS track
+    beside it. The screen offered 14 and the run reported 60, and nothing on
+    either line said they were counting different things.
+
+    Amber on the figures: they are the only part that changes between runs,
+    and the whole decision is what they say.
     """
+    tail = "%s files, %s" % (C.yellow("%d" % files), size)
     if here:
-        return ("  %s clips already imported, %s remaining (%s)"
-                % (C.yellow("%d" % here), C.yellow("%d" % todo), size), "")
-    return ("  %s clips to import (%s)" % (C.yellow("%d" % todo), size), "")
+        return ("  %s clips already imported, %s to go (%s)"
+                % (C.yellow("%d" % here), C.yellow("%d" % todo), tail), "")
+    return ("  %s clips to import (%s)" % (C.yellow("%d" % todo), tail), "")
 
 
 def _leftover_lines():
@@ -2974,7 +2978,7 @@ def step_import(ctx):
     if not (here + todo):
         print(C.green("  Nothing new at the source — it is already all imported."))
         return record(ctx, NAME[IMPORT], SATISFIED, started, "no new clips")
-    _print_all(_delta_lines(here, todo, human_bytes(size)))
+    _print_all(_delta_lines(here, todo, human_bytes(size), len(wanted)))
     if not confirm("  Run delta import", True):
         return record(ctx, NAME[IMPORT], ABORTED, started,
                       "Aborted by user pre-run.")
@@ -3036,8 +3040,8 @@ def step_import(ctx):
         return record(ctx, NAME[IMPORT], FAILED, started, "exit %d" % rc)
 
     moved, count = watch.state["done"], watch.state["files"]
-    done_line("imported %s files, %s from SIM"
-              % (C.yellow("%d" % count), human_bytes(moved)))
+    done_line("imported %s clips (%s files, %s) from SIM"
+              % (C.yellow("%d" % todo), C.yellow("%d" % count), human_bytes(moved)))
 
     dest = ctx.import_root / day
     ctx.selected_import = dest if (dest / "DCIM").is_dir() else ctx.selected_import
@@ -3055,7 +3059,8 @@ def step_import(ctx):
     record_import(ctx, ctx.card)
 
     return record(ctx, NAME[IMPORT], RAN, started,
-                  "%d files, %s -> %s" % (count, human_bytes(moved), tilde(dest)))
+                  "%d clips, %d files, %s -> %s"
+                  % (todo, count, human_bytes(moved), tilde(dest)))
 
 
 class ScanResult:
