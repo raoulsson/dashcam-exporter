@@ -3308,12 +3308,7 @@ def step_generate_meta(ctx):
     if have:
         gs = [g for g in have.get("trips", []) if g.get("renderable", True)]
         if gs:
-            done = 0
-            for g in gs:
-                base = g.get("out_base")
-                if base and all(Path(base + s).is_file()
-                                for s in (".gpx", ".html", "_meta.json")):
-                    done += 1
+            done = sum(1 for g in gs if _is_described(g.get("out_base")))
             need = done < len(gs)
             if not need:
                 # Nothing printed here. The postcondition holds, and the runner
@@ -3336,7 +3331,8 @@ def step_generate_meta(ctx):
     # reported eighteen.
     n = _sidecars_for(ctx, root)
     done_line("described %s trips%s, sidecars under %s"
-              % (C.yellow("%d" % n), _skipped_note(have), tilde(ctx.out_dir)))
+              % (C.yellow("%d" % n), _skipped_note(have),
+                 tilde(ctx.out_dir / root.name)))
     return record(ctx, NAME[META], RAN, started, "%d trips described" % n)
 
 
@@ -3355,6 +3351,35 @@ def _skipped_note(payload):
         return ""
     return " of %d (%d too short to render)" % (
         len((payload or {}).get("trips", [])), len(skipped))
+
+
+def _is_described(base):
+    """Has this trip got its sidecar set, for the set it can have.
+
+    The set was ".gpx, .html, _meta.json, all three or it is not done". A trip
+    with no GPS fix gets no track and no map -- there is nothing to draw -- so
+    it could never have all three, `need` stayed true forever and item 2 ran
+    the whole pass again every time it was pressed. Two of this card's trips
+    are exactly that: the camera wrote no .git file for those days.
+
+    So: the meta is the sidecar every trip has, and the track and the map are
+    required only of a trip that recorded a position.
+    """
+    if not base:
+        return False
+    meta = Path(base + "_meta.json")
+    if not meta.is_file():
+        return False
+    if not _has_fix(meta):
+        return True
+    return all(Path(base + s).is_file() for s in (".gpx", ".html"))
+
+
+def _has_fix(meta):
+    try:
+        return bool(json.loads(meta.read_text()).get("gps_points"))
+    except (OSError, ValueError):
+        return False
 
 
 def _sidecars_for(ctx, root):
@@ -3495,7 +3520,7 @@ def load_groups(ctx, root, refresh=False):
         rc, _lines = run_stream(
             [renderer_python(ctx), "-u", "make_dashcam_videos.py", "--print-groups",
              "--root", str(root), "--out", str(ctx.out_dir)] + ctx.config_args + ctx.scan_args,
-            ctx.exporter, "Grouping", stdout_file=tmp)
+            ctx.exporter, "Grouping", stdout_file=tmp, quiet_finish=True)
         if rc != 0:
             return None
         try:

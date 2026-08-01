@@ -1278,6 +1278,42 @@ class TestTheLogTimesTheWorkAndNotTheLogging(unittest.TestCase):
         self.assertEqual(P._hms(3661), "01:01:01")
 
 
+class TestATripWithNoFixIsStillDescribed(SeamTest):
+    """A trip the camera recorded no position for has no track and no map,
+    because there is nothing to draw.
+
+    The completeness test wanted all three sidecars — .gpx, .html and the
+    meta — so such a trip could never be done, `need` stayed true, and item 2
+    re-ran the whole pass every time it was pressed. Two trips on this card
+    are exactly that: the camera wrote no GPS file for those days.
+    """
+
+    def _base(self, points):
+        b = self.bench()
+        folder = b.ctx.out_dir / "2026-07-10"
+        folder.mkdir(parents=True, exist_ok=True)
+        base = folder / "trip_2026-07-10_16-23_01"
+        (folder / "trip_2026-07-10_16-23_01_meta.json").write_text(
+            '{"gps_points": %d, "start": "2026-07-10 16:23:38",'
+            ' "end": "2026-07-10 16:47:40"}' % points)
+        return b, str(base)
+
+    def test_the_meta_alone_is_enough_without_a_fix(self):
+        _b, base = self._base(points=0)
+        self.assertTrue(P._is_described(base))
+
+    def test_a_trip_with_a_fix_still_wants_its_track_and_map(self):
+        b, base = self._base(points=412)
+        self.assertFalse(P._is_described(base), "a route was promised and not written")
+        for ext in (".gpx", ".html"):
+            Path(base + ext).write_text("x")
+        self.assertTrue(P._is_described(base))
+
+    def test_no_meta_at_all_is_not_described(self):
+        b = self.bench()
+        self.assertFalse(P._is_described(str(b.ctx.out_dir / "nothing")))
+
+
 class TestThePreviewBoxTicksWhenThereIsAPreview(SeamTest):
     """The state of a step is read off what the step WRITES.
 
