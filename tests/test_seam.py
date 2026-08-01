@@ -1314,6 +1314,46 @@ class TestThePreviewBoxTicksWhenThereIsAPreview(SeamTest):
         self.assertTrue(P._stills_current(b.ctx))
 
 
+class TestWhatIsOfferedIsWhatIsFetched(SeamTest):
+    """The screen's count and the script's filter have to mean one thing.
+
+    to_import() offers a clip that is owed whatever its date. The script skips
+    everything at or before AFTER_STAMP. Between them, "14 clips to import
+    (2.5 GB)" fetched one untimestamped file: every owed clip sat below the
+    mark and the filter dropped all of them.
+    """
+
+    def _counts(self, card_stamps, mark, excluded=()):
+        b = self.bench()
+        front = b.ctx.card / "DCIM" / "200video" / "front"
+        front.mkdir(parents=True, exist_ok=True)
+        for st in card_stamps:
+            (front / ("%s_0060.mp4" % st)).write_text("clip")
+        if mark:
+            P.write_ledger(b.ctx, mark, "test fixture")
+        if excluded:
+            P.record_excluded_stamps(b.ctx, set(excluded))
+        return P._delta_counts(b.ctx, mark)
+
+    def test_the_mark_is_used_when_everything_wanted_is_above_it(self):
+        """The old clip is accounted for — dropped on purpose — so nothing
+        below the mark is wanted and the script's own filter is exactly
+        right."""
+        _here, todo, _size, delta = self._counts(
+            ["20260724185433", "20260801120000"], "20260724185433",
+            excluded=["20260724185433"])
+        self.assertEqual(todo, 1)
+        self.assertTrue(delta, "the ordinary delta stopped using the mark")
+
+    def test_the_whole_card_is_walked_when_something_wanted_is_below_it(self):
+        """An owed clip older than the mark. Passing AFTER_STAMP here asks the
+        script to skip the very file the screen just promised."""
+        _here, todo, _size, delta = self._counts(
+            ["20260502102459", "20260801120000"], "20260724185433")
+        self.assertEqual(todo, 2, "the old clip was not offered")
+        self.assertFalse(delta, "the script would have been told to skip it")
+
+
 class TestTheWayPastTheCardRefusal(SeamTest):
     """The one refusal with a way past it, and what the way past costs.
 

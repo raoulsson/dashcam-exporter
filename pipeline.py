@@ -2789,7 +2789,24 @@ def _delta_counts(ctx, after):
     new = to_import(ctx, frozenset(card_stamps(ctx)), after,
                     frozenset(excluded_stamps(ctx)), owed)
     here = workspace_stamps(ctx, new)
-    return len(here), len(new) - len(here), _bytes_of(ctx.card, new - here)
+    return (len(here), len(new) - len(here), _bytes_of(ctx.card, new - here),
+            _mark_covers_them(new, after))
+
+
+def _mark_covers_them(new, after):
+    """Can the high-water mark alone fetch these, or must the whole card be
+    walked.
+
+    The mark is passed to import-sd-card.sh as AFTER_STAMP and the script
+    skips everything at or before it. That is exactly right when "to import"
+    means "everything since the mark" -- and wrong the moment it does not.
+    An owed clip from May is offered by to_import() and dropped by the script,
+    so the screen promised fourteen clips and the run copied one untimestamped
+    file. Two definitions of new, one in each language.
+
+    So: use the mark only when nothing being fetched sits below it.
+    """
+    return bool(after) and not any(s <= after for s in new)
 
 
 def _bytes_of(card, stamps):
@@ -2923,8 +2940,7 @@ def step_import(ctx):
     # clip new again, and item 8 does exactly that when it discards an import.
     after = last_imported_stamp(ctx)
     excluded_stamps(ctx)                 # refresh the cache the split reads
-    here, todo, size = _delta_counts(ctx, after)
-    delta = bool(after)
+    here, todo, size, delta = _delta_counts(ctx, after)
     print()
     if not (here + todo):
         print(C.green("  Nothing new at the source — it is already all imported."))
