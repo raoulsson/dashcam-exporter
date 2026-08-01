@@ -287,8 +287,8 @@ class TestPurgeKeepsState(GuardTest):
         self.assertTrue((self.w.ctx.state_dir / P.LEDGER_FILE).is_file(),
                         "the ledger lives outside the swept tree now")
         left = sorted(p.name for p in self.w.ctx.out_dir.iterdir())
-        self.assertEqual(left, [self.w.ctx.render_root.name],
-                         "only the import namespace stays, and it is empty")
+        self.assertEqual(left, [],
+                         "the render namespace of a swept import goes with it")
         self.assertFalse((d / "trip_A_meta.json").exists(), "the receipt must not stay here")
         self.assertEqual(P.archived_trips(self.w.ctx), 1, "the receipt must be archived")
         self.assertFalse((d / "trip_A_h1080.mp4").exists(), "the render must go")

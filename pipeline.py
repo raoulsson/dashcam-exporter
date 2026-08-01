@@ -2724,11 +2724,11 @@ def purge_published_renders(ctx, root, finished=True):
     that names clips already deleted. Keeping any of it leaves exactly the files
     that are impossible to make a decision about later.
 
-    Kept: the import directory itself, so the next copy has somewhere to land.
-    Nothing else -- the run logs went to the import root and the four state
-    files to ~/.dashcam-exporter, so there is no longer a keep-list to get
-    right in the one place where being wrong deletes footage. Any final_* folder is
-    unaffected because it lives beside this tree, not in it.
+    Kept: any final_* folder, which is the gathered result of a finished cycle
+    and the whole point of having gathered it. Nothing else -- the run logs
+    went to the import root and the four state files to ~/.dashcam-exporter,
+    so there is no longer a keep-list to get right in the one place where being
+    wrong deletes footage.
 
     The trip receipts are not kept HERE any more — archive_sidecars moves them
     to ARCHIVE_DIR first, and this then takes everything. Sparing them in place
@@ -2766,14 +2766,17 @@ def purge_published_renders(ctx, root, finished=True):
     freed = n = 0
     for child in sorted(out.iterdir()):
         if child.name in keep_names or child.name.startswith(FINAL_PREFIX):
-            # The import dir stays, but empties. The SAME _meta.json exemption
-            # as the general branch below, because this branch does not only see
-            # footage: renders are namespaced out_dir/<import name>/, so the
-            # render namespace of the very import being cleaned up carries
-            # root's name and lands HERE, not below. Without the exemption the
-            # sweep destroyed exactly the metas the docstring promises to keep,
-            # for exactly the trips whose footage was just deleted. A real
-            # footage dir holds no _meta.json, so sparing them costs nothing.
+            # This is out_dir, so a child carrying root's name is the RENDER
+            # NAMESPACE of the import being cleaned up -- out_dir/<import
+            # name>/ -- and not the import itself, which lives in another tree
+            # and has already been rmtree'd by the commit above. So it empties
+            # AND goes: an import that no longer exists has no namespace, and
+            # the one left behind was an empty dated folder the operator had
+            # to look inside to find out it held nothing.
+            #
+            # A final_* child is a different thing entirely and is only ever
+            # skipped: it is the gathered result of a finished cycle, which is
+            # what the sweep exists to preserve.
             if child.name == root.name and _real_dir(child):
                 for f in sorted(child.rglob("*")):
                     if _real_file(f):
@@ -2789,6 +2792,13 @@ def purge_published_renders(ctx, root, finished=True):
                             d.rmdir()
                         except OSError:
                             pass
+                # rmdir, never rmtree: it refuses on a non-empty directory, so
+                # anything the walk above deliberately spared keeps the folder
+                # standing instead of being taken out by the tidy-up.
+                try:
+                    child.rmdir()
+                except OSError:
+                    pass
             continue
         try:
             if _real_dir(child):
