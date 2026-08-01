@@ -55,18 +55,18 @@ STYLE = "body{font:16px/1.5 system-ui;margin:3rem auto;max-width:40rem}\n"
 
 
 class LocalWebSiteBuilderPlugin(Builder):
-    """Item 5: stage a tiny site from the renders and sidecars."""
+    """Item 5: stage a tiny site from the trips the exporter described."""
 
     def describe(self) -> str:
-        return "Build a small HTML site in %s from the renders." % _staging()
+        return "Build a small HTML site in %s." % _staging()
 
     def evaluate(self, workspace) -> Verdict:
         """Cheap and local: this is asked on every menu draw.
 
-        Not "have the renders been made" — the exporter answers that itself
-        before it ever gets here, and an act that re-asked would be answering a
-        question about ordering. This asks about the one thing that is this
-        plugin's own business: somewhere to build.
+        Not "have the renders been made". A trip is buildable once it is
+        described, and the page for one whose video is still to come is a page
+        with everything but the video on it. This asks about the one thing
+        that is this plugin's own business: somewhere to build.
         """
         if _staging().parent.is_dir():
             return go()

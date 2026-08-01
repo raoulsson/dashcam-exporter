@@ -18,9 +18,9 @@ owns the connection to the destination:
     is_complete(trip_ids) -> Evidence   are ALL of these trips at the far end
 
 NOTHING IS REGISTERED AND NOTHING CALLS BACK. The exporter calls; the plugin
-returns. The graph in menu.py already decides when each act may run — item 7 is
-unreachable until item 5 has run, and item 5 is unreachable until there is
-something to build from — so a readiness callback would have no work to do.
+returns. Both acts are offered from everywhere in the cycle and each one
+answers for itself through evaluate(), so a readiness callback would have no
+work to do.
 
 THE ONE CONDITION OF TRUST: AN IMPLEMENTATION READS THE WORKSPACE AND NEVER
 MODIFIES IT. No move, no rename, no delete, no writing into the output tree.

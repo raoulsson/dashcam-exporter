@@ -19,25 +19,35 @@
 #   card  ->  import_dir  ->  renders + sidecars in export_dir  ->  published
 #
 # The menu walks that: 1) Import SIM copies the card, 2) Generate Meta writes a
-# sidecar per trip, 6) Render Trips encodes them, 5) Build Website makes what
-# gets published, 7) Upload Website puts it online, 8) Clean Workspace erases
-# the copies once they are safely elsewhere.
+# sidecar per trip, 5) Build Website makes what gets published, 7) Upload
+# Website puts it online, 6) Render Trips encodes the videos, and 8) Clean
+# Workspace erases the copies once they are safely elsewhere.
 #
 #
 # TWO EDITIONS, AND YOU ARE IN ONE OF THEM
 #
 #   LOCAL PAGE   -- nothing configured below under PUBLISHING.
-#                   5) Build Website writes one self-contained .html into
-#                   export_dir: every still embedded, every route drawn from
-#                   its .gpx, opens with no network. 7) Upload Website does not
-#                   exist. This is the whole tool for most people.
+#                   5) Build Website gathers the renders into
+#                   final_<day>_<import> beside export_dir and writes one
+#                   self-contained .html in there: every still embedded, every
+#                   route drawn from its .gpx, opens with no network.
+#                   7) Upload Website stays greyed and says "not available for
+#                   local page". This is the whole tool for most people.
 #
 #   UPLOADER     -- `website_uploader` names a plugin you supply.
-#                   6) and 7) become that plugin's: it decides what a website
+#                   5) and 7) become that plugin's: it decides what a website
 #                   is and where it goes -- S3, rsync, FTP, a folder on a NAS.
 #                   The tool never learns what your destination is; it asks the
 #                   plugin whether the trips are there before it erases
 #                   anything. examples/local_website.py is a working one.
+#
+#                   Pages go up before the videos do. A trip is publishable as
+#                   soon as 2) Generate Meta has described it, so the cycle is
+#                   import, meta, preview, exclude, 5) Build Website,
+#                   7) Upload Website -- then 6) Render Trips, then build and
+#                   upload again to bring the videos. Item 7 is offered from
+#                   2, 3, 4, 5, 6 and 7, and answers for itself when there is
+#                   nothing built yet.
 #
 # The status screen names which edition you are in at launch.
 #
@@ -49,7 +59,7 @@
 #   ~/.dashcam-exporter/state/  		how far the card has been imported
 #   ~/.dashcam-exporter/processed/   	a receipt per finished trip
 #
-# Nothing the tool needs to remember is inside import_dir or output_dir, so you
+# Nothing the tool needs to remember is inside import_dir or export_dir, so you
 # can delete both in Finder and lose nothing.
 #
 #
@@ -72,9 +82,9 @@
 #
 # Every setting is OPTIONAL: uncomment the ones you want to change. Booleans
 # accept true / false / yes / no / 1 / 0, and a value may name an earlier
-# setting as ${that}. Regenerate this file any time with
+# setting as ${that}. Write a fresh copy of the built-in default config with
 #
-#   python3 make_dashcam_videos.py --write-config ./config.txt
+#   python3 make_dashcam_videos.py --write-config ./config.new.txt
 #
 
 
@@ -116,7 +126,7 @@
 
 # The root where your data lives during import and export. What belongs to a
 # SESSION rather than to the footage goes here: pid.lock, which says this
-# workspace is busy, and logs/. import_dir and output_dir default inside it.
+# workspace is busy, and logs/. import_dir and export_dir default inside it.
 #workspace = ~/dashcam-data
 
 # Where a copy of the card is kept. Change this only to use a bigger disk
@@ -135,7 +145,7 @@
 # the other's working area. The tool writes an owner marker and refuses to
 # sweep a directory another checkout claims, but the setting is the fix.
 #
-# Also accepts the older names `output_dir` and `out`. export_dir wins.
+# `output_dir` and `out` are read as aliases for this setting. export_dir wins.
 #export_dir = ${workspace}/export
 
 # ============================================================================
@@ -143,8 +153,8 @@
 # ============================================================================
 #
 # Nothing below is needed to use this repo. Unset (a fresh clone) the pipeline
-# is: import the card, render the trips, build a browsable local page under
-# <out> and open it with file://. That path touches no network host and no
+# is: import the card, render the trips, build a browsable local page beside
+# export_dir and open it with file://. That path touches no network host and no
 # account.
 #
 # There is exactly ONE setting about publishing, and it names an implementation
@@ -153,16 +163,18 @@
 # a folder on an external disk, is that implementation's business and not this
 # repo's. Set it and 5) Build Website builds what YOUR plugin publishes and
 # 7) Upload Website lights up. Leave it and both stay exactly as a fresh clone
-# has them: item 5 writes the local page, item 7 sits in the menu greyed out
-# with the reason printed underneath. The item NUMBERS never move, so a note
-# saying "run 5" means the same thing on every machine.
+# has them: item 5 writes the local page, item 7 sits in the menu greyed out,
+# and p says why. The item NUMBERS never move, so a note saying "run 5" means
+# the same thing on every machine.
 
 # The plugin that publishes, as "<path to a .py>:<Builder>:<Uploader>". One
 # file, two classes: the builder subclasses uploader.Builder and is 5) Build
 # Website, the uploader subclasses uploader.Uploader and is 7) Upload Website.
 # Each answers three questions — describe(), evaluate(workspace),
 # execute(workspace) — and the uploader answers one more, is_complete(trip_ids).
-# That is the whole contract.
+# Both may also implement reset(), which the exporter calls after any step that
+# changed the workspace; a plugin that caches its answer needs it, one that goes
+# and looks every time does not. That is the whole contract.
 #
 # examples/local_website.py is a complete working one, and the test suite
 # drives the menu through it, so it cannot rot into a lie. Read that first,
@@ -187,7 +199,9 @@
 # THE DELETE GUARD. 8) Clean Workspace erases the original clips and the renders
 # they produced, and what it can prove first depends on what is set here. (The
 # card is not this item's business — that is 9) Delete SIM Data, with its own
-# evidence and its own word.)
+# evidence.) Items 4, 8 and 9 all ask for DELETE before they erase anything.
+# The one way PAST a refusal — item 9's, when clips exist nowhere else — asks
+# for ERASE instead, so habit cannot type you through it.
 #
 # THE RULE, in one sentence: the floors that never leave this machine first,
 # and then the destination's answer decides.
@@ -202,7 +216,7 @@
 # reading of the import, off the sidecars, so a trip that was never encoded is
 # in the list. You do not have it, the honest answer is NO, and its footage
 # stays. That is what makes one all-or-nothing answer safe: asked "do you have
-# everything you were given" you could truthfully say yes about a trip you were
+# everything you were given" you could rightly say yes about a trip you were
 # never given.
 #
 # THE ONE READING THAT MUST NEVER BE INVENTABLE is "could not find out". An
@@ -215,15 +229,15 @@
 #
 # With no website_uploader configured nothing can be verified: it says so in
 # red, names the check that could not run, keeps the renders instead of purging
-# them, and still makes you type CLEAN.
+# them, and still makes you type DELETE.
 #
 # When it DOES go ahead on your answer, the gate table and the banner name the
-# implementation that gave it, and so does the recorded step. Not a safeguard —
-# a trusted component needs none — but so that afterwards, when the footage is
-# gone, whose answer it was is readable off the tool.
+# implementation that gave it, and so does the recorded step, so that
+# afterwards, when the footage is gone, whose answer it was is readable off the
+# tool.
 
 # WRITING YOUR OWN. Copy examples/local_website.py and answer the four
-# questions honestly. There is no shape you have to reproduce and no service
+# questions straight. There is no shape you have to reproduce and no service
 # you have to sign up for: object storage behind a CDN, an rsync to a box, a
 # copy onto an external disk and a page you open by hand — all of them are the
 # same four answers. This repo produces the videos and their sidecars; what
@@ -346,15 +360,15 @@ software = true
 # draw every route in one colour, which shows the shape and nothing else.
 #speed_colour = true
 
-# Where the finished folders land. Each import becomes final_<newest trip day>,
-# holding the videos, the maps, the tracks and the page that links them — one
-# directory to move wherever you keep things. Unset, it lands BESIDE the output
-# dir (<parent of out>/final_<day>), deliberately: the output tree is swept on
-# every import and a finished deliverable must not be inside the thing that gets
-# emptied. Point
-# it at an external disk and the result arrives there instead of being carried
-# afterwards. An existing folder of the same name is merged into, never
-# overwritten.
+# Where the finished folders land. Each import becomes one
+# final_<newest trip day>_<import id>, holding the videos, the maps, the tracks
+# and the page that links them — one directory to move wherever you keep
+# things. Unset, it lands BESIDE the output dir
+# (<parent of export_dir>/final_<day>_<import>), deliberately: the output tree
+# is swept on every import and a finished deliverable must not be inside the
+# thing that gets emptied. Point it at an external disk and the result arrives
+# there instead of being carried afterwards. An existing folder of the same
+# name is merged into, never overwritten.
 #final_dir = /Volumes/Archive/drives
 
 # --- this machine's publishing setup ---------------------------------------
@@ -397,7 +411,10 @@ software = true
 # shows the map widget centred vertically.
 #panel_stats = true
 
-# Save .html (Leaflet), .gpx (standard GPX), and _links.txt next to each video.
+# Save .html (Leaflet), .gpx (standard GPX), and _links.txt in each trip's
+# folder. 2) Generate Meta writes them, so the map and the track exist before
+# the video does. _meta.json is written either way — it is what every later
+# step reads, not a map artifact.
 #map_sidecars = true
 
 # OPT-IN: look up place names for each trip's start/end (OSM Nominatim) and
@@ -542,8 +559,8 @@ software = true
 # pre-drive context.
 #drive_first_clip_pad_secs = 8
 
-# Legacy combined knob — kept for back-compat. If parking_entry_pad /
-# parking_exit_pad above aren't set, this value is used for both.
+# Combined fallback. If parking_entry_pad / parking_exit_pad
+# above aren't set, this value is used for both.
 #parking_pad_secs = 5
 
 # Exit-clip handling after a parking gap.
@@ -597,9 +614,10 @@ software = true
 
 # Tells your plugin this machine is on a bad connection, so it should skip
 # anything optional that would go and look. It arrives as `world.offline`.
-# Nothing in this repo reads it — there is no networked code left here — so
-# with no plugin configured it does nothing. It exists so "am I offline" has
-# one name across every plugin instead of each inventing its own.
+# Nothing in this repo reads it — the geocoder and the map tiles go out
+# regardless of it — so with no plugin configured it does nothing. It exists so
+# "am I offline" has one name across every plugin instead of each inventing its
+# own.
 #offline = false
 
 # Still frames: the preview sheet and the local result page both pull a frame

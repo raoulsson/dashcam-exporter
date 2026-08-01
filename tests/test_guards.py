@@ -588,7 +588,7 @@ class TestNothingRenderedIsBelowTheTargetsWordEntirely(GuardTest):
 
     def test_the_gate_table_and_the_verdict_agree(self):
         """The screen printed "rendered locally .... no" and then proceeded to
-        the CLEAN prompt. A gate the operator can read must be a gate."""
+        the prompt. A gate the operator can read must be a gate."""
         world = _world(renders_here=0, expected=3, complete=M.Evidence.YES)
         readings = dict(guards.gate_readings(world))
         self.assertIs(readings["rendered locally"], M.Evidence.NO)

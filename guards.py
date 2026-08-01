@@ -142,8 +142,8 @@ def nothing_was_rendered_here(world) -> Optional[Verdict]:
     including an implementation that answers YES to everything, which is
     requirement A of the trust model and the reason this question is never
     delegated. The gate table on screen says "rendered locally .... no" one
-    line above the CLEAN prompt, and a gate the operator can read must be a
-    gate.
+    line above the confirmation prompt, and a gate the operator can read must
+    be a gate.
     """
     if world.renders_here:
         return None
@@ -227,7 +227,7 @@ def gate_readings(world) -> Tuple[Tuple[str, Evidence], ...]:
 def destination_proof(world) -> str:
     """The answer a go rests on, or "" when the destination gave none.
 
-    Named rather than assumed, because the banner above the CLEAN prompt says
+    Named rather than assumed, because the banner above the prompt says
     which answer the erase is proceeding on and a plugin that declined the
     question never gave one. Attribution to an answer that was not given is
     worse than none: it is the last sentence before the footage goes, and a

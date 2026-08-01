@@ -418,7 +418,7 @@ class TestTheEraseSaysWhoseAnswerItActedOn(unittest.TestCase):
     it says is believed. But footage is not recoverable, so when the erase went
     ahead on somebody's answer, WHOSE answer has to be readable off the tool
     rather than reconstructed from memory weeks later. Three places carry it:
-    the gate table, the banner above the CLEAN prompt, and the recorded step.
+    the gate table, the banner above the prompt, and the recorded step.
     """
 
     def setUp(self):

@@ -656,7 +656,7 @@ class TestNothingUnprovenErasesFootage(SeamTest):
     def test_a_target_that_raises_refuses_and_never_reaches_the_prompt(self):
         """An exception is not a thing the target said. It reads as
         unreachable — UNKNOWN everywhere — and the refusal comes before the
-        banner, so nobody types CLEAN and then learns it was not going to
+        banner, so nobody types the word and then learns it was not going to
         happen."""
         b, ran = self._erased(Recorder(raises="the shelf fell over"))
         self.assertFalse(ran.completed)

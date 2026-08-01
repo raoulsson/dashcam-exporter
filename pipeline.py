@@ -5932,7 +5932,7 @@ def clean_workspace_plan(ctx, world):
     """Item 8's plan. Prints, asks nothing irreversible, refuses early.
 
     The heavy guard runs TWICE on purpose: here, so a refusal never reaches
-    the CLEAN prompt, and again inside the commit against a world captured
+    the prompt, and again inside the commit against a world captured
     after the word was typed. Same callable both times, so the two cannot
     drift the way two hand-copied chains did.
     """
