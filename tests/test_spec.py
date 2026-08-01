@@ -64,6 +64,7 @@ class Bench:
         c.archive_dir = self.root / "archive"
         c.state_dir = self.root / "state"
         c.lock_file = self.root / P.LOCK_FILE
+        c.workspace = self.root
         c.render_root = self.root / "import"
         c.import_root = self.root / "import"
         c.card = self.root / "card"

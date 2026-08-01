@@ -254,6 +254,7 @@ class FakeCtx:
         self.results = []
         self.out_dir = Path(tempfile.mkdtemp(prefix="dashcam-paths-"))
         self.state_dir = self.out_dir / "state"
+        self.workspace = self.out_dir
         self.plugin = None
 
 

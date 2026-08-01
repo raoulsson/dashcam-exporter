@@ -178,6 +178,7 @@ def a_ctx():
     ctx.results = []
     ctx.out_dir = Path(tempfile.mkdtemp(prefix="dashcam-runner-"))
     ctx.state_dir = ctx.out_dir / "state"
+    ctx.workspace = ctx.out_dir
     return ctx
 
 

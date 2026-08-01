@@ -5855,10 +5855,10 @@ def wipe_card(ctx):
     verdict = guards.card_is_expendable(capture_world(ctx, menu.Scope.LOCAL))
     if verdict.blocked:
         return 0, 0, verdict.reason
-    return _unlink_card_files(dcim)
+    return _unlink_card_files(ctx, dcim)
 
 
-def _unlink_card_files(dcim):
+def _unlink_card_files(ctx, dcim):
     gone = freed = 0
     for f in [f for f in dcim.rglob("*") if f.is_file()]:
         try:
@@ -5869,6 +5869,7 @@ def _unlink_card_files(dcim):
             print(C.red("  Could not erase %s: %s" % (f.name, e)))
     # No "folders kept so the camera can record" -- the banner said that four
     # lines up, before the word was typed, which is when it mattered.
+    _unlink_quietly(ctx.workspace / ORPHAN_LIST)
     done_line("erased %s files from the card, %s freed"
               % (C.yellow("%d" % gone), human_bytes(freed)))
     return gone, freed, ""
@@ -6841,20 +6842,48 @@ def _print_all(lines):
         print(line.rstrip())
 
 
+ORPHAN_LIST = "orphaned_clips_on_sim_card.txt"
+SHOWN = 5
+
+
 def _evidence_lines(verdict):
-    """What the refusal is about, named rather than counted, and all of it.
+    """What the refusal is about: enough to recognise, and a file for the rest.
 
-    "13 new clips ready for next session" is a number to take on trust. These
-    are the files, so the operator can look at the dates and decide for
-    himself whether that is footage he wants or the trash he suspects — which
-    is the decision the refusal is asking him to make.
-
-    No cap and no "... and 17 more": a list that stops short is a list you
-    cannot act on, and the one thing the operator wanted to see is as likely
-    to be in the tail as in the head. It only prints when he presses the key.
+    Five is enough to see WHAT they are -- the dates and the clip lengths --
+    which is the decision the refusal is asking for. The whole list goes to a
+    file in the workspace, because a card that has never been imported puts
+    every clip in here and a thousand paths on the screen answer nothing.
     """
-    return tuple(C.dim("        %s" % tilde(f))
-                 for f in getattr(verdict, "evidence", ()) or ())
+    files = getattr(verdict, "evidence", ()) or ()
+    lines = tuple(C.dim("        %s" % tilde(f)) for f in files[:SHOWN])
+    if len(files) > SHOWN:
+        lines += (C.dim("        ... and %d more" % (len(files) - SHOWN)),)
+    return lines
+
+
+def _orphan_file(ctx, files):
+    """Keep <workspace>/orphaned_clips_on_sim_card.txt in step with the truth.
+
+    Written whole on every refusal that has clips to name, and DELETED when
+    there are none -- a stale list of clips that have since been imported is
+    worse than no list, because it reads as current.
+    """
+    path = ctx.workspace / ORPHAN_LIST
+    if not files:
+        _unlink_quietly(path)
+        return ()
+    try:
+        path.write_text("\n".join(files) + "\n")
+    except OSError:
+        return ()
+    return (C.dim("        Full list: %s" % tilde(path)),)
+
+
+def _unlink_quietly(path):
+    try:
+        path.unlink()
+    except OSError:
+        pass
 
 
 def _colon(reason):
@@ -7207,6 +7236,7 @@ class Runner:
                        % (number, self.menu[number].name(),
                           _colon(getattr(verdict, "reason", "")))))
         _print_all(_evidence_lines(verdict))
+        _print_all(_orphan_file(self.ctx, getattr(verdict, "evidence", ()) or ()))
 
     def run_one(self, number):
         """One item, against a world captured for ITS scope, right now.

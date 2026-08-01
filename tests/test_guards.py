@@ -86,6 +86,7 @@ class Workspace:
         self.ctx.archive_dir = self.root / "archive"
         self.ctx.state_dir = self.root / "state"
         self.ctx.lock_file = self.root / P.LOCK_FILE
+        self.ctx.workspace = self.root
         self.ctx.render_root = self.root / "import"
         self.ctx.import_root = self.root / "import"
         self.ctx.card = self.root / "card"
