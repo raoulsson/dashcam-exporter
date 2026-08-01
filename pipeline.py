@@ -7002,8 +7002,21 @@ def _not_offered_reason(item):
 
 
 def _guard_reason(verdict):
+    """Blocked or SATISFIED both grey the entry, for different reasons.
+
+    Blocked means it cannot run. Satisfied means it would run and find its
+    work already done -- "Nothing to do: everything on the card is already
+    here", which is the whole output. A name in the same colour as the steps
+    that WILL do something invites pressing it to find that out, so it is
+    greyed and says why when asked.
+
+    It stays selectable: pressing it is harmless, completes, and moves the
+    position on, which is what a satisfied postcondition means to the graph.
+    """
     if verdict.blocked:
         return verdict.reason
+    if verdict.ruling is menu.Ruling.SATISFIED:
+        return verdict.reason or "nothing to do"
     return ""
 
 
@@ -7198,8 +7211,11 @@ def _next_steps(menu_items, verdicts, offered):
     grid of names cannot carry and a wall of every step's description would
     bury.
     """
+    # Nor a step whose work is already done: "next available" is what there is
+    # to DO, and an entry that would report "nothing to do" is not on that list.
     ready = sorted(n for n in offered
-                   if not verdicts[n].blocked and not menu.is_view(menu_items[n]))
+                   if not _why_not(menu_items[n], verdicts[n], True)
+                   and not menu.is_view(menu_items[n]))
     if not ready:
         return ()
     return ("", C.bold("  Next available steps:")) + tuple(
