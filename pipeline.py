@@ -6138,16 +6138,35 @@ def _card_advisory(ctx, world):
                      % C.yellow("%d" % len(unpublished)))]
 
 
+def _card_file_count(ctx):
+    """Everything under DCIM, which is what the erase actually unlinks.
+
+    Walked here rather than carried on the World: it is wanted by one banner,
+    once, on a screen the operator is already waiting at — and a guard that
+    goes to the disk answers differently on two reads of one world, which is
+    the whole reason nothing in world.py does this.
+    """
+    return sum(1 for f in _safe_rglob(ctx.card / "DCIM", "*") if f.is_file())
+
+
 def erase_card_plan(ctx, world):
     """Item 9's plan."""
     started = time.time()
-    # Two lines, two colours. Red is the sentence that says footage goes; dim
-    # is the evidence under it. The figure used to be amber INSIDE that red
-    # sentence, which put three colours on a five-line screen and made the one
-    # number nobody should skim the only word painted like a warning inside a
-    # warning. Red already carries the whole line.
-    lines = [C.red("  %d clips go. The folders stay, so the camera can record."
-                   % len(world.card.stamps)),
+    # BOTH numbers, because they differ by a factor of seven and only one of
+    # them is what goes. 131 clips is the front camera, which is what the
+    # accounting below is about; the erase takes every file under DCIM -- the
+    # rear camera, the GPS archives, the photos, the thumbnails, the event log
+    # -- and on this card that is 888. Saying "131 clips" alone in front of an
+    # irreversible wipe understates it sevenfold; saying "888 files" alone
+    # cannot be reconciled with the line underneath.
+    #
+    # Two colours, not three. Red is the sentence that says footage goes, dim
+    # is the evidence under it. The clip count used to be amber INSIDE the red
+    # sentence, painting the one number nobody should skim as a warning within
+    # a warning.
+    lines = [C.red("  %d clips will be deleted from the SIM card"
+                   " (%d files, including related data)."
+                   % (len(world.card.stamps), _card_file_count(ctx))),
              C.dim("  Accounted for: %s." % world.card.note)]
     lines.extend(_card_advisory(ctx, world))
     return menu.Plan(guards.card_is_expendable,
