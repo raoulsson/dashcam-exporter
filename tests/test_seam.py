@@ -1294,13 +1294,30 @@ class TestATripWithNoFixIsStillDescribed(SeamTest):
         folder.mkdir(parents=True, exist_ok=True)
         base = folder / "trip_2026-07-10_16-23_01"
         (folder / "trip_2026-07-10_16-23_01_meta.json").write_text(
-            '{"gps_points": %d, "start": "2026-07-10 16:23:38",'
-            ' "end": "2026-07-10 16:47:40"}' % points)
+            '{"gps_points": %d, "day": "2026-07-10",'
+            ' "start": "2026-07-10 16:23:38", "end": "2026-07-10 16:47:40"}' % points)
         return b, str(base)
 
     def test_the_meta_alone_is_enough_without_a_fix(self):
         _b, base = self._base(points=0)
         self.assertTrue(P._is_described(base))
+
+    def test_but_not_once_the_import_holds_a_track_for_that_day(self):
+        """A no-fix answer is only final while there is no track that could
+        change it. The import fetches GPS whether or not it fetched clips, so
+        one can land after the meta was written — and then the meta is an
+        answer reached without evidence that now exists."""
+        _b, base = self._base(points=0)
+        self.assertFalse(P._is_described(base, frozenset({"20260710"})))
+        self.assertTrue(P._is_described(base, frozenset({"20260931"})),
+                        "another day's track re-opened this trip")
+
+    def test_the_day_comes_from_the_meta_and_the_gps_from_its_name(self):
+        b = self.bench()
+        gps = b.ctx.render_root / "DCIM" / "203gps" / "tar" / "tmp"
+        gps.mkdir(parents=True, exist_ok=True)
+        (gps / "20260712191931_0120_T.git").write_text("track")
+        self.assertEqual(P._gps_days(b.ctx.render_root), frozenset({"20260712"}))
 
     def test_a_trip_with_a_fix_still_wants_its_track_and_map(self):
         b, base = self._base(points=412)

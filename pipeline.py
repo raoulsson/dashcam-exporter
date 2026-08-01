@@ -3352,7 +3352,8 @@ def step_generate_meta(ctx):
     if have:
         gs = [g for g in have.get("trips", []) if g.get("renderable", True)]
         if gs:
-            done = sum(1 for g in gs if _is_described(g.get("out_base")))
+            days = _gps_days(root)
+            done = sum(1 for g in gs if _is_described(g.get("out_base"), days))
             need = done < len(gs)
             if not need:
                 # Nothing printed here. The postcondition holds, and the runner
@@ -3397,17 +3398,28 @@ def _skipped_note(payload):
         len((payload or {}).get("trips", [])), len(skipped))
 
 
-def _is_described(base):
+def _is_described(base, gps_days=frozenset()):
     """Has this trip got its sidecar set, for the set it can have.
 
     The set was ".gpx, .html, _meta.json, all three or it is not done". A trip
     with no GPS fix gets no track and no map -- there is nothing to draw -- so
     it could never have all three, `need` stayed true forever and item 2 ran
-    the whole pass again every time it was pressed. Two of this card's trips
-    are exactly that: the camera wrote no .git file for those days.
+    the whole pass again every time it was pressed.
 
     So: the meta is the sidecar every trip has, and the track and the map are
     required only of a trip that recorded a position.
+
+    `gps_days` is what stops that becoming a trap of its own. A meta saying
+    gps_points 0 is only final while there is no track that could change its
+    mind -- and a track can arrive AFTER it, because an import fetches GPS
+    whether or not it fetched clips. So a trip with no fix counts as described
+    only when the import holds no GPS for its day at all.
+
+    By day rather than by mtime: rsync preserves the card's timestamps, so a
+    track that landed a minute ago is dated when the camera wrote it, which is
+    older than every meta. And by day rather than by span, because being wrong
+    here costs one re-run of a pass that is idempotent, while span arithmetic
+    over archive names is how the track went missing in the first place.
     """
     if not base:
         return False
@@ -3415,8 +3427,22 @@ def _is_described(base):
     if not meta.is_file():
         return False
     if not _has_fix(meta):
-        return True
+        return _day_of(meta) not in (gps_days or frozenset())
     return all(Path(base + s).is_file() for s in (".gpx", ".html"))
+
+
+def _day_of(meta):
+    try:
+        return re.sub(r"\D", "", str(json.loads(meta.read_text()).get("day") or ""))
+    except (OSError, ValueError):
+        return ""
+
+
+def _gps_days(root):
+    """The days the import holds any GPS for, as YYYYMMDD."""
+    return frozenset(filter(None, (
+        (_stamp_of_name(p.name) or "")[:8]
+        for p in _safe_rglob(root / "DCIM" / GPS_DIR, "*") if p.is_file())))
 
 
 def _has_fix(meta):

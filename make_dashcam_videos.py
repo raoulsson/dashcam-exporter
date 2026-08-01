@@ -1747,10 +1747,16 @@ def harvest_tarred_gpx(tar_dir: Path, cache_dir: Path) -> tuple[int, int]:
     cache_dir.mkdir(parents=True, exist_ok=True)
     n_arch = 0
     n_gpx = 0
-    for name in sorted(os.listdir(tar_dir)):
+    # rglob, not listdir. The camera keeps recent archives in 203gps/tar and
+    # moves older ones down into 203gps/tar/tmp -- on this card, 43 files for
+    # the last three days at the top and 57 files for 2026-07-11 to 07-14 in
+    # tmp. Reading only the top level meant every trip older than a few days
+    # was described with gps_points 0 and drawn with no route, from a track
+    # sitting one directory below the one being read.
+    for path in sorted(tar_dir.rglob("*")):
+        name = path.name
         if not name.endswith(".git") or name.startswith("._"):
             continue
-        path = tar_dir / name
         try:
             with tarfile.open(path, "r") as tf:
                 n_arch += 1
