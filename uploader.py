@@ -223,6 +223,30 @@ class Uploader(Act):
     folder — is yours, not the menu's. What the exporter needs is one answer
     about one destination, and an act that can leave half of that true is an
     act that publishes nothing while reporting success.
+
+    TWO RULES ABOUT THE ORDER, IF YOUR DESTINATION HAS PAGES AND MEDIA.
+
+    PAGES FIRST, MEDIA AFTER. A trip is publishable as soon as it is
+    DESCRIBED: its route, its distance, its places and its map all come from
+    the sidecars item 2 writes, and only playback waits on the encode. Sending
+    the media first means that for the whole of that upload — which is hours
+    on a card's worth of video — the destination shows nothing at all, and
+    everything appears at once when the last byte of the last file lands.
+    Reversed, the pages are up in a minute and each drive starts playing as its
+    own media arrives behind it.
+
+    AND MISSING MEDIA IS NOT A FAILURE. Item 5 is reachable before item 6 by
+    design, so a publish with nothing encoded yet is the ORDINARY first move
+    and not an odd one. It completes, and it says what it did: pages sent, no
+    media to send. An act that errors there fails the whole publish after the
+    pages have already gone up, and reports a failure for a run that did
+    exactly what was asked of it.
+
+    That is what makes the exporter's own gate safe to leave alone. Publishing
+    pages moves nothing at the destination as far as is_complete() is
+    concerned: a trip with no media there is still NO, so Clean Workspace stays
+    shut over footage whose only copy is local. Nothing about publishing early
+    may soften that answer.
     """
 
     @abstractmethod
