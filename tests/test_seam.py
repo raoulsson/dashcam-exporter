@@ -52,7 +52,7 @@ sys.path.insert(0, str(REPO))
 import items                     # noqa: E402,F401  (registers the ten)
 import menu as M                 # noqa: E402
 import uploader as U             # noqa: E402
-from menu import (EXCLUDE, BUILD, UPLOAD, CLEAN_WS)              # noqa: E402
+from menu import (META, EXCLUDE, BUILD, UPLOAD, CLEAN_WS)        # noqa: E402
 
 
 def load_pipeline():
@@ -748,6 +748,12 @@ class TestTheRecheckAsksTheTargetAgain(SeamTest):
         self.assertIn("Refused after the re-check", ran.note)
         self.assertGreaterEqual(target.times("is_complete"), 2,
                                 "the plugin was asked once and remembered")
+        # And it is in the log. This path returned an Outcome and recorded
+        # nothing, so the one run where the operator typed the word and the
+        # tool said no afterwards left no row in the summary at all.
+        rows = [r for r in b.ctx.results if r.name == items.NAMES[CLEAN_WS]]
+        self.assertTrue(rows, "a refusal after the word left no summary row")
+        self.assertIn("Refused after the re-check", rows[-1].detail)
 
     def test_the_erase_that_proceeds_was_asked_twice_and_not_remembered(self):
         """The same path when the answer holds up. Two asks, not one — the
@@ -1263,6 +1269,52 @@ class TestTheLogTimesTheWorkAndNotTheLogging(unittest.TestCase):
         self.assertEqual(P._hms(0), "00:00:00")
         self.assertEqual(P._hms(57), "00:00:57")
         self.assertEqual(P._hms(3661), "01:01:01")
+
+
+class TestARefusalIsAlwaysInTheLog(SeamTest):
+    """A step that decided not to act still ran, and the summary is the record
+    of what ran.
+
+    Item 8 recorded its plan-time exits through _nothing(); item 4 returned a
+    plan and logged nothing, so "no import folder", "the trip scan failed",
+    "no trips" and "cancelled" left the summary empty for a step the operator
+    had just watched refuse. Item 2 was worse than silent: it ran the whole
+    sidecar pass AFTER the scan it reads had failed and said so in red.
+    """
+
+    def _rows(self, b, number):
+        return [r for r in b.ctx.results if r.name == items.NAMES[number]]
+
+    def test_item_four_records_a_scan_that_failed(self):
+        b = self.bench().imported()
+        with quiet(), mock.patch.object(P, "load_groups", return_value=None):
+            P.drop_plan(b.ctx, b.world())
+        rows = self._rows(b, EXCLUDE)
+        self.assertTrue(rows, "item 4 refused and left no summary row")
+        self.assertEqual(rows[-1].detail, "the trip scan failed")
+
+    def test_item_four_records_an_import_with_no_trips(self):
+        b = self.bench().imported()
+        with quiet(), mock.patch.object(P, "load_groups", return_value={"trips": []}):
+            P.drop_plan(b.ctx, b.world())
+        rows = self._rows(b, EXCLUDE)
+        self.assertTrue(rows, "item 4 refused and left no summary row")
+        self.assertEqual(rows[-1].detail, "no trips")
+
+    def test_item_two_stops_when_the_scan_it_reads_has_failed(self):
+        """It used to carry on: minutes of sidecar pass behind a red failure
+        the operator had already been shown."""
+        b = self.bench().imported()
+        # run_stream returns (rc, lines); a bare Mock unpacks with a TypeError
+        # rather than a clean assertion, so it is given the shape of a success.
+        with quiet(), mock.patch.object(P, "load_groups", return_value=None), \
+                mock.patch.object(P, "run_stream", return_value=(0, [])) as ran:
+            P.step_generate_meta(b.ctx)
+        ran.assert_not_called()
+        rows = self._rows(b, META)
+        self.assertTrue(rows)
+        self.assertEqual(rows[-1].status, P.FAILED)
+        self.assertEqual(rows[-1].detail, "the trip scan failed")
 
 
 class TestTheEraseAsksASecondTime(SeamTest):
