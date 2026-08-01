@@ -52,7 +52,8 @@ sys.path.insert(0, str(REPO))
 import items                     # noqa: E402,F401  (registers the ten)
 import menu as M                 # noqa: E402
 import uploader as U             # noqa: E402
-from menu import (META, EXCLUDE, BUILD, UPLOAD, CLEAN_WS)        # noqa: E402
+from menu import (META, EXCLUDE, BUILD, UPLOAD, CLEAN_WS,
+                  ERASE_CARD)                                   # noqa: E402
 
 
 def load_pipeline():
@@ -1311,6 +1312,58 @@ class TestThePreviewBoxTicksWhenThereIsAPreview(SeamTest):
                                             previews, {})
         self.assertTrue(written.is_file())
         self.assertTrue(P._stills_current(b.ctx))
+
+
+class TestTheWayPastTheCardRefusal(SeamTest):
+    """The one refusal with a way past it, and what the way past costs.
+
+    "13 clips exist nowhere but this card" is true and is sometimes not a
+    reason to keep them. The way past is not a flag that skips the guard: it
+    records the clips as dropped on purpose — the same act item 4 performs per
+    trip — which makes the refusal FALSE, and the erase then passes the same
+    gates any erase passes.
+    """
+
+    def _carded(self, stamps=("20260502102459",)):
+        b = self.bench()
+        front = b.ctx.card / "DCIM" / "200video" / "front"
+        front.mkdir(parents=True, exist_ok=True)
+        for st in stamps:
+            (front / ("%s_0060.mp4" % st)).write_text("clip")
+        # A mark, so the refusal under test is the clip accounting and not
+        # "nothing was ever imported" — which is a different guard with no way
+        # past it, and rightly so.
+        P.write_ledger(b.ctx, "20260731061615", "test fixture")
+        return b, b.world(M.Scope.LOCAL)
+
+    def test_it_records_the_drop_and_then_erases(self):
+        b, w = self._carded()
+        self.assertTrue(P.guards.card_is_expendable(w).blocked)
+        with quiet(), mock.patch.object(P, "ask", return_value="ERASE"):
+            out = P.drop_unaccounted_then_erase(b.ctx, w)
+        self.assertTrue(out.completed, out.note)
+        self.assertIn("20260502102459", P.excluded_stamps(b.ctx))
+        self.assertFalse(any(p.is_file() for p in
+                             (b.ctx.card / "DCIM").rglob("*")), "the card kept files")
+
+    def test_the_guard_is_asked_again_and_can_still_refuse(self):
+        """Recording the drop is not permission. Anything else standing in the
+        way stops it, with the ledger changed and the card untouched."""
+        b, w = self._carded()
+        import guards as G
+        with quiet(), mock.patch.object(G, "card_is_expendable",
+                                        return_value=M.blocked("something else")):
+            out = P.drop_unaccounted_then_erase(b.ctx, w)
+        self.assertFalse(out.completed)
+        self.assertIn("something else", out.note)
+        self.assertTrue(any(p.is_file() for p in (b.ctx.card / "DCIM").rglob("*")),
+                        "the card was erased through a standing refusal")
+
+    def test_only_an_item_that_declares_a_word_offers_one(self):
+        built = M.build_menu(M.Strategy.LOCAL_PAGE, P.Work(self.bench().ctx))
+        self.assertEqual(built[ERASE_CARD].OVERRIDE_WORD, "ERASE")
+        self.assertEqual([n for n, i in built.items() if i.OVERRIDE_WORD],
+                         [ERASE_CARD], "a second item grew a way past its guard")
 
 
 class TestARefusalIsAlwaysInTheLog(SeamTest):

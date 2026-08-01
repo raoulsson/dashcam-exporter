@@ -379,6 +379,21 @@ class MenuItem(ABC):
     def outcome(self) -> Optional[Outcome]:
         return self._outcome
 
+    # A refusal this item lets the operator step past, by typing this word.
+    # Empty means there is no way past: most refusals are facts about the
+    # world, and the answer to them is to change the world.
+    OVERRIDE_WORD = ""
+
+    def override(self, world) -> Optional[Outcome]:
+        """Take the way past, having been shown exactly what it costs.
+
+        Not a bypass. The item that offers one has to make the refusal FALSE
+        -- by recording the decision the guard was waiting for -- and then go
+        through its own gates unchanged. A door around the guard would be a
+        second erase path with its own bugs.
+        """
+        return None
+
     def aborted(self, note: str, performed: bool = False) -> Outcome:
         """Record an interruption as this item's answer.
 

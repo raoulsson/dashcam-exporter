@@ -3114,12 +3114,18 @@ def _imported_line(world):
 
 
 def _excluded_line(world):
-    return _fact("%d" % len(world.dropped_ids), "Trips excluded",
-                 bool(world.dropped_ids))
+    # Never dim: dim means "nothing here yet", which is a statement about
+    # work outstanding, and excluding a trip is not work anyone owes. Zero
+    # excluded is the ordinary finished state of a cycle where every trip was
+    # worth keeping, and greying it read as a step not done.
+    return _fact("%d" % len(world.dropped_ids), "Trips excluded", True)
 
 
 def _meta_line(world):
-    return _fact("%d" % len(world.metas), "Trips described",
+    # "Described" was a word only this line used. Sidecars is what the rest of
+    # the tool calls them -- every guard that refuses says "no sidecars on
+    # disk for the import" -- so the row and the refusal now name one thing.
+    return _fact("%d" % len(world.metas), "Trips with sidecars",
                  bool(world.metas))
 
 
@@ -5690,6 +5696,33 @@ def erase_card_plan(ctx, world):
                      banner=tuple(lines))
 
 
+def drop_unaccounted_then_erase(ctx, world):
+    """Record the strays as dropped on purpose, then erase the card.
+
+    The recording is the point. It is the same act item 4 performs per trip,
+    it is permanent, it survives every clean-up, and every guard already
+    honours it -- so afterwards the card is expendable for a reason that is
+    written down rather than waived. The delta will not offer those clips
+    again either, which is the other half of the decision.
+
+    Then the ordinary path: capture again, ask card_is_expendable, and erase
+    only if it now says yes. If some OTHER refusal is standing -- nothing ever
+    imported, a clip that is owed for a different reason -- this stops, having
+    changed only the ledger.
+    """
+    started = time.time()
+    stamps = frozenset(world.card.new_stamps)
+    record_excluded_stamps(ctx, stamps)
+    print(C.dim("  %d clips recorded as dropped on purpose." % len(stamps)))
+    fresh = looked_at(ctx, menu.Scope.LOCAL)
+    verdict = guards.card_is_expendable(fresh)
+    if verdict.blocked:
+        print(C.red("  Still refusing: %s." % verdict.reason))
+        return _outcome(record(ctx, NAME[ERASE_CARD], SKIPPED, started,
+                               "refused: %s" % verdict.reason))
+    return _erase_card_commit(ctx, started)
+
+
 def _erase_card_commit(ctx, started):
     gone, freed, reason = wipe_card(ctx)
     if reason:
@@ -6640,6 +6673,9 @@ class Work:
     def erase_card_plan(self, world):
         return erase_card_plan(self.ctx, world)
 
+    def drop_unaccounted_then_erase(self, world):
+        return drop_unaccounted_then_erase(self.ctx, world)
+
     # -- what Destructive needs between the plan and the act ---------------
     def show(self, banner):
         """Nothing at all when there is nothing to show.
@@ -7229,6 +7265,25 @@ class Runner:
                           _colon(getattr(verdict, "reason", "")))))
         _print_all(_evidence_lines(verdict))
         _print_all(_orphan_file(self.ctx, getattr(verdict, "evidence", ()) or ()))
+        self._offer_way_past(number, verdict)
+
+    def _offer_way_past(self, number, verdict):
+        """A refusal an item declares a way past, asked for by its word.
+
+        Only under a refusal that NAMED what it is about: the operator has the
+        paths on screen and the full list in a file, which is the whole basis
+        on which he is allowed to answer this.
+        """
+        item = self.menu[number]
+        if not (item.OVERRIDE_WORD and getattr(verdict, "evidence", ())):
+            return
+        print()
+        if ask("  Type %s to drop them and erase anyway: " % item.OVERRIDE_WORD) \
+                != item.OVERRIDE_WORD:
+            print(C.dim("  Aborted by user pre-run."))
+            return
+        outcome = item.override(looked_at(self.ctx, item.SCOPE))
+        _print_all(_stayed_lines(item, outcome) if outcome else ())
 
     def run_one(self, number):
         """One item, against a world captured for ITS scope, right now.

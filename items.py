@@ -526,6 +526,12 @@ class DeleteSimData(Destructive):
 
     number = ERASE_CARD
     NAME = "Delete SIM Data"
+    # The one refusal in the tool with a way past it. "These clips exist
+    # nowhere else" is true and is sometimes not a reason to keep them: old
+    # strays, a fragment the scanner would never render, footage the operator
+    # has looked at and does not want. He is shown every path and the file
+    # they were written to before he is asked.
+    OVERRIDE_WORD = "ERASE"
     DESCRIPTION = "Erase the card, once every clip is accounted for elsewhere."
     END = True
     DESTR = True
@@ -566,6 +572,19 @@ class DeleteSimData(Destructive):
 
     def _plan(self, world) -> Plan:
         return self._work.erase_card_plan(world)
+
+    def override(self, world):
+        """Drop the unaccounted clips ON PURPOSE, then erase normally.
+
+        Excluding is what this tool already calls "this footage never
+        happened, deliberately" -- item 4 does it per trip and every guard
+        honours it. So the way past is not a flag that skips card_is_expendable:
+        it records the decision, which makes the refusal false, and the erase
+        then passes the same gates any erase passes and asks for the same word.
+        """
+        if not world.card.new_stamps:
+            return None
+        return self._work.drop_unaccounted_then_erase(world)
 
 
 # The cold-start orientation: the first row that matches names where we are.
