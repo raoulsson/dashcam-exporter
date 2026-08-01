@@ -68,6 +68,12 @@ class Ruling(Enum):
 class Verdict:
     ruling: Ruling
     reason: str = ""
+    # What the reason is talking about, when naming it is worth more than
+    # counting it. "13 new clips ready for next session" tells the operator
+    # the number; these tell him WHICH, so he can see for himself whether they
+    # are footage he wants or the trash he suspects. Printed under the refusal
+    # and nowhere else.
+    evidence: Tuple[str, ...] = ()
 
     @property
     def blocked(self) -> bool:
@@ -86,8 +92,8 @@ def satisfied(reason: str) -> Verdict:
     return Verdict(Ruling.SATISFIED, reason)
 
 
-def blocked(reason: str) -> Verdict:
-    return Verdict(Ruling.BLOCKED, reason)
+def blocked(reason: str, evidence: Tuple[str, ...] = ()) -> Verdict:
+    return Verdict(Ruling.BLOCKED, reason, tuple(evidence))
 
 
 @dataclass(frozen=True)

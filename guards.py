@@ -55,7 +55,7 @@ def clips_never_copied(world) -> Optional[Verdict]:
     if not world.card.new_stamps:
         return None
     return blocked("card: %d new clips ready for next session"
-                   % len(world.card.new_stamps))
+                   % len(world.card.new_stamps), world.card.new_files)
 
 
 def copy_lost(world) -> Optional[Verdict]:
@@ -71,7 +71,7 @@ def copy_lost(world) -> Optional[Verdict]:
     if not world.card.owed_stamps:
         return None
     return blocked("card: %d clips exist nowhere but this card"
-                   % len(world.card.owed_stamps))
+                   % len(world.card.owed_stamps), world.card.new_files)
 
 
 CARD_GUARDS = (never_imported, clips_never_copied, copy_lost)

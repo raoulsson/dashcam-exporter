@@ -75,6 +75,10 @@ class Card:
     stamps: FrozenSet[str] = frozenset()
     new_stamps: FrozenSet[str] = frozenset()      # never imported
     owed_stamps: FrozenSet[str] = frozenset()     # accounted for by nothing
+    # The files behind new_stamps, so a refusal can name what it is refusing
+    # about. Carried rather than looked up: a guard that goes to the disk
+    # answers differently on two reads of one world.
+    new_files: Tuple[str, ...] = ()
     note: str = ""                                # how the accounting was met
 
 

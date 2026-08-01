@@ -6090,10 +6090,16 @@ def _card_facts(ctx):
     excluded = frozenset(excluded_stamps(ctx))   # the file is the source; refreshed here
     stamps = frozenset(card_stamps(ctx))
     owed, note = card_accounting(ctx)
+    new = to_import(ctx, stamps, last_imported_stamp(ctx), excluded, owed)
     return W.Card(path=ctx.card, dcim=True, present=_holds_files(dcim), stamps=stamps,
-                  new_stamps=to_import(ctx, stamps, last_imported_stamp(ctx),
-                                       excluded, owed),
+                  new_stamps=new, new_files=_clips_named(ctx.card, new),
                   owed_stamps=frozenset(owed), note=note)
+
+
+def _clips_named(card, stamps):
+    """The paths of those clips, both cameras, in time order."""
+    return tuple(sorted(str(p) for p in _card_clips(card)
+                        if _stamp_of_name(p.name) in stamps))
 
 
 def _holds_files(dcim):
@@ -6813,6 +6819,24 @@ def _print_all(lines):
         print(line.rstrip())
 
 
+SHOWN = 8
+
+
+def _evidence_lines(verdict):
+    """What the refusal is about, named rather than counted.
+
+    "13 new clips ready for next session" is a number to take on trust. These
+    are the files, so the operator can look at the dates and decide for
+    himself whether that is footage he wants or the trash he suspects — which
+    is the decision the refusal is asking him to make.
+    """
+    files = getattr(verdict, "evidence", ()) or ()
+    shown = tuple(C.dim("        %s" % f) for f in files[:SHOWN])
+    if len(files) > SHOWN:
+        shown += (C.dim("        ... and %d more" % (len(files) - SHOWN)),)
+    return shown
+
+
 def _colon(reason):
     if not reason:
         return ""
@@ -7139,7 +7163,7 @@ class Runner:
         self.run_one(number)
         return True
 
-    def _not_available(self, number, reason=""):
+    def _not_available(self, number, verdict=None):
         """Plainly, and in terms of what to do rather than of the machine.
 
         "does not follow 7) Upload Website" described the graph to someone who
@@ -7160,7 +7184,9 @@ class Runner:
         acts of theatre around a no.
         """
         print(C.yellow("  %d) %s is not available%s."
-                       % (number, self.menu[number].name(), _colon(reason))))
+                       % (number, self.menu[number].name(),
+                          _colon(getattr(verdict, "reason", "")))))
+        _print_all(_evidence_lines(verdict))
 
     def run_one(self, number):
         """One item, against a world captured for ITS scope, right now.
@@ -7174,7 +7200,7 @@ class Runner:
         world = looked_at(self.ctx, item.SCOPE)
         verdict = _safe_verdict(item, world)
         if verdict.blocked:
-            self._not_available(number, verdict.reason)
+            self._not_available(number, verdict)
             return None
         print()
         print(rule(item.name(), ch="="))

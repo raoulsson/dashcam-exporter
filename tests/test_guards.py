@@ -825,6 +825,28 @@ class TestTheLocalRenderGateHasNoWayToAbstain(unittest.TestCase):
                                     "the floor abstained, so nothing holds the rule up")
 
 
+class TestARefusalNamesWhatItIsAbout(unittest.TestCase):
+    """A count is something to take on trust; the files are something to look
+    at. "13 new clips ready for next session" says how many; the operator's
+    next question is which, because May footage and this morning's footage are
+    the same number and a different decision."""
+
+    def _card(self, **kw):
+        return W.World(card=W.Card(path=Path("/Volumes/SIM"), dcim=True,
+                                   present=True, **kw))
+
+    def test_the_blocking_clips_are_carried_on_the_verdict(self):
+        files = ("/Volumes/SIM/DCIM/200video/front/20260502102459_0060.mp4",)
+        v = guards.clips_never_copied(
+            self._card(new_stamps=frozenset({"20260502102459"}), new_files=files))
+        self.assertTrue(v.blocked)
+        self.assertEqual(v.evidence, files)
+
+    def test_a_verdict_with_nothing_to_show_carries_nothing(self):
+        self.assertEqual(M.blocked("plain").evidence, ())
+        self.assertEqual(M.go().evidence, ())
+
+
 class TestOldFootageIsNotADeadEnd(unittest.TestCase):
     """A card carrying clips older than the last import must stay actionable.
 
