@@ -503,9 +503,18 @@ class Live:
     def __init__(self, enabled):
         self.enabled = enabled
         self.height = 0
+        self.opened = False
         if self.enabled:
             sys.stdout.write("\x1b[?25l")   # hide cursor
             sys.stdout.flush()
+
+    def _open(self):
+        """A blank line under whatever printed last, once, before the first
+        draw. The bar arrived hard against the line above it -- a status row,
+        a prompt the operator had just answered -- and read as part of it."""
+        if not self.opened:
+            self.opened = True
+            sys.stdout.write("\n")
 
     def _erase(self):
         if self.height:
@@ -516,6 +525,7 @@ class Live:
     def draw(self, lines):
         if not self.enabled:
             return
+        self._open()
         self._erase()
         w = term_width() - 1
         for ln in lines:
@@ -635,6 +645,8 @@ class Waiting(Bar):
         started, i = time.time(), 0
         if self._stop.wait(self.LEAD_IN):
             return
+        sys.stdout.write("\n")     # the same blank line the live area opens with
+        sys.stdout.flush()
         while not self._stop.wait(self.STEP):
             self._drawn = True
             _write_line(self.render_at(i, time.time() - started))
