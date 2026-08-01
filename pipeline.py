@@ -2770,8 +2770,9 @@ def _delta_counts(ctx, after):
     is how much of THIS card is not on this machine yet, and an interrupted
     copy left some of it here already.
     """
-    new = _never_imported_stamps(frozenset(card_stamps(ctx)), after,
-                                 frozenset(excluded_stamps(ctx)))
+    owed, _note = card_accounting(ctx)
+    new = to_import(ctx, frozenset(card_stamps(ctx)), after,
+                    frozenset(excluded_stamps(ctx)), owed)
     here = workspace_stamps(ctx, new)
     return len(here), len(new) - len(here), _bytes_of(ctx.card, new - here)
 
@@ -3043,9 +3044,10 @@ def step_progress(ctx, world):
 
 
 def _progress_lines(ctx, world):
-    return (_imported_line(world), _excluded_line(world), _meta_line(world),
-            _rendered_line(world), _preview_line(world), _built_line(world),
-            _uploaded_line(world))
+    return tuple(filter(None, (
+        _imported_line(world), _excluded_line(world), _meta_line(world),
+        _rendered_line(world), _preview_line(world), _built_line(world),
+        _uploaded_line(world))))
 
 
 def _state_line(text, there):
@@ -3120,7 +3122,16 @@ def _preview_line(world):
 
 
 def _built_line(world):
-    """The local page or a gathered folder -- whichever this edition makes."""
+    """The local page or a gathered folder -- whichever this edition makes.
+
+    Only the local edition makes either. Under an uploader, item 6 hands the
+    build to the plugin, which stages wherever it likes and is not asked
+    afterwards whether it did -- so the box could never tick, and a workspace
+    with everything published read "[x] Website uploaded" one line under
+    "[ ] Website built". A line the tool cannot answer is not status.
+    """
+    if world.strategy is not menu.Strategy.LOCAL_PAGE:
+        return None
     built = world.local_page or bool(world.final_folders)
     return _fact(_box(built), "Website built", built)
 
@@ -6035,6 +6046,25 @@ def _never_imported_stamps(stamps, mark, excluded):
         lambda s: _already_imported(s, mark, excluded), stamps))
 
 
+def to_import(ctx, stamps, mark, excluded, owed):
+    """The clips a delta import would copy: anything not provably elsewhere.
+
+    Two rules, and both are needed. Above the high-water mark is the ordinary
+    one -- footage recorded since the last import. Owed is the other: clips
+    accounted for by NOTHING, whatever their date.
+
+    With only the mark, a card carrying old footage was a dead end. Thirteen
+    clips from May and July sat below a mark set in August, so the delta
+    skipped them as already imported; no rendered trip's span contained them,
+    so item 9 refused to erase the card because they existed nowhere else.
+    Neither item would move, and each was right on its own terms.
+
+    Erring toward copying is the safe direction: the cost of being wrong here
+    is bytes and minutes, and the cost of the other way is footage.
+    """
+    return _never_imported_stamps(stamps, mark, excluded) | frozenset(owed)
+
+
 def _card_facts(ctx):
     """The card, and the per-clip accounting for it, derived once.
 
@@ -6049,8 +6079,8 @@ def _card_facts(ctx):
     stamps = frozenset(card_stamps(ctx))
     owed, note = card_accounting(ctx)
     return W.Card(path=ctx.card, dcim=True, present=_holds_files(dcim), stamps=stamps,
-                  new_stamps=_never_imported_stamps(stamps, last_imported_stamp(ctx),
-                                                    excluded),
+                  new_stamps=to_import(ctx, stamps, last_imported_stamp(ctx),
+                                       excluded, owed),
                   owed_stamps=frozenset(owed), note=note)
 
 

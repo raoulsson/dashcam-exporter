@@ -825,6 +825,36 @@ class TestTheLocalRenderGateHasNoWayToAbstain(unittest.TestCase):
                                     "the floor abstained, so nothing holds the rule up")
 
 
+class TestOldFootageIsNotADeadEnd(unittest.TestCase):
+    """A card carrying clips older than the last import must stay actionable.
+
+    Thirteen clips from May and July sat below a high-water mark set in
+    August. The delta skipped them as already imported; no rendered trip's
+    span contained them, so item 9 refused to erase the card because they
+    existed nowhere else. Item 1 would not take them and item 9 would not let
+    them go, and each was right on its own terms.
+    """
+
+    def test_a_clip_below_the_mark_that_nothing_accounts_for_is_still_offered(self):
+        old, recent = "20260502102459", "20260731061615"
+        stamps = frozenset({old, recent})
+        # The mark is past both, so the mark alone offers nothing.
+        self.assertEqual(P._never_imported_stamps(stamps, recent, frozenset()),
+                         frozenset())
+        # Owed says the old one is on the card and nowhere else.
+        offered = P.to_import(None, stamps, recent, frozenset(), {old})
+        self.assertIn(old, offered)
+        self.assertNotIn(recent, offered, "a clip already accounted for was re-offered")
+
+    def test_an_excluded_clip_is_never_re_offered(self):
+        """Dropped on purpose is accounted FOR, not owed -- card_accounting
+        removes it before owed is computed, so it cannot come back this way."""
+        old = "20260502102459"
+        offered = P.to_import(None, frozenset({old}), "20260731061615",
+                              frozenset({old}), set())
+        self.assertEqual(offered, frozenset())
+
+
 class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
     """The second way into item 8, and the only one that does not go through
     the publish gates.
