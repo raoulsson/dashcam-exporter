@@ -82,7 +82,17 @@ echo "Copying..."
 # them and an --after of 20260724185333 means "everything since that clip".
 # Without it the card's whole DCIM is copied, which is what a first import wants.
 FILTER=()
-if [ -n "${AFTER_STAMP:-}" ]; then
+if [ -n "${IMPORT_LIST:-}" ]; then
+    # The caller has already worked out exactly which files it wants, one
+    # relative path per line. That is the whole rule then -- no stamp
+    # arithmetic here, because two places computing "which files are new"
+    # is two answers, and the one time they disagreed the screen promised
+    # fourteen clips and the run copied one.
+    echo ">>> $(wc -l < "$IMPORT_LIST" | tr -d ' ') files selected by the caller"
+    FILTER=(--files-from="$IMPORT_LIST")
+    SRC_ARG="$SRC"
+    expect_files=$(wc -l < "$IMPORT_LIST" | tr -d ' ')
+elif [ -n "${AFTER_STAMP:-}" ]; then
     echo ">>> only clips newer than $AFTER_STAMP"
     tmp_list="$(mktemp)"
     # Matched with bash's own regex, not `grep | head`. Under `set -euo pipefail`

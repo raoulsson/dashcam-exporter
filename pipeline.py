@@ -841,7 +841,7 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
         # now, and a colour that spans a nested one ends at the nested one's
         # reset -- which is how the closing bracket and everything after it
         # lost the amber the opening bracket had.
-        live.draw([head + tail])
+        live.draw(["  " + head + tail])
 
     try:
         while not done:
@@ -2778,35 +2778,64 @@ def _same_card(ctx, leftovers):
 
 
 def _delta_counts(ctx, after):
-    """(already here, still to copy) among the clips this import would take.
+    """(already here, still to fetch, bytes, the file list) for this import.
 
-    Not card_split's (new, below the mark). What is below the mark is a fact
-    about rounds long since rendered and swept; what the operator is deciding
-    is how much of THIS card is not on this machine yet, and an interrupted
-    copy left some of it here already.
+    One computation, and the list it produces is what the script is given.
+    The screen used to count clips here while import-sd-card.sh worked out
+    "new" for itself from a high-water mark, and the two disagreed the moment
+    an owed clip was older than the mark: fourteen offered, one copied.
+
+    Not card_split's (new, below the mark) either. What is below the mark is a
+    fact about rounds long since rendered and swept; what is being decided is
+    how much of THIS card is not on this machine yet.
     """
     owed, _note = card_accounting(ctx)
     new = to_import(ctx, frozenset(card_stamps(ctx)), after,
                     frozenset(excluded_stamps(ctx)), owed)
     here = workspace_stamps(ctx, new)
-    return (len(here), len(new) - len(here), _bytes_of(ctx.card, new - here),
-            _mark_covers_them(new, after))
+    files = _files_for(ctx.card, new - here)
+    return len(here), len(new - here), _weigh(ctx.card, files), files
 
 
-def _mark_covers_them(new, after):
-    """Can the high-water mark alone fetch these, or must the whole card be
-    walked.
+def _files_for(card, stamps):
+    """Every file those clips need, as paths relative to the card.
 
-    The mark is passed to import-sd-card.sh as AFTER_STAMP and the script
-    skips everything at or before it. That is exactly right when "to import"
-    means "everything since the mark" -- and wrong the moment it does not.
-    An owed clip from May is offered by to_import() and dropped by the script,
-    so the screen promised fourteen clips and the run copied one untimestamped
-    file. Two definitions of new, one in each language.
-
-    So: use the mark only when nothing being fetched sits below it.
+    Both cameras and the GPS beside them, because a clip is not watchable
+    without its track -- and anything with no stamp at all (the camera's event
+    log), which the script has always carried along for the same reason.
     """
-    return bool(after) and not any(s <= after for s in new)
+    out = []
+    for p in _safe_rglob(card / "DCIM", "*"):
+        if not p.is_file():
+            continue
+        stamp = _stamp_of_name(p.name)
+        if stamp is None or stamp in stamps:
+            out.append(str(p.relative_to(card)))
+    return sorted(out)
+
+
+def _weigh(card, relative):
+    return sum(_size_of(card / r) for r in relative)
+
+
+def _write_import_list(relative):
+    """Hand the script the exact files, one relative path per line.
+
+    It used to be given AFTER_STAMP and left to work out "new" for itself.
+    Two places computing that is two answers, and when they parted the screen
+    promised fourteen clips and the run copied one untimestamped file. Then
+    the other way: dropping the stamp so the script would stop skipping them
+    made it copy the whole card, because without a filter rsync fetches
+    everything the empty workspace lacks -- 26 GB against an offer of 2.5.
+
+    A list cannot disagree with itself.
+    """
+    if not relative:
+        return ""
+    fd, path = tempfile.mkstemp(prefix="dashcam-import-", suffix=".txt")
+    with os.fdopen(fd, "w") as fh:
+        fh.write("\n".join(relative) + "\n")
+    return path
 
 
 def _bytes_of(card, stamps):
@@ -2940,7 +2969,7 @@ def step_import(ctx):
     # clip new again, and item 8 does exactly that when it discards an import.
     after = last_imported_stamp(ctx)
     excluded_stamps(ctx)                 # refresh the cache the split reads
-    here, todo, size, delta = _delta_counts(ctx, after)
+    here, todo, size, wanted = _delta_counts(ctx, after)
     print()
     if not (here + todo):
         print(C.green("  Nothing new at the source — it is already all imported."))
@@ -2960,7 +2989,7 @@ def step_import(ctx):
     # only record is a ledger the shell script cannot read. The script refuses
     # the combination outright; asking here would just be a prompt whose yes
     # ends in a failed run.
-    if delta:                       # which is now the same as 'there is a mark'
+    if after:                       # a mark exists, so this is not a first copy'
         # The reason is not that the skipped clips are precious — they are
         # already imported, and once rendered and uploaded the card is the copy
         # that matters least. It is that --delete only ever fires after a verify,
@@ -2979,8 +3008,9 @@ def step_import(ctx):
         erase = confirm("  Erase the source's files after a verified copy?", False)
 
     env = {"DASHCAM_IMPORT_ROOT": str(ctx.import_root)}
-    if after and delta:
-        env["AFTER_STAMP"] = after
+    listing = _write_import_list(wanted)
+    if listing:
+        env["IMPORT_LIST"] = listing
     cmd = ["./import-sd-card.sh"]
     if erase:
         cmd.append("--delete")
@@ -6116,22 +6146,31 @@ def _never_imported_stamps(stamps, mark, excluded):
 
 
 def to_import(ctx, stamps, mark, excluded, owed):
-    """The clips a delta import would copy: anything not provably elsewhere.
+    """The clips a delta import would copy: the ones accounted for by nothing.
 
-    Two rules, and both are needed. Above the high-water mark is the ordinary
-    one -- footage recorded since the last import. Owed is the other: clips
-    accounted for by NOTHING, whatever their date.
+    Which is `owed`, and only owed. It took three tries to see that.
 
-    With only the mark, a card carrying old footage was a dead end. Thirteen
-    clips from May and July sat below a mark set in August, so the delta
-    skipped them as already imported; no rendered trip's span contained them,
-    so item 9 refused to erase the card because they existed nowhere else.
-    Neither item would move, and each was right on its own terms.
+    First the rule was the high-water mark alone, and a card carrying footage
+    older than the mark was a dead end: the delta skipped those clips as
+    already imported, item 9 refused to erase the card because they existed
+    nowhere, and each was right on its own terms.
 
-    Erring toward copying is the safe direction: the cost of being wrong here
-    is bytes and minutes, and the cost of the other way is footage.
+    So owed was added to the mark, as a union. That fixed the dead end and
+    broke the other direction the first time the mark went backwards -- a
+    discard winds it back, and with it at zero every clip on the card counted
+    as never imported, including a hundred and seventeen already published
+    and swept, whose renders are online and whose receipts are in the archive.
+    25 GB offered where 2.5 GB was wanted.
+
+    Owed alone is both. A clip is owed when nothing accounts for it: not
+    excluded on purpose, not inside a rendered trip's span, not sitting in the
+    workspace. Anything above the mark that has not been taken in yet is owed
+    by that definition; anything the mark would have hidden is owed too. The
+    mark stays for the questions it can answer -- what item 1 tells the
+    script, what card_split counts -- and stops being the authority on what
+    exists.
     """
-    return _never_imported_stamps(stamps, mark, excluded) | frozenset(owed)
+    return frozenset(owed)
 
 
 def _card_facts(ctx):
@@ -7381,6 +7420,10 @@ class Runner:
         Typing q at the DELETE prompt reported "mid-run" about a step that had
         not started, which is the one thing the two words exist to tell apart.
         """
+        # The bar was mid-draw when the key landed; without this its first
+        # characters survive the shorter line printed over them, and the
+        # summary reads "20  Aborted by user mid-run."
+        _erase_line()
         note = "Aborted by user %s-run." % ("mid" if exc.mid_run else "pre")
         self.ctx.results.append(StepResult(item.name(), ABORTED, 0, note))
         # The same words to the item, because the outcome's note is what the

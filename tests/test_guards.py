@@ -869,6 +869,16 @@ class TestOldFootageIsNotADeadEnd(unittest.TestCase):
         self.assertIn(old, offered)
         self.assertNotIn(recent, offered, "a clip already accounted for was re-offered")
 
+    def test_a_published_clip_is_not_offered_when_the_mark_goes_backwards(self):
+        """A discard winds the mark back. With it at zero, every clip on the
+        card counted as never imported — including the ones already rendered,
+        published and swept, whose receipts are in the archive. 25 GB offered
+        where 2.5 GB was wanted."""
+        published, stray = "20260730135403", "20260502102459"
+        offered = P.to_import(None, frozenset({published, stray}), "",
+                              frozenset(), {stray})
+        self.assertEqual(offered, frozenset({stray}))
+
     def test_an_excluded_clip_is_never_re_offered(self):
         """Dropped on purpose is accounted FOR, not owed -- card_accounting
         removes it before owed is computed, so it cannot come back this way."""

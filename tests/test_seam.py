@@ -1335,23 +1335,37 @@ class TestWhatIsOfferedIsWhatIsFetched(SeamTest):
             P.record_excluded_stamps(b.ctx, set(excluded))
         return P._delta_counts(b.ctx, mark)
 
-    def test_the_mark_is_used_when_everything_wanted_is_above_it(self):
-        """The old clip is accounted for — dropped on purpose — so nothing
-        below the mark is wanted and the script's own filter is exactly
-        right."""
-        _here, todo, _size, delta = self._counts(
+    def test_the_list_holds_exactly_what_was_offered(self):
+        """The old clip is accounted for — dropped on purpose — so only the
+        new one is wanted, and only the new one is in the list."""
+        _here, todo, _size, files = self._counts(
             ["20260724185433", "20260801120000"], "20260724185433",
             excluded=["20260724185433"])
         self.assertEqual(todo, 1)
-        self.assertTrue(delta, "the ordinary delta stopped using the mark")
+        self.assertEqual([f for f in files if f.endswith(".mp4")],
+                         ["DCIM/200video/front/20260801120000_0060.mp4"])
 
-    def test_the_whole_card_is_walked_when_something_wanted_is_below_it(self):
-        """An owed clip older than the mark. Passing AFTER_STAMP here asks the
-        script to skip the very file the screen just promised."""
-        _here, todo, _size, delta = self._counts(
+    def test_a_clip_older_than_the_mark_is_in_the_list_too(self):
+        """The case that broke both ways. AFTER_STAMP would skip it; no filter
+        at all would fetch the whole card. The list names it and nothing
+        else."""
+        _here, todo, _size, files = self._counts(
             ["20260502102459", "20260801120000"], "20260724185433")
         self.assertEqual(todo, 2, "the old clip was not offered")
-        self.assertFalse(delta, "the script would have been told to skip it")
+        self.assertEqual(sorted(f for f in files if f.endswith(".mp4")),
+                         ["DCIM/200video/front/20260502102459_0060.mp4",
+                          "DCIM/200video/front/20260801120000_0060.mp4"])
+
+    def test_what_is_weighed_is_what_is_listed(self):
+        """The bar's total and the offer are the same bytes, so a copy cannot
+        run past 100% — it read "9.8 GB/2.5 GB" when they were computed
+        apart."""
+        b = self.bench()
+        front = b.ctx.card / "DCIM" / "200video" / "front"
+        front.mkdir(parents=True, exist_ok=True)
+        (front / "20260801120000_0060.mp4").write_text("x" * 500)
+        _here, _todo, size, files = P._delta_counts(b.ctx, "")
+        self.assertEqual(size, P._weigh(b.ctx.card, files))
 
 
 class TestTheWayPastTheCardRefusal(SeamTest):
