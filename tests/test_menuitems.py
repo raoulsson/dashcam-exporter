@@ -413,11 +413,17 @@ class TestWhatEachItemDeclares(unittest.TestCase):
 # KIND rather than a set of numbers and are asserted separately.
 OUTBOUND = {
     UPLOADER: {
+        # Item 7 is in every mid-cycle outbound: publishing is offered from
+        # wherever you are, and whether it MAY run is the publisher's answer
+        # about built material, not an ordering rule spelled as edges.
         IMPORT:   {IMPORT, META, CLEAN_WS, ERASE_CARD},
-        META:     {META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD},
-        PREVIEW:  {META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD},
-        EXCLUDE:  {META, PREVIEW, EXCLUDE, CLEAN_WS, ERASE_CARD},
-        RENDER:   {META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD},
+        META:     {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD, CLEAN_WS,
+                   ERASE_CARD},
+        PREVIEW:  {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD, CLEAN_WS,
+                   ERASE_CARD},
+        EXCLUDE:  {META, PREVIEW, EXCLUDE, UPLOAD, CLEAN_WS, ERASE_CARD},
+        RENDER:   {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD, CLEAN_WS,
+                   ERASE_CARD},
         BUILD:    {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD, CLEAN_WS,
                    ERASE_CARD},
         UPLOAD:   {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD, CLEAN_WS,
@@ -443,7 +449,7 @@ INBOUND = {
         EXCLUDE:  {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD},
         RENDER:   {META, PREVIEW, RENDER, BUILD, UPLOAD},
         BUILD:    {META, PREVIEW, RENDER, BUILD, UPLOAD},
-        UPLOAD:   {BUILD, UPLOAD},
+        UPLOAD:   {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD},
         CLEAN_WS: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD,
                    CLEAN_WS},
         ERASE_CARD: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD},

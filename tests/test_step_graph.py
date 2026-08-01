@@ -57,7 +57,7 @@ AUTHORED_INBOUND = {
         EXCLUDE: {EXCLUDE, META, PREVIEW},
         RENDER: {RENDER, META, PREVIEW, EXCLUDE, BUILD, UPLOAD},
         BUILD: {BUILD, META, PREVIEW, EXCLUDE, RENDER, UPLOAD},
-        UPLOAD: {UPLOAD, BUILD},
+        UPLOAD: {UPLOAD, BUILD, META, PREVIEW, EXCLUDE, RENDER},
         CLEAN_WS: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD},
         ERASE_CARD: {IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD},
     },
@@ -293,18 +293,34 @@ class TestGraphConsistency(GraphTest):
             frontier |= set(built[n].outbound().offers(universe))
         return seen
 
-    def test_publishing_is_reached_from_building_and_nowhere_else(self):
-        """The edge the owner's table was missing.
+    def test_publishing_is_offered_from_everywhere_in_the_cycle(self):
+        """REVERSED: the owner's table removed item 2's route to item 7 —
+        "publish the page hours early and find out then that the publish path
+        is broken" — and under pages-first that is no longer a hazard but the
+        product. A described trip is what gets published; the encode follows.
 
-        He wrote Build into item 7's inbound and never put 7 into any outbound,
-        Upload Website was unreachable by its own natural route. Item 6 offered
-        it instead, which skips building the site item 7 uploads.
+        So the edges stop deciding it. Item 7 is offered from every mid-cycle
+        position and answers for itself: with nothing built it says so, which
+        is a fact about the destination's material rather than about which key
+        was pressed last. An entry that is hidden teaches nothing; one that is
+        greyed with a reason teaches what is missing.
         """
         built = M.build_menu(M.Strategy.UPLOADER, NullWork())
         universe = frozenset(built)
-        self.assertIn(UPLOAD, built[BUILD].outbound().offers(universe))
-        self.assertNotIn(UPLOAD, built[RENDER].outbound().offers(universe))
+        for number in (META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD):
+            with self.subTest(item=number):
+                self.assertIn(UPLOAD, built[number].outbound().offers(universe))
 
+    def test_the_local_edition_offers_publishing_from_nowhere(self):
+        """Item 7 exists there so every number means the same thing on every
+        installation, but it publishes nothing and leads nowhere."""
+        built = M.build_menu(M.Strategy.LOCAL_PAGE, NullWork())
+        universe = frozenset(built)
+        for number in built:
+            if number == PROGRESS:
+                continue          # neighbours everything, by definition
+            with self.subTest(item=number):
+                self.assertNotIn(UPLOAD, built[number].outbound().offers(universe))
 
 class TestTheUnfoldIsStructural(GraphTest):
     """8 cannot precede 9 in one cycle, and 9 can precede 8.
@@ -349,10 +365,11 @@ class TestTheOwnersWorkedExample(GraphTest):
         position.current = PREVIEW
         self.assertEqual(sorted(position.selectable(built)),
                          [PROGRESS, META, PREVIEW, EXCLUDE, BUILD, RENDER,
-                          CLEAN_WS, ERASE_CARD])
+                          UPLOAD, CLEAN_WS, ERASE_CARD])
         position.current = EXCLUDE
         self.assertEqual(sorted(position.selectable(built)),
-                         [PROGRESS, META, PREVIEW, EXCLUDE, CLEAN_WS, ERASE_CARD])
+                         [PROGRESS, META, PREVIEW, EXCLUDE, UPLOAD,
+                          CLEAN_WS, ERASE_CARD])
 
 
 class TestInterfaceMatchesBehaviour(GraphTest):
@@ -444,17 +461,19 @@ class TestStrategySplit(GraphTest):
         self.assertIs(M.Strategy.of(object()), M.Strategy.UPLOADER)
 
     def test_only_the_publishing_items_declare_different_edges(self):
-        """The AUTHORED column — outbound — differs for exactly two items.
+        """The AUTHORED column — outbound — differs for the mid-cycle items.
 
-        Item 5 gains the edge to publishing, and item 7 has no edges at all
-        under the local product. Every other difference in the table is in the
-        DERIVED inbound and follows from these two.
+        Every one of them gains the edge to publishing, because item 7 is
+        offered from wherever you are and answers for itself; and item 7 has
+        no edges at all under the local product. Every other difference in the
+        table is in the DERIVED inbound and follows from these.
         """
         a = M.build_menu(M.Strategy.UPLOADER, NullWork())
         b = M.build_menu(M.Strategy.LOCAL_PAGE, NullWork())
         differing = {n for n in a
                      if a[n].outbound().edges() != b[n].outbound().edges()}
-        self.assertEqual(differing, {BUILD, UPLOAD})
+        self.assertEqual(differing,
+                         {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD})
 
     def test_local_product_settles_the_workspace_by_gathering(self):
         b = M.build_menu(M.Strategy.LOCAL_PAGE, NullWork())

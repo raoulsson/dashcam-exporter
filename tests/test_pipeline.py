@@ -647,7 +647,7 @@ class Advancing(unittest.TestCase):
         self.assertEqual(position.advance(menu_items[META]), META)
         self.assertEqual(offered(menu_items, position),
                          [PROGRESS, META, PREVIEW, EXCLUDE, BUILD, RENDER,
-                          CLEAN_WS, ERASE_CARD])
+                          UPLOAD, CLEAN_WS, ERASE_CARD])
 
     def test_the_pipeline_asks_the_item_itself_whether_it_completed(self):
         """The answer comes from the item that ran, not from a status the
@@ -673,10 +673,11 @@ class Advancing(unittest.TestCase):
         position.advance(menu_items[PREVIEW])
         self.assertEqual(offered(menu_items, position),
                          [PROGRESS, META, PREVIEW, EXCLUDE, BUILD, RENDER,
-                          CLEAN_WS, ERASE_CARD])
+                          UPLOAD, CLEAN_WS, ERASE_CARD])
         position.advance(menu_items[EXCLUDE])
         self.assertEqual(offered(menu_items, position),
-                         [PROGRESS, META, PREVIEW, EXCLUDE, CLEAN_WS, ERASE_CARD])
+                         [PROGRESS, META, PREVIEW, EXCLUDE, UPLOAD,
+                          CLEAN_WS, ERASE_CARD])
 
     def test_running_the_same_item_twice_leaves_the_position_alone(self):
         """The position is idempotent in the same sense the items are: a

@@ -104,6 +104,25 @@ def _both(neighbours):
             Strategy.LOCAL_PAGE: neighbours}
 
 
+def _and_upload(*numbers):
+    """These neighbours, plus item 7 wherever item 7 is a real entry.
+
+    Item 7 is offered from everywhere in the cycle, and the graph is
+    deliberately not the thing that decides whether it may run. Publishing
+    needs a built site, which is a FACT about the destination's material and is
+    the publisher's to answer — it says "nothing has been built to upload yet"
+    and means it. Encoded as edges instead, the same fact became an ordering
+    rule that hid the entry, and hiding it is how the operator who just
+    rendered an mp4 is told to go and rebuild an index the encode did not
+    change.
+
+    Under the local edition item 7 exists but publishes nothing, so it stays
+    out of every outbound there, exactly as before.
+    """
+    return {Strategy.UPLOADER: _e(*numbers, UPLOAD),
+            Strategy.LOCAL_PAGE: _e(*numbers)}
+
+
 def _both_sets(*numbers):
     return {Strategy.UPLOADER: frozenset(numbers),
             Strategy.LOCAL_PAGE: frozenset(numbers)}
@@ -213,7 +232,7 @@ class GenerateMeta(MenuItem):
     number = META
     NAME = "Generate Meta"
     DESCRIPTION = "Work out where each trip begins and ends, and describe it."
-    OUT = _both(_e(META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD))
+    OUT = _and_upload(META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD)
     IN_AUTHORED = _both_sets(META, IMPORT, EXCLUDE)
 
     def evaluate(self, world) -> Verdict:
@@ -242,7 +261,7 @@ class BuildPreview(MenuItem):
     number = PREVIEW
     NAME = "Build Preview"
     DESCRIPTION = "Make one still per trip so you can see what you have."
-    OUT = _both(_e(PREVIEW, META, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD))
+    OUT = _and_upload(PREVIEW, META, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD)
     IN_AUTHORED = _both_sets(PREVIEW, META, EXCLUDE)
 
     def evaluate(self, world) -> Verdict:
@@ -290,7 +309,7 @@ class ExcludeTrip(Destructive):
     # no second copy behind it.
     WORD = "DELETE"
     SCOPE = Scope.FULL          # the only-copy warning has to ask the target
-    OUT = _both(_e(EXCLUDE, META, PREVIEW, CLEAN_WS, ERASE_CARD))
+    OUT = _and_upload(EXCLUDE, META, PREVIEW, CLEAN_WS, ERASE_CARD)
     IN_AUTHORED = _both_sets(EXCLUDE, META, PREVIEW)
 
     def evaluate(self, world) -> Verdict:
@@ -309,13 +328,14 @@ class RenderVideos(MenuItem):
     number = RENDER
     NAME = "Render Trips"
     DESCRIPTION = "Encode the trips into watchable videos. Hours for a full card."
-    # DEVIATION FROM THE OWNER'S TABLE: he gave item 6 an outbound edge to 7
-    # under the uploader edition. Removed. Item 7 uploads the BUILT site, and reaching
-    # it from Render skips the building — item 7's own inbound column says
-    # {7,5}, so the edge was one-sided in his table too. Item 5 gained 7 in
-    # exchange (see BuildWebsite), and the two changes only make sense
-    # together: Build was the sole route to 7 before them.
-    OUT = _both(_e(RENDER, META, PREVIEW, EXCLUDE, BUILD, CLEAN_WS, ERASE_CARD))
+    # RESTORED TO THE OWNER'S TABLE: he gave item 6 an outbound edge to 7 and
+    # it was taken away, on the reasoning that item 7 uploads the BUILT site so
+    # reaching it from Render skips the building. That reasoning was wrong
+    # about what a render produces. An encode makes an mp4 and no metadata at
+    # all, so the manifest built before it is still correct after it, and
+    # sending the videos is the whole of what is left to do. The removed edge
+    # bought nothing and cost a rebuild after every render.
+    OUT = _and_upload(RENDER, META, PREVIEW, EXCLUDE, BUILD, CLEAN_WS, ERASE_CARD)
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({RENDER, META, PREVIEW, EXCLUDE, BUILD, UPLOAD}),
         Strategy.LOCAL_PAGE: frozenset({RENDER, META, PREVIEW, EXCLUDE, BUILD}),

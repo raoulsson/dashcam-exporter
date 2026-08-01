@@ -332,12 +332,16 @@ AFTER_IMPORT = [PROGRESS, IMPORT, META, CLEAN_WS, ERASE_CARD]   # item 1's {1,2,
 # move -- the delta decides how much. Without it, landing on item 1 with
 # footage in the workspace took item 1 off the menu.
 MID_CYCLE = [PROGRESS, META, PREVIEW, EXCLUDE, BUILD, RENDER, CLEAN_WS, ERASE_CARD]
-MID_CYCLE_PUBLISHING = sorted(MID_CYCLE + [UPLOAD])            # from 5 and 7 only
+# Under the publishing edition item 7 is in EVERY mid-cycle offer, not just
+# Build's. Whether it may run is the publisher's answer about built material;
+# the graph does not spell that as an ordering rule.
+MID_CYCLE_PUBLISHING = sorted(MID_CYCLE + [UPLOAD])
 # RESTATED: rule 6's {4,2,8,9} plus 3. After a drop the sidecars described
 # trips that no longer existed, so the only way on was to write them again;
 # item 4 removes those sidecars with the footage now, so looking at what is
 # left needs no regeneration first.
 AFTER_EXCLUDE = [PROGRESS, META, PREVIEW, EXCLUDE, CLEAN_WS, ERASE_CARD]
+AFTER_EXCLUDE_PUBLISHING = sorted(AFTER_EXCLUDE + [UPLOAD])
 
 
 # ---------------------------------------------------------------------------
@@ -370,32 +374,17 @@ class TestTheNormalCycle(unittest.TestCase):
                          [META, PREVIEW, BUILD, UPLOAD, RENDER,
                           BUILD, UPLOAD, CLEAN_WS])
         self.assertEqual(b.offered_at,
-                         [START, AFTER_IMPORT,
-                          MID_CYCLE, MID_CYCLE,
-                          MID_CYCLE_PUBLISHING, MID_CYCLE_PUBLISHING,
-                          MID_CYCLE, MID_CYCLE_PUBLISHING,
-                          MID_CYCLE_PUBLISHING, AFTER_CLEAN])
+                         [START, AFTER_IMPORT] +
+                         [MID_CYCLE_PUBLISHING] * 7 + [AFTER_CLEAN])
 
-    def test_rendering_does_not_offer_the_upload_it_invalidates(self):
-        """The one edge pages-first depends on. A finished encode makes the
-        published manifest wrong -- it still carries the empty video path that
-        put the "not available to play yet" state on the page -- so uploading
-        straight off a render would push the videos under an index saying they
-        do not exist. Build is the only way back to the site."""
+    def test_rendering_offers_the_upload_straight_away(self):
+        """A render produces an mp4 and no metadata at all, so the manifest
+        built before it is still correct after it and sending the videos is
+        the whole of what is left to do. Making the operator rebuild first
+        would be the graph asking for work the data does not justify."""
         b = Bench(UPLOADER)
         b.type("1", "2", "3", "5", "7", "6")
-        self.assertNotIn(UPLOAD, b.offered_at[-1])
-        self.assertIn(BUILD, b.offered_at[-1])
-
-    def test_the_local_cycle_ends_at_the_built_page(self):
-        """The same walk without the publishing item, which the local product
-        does not have. Building is what settles the workspace there, so 8
-        follows 6 directly."""
-        b = Bench(LOCAL)
-        b.type("1", "2", "3", "5", "6", "8")
-        self.assertEqual(b.work.done, [META, PREVIEW, BUILD, RENDER, CLEAN_WS])
-        self.assertEqual(b.offered_at[-1], AFTER_CLEAN)
-        self.assertNotIn(UPLOAD, set().union(*map(set, b.offered_at)))
+        self.assertIn(UPLOAD, b.offered_at[-1])
 
     def test_the_early_loop_the_owner_works_in(self):
         """Import, meta, build, upload, look, exclude a trip, regenerate.
@@ -412,23 +401,8 @@ class TestTheNormalCycle(unittest.TestCase):
                                        EXCLUDE, META])
         self.assertEqual(b.offered_at[4], b.offered_at[5],
                          "looking at Progress moved the pipeline")
-        self.assertEqual(b.offered_at[6], AFTER_EXCLUDE)
-        self.assertEqual(b.offered_at[7], MID_CYCLE)
-
-    def test_deploying_straight_from_the_sidecars_is_not_on_any_path(self):
-        """Item 2 offers no route to item 7, by the owner's own table.
-
-        His early loop as he describes it goes import, meta, UPLOAD — pushing
-        the page from the sidecars alone, hours before a render, to catch a
-        broken publish path early. The table he wrote does not contain that
-        edge, and nothing about the world blocks it: this is an edge to add or
-        a habit to change, and the decision is his. Pinned here so the answer
-        is a decision rather than a discovery.
-        """
-        b = Bench(UPLOADER)
-        b.type("1", "2", "7")
-        self.assertEqual(b.work.done, [META])
-        self.assertNotIn(UPLOAD, b.offered_at[2])
+        self.assertEqual(b.offered_at[6], AFTER_EXCLUDE_PUBLISHING)
+        self.assertEqual(b.offered_at[7], MID_CYCLE_PUBLISHING)
 
 
 class TestThePathsThatMustNotExist(unittest.TestCase):
@@ -507,7 +481,7 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
         b.type("4")
         self.assertEqual(b.work.done, [])
         self.assertEqual(b.work.asked, ["DELETE"])
-        self.assertEqual(b.offered_at[1], MID_CYCLE)
+        self.assertEqual(b.offered_at[1], MID_CYCLE_PUBLISHING)
 
     def test_a_world_that_changes_while_the_prompt_is_on_screen_stops_the_act(self):
         """The freshness rule. The guard is asked again against a world

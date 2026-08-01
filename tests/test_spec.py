@@ -236,19 +236,21 @@ class TestAvailability(SpecTest):
         self.b.built()
         self.assertAvailable(UPLOAD)
 
-    def test_publishing_is_no_longer_reachable_before_a_render(self):
-        """Deploying straight from the sidecars is REMOVED by the owner's table.
+    def test_publishing_is_reachable_before_a_render(self):
+        """REVERSED, and the reversal is the product. His table removed item
+        2's route to item 7 — "publish the page hours early and find out then
+        that the publish path is broken" — but publishing a described trip
+        before it is encoded is now the point rather than the hazard: the
+        route, the distance, the places and the map all come from the sidecars,
+        and only the player waits for the mp4.
 
-        It used to be an edge from Generate Meta: publish the page hours early
-        and find out then that the publish path is broken. His item 2 outbound
-        is {2,3,4,5,6,8,9} — no 7 — and item 7's inbound is {7,5}, so the route
-        is gone. Nothing about the world blocks it; the graph does, which is
-        why this is asserted on the edges and not on a verdict.
+        The refusal that remains is about material, not order. With nothing
+        built the publisher says so, and it says it from wherever the operator
+        is standing rather than by being absent from the menu.
         """
         self.b.imported().sidecars().publishes()
         built = M.build_menu(M.Strategy.of(self.b.ctx.plugin), P.Work(self.b.ctx))
-        self.assertNotIn(UPLOAD, built[META].outbound().offers(frozenset(built)))
-        self.assertEqual(set(built[UPLOAD].inbound().edges()), {BUILD, UPLOAD})
+        self.assertIn(UPLOAD, built[META].outbound().offers(frozenset(built)))
 
     def test_cannot_upload_without_sidecars(self):
         """You cannot upload a site without the sidecars created."""
