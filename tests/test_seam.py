@@ -1271,6 +1271,42 @@ class TestTheLogTimesTheWorkAndNotTheLogging(unittest.TestCase):
         self.assertEqual(P._hms(3661), "01:01:01")
 
 
+class TestThePreviewBoxTicksWhenThereIsAPreview(SeamTest):
+    """The state of a step is read off what the step WRITES.
+
+    _stills_current asked for previews/index.html, which is what the contact
+    sheet was called before it was dated. write_contact_sheet writes
+    preview_<day>.html and unlinks any index.html it finds, so the one file
+    the check asked about was the one file guaranteed not to exist. The box
+    never ticked, and the cold-start rule that orients onto Build Preview read
+    the same false answer.
+    """
+
+    def test_a_dated_contact_sheet_counts(self):
+        b = self.bench()
+        previews = b.ctx.out_dir / P.PREVIEW_DIRNAME
+        previews.mkdir(parents=True, exist_ok=True)
+        self.assertFalse(P._stills_current(b.ctx))
+        (previews / "preview_2026-07-31.html").write_text("<html/>")
+        self.assertTrue(P._stills_current(b.ctx),
+                        "the sheet the writer actually writes did not count")
+
+    def test_the_name_the_writer_uses_is_the_name_that_is_checked(self):
+        """Pinned against the writer rather than against a literal, so the two
+        cannot drift apart again."""
+        b = self.bench().imported().sidecars()
+        payload = {"trips": [{"index": 1, "day": "2026-07-31",
+                              "start": "2026-07-31 06:05:00",
+                              "end": "2026-07-31 06:16:00", "front": []}]}
+        previews = b.ctx.out_dir / P.PREVIEW_DIRNAME
+        previews.mkdir(parents=True, exist_ok=True)
+        with quiet():
+            written = P.write_contact_sheet(b.ctx, b.ctx.render_root, payload,
+                                            previews, {})
+        self.assertTrue(written.is_file())
+        self.assertTrue(P._stills_current(b.ctx))
+
+
 class TestARefusalIsAlwaysInTheLog(SeamTest):
     """A step that decided not to act still ran, and the summary is the record
     of what ran.

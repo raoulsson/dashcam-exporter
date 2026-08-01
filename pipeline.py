@@ -6022,9 +6022,21 @@ def _is_renderable(trip):
 
 
 def _stills_current(ctx):
-    """A contact sheet exists and every still beside it is a real file."""
-    sheet = ctx.out_dir / PREVIEW_DIRNAME / "index.html"
-    return sheet.is_file()
+    """Is there a contact sheet.
+
+    It looked for previews/index.html, which is the name the sheet had BEFORE
+    it was dated -- write_contact_sheet now writes preview_<day>.html and
+    unlinks any index.html it finds, so the one file this asked about was the
+    one file guaranteed not to be there. "[ ] Preview built" was permanent,
+    and item 3's own cold-start rule read the same false answer.
+    """
+    return any(_safe_glob(ctx.out_dir / PREVIEW_DIRNAME, "preview_*.html"))
+
+
+def _safe_glob(d, pattern):
+    if not d.is_dir():
+        return []
+    return d.glob(pattern)
 
 
 def _already_imported(stamp, mark, excluded):
