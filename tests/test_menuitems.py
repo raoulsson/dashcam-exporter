@@ -847,22 +847,18 @@ class TestBuildWebsite(unittest.TestCase):
         w = imported(renders=(), final_folders=(Path("/ws/final_2026-01-01"),))
         self.assertIs(ruling(item_for(BUILD), w), M.Ruling.GO)
 
-    def test_nothing_rendered_and_nothing_gathered_is_refused(self):
-        """Refused on the evidence, not on the order: the wording says there is
-        nothing to build a page from, and stays true whether the renders were
-        never made or were deleted in Finder."""
-        verdict = evaluate(item_for(BUILD), imported())
+    def test_a_described_trip_is_enough_to_build_from(self):
+        """Sidecars, no render anywhere. Everything a page says about a drive —
+        its route, its distance, its places, its map — comes from what item 2
+        writes; only the player needs the mp4. Demanding a render here made the
+        site wait hours on an encode it does not read."""
+        self.assertIs(ruling(item_for(BUILD), imported(renders=())), M.Ruling.GO)
+
+    def test_nothing_described_and_nothing_rendered_is_refused(self):
+        """Refused on the evidence, not on the order: the wording stays true
+        whether the sidecars were never made or were deleted in Finder."""
+        verdict = evaluate(item_for(BUILD), imported(metas=(), renders=()))
         self.assertTrue(verdict.blocked)
-        self.assertIn("no rendered trips yet", verdict.reason)
-
-    def test_it_does_not_claim_the_sidecars_are_missing_too(self):
-        """The old wording was "no meta or renders" over a workspace whose
-        sidecars were sitting right there, which sent the operator back to
-        item 2 to make the thing he already had."""
-        self.assertNotIn("meta", evaluate(item_for(BUILD), imported()).reason)
-
-    def test_with_nothing_described_either_it_says_so(self):
-        verdict = evaluate(item_for(BUILD), imported(metas=()))
         self.assertIn("nothing described or rendered", verdict.reason)
 
     def test_it_hands_the_work_to_the_builder_it_was_constructed_with(self):
@@ -881,8 +877,8 @@ class TestBuildWebsite(unittest.TestCase):
         cannot get a page built out of nothing."""
         work = FakeWork(build_reason="the target is not reachable")
         item = menu_for(UPLOADER, work)[BUILD]
-        self.assertIn("no rendered trips yet",
-                      evaluate(item, imported()).reason)
+        self.assertIn("nothing described or rendered",
+                      evaluate(item, imported(metas=(), renders=())).reason)
         self.assertIn("not reachable",
                       evaluate(item, imported(renders=(MP4,))).reason)
 
@@ -925,9 +921,23 @@ class TestUploadWebsite(unittest.TestCase):
         """"The destination has everything" is true of no renders at all, and it
         is the wrong sentence to put in front of someone who has published
         nothing. Evidence, not order: it survives the renders being deleted."""
-        verdict = evaluate(item_for(UPLOAD), imported())
+        verdict = evaluate(item_for(UPLOAD), world(imports=IMPORTS))
         self.assertTrue(verdict.blocked)
-        self.assertIn("no renders", verdict.reason)
+        self.assertIn("nothing on disk to publish", verdict.reason)
+
+    def test_a_described_trip_may_be_published_before_it_is_encoded(self):
+        """The pages of a described trip go up while its video is still hours
+        away — that is the whole point of the floor moving off renders."""
+        w = imported(renders=(), trip_ids=("trip_2026-07-12_17-46_01",))
+        self.assertFalse(evaluate(item_for(UPLOAD), w).blocked)
+
+    def test_the_floor_is_this_import_not_the_whole_tree(self):
+        """metas is the whole output tree; trip_ids is THIS import. A fresh
+        import with no sidecars yet, beside an old import whose sidecars are
+        still on disk, would pass a metas test and then ask the destination
+        about no trips at all — and is_complete answers YES to an empty list."""
+        w = imported(renders=(), trip_ids=())
+        self.assertTrue(evaluate(item_for(UPLOAD), w).blocked)
 
     def test_no_sidecars_anywhere_is_refused_because_the_index_would_be_empty(self):
         """Publishing is putting the trips' metadata online. With no sidecar in
@@ -1389,8 +1399,8 @@ class TestCompleted(unittest.TestCase):
         """A greyed item with no reason is an item the operator cannot act on.
         Every refusal here is a sentence naming what is missing."""
         blocked_worlds = ((META, world()), (PREVIEW, world()),
-                          (RENDER, world()), (BUILD, imported()),
-                          (UPLOAD, imported()), (CLEAN_WS, world()),
+                          (RENDER, world()), (BUILD, world()),
+                          (UPLOAD, world()), (CLEAN_WS, world()),
                           (ERASE_CARD, imported()))
         for number, w in blocked_worlds:
             with self.subTest(item=number):

@@ -6972,6 +6972,17 @@ class LocalPage:
                 "this machine.")
 
     def evaluate(self, world):
+        """Its own renders floor, because THIS build also gathers.
+
+        The shared guard stopped demanding renders so a described trip can be
+        published before it is encoded — right for a page, wrong here. execute
+        moves whole day directories into final_<day>_<import>, sidecars and
+        all, and a gather with nothing rendered would carry the sidecars out
+        of the import namespace where _is_described looks for them, leaving
+        item 2 with a trip it no longer believes it has described.
+        """
+        if not guards.renders_exist(world):
+            return menu.blocked("no renders on disk to gather")
         return menu.go()
 
     def execute(self, world):

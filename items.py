@@ -40,19 +40,31 @@ def _blocked_or_go(reason) -> Verdict:
     return go()
 
 
-def _nothing_rendered(world):
-    """No mp4 on disk to put online.
+def _nothing_to_send(world):
+    """Nothing to put online: no render, and no trip in this import either.
 
-    Evidence, not order: the old wording was "nothing rendered to upload — run
-    6 first", and only the second half of that sentence was an ordering claim.
-    The fact itself survives an operator deleting the renders in Finder, and
-    without it an empty tree answers SATISFIED — "the target has everything"
-    is vacuously true of no renders, which is the wrong sentence to put in
-    front of someone who has published nothing.
+    It used to demand a render, which is the thing publishing no longer waits
+    for — the pages of a described trip go up while its video is still hours
+    away. But the floor itself cannot go, and the reason is exact: is_complete
+    answers YES to an EMPTY trip list, deliberately, and that yes is only safe
+    because something refuses before it is ever consulted. Take the refusal
+    away and an import with nothing in it reads as "the destination has
+    everything", which is the one sentence that must never appear in front of
+    someone who has published nothing.
+
+    So the floor moves from renders to trip_ids, and it must be trip_ids
+    rather than metas: metas is the whole output tree, trip_ids is THIS
+    import. A fresh import with no sidecars yet, beside an old import whose
+    sidecars are still on disk, passes a metas test and then asks the
+    destination about no trips at all.
+
+    Evidence, not order, as before: the old wording was "nothing rendered to
+    upload — run 6 first", and only the second half of that was an ordering
+    claim. The fact survives an operator deleting the renders in Finder.
     """
-    if world.renders:
+    if world.renders or world.trip_ids:
         return None
-    return "no renders on disk to publish"
+    return "nothing on disk to publish"
 
 
 def _nothing_left_to_do(world) -> Verdict:
@@ -446,13 +458,13 @@ class UploadWebsite(MenuItem):
         """The exporter's own evidence first, then the uploader, then the
         frozen answer about the destination.
 
-        Both local checks are evidence, not order: something rendered to send,
-        and a sidecar somewhere to describe it. The sidecar one came across
-        from the folded-in deploy step — publishing is putting the trips'
-        metadata online, and with no sidecar anywhere the deploy pushes an
-        index describing no trips.
+        Both local checks are evidence, not order: something to send, and a
+        sidecar somewhere to describe it. The sidecar one came across from the
+        folded-in deploy step — publishing is putting the trips' metadata
+        online, and with no sidecar anywhere the deploy pushes an index
+        describing no trips.
         """
-        stop = _reason(_nothing_rendered(world), guards.no_sidecars_at_all(world))
+        stop = _reason(_nothing_to_send(world), guards.no_sidecars_at_all(world))
         if stop:
             return blocked(stop)
         return self._still_owed(world)

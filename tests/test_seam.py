@@ -509,12 +509,21 @@ class TestBuildWebsiteDelegates(SeamTest):
         anything here to build from" is a fact about this machine and is never
         delegated."""
         target = Recorder()
-        b = self.bench(target).imported().sidecars()      # no render anywhere
+        b = self.bench(target).imported()      # nothing described, nothing made
         ran = b.run(BUILD)
         self.assertFalse(ran.completed)
-        self.assertIn("no rendered trips yet", ran.note)
+        self.assertIn("nothing described or rendered", ran.note)
         self.assertEqual(target.times("build"), 0,
                          "the target was asked to build from nothing")
+
+    def test_sidecars_alone_do_reach_the_target(self):
+        """The other half of the same rule, and the reason the floor moved: a
+        described trip is a whole card, and its pages go online while the video
+        is still hours away."""
+        target = Recorder()
+        b = self.bench(target).imported().sidecars()      # no render anywhere
+        self.assertTrue(b.run(BUILD).completed)
+        self.assertEqual(target.times("build"), 1)
 
     def test_a_target_that_reports_failure_does_not_complete(self):
         """`ok` is the only thing the menu reads off a Report, and it decides

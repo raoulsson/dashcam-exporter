@@ -423,19 +423,21 @@ def renders_exist(world) -> bool:
 def nothing_to_build_from(world) -> Optional[str]:
     """The exporter's OWN question in front of item 6's delegation.
 
-    A gathered final_ folder counts — the rebuild case, where the loose
+    A DESCRIBED trip is enough. Everything a page says about a drive — its
+    route, its distance, its places, its map — comes from the sidecars item 2
+    writes, and only the player needs the mp4. Demanding a render here is what
+    made the site wait hours on an encode it does not read, and the page has
+    always had a state for a drive whose video is not up yet.
+
+    A gathered final_ folder counts too — the rebuild case, where the loose
     renders are gone because an earlier build moved them. Asked here rather
     than of the target because it is a fact about this machine: a target that
     answers yes to everything still cannot get a page built out of an empty
     tree.
 
-    Two messages because there are two states, and the single "no meta or
-    renders" was wrong in the commoner one: it fired over a workspace whose
-    sidecars were sitting right there, told the operator he had no meta, and
-    sent him back to item 2 to make the thing he already had.
+    This is NOT the floor for the local edition, whose item 6 also gathers —
+    see pipeline.LocalPage, which keeps the renders floor of its own.
     """
-    if renders_exist(world):
+    if renders_exist(world) or world.metas:
         return None
-    if world.metas:
-        return "no rendered trips yet"
     return "nothing described or rendered yet"
