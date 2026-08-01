@@ -141,9 +141,8 @@ skipped clips were verified by an earlier run this script cannot see.
   never the wrapper: a wrapper-level wipe cannot know which days a run writes,
   so it would take other imports' output with it.
 - Direct: `python3 make_dashcam_videos.py --root … --out … [--dry-run|--sidecars-only|--force]`.
-- `--write-config PATH` dumps the fully-commented config template. The template
-  is the `CONFIG_TEMPLATE` string near the top of the script — keep it in sync
-  with `config.txt` and the argparse defaults (a config change is three places).
+- `--write-config PATH` copies `config.txt` itself to PATH, so a config change
+  is two places: that file and the argparse defaults.
 
 ## Output files per trip
 

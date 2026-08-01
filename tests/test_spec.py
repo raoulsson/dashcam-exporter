@@ -15,6 +15,7 @@ import importlib.util
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -573,41 +574,30 @@ if __name__ == "__main__":
 # The two copies of config.txt
 # ---------------------------------------------------------------------------
 
-class TestTheEmbeddedConfigTemplate(unittest.TestCase):
-    """make_dashcam_videos.CONFIG_TEMPLATE is a second copy of config.txt.
+class TestWriteConfigHandsOutTheRealFile(unittest.TestCase):
+    """--write-config copies config.txt itself, so there is one document.
 
-    --write-config writes it, so it is what a fresh clone actually reads. It is
-    an abridged copy on purpose, which is exactly why it rots: a setting renamed
-    in config.txt stays right in the file everyone edits and stays wrong in the
-    file everyone is GIVEN. That happened — the publishing keys were renamed and
-    this copy went on documenting the old ones, and only a grep across tracked
-    files caught it.
-
-    So the invariant is checked rather than remembered: every setting the
-    template offers must be one config.txt also offers.
+    An abridged second copy lived in the script and rotted: the file everybody
+    edits stayed right while the file everybody is GIVEN went on describing
+    confirmation words the tool does not ask for. A test can pin setting names
+    across two documents; it cannot pin the prose, which is most of what a
+    commented config file is.
     """
 
-    # Optional leading "#", because a setting is offered whether it ships
-    # commented out (the template's way) or with a value (config.txt's, for the
-    # handful that have a useful default). Requiring the "#" reported import_dir
-    # as dropped when it is merely set.
-    SETTING = re.compile(r"^#?(\w+)\s*=", re.M)
+    def test_it_writes_config_txt_byte_for_byte(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "config.new.txt"
+            subprocess.run(
+                [sys.executable, str(REPO / "make_dashcam_videos.py"),
+                 "--write-config", str(out)],
+                check=True, capture_output=True, cwd=str(REPO))
+            self.assertEqual(out.read_text(encoding="utf-8"),
+                             (REPO / "config.txt").read_text(encoding="utf-8"))
 
-    def _template(self):
-        source = (REPO / "make_dashcam_videos.py").read_text(encoding="utf-8")
-        return re.search(r'CONFIG_TEMPLATE = """(.*?)\n"""', source, re.S).group(1)
-
-    def _keys(self, text):
-        return set(self.SETTING.findall(text))
-
-    def test_it_offers_no_setting_config_txt_has_dropped(self):
-        gone = self._keys(self._template()) - self._keys(
-            (REPO / "config.txt").read_text(encoding="utf-8"))
-        self.assertEqual(gone, set(),
-                         "CONFIG_TEMPLATE documents settings config.txt no longer has")
-
-    def test_the_one_publishing_setting_is_in_both(self):
-        """Named on its own because it is the one a stale copy silently breaks:
-        a clone told to set `site_repo` sets it, sees nothing happen, and has no
-        way to find out that the setting stopped existing."""
-        self.assertIn("website_uploader", self._keys(self._template()))
+    def test_a_directory_argument_lands_on_config_txt_inside_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(
+                [sys.executable, str(REPO / "make_dashcam_videos.py"),
+                 "--write-config", tmp],
+                check=True, capture_output=True, cwd=str(REPO))
+            self.assertTrue((Path(tmp) / "config.txt").is_file())
