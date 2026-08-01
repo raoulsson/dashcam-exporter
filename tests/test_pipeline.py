@@ -662,9 +662,13 @@ class Advancing(unittest.TestCase):
 
     def test_the_owners_worked_example(self):
         """His rule 6, run through the position machine: with the preview
-        built, 2,3,4,5,6,8,9 are selectable; once a trip has actually been
-        dropped, only 4,2,8,9 are, because the meta now describes trips that
-        no longer exist."""
+        built, 2,3,4,5,6,8,9 are selectable.
+
+        RESTATED: after a drop it was 4,2,8,9 — the meta then described trips
+        that no longer existed. Item 4 removes those sidecars with the footage
+        now, so 3 comes back: what is left can be looked at without writing
+        the metadata again first.
+        """
         menu_items, position = machine(at=META)
         position.advance(menu_items[PREVIEW])
         self.assertEqual(offered(menu_items, position),
@@ -672,7 +676,7 @@ class Advancing(unittest.TestCase):
                           CLEAN_WS, ERASE_CARD])
         position.advance(menu_items[EXCLUDE])
         self.assertEqual(offered(menu_items, position),
-                         [PROGRESS, META, EXCLUDE, CLEAN_WS, ERASE_CARD])
+                         [PROGRESS, META, PREVIEW, EXCLUDE, CLEAN_WS, ERASE_CARD])
 
     def test_running_the_same_item_twice_leaves_the_position_alone(self):
         """The position is idempotent in the same sense the items are: a

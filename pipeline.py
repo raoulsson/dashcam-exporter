@@ -4661,29 +4661,28 @@ def _unlink_all(files):
 
 
 def _drop_orphan_sidecars(by_index, picked):
-    """Sidecars of trips that are now gone.
+    """Sidecars of trips that are now gone. Removed, not asked about.
 
     They are not source footage — they describe something that no longer
     exists, and left in place an index rebuild keeps publishing a trip whose
     video can never be rendered. For a trip that WAS rendered these went with
     the render; what this catches is the preview-only case.
+
+    It used to list them and ask "remove them too (they are derived data, not
+    footage)?" after the word had already been typed. That is a second
+    question about the same decision, defaulting to the answer that leaves the
+    workspace describing a trip the operator has just deleted — and a prompt
+    whose only sane answer is yes teaches him to stop reading prompts. They go
+    with the footage, silently, because they are a consequence of it and not a
+    choice of their own.
     """
     orphans = []
     for i in picked:
         base = by_index[i].get("out_base")
         if base:
             orphans.extend(_existing_sidecars(base))
-    if not orphans:
-        return
-    print()
-    print("  %d preview sidecars now describe a trip that no longer exists:"
-          % len(orphans))
-    for p in orphans:
-        print(C.dim("    %s" % tilde(p)))
-    if confirm("  Remove them too (they are derived data, not footage)?", False):
+    if orphans:
         _unlink_all(orphans)
-        print(C.dim("  Removed. The next %s or %s drops them from the site index."
-                    % (NAME[META], NAME[RENDER])))
 
 
 def _existing_sidecars(base):

@@ -258,8 +258,15 @@ class ExcludeTrip(Destructive):
 
     Completed IFF a trip was removed — the owner's own worked example. Every
     cancel path (a blank selection, an index that is not listed, anything but
-    DROP at the prompt) leaves the position where it was, and the narrow
-    outbound {4,2,8,9} only takes effect when clips actually went.
+    the word at the prompt) leaves the position where it was, and the outbound
+    only takes effect when clips actually went.
+
+    That outbound was {4,2,8,9}: after a drop the sidecars described trips
+    that no longer existed, so the only way on was to write them again. It
+    takes 3 now as well, because the reason has gone — the orphaned sidecars
+    are removed with the footage rather than left behind for the next pass to
+    trip over, so the workspace after an exclude is consistent and looking at
+    what is left is a reasonable next move.
     """
 
     number = EXCLUDE
@@ -271,7 +278,7 @@ class ExcludeTrip(Destructive):
     # no second copy behind it.
     WORD = "DELETE"
     SCOPE = Scope.FULL          # the only-copy warning has to ask the target
-    OUT = _both(_e(EXCLUDE, META, CLEAN_WS, ERASE_CARD))
+    OUT = _both(_e(EXCLUDE, META, PREVIEW, CLEAN_WS, ERASE_CARD))
     IN_AUTHORED = _both_sets(EXCLUDE, META, PREVIEW)
 
     def evaluate(self, world) -> Verdict:

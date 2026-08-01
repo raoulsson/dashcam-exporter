@@ -339,6 +339,11 @@ class TestTheOwnersWorkedExample(GraphTest):
     """Rule 6, asserted literally against the graph."""
 
     def test_after_a_preview_and_then_an_exclusion(self):
+        """RESTATED: after a drop it was {4,2,8,9}, because the sidecars then
+        described trips that no longer existed and the only way on was to
+        write them again. Item 4 removes those sidecars with the footage now,
+        so the workspace is consistent and 3 is on the list — looking at what
+        is left is a reasonable next move."""
         built = M.build_menu(M.Strategy.UPLOADER, NullWork())
         position = M.position_for(built)
         position.current = PREVIEW
@@ -347,7 +352,7 @@ class TestTheOwnersWorkedExample(GraphTest):
                           CLEAN_WS, ERASE_CARD])
         position.current = EXCLUDE
         self.assertEqual(sorted(position.selectable(built)),
-                         [PROGRESS, META, EXCLUDE, CLEAN_WS, ERASE_CARD])
+                         [PROGRESS, META, PREVIEW, EXCLUDE, CLEAN_WS, ERASE_CARD])
 
 
 class TestInterfaceMatchesBehaviour(GraphTest):

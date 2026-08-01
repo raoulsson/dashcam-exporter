@@ -333,7 +333,11 @@ AFTER_IMPORT = [PROGRESS, IMPORT, META, CLEAN_WS, ERASE_CARD]   # item 1's {1,2,
 # footage in the workspace took item 1 off the menu.
 MID_CYCLE = [PROGRESS, META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD]
 MID_CYCLE_PUBLISHING = sorted(MID_CYCLE + [UPLOAD])            # from 6 and 7 only
-AFTER_EXCLUDE = [PROGRESS, META, EXCLUDE, CLEAN_WS, ERASE_CARD]  # rule 6's {4,2,8,9}
+# RESTATED: rule 6's {4,2,8,9} plus 3. After a drop the sidecars described
+# trips that no longer existed, so the only way on was to write them again;
+# item 4 removes those sidecars with the footage now, so looking at what is
+# left needs no regeneration first.
+AFTER_EXCLUDE = [PROGRESS, META, PREVIEW, EXCLUDE, CLEAN_WS, ERASE_CARD]
 
 
 # ---------------------------------------------------------------------------
