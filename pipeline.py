@@ -6097,8 +6097,15 @@ def _card_facts(ctx):
 
 
 def _clips_named(card, stamps):
-    """The paths of those clips, both cameras, in time order."""
-    return tuple(sorted(str(p) for p in _card_clips(card)
+    """One path per clip, front camera, in time order.
+
+    Front only, because the count beside it is front only: the card accounting
+    counts a clip once and the camera writes it twice, so naming both made
+    "13 new clips" print thirty lines and then say "and 17 more" about the
+    same thirteen clips.
+    """
+    front = card / "DCIM" / "200video" / "front"
+    return tuple(sorted(str(p) for p in _safe_glob(front, "*.mp4")
                         if _stamp_of_name(p.name) in stamps))
 
 
@@ -6819,22 +6826,20 @@ def _print_all(lines):
         print(line.rstrip())
 
 
-SHOWN = 8
-
-
 def _evidence_lines(verdict):
-    """What the refusal is about, named rather than counted.
+    """What the refusal is about, named rather than counted, and all of it.
 
     "13 new clips ready for next session" is a number to take on trust. These
     are the files, so the operator can look at the dates and decide for
     himself whether that is footage he wants or the trash he suspects — which
     is the decision the refusal is asking him to make.
+
+    No cap and no "... and 17 more": a list that stops short is a list you
+    cannot act on, and the one thing the operator wanted to see is as likely
+    to be in the tail as in the head. It only prints when he presses the key.
     """
-    files = getattr(verdict, "evidence", ()) or ()
-    shown = tuple(C.dim("        %s" % f) for f in files[:SHOWN])
-    if len(files) > SHOWN:
-        shown += (C.dim("        ... and %d more" % (len(files) - SHOWN)),)
-    return shown
+    return tuple(C.dim("        %s" % tilde(f))
+                 for f in getattr(verdict, "evidence", ()) or ())
 
 
 def _colon(reason):
