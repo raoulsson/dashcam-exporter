@@ -162,6 +162,11 @@ class World:
     # published-then-cleaned-up trip are indistinguishable afterwards, so this
     # is recorded at the only moment that knows which it was.
     dropped_ids: Tuple[str, ...] = ()
+    # The same act counted honestly. dropped_ids holds out_base names, which a
+    # trip too short to render never has -- so it is short by exactly the
+    # fragments, and the progress row that counted it said 1 where the operator
+    # had excluded 3. This is one key per excluded trip, fragments included.
+    dropped_trips: Tuple[str, ...] = ()
     # Every FILE in the working import, by path relative to it, and the ones
     # the source in the slot does not have at the same path and size.
     #

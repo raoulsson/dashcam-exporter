@@ -2276,12 +2276,20 @@ _EXCLUDED = set()
 
 
 def _excluded_record(ctx):
-    """The whole file: {"stamps": [clip stamps], "ids": [trip ids]}.
+    """The whole file: {"stamps": [...], "ids": [...], "trips": [...]}.
 
-    Two facts about one act, so one file. They are read by different readers —
+    Three facts about one act, so one file. They are read by different readers —
     the delta import and the card accounting want the stamps, a publisher wants
-    the ids — and writing either half on its own is how the other half gets
-    dropped by a rewrite.
+    the ids, the progress block wants the trips — and writing any one of them on
+    its own is how the others get dropped by a rewrite.
+
+    "ids" and "trips" are not the same list and neither is redundant. An id is
+    an out_base name, the thing a DESTINATION is keyed on, and a trip too short
+    to render never had one — so the id list is silently short by exactly the
+    fragments, and counting it answered "3 trips excluded" with 1. A trip key is
+    this workspace's own handle on a trip, its first clip's stamp: every trip
+    has one, it is already the vocabulary of the stamps list beside it, and
+    unlike the index in the table it does not move when the grouping renumbers.
     """
     try:
         return json.loads((ctx.state_dir / EXCLUDED_FILE).read_text())
@@ -2321,6 +2329,12 @@ def dropped_trip_ids(ctx):
     return tuple(sorted(str(i) for i in _excluded_record(ctx).get("ids", [])))
 
 
+def dropped_trip_keys(ctx):
+    """Every trip deleted on purpose, ever, including the ones that never
+    rendered — see _excluded_record for why that is a different list."""
+    return tuple(sorted(str(k) for k in _excluded_record(ctx).get("trips", [])))
+
+
 def _strings(values):
     return set(map(str, values))
 
@@ -2336,11 +2350,16 @@ def record_excluded_stamps(ctx, stamps):
     return merged
 
 
-def record_dropped_trips(ctx, trip_ids):
-    """Persist the trip ids a drop removed, beside their clip stamps."""
+def record_dropped_trips(ctx, trip_ids, keys=()):
+    """Persist what a drop removed: the trip ids, and the trips themselves.
+
+    Both in one write. They are two keys of one record, and a second write for
+    the second key is the rewrite the record's own docstring warns about.
+    """
     record = _excluded_record(ctx)
     merged = _strings(record.get("ids", ())) | _strings(trip_ids)
     record["ids"] = sorted(merged)
+    record["trips"] = sorted(_strings(record.get("trips", ())) | _strings(keys))
     _write_excluded(ctx, record)
     return merged
 
@@ -3294,7 +3313,7 @@ def _excluded_line(world):
     # work outstanding, and excluding a trip is not work anyone owes. Zero
     # excluded is the ordinary finished state of a cycle where every trip was
     # worth keeping, and greying it read as a step not done.
-    return _fact("%d" % len(world.dropped_ids), "Trips excluded", True)
+    return _fact("%d" % len(world.dropped_trips), "Trips excluded", True)
 
 
 def _meta_line(world):
@@ -4358,6 +4377,22 @@ def _out_base_name(trip):
     return Path(base).name if base else None
 
 
+def _picked_keys(by_index, picked):
+    """This workspace's own handle on each chosen trip: its first clip's stamp.
+
+    Unlike _picked_ids this never comes back short. A trip with no out_base is
+    a trip nothing off this machine has ever heard of, which is precisely why
+    it has no id — but it is still a trip the operator excluded, and the row
+    that counts them has to say so.
+    """
+    return list(filter(None, map(lambda i: _trip_key(by_index[i]), picked)))
+
+
+def _trip_key(trip):
+    front = trip.get("front", [])
+    return _stamp_of_name(Path(front[0]).name) if front else None
+
+
 def _note_trips_published(world, ids):
     """Local deletion is not unpublishing. Say so rather than letting a clean
     local result imply the trip is gone from the world.
@@ -4733,12 +4768,18 @@ def _record_the_drop(ctx, by_index, picked):
     hands it over as Workspace.dropped_ids.
     """
     ids = _picked_ids(by_index, picked)
-    if not ids:
+    keys = _picked_keys(by_index, picked)
+    if not ids and not keys:
         return
+    # It used to return early on an empty id list, which is the ONLY case a
+    # fragment ever reaches: too short to render, so no out_base, so no id, so
+    # nothing about it was written down at all and the progress row counted it
+    # as never excluded.
+    #
     # Recorded, not announced. Both ledgers are bookkeeping the operator
     # cannot act on, and each was a dim line above the one green sentence that
     # says what actually happened.
-    record_dropped_trips(ctx, ids)
+    record_dropped_trips(ctx, ids, keys)
 
 
 def _clear_intermediates(ctx):
@@ -6770,6 +6811,7 @@ def _world_of(ctx, scope, imports, root, metas, renders, trip_ids, target,
         imports=imports, selected_import=root, metas=metas,
         renders=renders, renders_here=_renders_here(ctx, root),
         trip_ids=trip_ids, dropped_ids=dropped_trip_ids(ctx),
+        dropped_trips=dropped_trip_keys(ctx),
         import_files=mine, unsourced_files=_unsourced_files(root, ctx.card, mine),
         card_shares_the_import=_card_shares(ctx.card, root),
         final_folders=_final_folders(ctx), expected_trips=_expected_trips(ctx, root, metas),

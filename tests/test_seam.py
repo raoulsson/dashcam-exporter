@@ -1477,6 +1477,72 @@ class TestPreviewRebuildsFromEmpty(SeamTest):
         self.assertTrue(d.is_dir())
 
 
+class TestEveryExcludedTripIsCounted(SeamTest):
+    """He excluded three trips and the progress block said one.
+
+    Two of them were fragments -- too short to render, so no out_base, so no
+    trip id, so _picked_ids came back with one entry and _record_the_drop
+    returned early on the rest.
+    """
+
+    @staticmethod
+    def _trip(index, stamp, out_base=None):
+        trip = {"index": index, "front": ["/card/%s_0060.MP4" % stamp]}
+        if out_base:
+            trip["out_base"] = out_base
+        return trip
+
+    def _three(self):
+        return {1: self._trip(1, "20260502102459"),
+                2: self._trip(2, "20260710162338", "/out/trip_2026-07-10_16-23_01"),
+                4: self._trip(4, "20260714143354")}
+
+    def test_a_fragment_has_no_id_to_record(self):
+        """The premise. If this ever stops being true the rest is moot."""
+        by_index = self._three()
+        self.assertEqual(P._picked_ids(by_index, [1, 2, 4]),
+                         ["trip_2026-07-10_16-23_01"])
+
+    def test_every_trip_has_a_key(self):
+        keys = P._picked_keys(self._three(), [1, 2, 4])
+        self.assertEqual(sorted(keys),
+                         ["20260502102459", "20260710162338", "20260714143354"])
+
+    def test_the_drop_is_recorded_for_all_three(self):
+        b = self.bench()
+        P._record_the_drop(b.ctx, self._three(), [1, 2, 4])
+        self.assertEqual(len(P.dropped_trip_keys(b.ctx)), 3)
+        # The destination still hears only about the trip it could know.
+        self.assertEqual(P.dropped_trip_ids(b.ctx), ("trip_2026-07-10_16-23_01",))
+
+    def test_a_drop_of_fragments_alone_is_still_recorded(self):
+        """It used to return before writing anything at all."""
+        b = self.bench()
+        P._record_the_drop(b.ctx, self._three(), [1, 4])
+        self.assertEqual(len(P.dropped_trip_keys(b.ctx)), 2)
+        self.assertEqual(P.dropped_trip_ids(b.ctx), ())
+
+    def test_the_stamps_beside_them_survive_the_write(self):
+        """One record, three keys: writing one must not drop the others."""
+        b = self.bench()
+        P.record_excluded_stamps(b.ctx, {"20260502102459"})
+        P._record_the_drop(b.ctx, self._three(), [1])
+        self.assertEqual(P.excluded_stamps(b.ctx), {"20260502102459"})
+        self.assertEqual(P.dropped_trip_keys(b.ctx), ("20260502102459",))
+
+    def test_dropping_the_same_trip_twice_counts_once(self):
+        b = self.bench()
+        P._record_the_drop(b.ctx, self._three(), [2])
+        P._record_the_drop(b.ctx, self._three(), [2])
+        self.assertEqual(len(P.dropped_trip_keys(b.ctx)), 1)
+
+    def test_the_row_counts_trips_not_ids(self):
+        line = P._excluded_line(P.W.World(dropped_ids=("trip_a",),
+                                          dropped_trips=("1", "2", "3")))
+        self.assertIn("3", line)
+        self.assertNotIn("1", line.replace("20260", ""))
+
+
 class TestDroppingWhatTheCardStillHolds(SeamTest):
     """The last-copy banner is true when it is true.
 
