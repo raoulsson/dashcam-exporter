@@ -1441,6 +1441,35 @@ class TestWipingAWorkspaceWhoseSourceIsStillInTheSlot(SeamTest):
         self.assertIn("still on the SIM card", said)
 
 
+class TestAutoSkippedIsNotAutoExcluded(SeamTest):
+    """Two different acts, and the tool must not make the second on the
+    strength of the first.
+
+    Auto-skipping is the scanner's opinion — below --min-clips-per-group, not
+    worth encoding. Excluding is the operator deciding the footage never
+    happened, which is permanent and which every guard honours. A sixteen-
+    second fragment is exactly the shape of the clip worth keeping, so
+    auto-excluding one would quietly make the card erasable while dropping it.
+    """
+
+    def test_a_fragment_is_named_but_not_chosen(self):
+        by = {1: {"renderable": False}, 2: {"renderable": True},
+              3: {"renderable": False}}
+        said = "\n".join(P._never_renders(by))
+        self.assertIn("1, 3", said)
+        self.assertIn("can never render", said)
+
+    def test_nothing_is_said_when_everything_renders(self):
+        self.assertEqual(P._never_renders({1: {"renderable": True}}), ())
+
+    def test_blank_still_cancels(self):
+        """This is a delete. An empty answer must never be one, however good
+        the suggestion above it."""
+        by = {1: {"renderable": False}}
+        with quiet(), mock.patch.object(P, "ask", return_value="  "):
+            self.assertIsNone(P._ask_trip_indices(by))
+
+
 class TestEveryRendererRunIsToldWhereToLog(SeamTest):
     """make-trips-rendered.sh defaults LOG_DIR to <out>/logs.
 

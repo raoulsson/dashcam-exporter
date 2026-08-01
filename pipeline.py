@@ -4247,10 +4247,36 @@ def _print_trip_table(ctx, root, trips):
 
 def _ask_trip_indices(by_index):
     """The indices to drop, or None when the answer was not one."""
+    _print_all(_never_renders(by_index))
     sel = ask("  Trip indices to DROP (space separated, blank = cancel): ")
     if not sel.strip():
         return None
     return _parse_indices(sel, by_index)
+
+
+def _never_renders(by_index):
+    """Name the trips the scanner will not encode, without picking them.
+
+    Auto-skipping is the scanner's opinion -- too short to be worth encoding
+    -- and excluding is the operator's decision that the footage never
+    happened. They are not the same act, and the tool must not make the second
+    on the strength of the first: a sixteen-second fragment is exactly the
+    shape of the clip worth keeping, and auto-excluding one would quietly make
+    the card erasable while dropping it.
+
+    But they ARE the obvious candidates, and the alternative is that they sit
+    in the workspace forever blocking item 9 -- accounted for by nothing,
+    which is the state that gave "13 clips exist nowhere but this card".
+
+    Blank stays cancel. This is a delete, and an empty answer must never be
+    one, however good the suggestion.
+    """
+    never = [i for i, t in sorted(by_index.items()) if not t.get("renderable", True)]
+    if not never:
+        return ()
+    return (C.dim("  %s can never render (too short), and hold the card until"
+                  " they are dropped or imported elsewhere."
+                  % ", ".join("%d" % i for i in never)),)
 
 
 def _parse_indices(sel, by_index):
