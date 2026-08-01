@@ -1846,7 +1846,7 @@ class TestTheWayPastTheCardRefusal(SeamTest):
 
     def test_only_an_item_that_declares_a_word_offers_one(self):
         built = M.build_menu(M.Strategy.LOCAL_PAGE, P.Work(self.bench().ctx))
-        self.assertEqual(built[ERASE_CARD].OVERRIDE_WORD, "DELETE")
+        self.assertEqual(built[ERASE_CARD].OVERRIDE_WORD, "ERASE")
         self.assertNotEqual(built[ERASE_CARD].OVERRIDE_WORD,
                             built[ERASE_CARD].WORD,
                             "the way past a guard is reachable by habit")

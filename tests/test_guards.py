@@ -741,7 +741,7 @@ class TestTheDestructiveSequence(GuardTest):
         self.assertTrue(self.clip.is_file(), "the footage must survive a cancel")
 
     def test_the_word_erases_the_files_and_keeps_the_folders(self):
-        outcome = self._run("ERASE")
+        outcome = self._run("DELETE")
         self.assertTrue(outcome.completed, outcome.note)
         self.assertFalse(self.clip.exists())
         self.assertTrue((self.w.ctx.card / "DCIM" / "200video" / "front").is_dir(),
@@ -752,9 +752,9 @@ class TestTheDestructiveSequence(GuardTest):
 
         evaluate() answers SATISFIED on an already-empty card, and SATISFIED
         must mean the body never runs — otherwise the operator is asked to
-        type ERASE to find out there is nothing behind it.
+        type DELETE to find out there is nothing behind it.
         """
-        self._run("ERASE")
+        self._run("DELETE")
         with mock.patch.object(P, "ask", side_effect=AssertionError(
                 "an already-satisfied item must not prompt")):
             outcome = self.item.execute(P.capture_world(self.w.ctx, M.Scope.FULL))
@@ -772,7 +772,7 @@ class TestTheDestructiveSequence(GuardTest):
 
         def answer_and_move_the_world(_prompt, *a, **k):
             _sh.rmtree(str(self.w.ctx.render_root / "DCIM"))
-            return "ERASE"
+            return "DELETE"
 
         with mock.patch.object(P, "ask", side_effect=answer_and_move_the_world):
             outcome = self.item.execute(P.capture_world(self.w.ctx, M.Scope.FULL))

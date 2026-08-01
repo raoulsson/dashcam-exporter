@@ -588,14 +588,23 @@ class DeleteSimData(Destructive):
     # has looked at and does not want. He is shown every path and the file
     # they were written to before he is asked.
     #
-    # DELETE and not ERASE, which is this item's own word. Stepping past a
+    # ERASE and not DELETE, which is this item's own word. Stepping past a
     # guard should not be reachable by the muscle memory of the erase it is
     # guarding: typing the usual word out of habit gets you nowhere here.
-    OVERRIDE_WORD = "DELETE"
+    #
+    # THE TWO WERE THE OTHER WAY ROUND. The entry is called Delete SIM Data and
+    # then asked for ERASE, which is a name and a password for the same act
+    # disagreeing on the screen where the operator is being asked to be sure.
+    # DELETE is now the word, matching the name and matching items 4 and 8 —
+    # what is given up is that the card no longer has a word of its own, and
+    # what that was worth was never the safety here. The guard is the per-clip
+    # accounting; the word only confirms he meant it. The property that DOES
+    # matter is the one below, and it survives the swap intact.
+    OVERRIDE_WORD = "ERASE"
     DESCRIPTION = "Erase the card, once every clip is accounted for elsewhere."
     END = True
     DESTR = True
-    WORD = "ERASE"
+    WORD = "DELETE"
     # FULL, for the ADVISORY rather than for the guard. Every card guard is
     # local and would be answered identically at either scope; what needs the
     # target is _card_advisory, which says whether the workspace copy — the one

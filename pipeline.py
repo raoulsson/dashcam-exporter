@@ -3674,12 +3674,11 @@ def load_groups(ctx, root, refresh=False):
     if not refresh and ctx.last_groups and ctx.last_groups[0] == root:
         return ctx.last_groups[1]
 
-    # One line, and only because the wait is minutes: the scan decodes video
-    # to find where each trip pulls away and parks. It said that three times
-    # over -- what it was scanning, that this is the same pass item 2 runs
-    # (from inside item 2), and that the answer is cached. The bar under it
-    # says it is working; the cache is nobody's business but this function's.
-    print(C.dim("  Scanning %s for trip boundaries." % tilde(root)))
+    # No line above the bar. It was there because an uncached scan takes
+    # minutes and something has to say so -- but the bar says it, by moving,
+    # and its tail already names the very path this sentence was naming. On a
+    # cached scan the whole thing came and went in under a second, leaving one
+    # more sentence between a confirmation prompt and the figure it is about.
     fd, tmp = tempfile.mkstemp(prefix="dashcam-groups-", suffix=".json")
     os.close(fd)
     try:
@@ -6142,13 +6141,14 @@ def _card_advisory(ctx, world):
 def erase_card_plan(ctx, world):
     """Item 9's plan."""
     started = time.time()
-    # Amber on the figure, red on the sentence that says it is gone. The
-    # accounting below it is EVIDENCE, not success -- green is the colour of
-    # the one line that says a step worked, and spending it here made the
-    # strongest reassurance on the screen the thing directly under the warning.
-    lines = [C.red("  The card's %s clips go; its folders stay so the camera can"
-                   " record." % C.yellow("%d" % len(world.card.stamps))),
-             C.dim("  Every clip is accounted for: %s." % world.card.note)]
+    # Two lines, two colours. Red is the sentence that says footage goes; dim
+    # is the evidence under it. The figure used to be amber INSIDE that red
+    # sentence, which put three colours on a five-line screen and made the one
+    # number nobody should skim the only word painted like a warning inside a
+    # warning. Red already carries the whole line.
+    lines = [C.red("  %d clips go. The folders stay, so the camera can record."
+                   % len(world.card.stamps)),
+             C.dim("  Accounted for: %s." % world.card.note)]
     lines.extend(_card_advisory(ctx, world))
     return menu.Plan(guards.card_is_expendable,
                      lambda fresh: _erase_card_commit(ctx, started),
@@ -6292,9 +6292,9 @@ def card_accounting(ctx):
 def _accounting_note(dropped, covered, only_in_workspace):
     bits = []
     if dropped:
-        bits.append("%d excluded on purpose" % len(dropped))
+        bits.append("%d excluded" % len(dropped))
     if covered:
-        bits.append("%d inside rendered trips" % len(covered))
+        bits.append("%d rendered" % len(covered))
     if only_in_workspace:
         bits.append("%d in the workspace" % len(only_in_workspace))
     return ", ".join(bits) or "nothing on the card"

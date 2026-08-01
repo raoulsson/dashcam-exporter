@@ -386,20 +386,24 @@ class TestWhatEachItemDeclares(unittest.TestCase):
                 item = self.menu[number]
                 self.assertEqual(item.destr(), bool(item.word()))
 
-    def test_the_card_asks_for_a_word_of_its_own(self):
-        """RESTATED: it was DROP, DELETE, ERASE — three distinct words, so a
-        second prompt could not be answered from muscle memory.
+    def test_every_destructive_item_asks_the_same_word(self):
+        """RESTATED TWICE. It was DROP, DELETE, ERASE — three distinct words,
+        so a second prompt could not be answered from muscle memory. Then 4 and
+        8 converged on DELETE, and the card kept ERASE for being the one target
+        with nothing behind it.
 
-        Items 4 and 8 now both ask DELETE. They erase different things and
-        both erase from the WORKSPACE, where a second copy is the ordinary
-        case: the card still holds the clips, or the renders are published.
-        The card keeps a word of its own, because that is the one target with
-        nothing behind it — and item 9's way past its own guard asks for a
-        third word again, which is where habit would actually cost something.
+        Now 9 asks DELETE too, because the entry is called Delete SIM Data and
+        asking for ERASE was a name and a password for one act disagreeing on
+        the very screen where the operator is told to be sure. What guards the
+        card is the per-clip accounting, not the spelling of the word; the word
+        confirms he meant it.
+
+        The distinctness that DOES earn its place is below: item 9's way PAST
+        its own guard still asks a different word, which is the only prompt in
+        the tool habit could carry someone through.
         """
         words = {n: self.menu[n].word() for n in (EXCLUDE, CLEAN_WS, ERASE_CARD)}
-        self.assertEqual(words[EXCLUDE], words[CLEAN_WS], "both erase the workspace")
-        self.assertNotIn(words[ERASE_CARD], (words[EXCLUDE], words[CLEAN_WS]))
+        self.assertEqual(set(words.values()), {"DELETE"})
         self.assertNotEqual(self.menu[ERASE_CARD].OVERRIDE_WORD,
                             self.menu[ERASE_CARD].word())
 
@@ -1233,7 +1237,7 @@ class TestDeleteSimData(unittest.TestCase):
         """No plan is even built, so no banner is printed and no word is asked
         for: a refusal is not a prompt with a discouraging message."""
         act = Act()
-        work = FakeWork(plan=a_plan(act=act), word="ERASE")
+        work = FakeWork(plan=a_plan(act=act), word="DELETE")
         item = menu_for(UPLOADER, work)[ERASE_CARD]
         item.execute(imported(ledger_mark=None, card=full_card()))
         self.assertFalse(act.ran)
@@ -1302,7 +1306,7 @@ class TestIdempotence(unittest.TestCase):
         there is nothing behind it. Asking for a word implies there is
         something to lose."""
         act = Act()
-        work = FakeWork(plan=a_plan(act=act), word="ERASE")
+        work = FakeWork(plan=a_plan(act=act), word="DELETE")
         item = menu_for(UPLOADER, work)[ERASE_CARD]
         item.execute(imported(ledger_mark="20260101130000", card=full_card()))
         item.execute(imported(card=a_card(dcim=True, stamps=frozenset())))
@@ -1357,7 +1361,7 @@ class TestIdempotence(unittest.TestCase):
 
 
 def _word_for(number):
-    return {EXCLUDE: "DELETE", CLEAN_WS: "DELETE", ERASE_CARD: "ERASE"}.get(number, "")
+    return {EXCLUDE: "DELETE", CLEAN_WS: "DELETE", ERASE_CARD: "DELETE"}.get(number, "")
 
 
 # ---------------------------------------------------------------------------

@@ -397,22 +397,19 @@ class TestInterfaceMatchesBehaviour(GraphTest):
         self.assertEqual({n for n, i in built.items() if i.destr()},
                          {EXCLUDE, CLEAN_WS, ERASE_CARD})
 
-    def test_the_card_asks_for_a_word_the_workspace_does_not(self):
-        """RESTATED: the three were distinct, so a second prompt could not be
-        answered from muscle memory.
-
-        Two of the three erase from the WORKSPACE, where a second copy is the
-        ordinary case — the card still holds the clips, or the renders are
-        published — and they ask the same word. The card is the one target
-        with nothing behind it, so it keeps its own; and item 9's way past its
-        guard asks a different word again, which is where habit would cost
-        something.
+    def test_the_destructive_items_all_ask_one_word(self):
+        """RESTATED TWICE. Three distinct words, then two, now one: the guard
+        on each of these is its own evidence, and the word only confirms the
+        operator meant it. Item 9's way PAST its guard still asks a different
+        word — that is the one prompt habit could carry someone through, and
+        the assertion for it lives with the override in test_seam.
         """
         built = M.build_menu(M.Strategy.UPLOADER, NullWork())
         words = {n: i.word() for n, i in built.items() if i.destr()}
-        self.assertEqual(sorted(set(words.values())), ["DELETE", "ERASE"])
-        self.assertEqual(words[ERASE_CARD], "ERASE")
-        self.assertNotEqual(built[ERASE_CARD].OVERRIDE_WORD, words[ERASE_CARD])
+        self.assertEqual(sorted(set(words.values())), ["DELETE"])
+        self.assertNotEqual(built[ERASE_CARD].OVERRIDE_WORD,
+                            built[ERASE_CARD].word(),
+                            "the way past a guard is reachable by habit")
 
     def test_the_items_that_end_the_cycle_say_so(self):
         built = M.build_menu(M.Strategy.UPLOADER, NullWork())

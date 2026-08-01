@@ -495,22 +495,18 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
                                  stamps=frozenset({"20260729120000"}),
                                  new_stamps=frozenset({"20260729120000"})))
         b.type("9")
-        self.assertEqual(b.work.asked, ["ERASE"], "the word was never asked for")
+        self.assertEqual(b.work.asked, ["DELETE"], "the word was never asked for")
         self.assertEqual(b.work.done, [], "the card was erased on stale evidence")
         self.assertEqual(len(b.work.refused), 1)
         self.assertIn("new clips", b.work.refused[0])
 
-    def test_the_card_asks_for_a_word_the_workspace_does_not(self):
-        """RESTATED: DROP, ERASE, DELETE — three distinct words on one path.
-
-        4 and 8 now share DELETE: both erase from the workspace, where a
-        second copy is the ordinary case. 9 erases the card, which is the one
-        target with nothing behind it, so it keeps a word of its own.
-        """
+    def test_every_word_on_the_path_is_the_same_one(self):
+        """RESTATED TWICE: DROP, ERASE, DELETE, then two of three, now one.
+        Item 9 asking ERASE under a heading that says Delete SIM Data was a
+        name and a password for one act disagreeing where it matters most."""
         b = Bench(UPLOADER, current=PREVIEW)
         b.type("4", "2", "9", "8")
-        self.assertEqual(b.work.asked, ["DELETE", "ERASE", "DELETE"])
-        self.assertNotIn("ERASE", [b.work.asked[0], b.work.asked[2]])
+        self.assertEqual(b.work.asked, ["DELETE", "DELETE", "DELETE"])
 
 
 class TestIdempotence(unittest.TestCase):
