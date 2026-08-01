@@ -3814,6 +3814,13 @@ def write_clip_review(ctx, trips):
     return made, root
 
 
+def _emptied(folder):
+    """Remove it and put it back, so what is in it afterwards is only what
+    this run wrote."""
+    shutil.rmtree(str(folder), ignore_errors=True)
+    folder.mkdir(parents=True, exist_ok=True)
+
+
 def _review_folder(root, trip):
     """<clip_review>/[not_renderable/]trip_NN_<day>_<hh-mm>."""
     name = "trip_%02d_%s_%s" % (trip["index"], trip.get("day", ""),
@@ -3824,11 +3831,9 @@ def _review_folder(root, trip):
 
 
 def _one_clip_still(src, folder, n):
-    """Kept if it is already there and not older than its clip -- a second
-    look at a big card is a glance rather than a wait."""
+    """Always written: the folder was emptied before this run started, so
+    there is never one already there to keep."""
     dst = folder / ("%02d_%s.jpg" % (n, src.stem))
-    if dst.is_file() and src.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
-        return
     extract_still(src, dst, seconds=CLIP_REVIEW_T, width=PREVIEW_STILL_W)
 
 
@@ -4183,7 +4188,19 @@ def step_preview(ctx):
 
     # Stills. Every trip gets one, including the auto-skipped fragments — he
     # is deciding what to keep, and a trip he cannot see is one he cannot judge.
-    previews_dir.mkdir(parents=True, exist_ok=True)
+    # Both folders are emptied first. They hold one file per trip and per
+    # clip, named after what the grouping said at the time -- so after a trip
+    # is excluded, or after the boundaries move because a GPS track finally
+    # arrived, what is left is a mix of current stills and stills of things
+    # that no longer exist, and nothing on the name says which is which.
+    # Rebuilding from empty is the only version where everything in there is
+    # about the workspace as it is now.
+    #
+    # It costs one ffmpeg seek per trip and per clip, every time. That is
+    # seconds for a card's worth of trips and minutes for a thousand clips,
+    # and it buys a folder the operator can trust without checking dates.
+    _emptied(previews_dir)
+    _emptied(ctx.out_dir / CLIP_REVIEW_DIRNAME)
     stills, failed = {}, []
     # A bar rather than a line per trip. Forty trips was forty lines of scroll
     # for a countable loop, and the two shapes it printed -- one for a still
@@ -4198,15 +4215,7 @@ def step_preview(ctx):
         if not front:
             failed.append(t["index"])
             continue
-        # Keep a still that is already there and not older than its clip. It is
-        # one ffmpeg seek per trip, which is seconds rather than minutes, but it
-        # is seconds spent producing a file that already exists — and on a
-        # second look at forty trips that is the difference between a glance and
-        # a wait.
         src = Path(front[0])
-        if dst.is_file() and src.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
-            stills[t["index"]] = dst
-            continue
         if extract_still(src, dst,
                          seconds=ctx.still_seconds, width=ctx.still_width):
             stills[t["index"]] = dst

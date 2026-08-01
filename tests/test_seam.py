@@ -1441,6 +1441,42 @@ class TestWipingAWorkspaceWhoseSourceIsStillInTheSlot(SeamTest):
         self.assertIn("still on the SIM card", said)
 
 
+class TestPreviewRebuildsFromEmpty(SeamTest):
+    """Both folders hold one file per trip and per clip, named after what the
+    grouping said at the time.
+
+    Exclude a trip, or let a GPS track arrive and move the boundaries, and
+    what is left is a mix of current stills and stills of things that no
+    longer exist — with nothing on the name to say which is which.
+    """
+
+    def test_a_still_of_something_gone_does_not_survive(self):
+        b = self.bench()
+        previews = b.ctx.out_dir / P.PREVIEW_DIRNAME
+        review = b.ctx.out_dir / P.CLIP_REVIEW_DIRNAME
+        for d in (previews, review / "trip_09_2026-01-01_00-00"):
+            d.mkdir(parents=True, exist_ok=True)
+        (previews / "trip_09_2026-01-01_00-00.jpg").write_text("stale")
+        (review / "trip_09_2026-01-01_00-00" / "01_x.jpg").write_text("stale")
+        P._emptied(previews)
+        P._emptied(review)
+        self.assertEqual(list(previews.iterdir()), [])
+        self.assertEqual(list(review.iterdir()), [])
+
+    def test_the_folders_are_there_afterwards(self):
+        """Emptied, not removed: what follows writes straight into them."""
+        b = self.bench()
+        d = b.ctx.out_dir / P.PREVIEW_DIRNAME
+        P._emptied(d)
+        self.assertTrue(d.is_dir())
+
+    def test_emptying_something_that_was_never_there_is_fine(self):
+        b = self.bench()
+        d = b.ctx.out_dir / "never-existed"
+        P._emptied(d)
+        self.assertTrue(d.is_dir())
+
+
 class TestDroppingWhatTheCardStillHolds(SeamTest):
     """The last-copy banner is true when it is true.
 
