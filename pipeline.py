@@ -496,9 +496,6 @@ class Ctx:
 # on screen, and the full stream is buffered so a failure can dump its tail.
 # ---------------------------------------------------------------------------
 
-SPIN = "|/-\\"
-
-
 class Live:
     def __init__(self, enabled):
         self.enabled = enabled
@@ -869,8 +866,13 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
             # function local, including the one on the line above.
             used = note_first and bool(note)
         else:
-            head = C.yellow("%s %s %s" % (label, SPIN[spin % len(SPIN)],
-                                          human_secs(elapsed)))
+            # The indeterminate bar, not a spinner. Both say "still working",
+            # but only one of them looks like the rest of the tool: a step with
+            # a countable unit draws [####......] and a step without one drew a
+            # bare |/-\, so the deploy read as a different program from the
+            # render three lines above it. Waiting already knew how to draw
+            # this for blocking calls; it just had no way in from here.
+            head = _sweep_line(label, spin, elapsed)
             used = False
         if note and not used:
             head += "  " + C.yellow(note)
@@ -1106,6 +1108,22 @@ def _still_bar(bar, i, total, name):
     bar.open_once()
     _write_line("  %s %s %s" % (C.yellow(bar.label), bar.bracket(i / float(total)),
                                 C.yellow("%d/%d  %s" % (i, total, name))))
+
+
+def _sweep_line(label, i, elapsed):
+    """`label [.....###....] 0:05` — the bar for work with no denominator.
+
+    Waiting draws exactly this and is where the shape lives; this is the
+    streaming caller's way in. It is deliberately NOT a percentage: run_stream
+    never synthesises one from a guess, and a deploy cannot say how many phases
+    it has until it has run them. What the operator needs from a step whose
+    length nobody knows is that it is alive, and a block that keeps moving says
+    that in the same visual language as the bars around it.
+
+    No leading indent and no trailing space: Waiting.render_at owns a whole
+    line, this one is a head that the child's latest output is appended to.
+    """
+    return Waiting(label).render_at(i, elapsed).strip()
 
 
 def _bar_line(label, frac, elapsed, note, note_first):

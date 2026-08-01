@@ -374,6 +374,41 @@ class TheLiveProgressLineIsActuallyDrawn(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("Import", out)
 
+    def _sweep(self, script):
+        """A child with nothing countable in its output, the deploy's case."""
+        buf = io.StringIO()
+        with mock.patch.object(P.C, "enabled", True):
+            with redirect_stdout(buf):
+                rc, _ = P.run_stream(["/bin/sh", "-c", script], str(REPO),
+                                     "Deploy", quiet_finish=True)
+        return rc, buf.getvalue()
+
+    def test_a_step_with_no_denominator_draws_the_bar_not_a_spinner(self):
+        """It drew a bare |/-\\, so the deploy read as a different program
+        from the render three lines above it. Both say "still working"; only
+        one of them says it in the tool's own language."""
+        rc, out = self._sweep("echo '=== pulling live curation ==='; sleep 0.4")
+        self.assertEqual(rc, 0)
+        self.assertIn("###", out)
+        for ch in "|/-\\":
+            self.assertNotIn("Deploy %s" % ch, out)
+
+    def test_the_block_moves_while_the_child_says_nothing(self):
+        """The whole point of it. A deploy is ssh round trips, so the child is
+        silent for seconds at a time and the line has to keep saying it is
+        alive on the timeout tick rather than on output."""
+        _rc, out = self._sweep("sleep 0.8")
+        positions = {line.index("###") for line in out.split("\n")
+                     if "###" in line}
+        self.assertGreater(len(positions), 2,
+                           "the block never moved without child output")
+
+    def test_it_never_shows_a_percentage_it_does_not_have(self):
+        """run_stream does not synthesise one from a guess, and a deploy cannot
+        say how many phases it has until it has run them."""
+        _rc, out = self._sweep("echo '=== rsync ==='; sleep 0.3")
+        self.assertNotIn("%", out)
+
 
 class DiscardingAnImportUnclaimsIt(unittest.TestCase):
     """After throwing away the local copy, the ledger must stop saying it has
