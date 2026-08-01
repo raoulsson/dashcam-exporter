@@ -103,6 +103,14 @@ def every_item_can_run(strategy, **override):
     what refuses an item here is the position it is asked from, never a
     missing file. The one exception is stated in its own test, which takes
     this world and removes exactly one fact.
+
+    One pair cannot both be satisfied by a single frozen world, and that is a
+    real rule rather than a gap in the fixture: item 1 wants clips accounted
+    for by nothing, item 9 wants every clip accounted for by something. In a
+    live run the import itself moves a clip from the first set to the second;
+    here the world does not move, so item 1 answers SATISFIED — completing
+    without performing, which is what a step with nothing to do means and
+    what these walks then have to allow for.
     """
     facts = dict(
         strategy=strategy, out_dir=Path("/w/out"),
@@ -344,8 +352,11 @@ class TestTheNormalCycle(unittest.TestCase):
         """
         b = Bench(UPLOADER)
         b.type("1", "2", "3", "5", "6", "7", "8")
+        # No IMPORT: this world's card is fully accounted for, so item 1
+        # completes without performing. It still advances the position, which
+        # is what the offer table below is asserting.
         self.assertEqual(b.work.done,
-                         [IMPORT, META, PREVIEW, RENDER, BUILD, UPLOAD, CLEAN_WS])
+                         [META, PREVIEW, RENDER, BUILD, UPLOAD, CLEAN_WS])
         self.assertEqual(b.offered_at,
                          [START, AFTER_IMPORT,
                           MID_CYCLE, MID_CYCLE, MID_CYCLE,
@@ -358,7 +369,7 @@ class TestTheNormalCycle(unittest.TestCase):
         follows 6 directly."""
         b = Bench(LOCAL)
         b.type("1", "2", "3", "5", "6", "8")
-        self.assertEqual(b.work.done, [IMPORT, META, PREVIEW, RENDER, BUILD, CLEAN_WS])
+        self.assertEqual(b.work.done, [META, PREVIEW, RENDER, BUILD, CLEAN_WS])
         self.assertEqual(b.offered_at[-1], AFTER_CLEAN)
         self.assertNotIn(UPLOAD, set().union(*map(set, b.offered_at)))
 
@@ -373,7 +384,7 @@ class TestTheNormalCycle(unittest.TestCase):
         """
         b = Bench(UPLOADER)
         b.type("1", "2", "6", "7", "0", "4", "2")
-        self.assertEqual(b.work.done, [IMPORT, META, BUILD, UPLOAD, PROGRESS,
+        self.assertEqual(b.work.done, [META, BUILD, UPLOAD, PROGRESS,
                                        EXCLUDE, META])
         self.assertEqual(b.offered_at[4], b.offered_at[5],
                          "looking at Progress moved the pipeline")
@@ -392,7 +403,7 @@ class TestTheNormalCycle(unittest.TestCase):
         """
         b = Bench(UPLOADER)
         b.type("1", "2", "7")
-        self.assertEqual(b.work.done, [IMPORT, META])
+        self.assertEqual(b.work.done, [META])
         self.assertNotIn(UPLOAD, b.offered_at[2])
 
 
@@ -431,7 +442,7 @@ class TestThePathsThatMustNotExist(unittest.TestCase):
         """
         b = Bench(UPLOADER)
         b.type("1", "2", "8", "9")
-        self.assertEqual(b.work.done, [IMPORT, META, CLEAN_WS])
+        self.assertEqual(b.work.done, [META, CLEAN_WS])
         self.assertEqual(b.offered_at[3], AFTER_CLEAN)
         self.assertNotIn(ERASE_CARD, AFTER_CLEAN)
 
@@ -441,7 +452,7 @@ class TestThePathsThatMustNotExist(unittest.TestCase):
         offer from there."""
         b = Bench(UPLOADER)
         b.type("1", "2", "9", "8")
-        self.assertEqual(b.work.done, [IMPORT, META, ERASE_CARD, CLEAN_WS])
+        self.assertEqual(b.work.done, [META, ERASE_CARD, CLEAN_WS])
         self.assertEqual(b.offered_at[2], b.offered_at[3],
                          "erasing the card moved the pipeline")
 
@@ -510,7 +521,7 @@ class TestIdempotence(unittest.TestCase):
         """
         b = Bench(UPLOADER)
         b.type("1", "2", "2", "2")
-        self.assertEqual(b.work.done, [IMPORT, META, META, META])
+        self.assertEqual(b.work.done, [META, META, META])
         self.assertEqual(b.offered_at[2], b.offered_at[3])
 
     def test_a_second_erase_of_an_empty_card_never_reaches_the_prompt(self):
@@ -559,7 +570,11 @@ class TestEveryShortPath(unittest.TestCase):
     def _drive(self, strategy, path):
         b = Bench(strategy)
         b.type(*map(str, path))
-        self.assertEqual(b.work.done, list(path),
+        # Item 1 is SATISFIED against this frozen world -- its clips are
+        # already accounted for -- so it completes without performing and
+        # never reaches the recorder. It still advances the position, which is
+        # what the walk is about.
+        self.assertEqual(b.work.done, [n for n in path if n != IMPORT],
                          "a path the graph offers did not run")
         self.assertEqual(b.position.current, _lands_at(b.menu, path))
 

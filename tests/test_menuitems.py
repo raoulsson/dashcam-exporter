@@ -282,7 +282,12 @@ def a_card(**kw):
 
 
 def full_card(**kw):
-    """A card with two clips on it, imported, and accounted for elsewhere."""
+    """A card with two clips on it, imported, and accounted for elsewhere.
+
+    So: nothing left to FETCH. That is what item 9 wants to see and the
+    opposite of what item 1 does — a card with something to import passes
+    new_stamps, which is the set accounted for by nothing.
+    """
     base = dict(dcim=True, present=True,
                 stamps=frozenset({"20260101120000", "20260101121000"}))
     base.update(kw)
@@ -618,11 +623,22 @@ class TestProgress(unittest.TestCase):
 class TestImportSim(unittest.TestCase):
     """Copy the source's DCIM tree in. The one entry point."""
 
-    def test_a_source_with_footage_is_all_it_needs(self):
+    def test_a_source_with_something_to_copy_is_all_it_needs(self):
         """No ordering question is asked at all: importing is where a cycle
-        begins, so what is asked is whether there is something to copy."""
-        w = world(card=full_card())
+        begins, so what is asked is whether there is something to copy.
+
+        RESTATED: "a source with footage" used to be enough, and the delta
+        decided how much once the step was running. It is decided at capture
+        now — new_stamps is what an import would take — so a card whose every
+        clip is accounted for elsewhere leaves item 1 with nothing to do, and
+        it says so as a greyed name rather than as the step's only output.
+        """
+        w = world(card=full_card(new_stamps=frozenset({"20260101120000"})))
         self.assertIs(ruling(item_for(IMPORT), w), M.Ruling.GO)
+
+    def test_a_card_with_nothing_left_to_fetch_is_satisfied(self):
+        w = world(card=full_card(), imports=(Path("/w/import"),))
+        self.assertIs(ruling(item_for(IMPORT), w), M.Ruling.SATISFIED)
 
     def test_an_unfinished_session_refuses_a_second_card(self):
         """Importing on top mixes two cards into one grouping with no record of

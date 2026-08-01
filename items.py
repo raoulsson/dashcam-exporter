@@ -164,15 +164,29 @@ class ImportSim(MenuItem):
         return self._source(world)
 
     def _source(self, world) -> Verdict:
-        # A source with footage always has work to offer, even over an import
-        # that is already there: the delta decides how much.
-        if world.card.dcim:
+        """A card with nothing left to fetch is not work.
+
+        It used to be: "a source with footage always has work to offer, even
+        over an import that is already there -- the delta decides how much."
+        That was true while the delta was only decided inside the step. It is
+        decided at capture now: card.new_stamps is the set accounted for by
+        nothing, which is exactly what an import would copy. Empty means
+        pressing 1 can only report "nothing new at the source", and a menu
+        entry whose whole outcome is that sentence should have said it while
+        it was still a greyed name.
+        """
+        if world.card.dcim and world.card.new_stamps:
             return go()
         return self._already_in(world)
 
     def _already_in(self, world) -> Verdict:
         if world.imports:
-            return satisfied("footage is already in the workspace")
+            return satisfied("everything on the card is already here")
+        if world.card.dcim:
+            # A card whose every clip is accounted for elsewhere: rendered and
+            # published, or dropped on purpose. Nothing to fetch and nothing
+            # missing -- which is the finished state, not a fault.
+            return satisfied("nothing on the card needs importing")
         return blocked("no source with a DCIM tree, and nothing imported")
 
     def _perform(self, world):
