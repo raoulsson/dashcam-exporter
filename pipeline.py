@@ -569,6 +569,21 @@ class Bar:
     def __init__(self, label, width=None):
         self.label = label
         self._width = width
+        self.opened = False
+
+    def open_once(self):
+        """A blank line under whatever printed last, before the first draw.
+
+        Every bar in the tool gets one -- the live area opens with it, the
+        indeterminate bar opens with it after its lead-in, and a bar drawn
+        directly through _write_line has to ask for it here. Without it the
+        bar arrives hard against the line above and reads as part of it.
+        """
+        if self.opened:
+            return
+        self.opened = True
+        sys.stdout.write("\n")
+        sys.stdout.flush()
 
     def width(self, room_for=60):
         if self._width:
@@ -645,8 +660,7 @@ class Waiting(Bar):
         started, i = time.time(), 0
         if self._stop.wait(self.LEAD_IN):
             return
-        sys.stdout.write("\n")     # the same blank line the live area opens with
-        sys.stdout.flush()
+        self.open_once()
         while not self._stop.wait(self.STEP):
             self._drawn = True
             _write_line(self.render_at(i, time.time() - started))
@@ -1051,6 +1065,7 @@ def _still_bar(bar, i, total, name):
     """One line, redrawn, for a loop that is countable and short."""
     if not C.enabled:
         return
+    bar.open_once()
     _write_line("  %s %s %s" % (C.yellow(bar.label), bar.bracket(i / float(total)),
                                 C.yellow("%d/%d  %s" % (i, total, name))))
 
