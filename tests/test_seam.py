@@ -1338,6 +1338,23 @@ class TestWipingAWorkspaceWhoseSourceIsStillInTheSlot(SeamTest):
                         "the card holds it, so it is a second copy")
         self.assertFalse(P.guards.clean_is_allowed(w).blocked)
 
+    def test_it_files_no_receipt_for_a_trip_that_was_never_published(self):
+        """A receipt says "this trip finished". covered_stamps reads them, so
+        one filed for a discarded trip tells the tool its clips sit inside a
+        rendered trip — hiding them from the next import and clearing the card
+        to be erased. Ten clips read as safe when they existed in one place."""
+        b = self.bench().imported().sidecars().render()
+        f = b.ctx.card / "DCIM" / "200video" / "front"
+        f.mkdir(parents=True, exist_ok=True)
+        (f / ("%s_0060.mp4" % CLIP)).write_text("clip")
+        before = P.read_ledger(b.ctx).get("through") or ""
+        ran = b.run(CLEAN_WS)
+        self.assertTrue(ran.completed, ran.note)
+        self.assertEqual(list(P._safe_rglob(P.archive_dir(b.ctx), "trip_*_meta.json")),
+                         [], "a discard filed a receipt for an unpublished trip")
+        self.assertLessEqual(P.read_ledger(b.ctx).get("through") or "", before,
+                             "a discard advanced the high-water mark")
+
     def test_the_renders_go_with_it(self):
         """He asked for everything gone. Leaving the renders leaves a
         workspace he asked to be empty half full."""

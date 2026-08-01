@@ -2619,7 +2619,7 @@ def _swept_on(ctx):
     return "cleanup on %s's answer (%s)" % (plugin.name, plugin.origin)
 
 
-def purge_published_renders(ctx, root):
+def purge_published_renders(ctx, root, finished=True):
     """Empty the working area. Everything goes except a short keep-list.
 
     Once the trips are at the destination, every file here is a third copy or
@@ -2649,9 +2649,19 @@ def purge_published_renders(ctx, root):
     a screen is read once and then scrolls, and "who said the footage was
     safe" is a question asked weeks later, so it belongs in the file that
     outlives the session rather than on the line that does not.
+
+    `finished` is what separates the two acts that reach here. A sweep ends a
+    cycle: the trips are published, their receipts are the record of that, and
+    the mark may advance. A DISCARD ends nothing — it throws away a workspace
+    whose only remaining copy is the card — so it must write neither. Archiving
+    a receipt for a trip that was never published tells covered_stamps that
+    its clips sit inside a rendered trip, which then hides them from the next
+    import and clears the card to be erased. Ten clips read as safe when they
+    existed in one place.
     """
-    write_ledger(ctx, last_imported_stamp(ctx), _swept_on(ctx))
-    archive_sidecars(ctx)
+    if finished:
+        write_ledger(ctx, last_imported_stamp(ctx), _swept_on(ctx))
+        archive_sidecars(ctx)
 
     out = ctx.out_dir
     if not out.is_dir():
@@ -5735,7 +5745,7 @@ def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
         ok, why, stragglers = True, "", []
     n = freed = 0
     if ok:
-        n, freed = purge_published_renders(ctx, root)
+        n, freed = purge_published_renders(ctx, root, finished=not discarding)
     else:
         _keeping_the_renders(why, stragglers)
     return _outcome(record(ctx, NAME[CLEAN_WS], RAN, started,
