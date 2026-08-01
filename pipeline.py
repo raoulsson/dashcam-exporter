@@ -3302,10 +3302,15 @@ def _box(done):
 
 
 def _imported_line(world):
+    # "in workspace", not "imported": this counts the clips that are THERE, and
+    # excluding a trip deletes clips, so the figure goes down. Beside a "Trips
+    # excluded" row that only ever grows, the past tense read as a running
+    # total of everything ever fetched and the two rows could not be reconciled
+    # -- six imported and three excluded looks like a card of thirteen clips.
     if not world.imports:
-        return _fact("0", "Clips imported", False)
+        return _fact("0", "Clips in workspace", False)
     return _fact(_clip_total(clip_count(world.imports[0])),
-                 "Clips imported", True)
+                 "Clips in workspace", True)
 
 
 def _excluded_line(world):
