@@ -3307,9 +3307,26 @@ def step_generate_meta(ctx):
     # rglob there counts every earlier import's trips too, so six scanned trips
     # reported eighteen.
     n = _sidecars_for(ctx, root)
-    done_line("described %s trips, sidecars under %s"
-              % (C.yellow("%d" % n), tilde(ctx.out_dir)))
+    done_line("described %s trips%s, sidecars under %s"
+              % (C.yellow("%d" % n), _skipped_note(have), tilde(ctx.out_dir)))
     return record(ctx, NAME[META], RAN, started, "%d trips described" % n)
+
+
+def _skipped_note(payload):
+    """Why the count here is smaller than the number of trips on the card.
+
+    A trip below --min-clips-per-group gets no sidecar, so "described 2
+    trips" sat next to Build Preview's "5 stills for 5 trips" with nothing
+    saying they had counted different things. The renderer says it -- "Auto-
+    skipping 3 fragment trips: #1 (2 clips)..." -- and this step stopped
+    keeping the renderer's lines, which took the explanation with them.
+    """
+    skipped = [t for t in (payload or {}).get("trips", [])
+               if not t.get("renderable", True)]
+    if not skipped:
+        return ""
+    return " of %d (%d too short to render)" % (
+        len((payload or {}).get("trips", [])), len(skipped))
 
 
 def _sidecars_for(ctx, root):
