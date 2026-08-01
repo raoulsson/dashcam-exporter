@@ -175,7 +175,7 @@ class ImportSim(MenuItem):
         entry whose whole outcome is that sentence should have said it while
         it was still a greyed name.
         """
-        if world.card.dcim and world.card.new_stamps:
+        if world.card.dcim and (world.card.new_stamps or world.card.to_fetch):
             return go()
         return self._already_in(world)
 

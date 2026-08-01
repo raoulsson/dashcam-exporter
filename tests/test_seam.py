@@ -1423,6 +1423,93 @@ class TestWipingAWorkspaceWhoseSourceIsStillInTheSlot(SeamTest):
         self.assertIn("still on the SIM card", said)
 
 
+class TestGpsAloneIsStillWorkToDo(SeamTest):
+    """A card can hold tracks for clips that came over before the tracks did.
+
+    Nothing new by the clip count, and a trip that cannot be described until
+    they arrive — so item 1 has work even though new_stamps is empty, and
+    saying "everything on the card is already here" would be false.
+    """
+
+    def _imported_without_its_track(self):
+        b = self.bench()
+        dcim = b.ctx.card / "DCIM"
+        (dcim / "200video" / "front").mkdir(parents=True, exist_ok=True)
+        (dcim / "200video" / "front" / ("%s_0060.mp4" % CLIP)).write_text("clip")
+        (dcim / "203gps").mkdir(parents=True, exist_ok=True)
+        (dcim / "203gps" / "20260101000000_0480_T.git").write_text("track")
+        # the clip is already in the workspace; its track is not
+        imp = b.ctx.render_root / "DCIM" / "200video" / "front"
+        imp.mkdir(parents=True, exist_ok=True)
+        (imp / ("%s_0060.mp4" % CLIP)).write_text("clip")
+        return b
+
+    def test_the_track_alone_counts_as_work(self):
+        b = self._imported_without_its_track()
+        _here, todo, _size, files = P._delta_counts(b.ctx, "")
+        self.assertEqual(todo, 0, "no clip is missing")
+        self.assertEqual([f for f in files if "203gps" in f],
+                         ["DCIM/203gps/20260101000000_0480_T.git"])
+
+    def test_and_item_one_offers_to_do_it(self):
+        b = self._imported_without_its_track()
+        built = M.build_menu(M.Strategy.LOCAL_PAGE, P.Work(b.ctx))
+        self.assertIs(built[1].evaluate(b.world(M.Scope.LOCAL)).ruling, M.Ruling.GO)
+
+    def test_and_stops_offering_once_it_is_here(self):
+        b = self._imported_without_its_track()
+        dst = b.ctx.render_root / "DCIM" / "203gps"
+        dst.mkdir(parents=True, exist_ok=True)
+        (dst / "20260101000000_0480_T.git").write_text("track")
+        _here, _todo, _size, files = P._delta_counts(b.ctx, "")
+        self.assertEqual(files, [], "it offered what the workspace already had")
+
+
+class TestTheGpsComesWithTheClips(SeamTest):
+    """A GPS archive is stamped with ITS OWN start and a span —
+    "20260712191931_0120_T.git" — so it almost never carries a clip's stamp.
+
+    Matched by stamp, an import took two GPS files off a card that held thirty
+    for that day, and the trip came out with gps_points 0: a drive with no
+    route, from footage whose track was sitting right there on the card.
+    """
+
+    def _card(self):
+        b = self.bench()
+        dcim = b.ctx.card / "DCIM"
+        (dcim / "200video" / "front").mkdir(parents=True, exist_ok=True)
+        (dcim / "200video" / "front" / "20260712192031_0060.mp4").write_text("clip")
+        (dcim / "203gps" / "tar").mkdir(parents=True, exist_ok=True)
+        (dcim / "203gps" / "tar" / "20260712191931_0120_T.git").write_text("track")
+        (dcim / "201photo").mkdir(parents=True, exist_ok=True)
+        (dcim / "201photo" / "G_20260507144616_745_0000_X.jpg").write_text("photo")
+        (dcim / "IPSRecord.txt").write_text("log")
+        return b
+
+    def test_a_track_whose_stamp_matches_no_clip_still_comes(self):
+        b = self._card()
+        files = P._files_for(b.ctx.card, frozenset({"20260712192031"}))
+        self.assertIn("DCIM/203gps/tar/20260712191931_0120_T.git", files)
+
+    def test_the_clip_and_the_camera_log_come_too(self):
+        b = self._card()
+        files = P._files_for(b.ctx.card, frozenset({"20260712192031"}))
+        self.assertIn("DCIM/200video/front/20260712192031_0060.mp4", files)
+        self.assertIn("DCIM/IPSRecord.txt", files)
+
+    def test_what_nothing_reads_does_not(self):
+        """750 MB of stills and thumbnails on a full card, into a workspace
+        whose whole purpose is to be rendered from and thrown away."""
+        b = self._card()
+        files = P._files_for(b.ctx.card, frozenset({"20260712192031"}))
+        self.assertEqual([f for f in files if "201photo" in f], [])
+
+    def test_a_clip_not_asked_for_does_not(self):
+        b = self._card()
+        self.assertEqual(
+            [f for f in P._files_for(b.ctx.card, frozenset()) if "200video" in f], [])
+
+
 class TestWhatIsOfferedIsWhatIsFetched(SeamTest):
     """The screen's count and the script's filter have to mean one thing.
 

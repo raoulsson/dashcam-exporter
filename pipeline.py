@@ -2821,25 +2821,65 @@ def _delta_counts(ctx, after):
     new = to_import(ctx, frozenset(card_stamps(ctx)), after,
                     frozenset(excluded_stamps(ctx)), owed)
     here = workspace_stamps(ctx, new)
-    files = _files_for(ctx.card, new - here)
+    files = _not_here_yet(ctx, _files_for(ctx.card, new - here))
     return len(here), len(new - here), _weigh(ctx.card, files), files
+
+
+def _not_here_yet(ctx, relative):
+    """Drop what the workspace already holds, by path and size.
+
+    Without this the list carried every GPS archive on the card on every
+    import, because those come along whatever their stamp -- so the screen
+    offered a gigabyte that rsync would then skip, and "what is offered is
+    what is fetched" stopped being true in the other direction.
+    """
+    folders = import_candidates(ctx)
+    return [r for r in relative
+            if not any(_same_file(ctx.card / r, f / r) for f in folders)]
+
+
+def _same_file(src, dst):
+    return dst.is_file() and _size_of(dst) == _size_of(src)
+
+
+# What the renderer opens: the clips, and the GPS beside them. Everything
+# else the camera writes -- 201photo, 202thumb, 207log, 750 MB of it -- is
+# never read by anything here, so it is not copied into a workspace whose
+# whole purpose is to be rendered from and then thrown away.
+VIDEO_DIR, GPS_DIR = "200video", "203gps"
 
 
 def _files_for(card, stamps):
     """Every file those clips need, as paths relative to the card.
 
-    Both cameras and the GPS beside them, because a clip is not watchable
-    without its track -- and anything with no stamp at all (the camera's event
-    log), which the script has always carried along for the same reason.
+    The clips are matched by stamp -- both cameras, since front and rear share
+    one. EVERYTHING ELSE comes along whatever its name, and that is the part
+    worth stating: a GPS archive is stamped with ITS OWN start and a span,
+    "20260712191931_0120_T.git", so it almost never carries a clip's stamp.
+    Matching it by stamp took two files off a card that held thirty for that
+    day, and the trip came out with gps_points 0 -- a drive with no route,
+    from footage whose track was sitting right there.
+
+    203gps is 251 MB against 25 GB of video, and rsync skips what the
+    destination already has, so taking all of it costs a stat per file on
+    every import after the first. Erring toward copying is the safe direction
+    here: the cost of being wrong is bytes, and the cost the other way is a
+    trip that can never be described.
     """
     out = []
     for p in _safe_rglob(card / "DCIM", "*"):
-        if not p.is_file():
-            continue
-        stamp = _stamp_of_name(p.name)
-        if stamp is None or stamp in stamps:
+        if p.is_file() and _wanted_file(p, stamps):
             out.append(str(p.relative_to(card)))
     return sorted(out)
+
+
+def _wanted_file(path, stamps):
+    """A clip we asked for, the GPS beside it, or anything unstamped."""
+    if GPS_DIR in path.parts:
+        return True
+    if VIDEO_DIR in path.parts:
+        return _stamp_of_name(path.name) in stamps
+    return _stamp_of_name(path.name) is None
 
 
 def _weigh(card, relative):
@@ -2892,6 +2932,10 @@ def _delta_lines(here, todo, size, files):
     if here:
         return ("  %s clips already imported, %s to go (%s)"
                 % (C.yellow("%d" % here), C.yellow("%d" % todo), tail), "")
+    if not todo:
+        # No clips, but something to fetch: the GPS for clips that came over
+        # before the tracks were being collected at all.
+        return ("  no new clips, %s to fetch" % tail, "")
     return ("  %s clips to import (%s)" % (C.yellow("%d" % todo), tail), "")
 
 
@@ -3003,7 +3047,7 @@ def step_import(ctx):
     excluded_stamps(ctx)                 # refresh the cache the split reads
     here, todo, size, wanted = _delta_counts(ctx, after)
     print()
-    if not (here + todo):
+    if not wanted:
         print(C.green("  Nothing new at the source — it is already all imported."))
         return record(ctx, NAME[IMPORT], SATISFIED, started, "no new clips")
     _print_all(_delta_lines(here, todo, human_bytes(size), len(wanted)))
@@ -6326,9 +6370,11 @@ def _card_facts(ctx):
     stamps = frozenset(card_stamps(ctx))
     owed, note = card_accounting(ctx)
     new = to_import(ctx, stamps, last_imported_stamp(ctx), excluded, owed)
+    here = workspace_stamps(ctx, new)
+    fetch = _not_here_yet(ctx, _files_for(ctx.card, new - here))
     return W.Card(path=ctx.card, dcim=True, present=_holds_files(dcim), stamps=stamps,
                   new_stamps=new, new_files=_clips_named(ctx.card, new),
-                  owed_stamps=frozenset(owed), note=note)
+                  to_fetch=len(fetch), owed_stamps=frozenset(owed), note=note)
 
 
 def _clips_named(card, stamps):

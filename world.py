@@ -79,6 +79,11 @@ class Card:
     # about. Carried rather than looked up: a guard that goes to the disk
     # answers differently on two reads of one world.
     new_files: Tuple[str, ...] = ()
+    # Files an import would still fetch: the clips above, and the GPS beside
+    # them. Separate from new_stamps because a card can hold tracks for clips
+    # that came over before the tracks did — nothing new to import by the
+    # clip count, and a trip that cannot be described until they arrive.
+    to_fetch: int = 0
     note: str = ""                                # how the accounting was met
 
 
