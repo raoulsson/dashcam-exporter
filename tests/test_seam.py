@@ -1453,11 +1453,22 @@ class TestAutoSkippedIsNotAutoExcluded(SeamTest):
     """
 
     def test_a_fragment_is_named_but_not_chosen(self):
-        by = {1: {"renderable": False}, 2: {"renderable": True},
-              3: {"renderable": False}}
-        said = "\n".join(P._never_renders(by))
-        self.assertIn("1, 3", said)
-        self.assertIn("can never render", said)
+        frag = {"renderable": False,
+                "reason": "fragment: 2 clips, fewer than --min-clips-per-group 4"}
+        said = "\n".join(P._never_renders({1: frag, 2: {"renderable": True}, 3: frag}))
+        self.assertIn("Trips 1, 3", said)
+        self.assertIn("less than 4 clips", said)
+        self.assertIn("Include them to forget them", said)
+
+    def test_the_threshold_comes_from_what_the_scanner_said(self):
+        """Not from the setting read a second time here. Two readings of one
+        number drift, and this one only ever appears beside the trips that
+        number excluded."""
+        frag = {"renderable": False,
+                "reason": "fragment: 1 clips, fewer than --min-clips-per-group 9"}
+        self.assertIn("less than 9 clips", "\n".join(P._never_renders({1: frag})))
+        bare = {"renderable": False}
+        self.assertIn("too short to render", "\n".join(P._never_renders({1: bare})))
 
     def test_nothing_is_said_when_everything_renders(self):
         self.assertEqual(P._never_renders({1: {"renderable": True}}), ())

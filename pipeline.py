@@ -4248,7 +4248,7 @@ def _print_trip_table(ctx, root, trips):
 def _ask_trip_indices(by_index):
     """The indices to drop, or None when the answer was not one."""
     _print_all(_never_renders(by_index))
-    sel = ask("  Trip indices to DROP (space separated, blank = cancel): ")
+    sel = ask("  Enter Trip indices to exclude: ")
     if not sel.strip():
         return None
     return _parse_indices(sel, by_index)
@@ -4271,12 +4271,27 @@ def _never_renders(by_index):
     Blank stays cancel. This is a delete, and an empty answer must never be
     one, however good the suggestion.
     """
-    never = [i for i, t in sorted(by_index.items()) if not t.get("renderable", True)]
+    never = [(i, t) for i, t in sorted(by_index.items())
+             if not t.get("renderable", True)]
     if not never:
         return ()
-    return (C.dim("  %s can never render (too short), and hold the card until"
-                  " they are dropped or imported elsewhere."
-                  % ", ".join("%d" % i for i in never)),)
+    return (C.dim("  Trips %s %s. Include them to forget them."
+                  % (", ".join("%d" % i for i, _t in never),
+                     _too_short(t for _i, t in never))),)
+
+
+def _too_short(trips):
+    """Why the scanner will not render them, in its own number.
+
+    Taken from what it SAID rather than from the setting read again here: two
+    readings of one number drift, and this one is only ever printed beside the
+    trips that number excluded.
+    """
+    for t in trips:
+        m = re.search(r"--min-clips-per-group (\d+)", t.get("reason") or "")
+        if m:
+            return "contain less than %s clips as configured" % m.group(1)
+    return "are too short to render"
 
 
 def _parse_indices(sel, by_index):
