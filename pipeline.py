@@ -1006,7 +1006,11 @@ def _remember_name(state, line):
 # ("271.36MB/s", "142.3 MB"). Left to size themselves, every field jumped
 # sideways whenever a number gained a digit, which is the whole line wiggling
 # to report that one clip is faster than the last.
-NAME_W, RATE_W, SIZE_W = 23, 10, 8
+# 9 on the sizes, not 8: human_bytes stays in MB up to 1024, so it emits
+# "1023.0 MB" -- nine characters -- for the twenty-four megabytes between 1000
+# and a gigabyte. A field one short there shifts everything to its right by a
+# character, twice per gigabyte, which is the left half of the line wiggling.
+NAME_W, RATE_W, SIZE_W = 23, 10, 9
 
 
 def _import_progress(state, moved, total, rate):
@@ -1063,8 +1067,10 @@ def _bar_line(label, frac, elapsed, note, note_first):
     bar = Bar(label)
     if not (note_first and note):
         return bar.render(frac, elapsed)
+    # %3d on the percentage: it ends the line, but it is redrawn in place, and
+    # a field that grows from "9%" to "100%" leaves the old tail behind it.
     return "%s    %s %s" % (C.yellow(note), bar.bracket(frac),
-                            C.yellow("%d%%" % int(frac * 100)))
+                            C.yellow("%3d%%" % int(frac * 100)))
 
 
 def make_scan_parser():
