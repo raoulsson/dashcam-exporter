@@ -1366,7 +1366,8 @@ class TestWipingAWorkspaceWhoseSourceIsStillInTheSlot(SeamTest):
         (f / ("%s_0060.mp4" % CLIP)).write_text("clip")
         said = "\n".join(P._what_goes_lines(b.world(M.Scope.LOCAL)))
         self.assertNotIn("ORIGINAL", said)
-        self.assertIn("renders go too", said)
+        self.assertIn("removes 1 trips and the metadata", said)
+        self.assertIn("still on the SIM card", said)
 
 
 class TestWhatIsOfferedIsWhatIsFetched(SeamTest):

@@ -5655,11 +5655,13 @@ def _what_goes_lines(world):
     """
     if not guards.import_is_disposable(world):
         return ("", C.red("  This is the ORIGINAL footage and it is not recoverable."))
-    made = len(world.renders)
-    if not made:
+    trips = max(len(world.metas), len(world.renders))
+    if not trips:
         return ()
-    return ("", C.dim("  %d renders go too; the clips they came from are on the"
-                      " card." % made))
+    return ("", C.dim("  Cleaning the workspace removes %d trips and the metadata."
+                      % trips),
+            C.dim("  All sources are still on the SIM card and the process can be"),
+            C.dim("  restarted without any loss."))
 
 
 def _why_it_may_go(world):
