@@ -77,11 +77,13 @@ STANDABLE = tuple(sorted(set(REAL) - {PROGRESS}))
 # The fakes
 # ---------------------------------------------------------------------------
 
-def _aborted(item, note):
+def _aborted(item, note, performed=False):
     """What the real MenuItem.aborted() amounts to for the position: an
-    interruption is simply not completing."""
+    interruption is simply not completing. performed rides along because it
+    decides whether the plugin is told its input moved, and a prompt declined
+    moved nothing."""
     item.completed.return_value = False
-    return M.stopped(note)
+    return M.stopped(note, performed)
 
 
 def fake_item(number, strategy=UPLOADER):
@@ -182,11 +184,12 @@ def a_ctx():
     return ctx
 
 
-def drive(menu_items, position, keys):
+def drive(menu_items, position, keys, plugin=None):
     """Run the real Runner loop over mock items, answering the prompt with
     `keys`. Nothing touches the disk but a temp ledger: the world is a
     sentinel, the painter is a mock, and the prompt is a mock too."""
     ctx = a_ctx()
+    ctx.plugin = plugin
     runner = P.Runner(ctx, menu_items, position)
     captures = Captures()
     buf = io.StringIO()
@@ -267,6 +270,34 @@ class WhereWeLeftOffSurvivesARestart(unittest.TestCase):
         ctx = a_ctx()
         P.remember_step(ctx, M.NOWHERE)
         self.assertIsNone(P.remembered_step(ctx))
+
+
+class DecliningTellsThePluginNothing(unittest.TestCase):
+    """The plugin is told its input moved so it can drop what it cached. An
+    abort before anything ran moved nothing.
+
+    It was told anyway: stopped() defaulted to performed=True, so typing
+    anything but DELETE, answering n, or pressing q dropped the plugin's
+    answer and the next menu draw paid for a fresh one — eight seconds of
+    "Reading the workspace..." for a keypress that touched nothing.
+    """
+
+    def _drove(self, boom):
+        menu_items, position = machine(at=META)
+        menu_items[RENDER].execute.side_effect = boom
+        plugin = mock.Mock()
+        run = drive(menu_items, position, [str(RENDER), "q"], plugin=plugin)
+        return plugin, run
+
+    def test_a_prompt_abort_does_not_reset_it(self):
+        plugin, _run = self._drove(P.Aborted())
+        plugin.reset.assert_not_called()
+
+    def test_an_abort_part_way_through_does(self):
+        """That one really did change the workspace: a copy or an encode was
+        running when it stopped."""
+        plugin, _run = self._drove(P.Aborted(mid_run=True))
+        plugin.reset.assert_called_once()
 
 
 class AYesNoQuestionTakesOneKey(unittest.TestCase):
@@ -1035,7 +1066,8 @@ class TheRunner(unittest.TestCase):
         menu_items, position = machine(at=M.NOWHERE)
         menu_items[IMPORT].execute.side_effect = P.Aborted(mid_run=True)
         run = drive(menu_items, position, ["1", "q"])
-        menu_items[IMPORT].aborted.assert_called_once_with("Aborted by user mid-run.")
+        menu_items[IMPORT].aborted.assert_called_once_with("Aborted by user mid-run.",
+                                                    performed=True)
         self.assertEqual(run.position.current, M.NOWHERE)
         self.assertEqual([r.status for r in run.ctx.results], [P.ABORTED])
         self.assertEqual(P._exit_code(run.ctx), 0, "stopping on purpose is not a failure")
@@ -1047,7 +1079,8 @@ class TheRunner(unittest.TestCase):
         menu_items, position = machine(at=M.NOWHERE)
         menu_items[IMPORT].execute.side_effect = P.Aborted()
         run = drive(menu_items, position, ["1", "q"])
-        menu_items[IMPORT].aborted.assert_called_once_with("Aborted by user pre-run.")
+        menu_items[IMPORT].aborted.assert_called_once_with("Aborted by user pre-run.",
+                                                    performed=False)
         self.assertEqual([r.detail for r in run.ctx.results],
                          ["Aborted by user pre-run."])
 

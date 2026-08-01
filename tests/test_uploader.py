@@ -442,21 +442,42 @@ class TestTheEraseSaysWhoseAnswerItActedOn(unittest.TestCase):
             self.P._print_gates(world)
         return out.getvalue()
 
-    def test_the_gate_table_names_the_implementation_being_asked(self):
-        self.assertIn("fortknox (~/dev/mine/up.py:Build:FortKnox)",
-                      self._printed(self._world(self.target)))
+    def test_the_gate_table_names_no_implementation_either(self):
+        """RESTATED: it opened with "destination: fortknox (<loader spec>)".
+
+        Which gates can be asked still depends on what is configured, and the
+        table still numbers itself against that — [1/2] rather than [1/3] when
+        only two can run. What went is the name over the top of it: the gates
+        say what was answered, and who answered is this tool's own business.
+        """
+        said = self._printed(self._world(self.target))
+        self.assertNotIn("fortknox", said)
+        self.assertNotIn("destination:", said)
+        self.assertIn("complete at the destination", said)
 
     def test_with_nothing_configured_there_is_nobody_to_name(self):
-        """The local edition asks no one, so a "destination:" line would be a
-        row about a thing that does not exist."""
+        """Unchanged in effect, and now true of both editions alike."""
         self.assertNotIn("destination:", self._printed(self._world(W.TargetFacts())))
 
-    def test_the_banner_says_whose_answer_the_erase_proceeds_on(self):
+    def test_the_banner_names_no_plugin_at_all(self):
+        """RESTATED: it used to name it, and the loader spec with it.
+
+        The screen above an irreversible delete carried the plugin's name
+        three times — over the gate table, in "the copies <name> holds stay",
+        and in "proceeding on <name> (<spec>)'s answer". Repeating a third
+        party's name over footage about to go reads as the tool laying the
+        decision off on it, and the decision is the operator's.
+
+        Attribution is not lost: _swept_on() puts it in the ledger's note for
+        that sweep, which is a file and outlives the session. A screen is read
+        once and scrolls.
+        """
         lines = self.P._clean_banner(
             _a_ctx(), self._world(self.target), Path("/w/import"), 1024)
         said = "\n".join(lines)
-        self.assertIn("fortknox (~/dev/mine/up.py:Build:FortKnox)", said)
-        self.assertIn("Proceeding on", said)
+        self.assertNotIn("fortknox", said)
+        self.assertNotIn("up.py:Build:FortKnox", said)
+        self.assertIn("the raw clips do not come back", said)
 
     def test_an_unconfigured_install_gets_the_unverified_banner_instead(self):
         """Nothing was asked, so nothing is attributed — and the sentence that

@@ -115,8 +115,20 @@ def did(note: str) -> Outcome:
     return Outcome(True, note)
 
 
-def stopped(note: str) -> Outcome:
-    return Outcome(False, note)
+def stopped(note: str, performed: bool = False) -> Outcome:
+    """An item that did not complete, and by default did not DO anything.
+
+    performed drove one thing: whether the plugin is told its input moved. It
+    defaulted to True here, so declining a prompt -- typing anything but the
+    word, answering n, pressing q -- announced a change that had not happened,
+    the plugin dropped whatever it had cached, and the next menu draw paid for
+    a fresh answer. Eight seconds of "Reading the workspace..." for a keypress
+    that touched nothing.
+
+    An abort part-way through a copy or an encode IS a change, so that one
+    passes performed=True from where it knows: Aborted carries mid_run.
+    """
+    return Outcome(False, note, performed)
 
 
 def _not_doing(verdict: Verdict) -> Outcome:
@@ -367,7 +379,7 @@ class MenuItem(ABC):
     def outcome(self) -> Optional[Outcome]:
         return self._outcome
 
-    def aborted(self, note: str) -> Outcome:
+    def aborted(self, note: str, performed: bool = False) -> Outcome:
         """Record an interruption as this item's answer.
 
         Ctrl-C and a bare q leave execute() part-way through, so the outcome
@@ -375,7 +387,7 @@ class MenuItem(ABC):
         runner asks it. An abort is simply not completing: the position stays
         where it was, which is the same thing a declined prompt means.
         """
-        self._outcome = stopped(note)
+        self._outcome = stopped(note, performed)
         return self._outcome
 
     # -- doing it ----------------------------------------------------------

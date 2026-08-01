@@ -1063,17 +1063,22 @@ class TestATargetThatDeclinesTheDestinationQuestion(SeamTest):
         b, _ran = self._cleaned(complete=NA)
         self.assertEqual(b.renders_on_disk(), [RENDER_NAME])
 
-    def test_the_banner_names_the_answer_the_erase_actually_rested_on(self):
-        """Attribution is worthless if it names an answer that was not given.
+    def test_the_gate_that_decided_is_the_gate_on_screen(self):
+        """RESTATED: the banner used to name the plugin and the gate together
+        — "proceeding on <name> (<loader spec>)'s answer that these renders
+        are complete at the destination". The gate still has to be the one
+        that actually decided; naming the plugin is what went.
 
-        The last line before the footage goes used to say "proceeding on X's
-        answer that these renders are published" whatever had been asked —
-        including to a target that had just said publishing does not arise
-        here. A reader checking that sentence afterwards would be checking one
-        the plugin can truthfully deny.
+        Three lines above a delete carried its name, and a screen that repeats
+        a third party's name over an irreversible act reads as the tool laying
+        the decision off on it. The decision is the operator's, on evidence
+        this tool gathered. Whose answer it rested on is recorded in the
+        ledger, which outlives the session; a screen does not.
         """
         _b, ran = self._cleaned(complete=YES)
-        self.assertIn("are complete at the destination", ran.printed)
+        self.assertIn("complete at the destination", ran.printed)
+        self.assertNotIn("RecordingUploader", ran.printed)
+        self.assertNotIn("/a/test/plugin.py", ran.printed)
 
 
 # ---------------------------------------------------------------------------
@@ -1477,14 +1482,15 @@ class TestTheShippedExampleIsRunAndNotJustRead(SeamTest):
         self.assertIn("Nothing to do", _runner_said(b, UPLOAD))
 
     def test_the_erase_rests_on_the_examples_own_answer(self):
-        """And says so, naming the gate that actually decided."""
+        """And says which gate decided, without naming who answered it."""
         b, _dest = self._example()
         b.run(BUILD)
         b.run(UPLOAD)
         ran = b.run(CLEAN_WS)
         self.assertTrue(ran.completed, ran.note)
         self.assertFalse(b.footage_on_disk())
-        self.assertIn("are complete at the destination", ran.printed)
+        self.assertIn("complete at the destination", ran.printed)
+        self.assertNotIn("LocalWebSiteUploader", ran.printed)
 
     def test_an_upload_that_never_happened_keeps_the_footage(self):
         """The destination has nothing, so it says NO — and the erase is

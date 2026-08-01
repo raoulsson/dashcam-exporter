@@ -5383,17 +5383,16 @@ def _print_gates(world):
 
 
 def _print_who_answers(target):
-    """Which implementation the two destination gates are asking.
+    """Nothing. The gates below say what was answered; who answered is the
+    tool's own business.
 
-    Attribution, not a safeguard — a component inside the trust boundary needs
-    no policing, and this line polices nothing. It is so that if footage is
-    gone and the answer was wrong, the operator can read whose answer he acted
-    on off the tool rather than out of memory. The first gate is deliberately
-    not covered by it: that one never leaves this machine.
+    It printed the plugin's name and its whole loader spec over a screen about
+    erasing footage, and then again in the banner, and a third time in the
+    sentence the erase proceeded on. Naming a third party three times above a
+    delete reads as laying off the decision on it -- the decision is the
+    operator's, taken on evidence this tool gathered and asked for.
     """
-    if not target.configured:
-        return
-    print(C.dim("  destination: %s" % target.origin))
+    return
 
 
 def _applicable_readings(world):
@@ -5438,26 +5437,19 @@ def _what_survives(ctx, world):
 
 
 def _on_the_targets_word(target, proof):
-    """What survives, and which answer of whose says so.
+    """What survives, without naming who vouched for it.
 
-    The second line names the implementation because the erase is proceeding
-    on ITS answer, not on anything this repo checked. Not a warning: whoever
-    configured it owns what it does, exactly as with any library. It is there
-    so the decision stays attributable afterwards, when the footage is gone
-    and the only question left is who said it was safe.
-
-    It names the GATE too, and that is not decoration. This line used to say
-    "published" whatever had been asked, including to a target that had
-    answered "the serving question does not arise here" — which the shipped
-    folder example does, and an archive disk does. Attribution to an answer
-    that was never given is worse than none: it is the last sentence before
-    the footage goes, and a reader checking it afterwards is checking a
-    sentence the target can truthfully deny.
+    It named the implementation twice -- once as "the copies <name> holds"
+    and once as "proceeding on <name> (<full loader spec>)'s answer" -- on the
+    argument that the decision should stay attributable. It still is: the
+    ledger's note for the sweep records whose answer it rested on, in a file
+    that outlives the session. On screen, above a delete, the same fact three
+    times reads as the tool laying the decision off on somebody else. The
+    decision is the operator's, on evidence this tool gathered and printed
+    two lines above.
     """
-    return (C.dim("  The renders and the copies %s holds stay; the raw clips"
-                  " do not come back." % target.name),
-            C.dim("  Proceeding on %s's answer that these renders are %s."
-                  % (target.origin, proof)))
+    return (C.dim("  The renders stay, and so do the copies at the destination;"
+                  " the raw clips do not come back."),)
 
 
 def _nothing_off_this_machine_was_checked(ctx, unproven):
@@ -6876,7 +6868,7 @@ def _orphan_file(ctx, files):
         path.write_text("\n".join(files) + "\n")
     except OSError:
         return ()
-    return (C.dim("        Full list: %s" % tilde(path)),)
+    return (C.bold("        Full list: %s" % tilde(path)),)
 
 
 def _unlink_quietly(path):
@@ -7306,7 +7298,8 @@ class Runner:
         _print_all(_crash_log_line(_log_crash(self.ctx, item)))
         self.ctx.results.append(StepResult(
             item.name(), FAILED, 0, "%s: %s" % (type(exc).__name__, exc)))
-        return item.aborted("failed: %s" % exc)
+        # performed: a crash lands anywhere, including after the act.
+        return item.aborted("failed: %s" % exc, performed=True)
 
     def _interrupted(self, item, exc):
         """An abort does NOT complete the item, so the position stays put —
@@ -7322,7 +7315,7 @@ class Runner:
         # The same words to the item, because the outcome's note is what the
         # line under this one prints. Two spellings of one event gave the
         # summary "Aborted by user mid-run." and the screen "interrupted".
-        return item.aborted(note)
+        return item.aborted(note, performed=exc.mid_run)
 
 
 def _nothing_to_do_lines(outcome):
