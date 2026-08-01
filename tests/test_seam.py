@@ -287,6 +287,7 @@ class Bench:
         c.state_dir = self.root / "state"
         c.lock_file = self.root / P.LOCK_FILE
         c.workspace = self.root
+        c.log_dir = self.root / "logs"
         c.render_root = self.root / "import"
         c.import_root = self.root / "import"
         c.card = self.root / "card"
@@ -1438,6 +1439,35 @@ class TestWipingAWorkspaceWhoseSourceIsStillInTheSlot(SeamTest):
         self.assertNotIn("ORIGINAL", said)
         self.assertIn("removes 1 trips and the metadata", said)
         self.assertIn("still on the SIM card", said)
+
+
+class TestEveryRendererRunIsToldWhereToLog(SeamTest):
+    """make-trips-rendered.sh defaults LOG_DIR to <out>/logs.
+
+    So a call that does not pass it writes its run log into the EXPORT tree —
+    beside the sidecars, inside the directory item 8 sweeps, and nowhere near
+    the logs/ the workspace keeps at its root. Only the render step passed it,
+    so every sidecar pass logged in the wrong place.
+    """
+
+    def _envs(self, run):
+        return [c.kwargs.get("env_extra") for c in run.call_args_list]
+
+    def test_the_sidecar_pass_carries_it(self):
+        b = self.bench().imported()
+        payload = {"trips": [{"index": 1, "renderable": True, "day": "2026-07-31",
+                              "out_base": str(b.ctx.out_dir / "nope")}]}
+        with quiet(), mock.patch.object(P, "load_groups", return_value=payload), \
+                mock.patch.object(P, "run_stream", return_value=(0, [])) as run:
+            P.step_generate_meta(b.ctx)
+        self.assertTrue(run.called)
+        for env in self._envs(run):
+            self.assertEqual(env, {"LOG_DIR": str(b.ctx.log_dir)})
+
+    def test_and_the_log_dir_is_the_workspace_root(self):
+        b = self.bench()
+        self.assertEqual(b.ctx.log_dir, b.ctx.workspace / "logs")
+        self.assertNotIn(str(b.ctx.out_dir), str(b.ctx.log_dir))
 
 
 class TestGpsAloneIsStillWorkToDo(SeamTest):

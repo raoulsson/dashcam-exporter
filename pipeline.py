@@ -762,6 +762,18 @@ def _reader(stream, q):
         q.put(None)
 
 
+def _renderer_env(ctx):
+    """What every run of the renderer needs told, in one place.
+
+    LOG_DIR above all: make-trips-rendered.sh defaults it to <out>/logs, so a
+    call that did not pass it wrote its run log into the EXPORT tree — beside
+    the sidecars, inside the directory item 8 sweeps, and nowhere near the
+    logs/ the workspace keeps at its root. Only the render step was passing
+    it, so every sidecar pass left a log in the wrong place.
+    """
+    return {"LOG_DIR": str(ctx.log_dir)}
+
+
 def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
                env_extra=None, tail_lines=40, stdout_file=None, note_first=False,
                quiet_finish=False):
@@ -3395,7 +3407,8 @@ def step_generate_meta(ctx):
     cmd = (["./make-trips-rendered.sh", "--sidecars-only", "--root", str(root),
             "--out", str(ctx.out_dir)] + ctx.config_args + ctx.scan_args)
     rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars",
-                            parser=make_scan_parser(), quiet_finish=True)
+                            parser=make_scan_parser(), quiet_finish=True,
+                            env_extra=_renderer_env(ctx))
     if rc != 0:
         return record(ctx, NAME[META], FAILED, started, "sidecars exit %d" % rc)
     # Counted where they were written, not across the whole export tree: an
@@ -3617,7 +3630,8 @@ def load_groups(ctx, root, refresh=False):
         rc, _lines = run_stream(
             [renderer_python(ctx), "-u", "make_dashcam_videos.py", "--print-groups",
              "--root", str(root), "--out", str(ctx.out_dir)] + ctx.config_args + ctx.scan_args,
-            ctx.exporter, "Grouping", stdout_file=tmp, quiet_finish=True)
+            ctx.exporter, "Grouping", stdout_file=tmp, quiet_finish=True,
+            env_extra=_renderer_env(ctx))
         if rc != 0:
             return None
         try:
@@ -4113,8 +4127,9 @@ def build_sidecars(ctx):
         cmd = (["./make-trips-rendered.sh", "--sidecars-only",
                 "--root", str(cand), "--out", str(ctx.out_dir)]
                + ctx.config_args + ctx.scan_args)
-        rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars", parser=make_scan_parser(),
-                                keep=lambda l: l.startswith("[Trip "))
+        rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars",
+                                parser=make_scan_parser(), quiet_finish=True,
+                                env_extra=_renderer_env(ctx))
         if rc == 0:
             ran.append(cand)
     return ran
@@ -4882,8 +4897,7 @@ def step_render(ctx):
     # already says, and its "✓ <absolute path>" lines are one per video in the
     # renderer's words -- the sentence below counts them once, in the tool's.
     rc, _lines = run_stream(cmd, ctx.exporter, "Render", parser=make_render_parser(),
-                            env_extra={"LOG_DIR": str(ctx.log_dir)},
-                            quiet_finish=True)
+                            env_extra=_renderer_env(ctx), quiet_finish=True)
     after = set(rendered_mp4s(ctx.out_dir))
     new = after - before
     if rc != 0:
