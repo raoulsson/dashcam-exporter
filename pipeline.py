@@ -504,6 +504,7 @@ class Live:
         self.enabled = enabled
         self.height = 0
         self.opened = False
+        self.emitted = False
         if self.enabled:
             sys.stdout.write("\x1b[?25l")   # hide cursor
             sys.stdout.flush()
@@ -511,7 +512,13 @@ class Live:
     def _open(self):
         """A blank line under whatever printed last, once, before the first
         draw. The bar arrived hard against the line above it -- a status row,
-        a prompt the operator had just answered -- and read as part of it."""
+        a prompt the operator had just answered -- and read as part of it.
+
+        Taken back by close(), unless something was emitted under it. A step
+        that runs two children -- the grouping scan and then the sidecar pass
+        -- opened one each and left both behind, so the line that followed sat
+        two blank lines below the line that introduced it.
+        """
         if not self.opened:
             self.opened = True
             sys.stdout.write("\n")
@@ -540,6 +547,7 @@ class Live:
         if not self.enabled:
             print(text)
             return
+        self.emitted = True
         self._erase()
         sys.stdout.write(text[:term_width() - 1] + "\n")
         sys.stdout.flush()
@@ -547,6 +555,10 @@ class Live:
     def close(self):
         if self.enabled:
             self._erase()
+            if self.opened and not self.emitted:
+                # Take the blank line back. It was there to separate a bar
+                # that is now gone, and nothing was left under it.
+                sys.stdout.write("\x1b[1A\x1b[J")
             sys.stdout.write("\x1b[?25h")   # show cursor
             sys.stdout.flush()
             self.enabled = False
