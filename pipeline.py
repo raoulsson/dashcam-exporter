@@ -2732,10 +2732,25 @@ def record_import(ctx, card):
     """Advance the ledger to the newest clip on the card just imported.
 
     Called only after import-sd-card.sh exits 0, which it does only after
-    verifying the copy file-for-file — so 'a verified copy of everything up to
-    this stamp exists on this disk' is a fact, and that fact is what the
-    ledger holds. Taken from the CARD because the card is what the next delta
-    compares against. write_ledger refuses to move backwards.
+    verifying the copy file-for-file. Taken from the CARD because the card is
+    what the next delta compares against, and write_ledger refuses to move
+    backwards.
+
+    What this stamp does NOT establish, though it used to say it did: that a
+    verified copy of everything up to it exists on this disk. It is one
+    number, and it is lifted by things that are not a copy — a cleanup writes
+    it from last_imported_stamp(), which reads the END of every rendered
+    trip's meta. Render a trip that ends on the 24th and the mark asserts the
+    2nd of May was imported too.
+
+    That is not hypothetical: the first mark this machine ever wrote came from
+    a cleanup, at 20260724185433, and thirteen clips older than it had never
+    been copied. Every delta after that skipped them as already imported,
+    while item 9 refused to erase the card because nothing accounted for them.
+
+    The mark is therefore an optimisation, not the authority. What a delta
+    actually offers is to_import(): above the mark OR owed, and owed is the
+    per-clip accounting that cannot be lifted by an unrelated render.
     """
     newest = ""
     front = card / "DCIM" / "200video" / "front"
