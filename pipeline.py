@@ -7084,7 +7084,26 @@ def _logged(ctx, number, run):
     started = time.time()
     outcome = run()
     record(ctx, NAME[number], _status_of(outcome), started, outcome.note)
+    _closed_on(outcome)
     return outcome
+
+
+def _closed_on(outcome):
+    """The one green line every step ends on, for the two that are a plugin's.
+
+    Every other step closes on `100% - <what it did>`, and these two closed on
+    nothing at all: the heading, the description, whatever the child streamed,
+    and then the menu again. The operator was left inferring success from the
+    absence of red.
+
+    The act's own words, not this module's. It is the only thing that knows
+    what it achieved -- how many trips it indexed, how many videos went up --
+    and quiet_finish exists precisely so the streamer's "completed" does not
+    speak over it. Nothing is printed for an outcome that did not complete: the
+    failure has already said more than a summary line could.
+    """
+    if outcome.completed and outcome.performed and outcome.note:
+        done_line(outcome.note)
 
 
 def _status_of(outcome):
