@@ -1520,7 +1520,7 @@ class TestEveryExcludedTripIsCounted(SeamTest):
     def test_the_drop_is_recorded_for_all_three(self):
         b = self.bench()
         P._record_the_drop(b.ctx, self._three(), [1, 2, 4])
-        self.assertEqual(len(P.dropped_trip_keys(b.ctx)), 3)
+        self.assertEqual(len(P.dropped_trip_keys(b.ctx, "")), 3)
         # The destination still hears only about the trip it could know.
         self.assertEqual(P.dropped_trip_ids(b.ctx), ("trip_2026-07-10_16-23_01",))
 
@@ -1528,7 +1528,7 @@ class TestEveryExcludedTripIsCounted(SeamTest):
         """It used to return before writing anything at all."""
         b = self.bench()
         P._record_the_drop(b.ctx, self._three(), [1, 4])
-        self.assertEqual(len(P.dropped_trip_keys(b.ctx)), 2)
+        self.assertEqual(len(P.dropped_trip_keys(b.ctx, "")), 2)
         self.assertEqual(P.dropped_trip_ids(b.ctx), ())
 
     def test_the_stamps_beside_them_survive_the_write(self):
@@ -1537,13 +1537,27 @@ class TestEveryExcludedTripIsCounted(SeamTest):
         P.record_excluded_stamps(b.ctx, {"20260502102459"})
         P._record_the_drop(b.ctx, self._three(), [1])
         self.assertEqual(P.excluded_stamps(b.ctx), {"20260502102459"})
-        self.assertEqual(P.dropped_trip_keys(b.ctx), ("20260502102459",))
+        self.assertEqual(P.dropped_trip_keys(b.ctx, ""), ("20260502102459",))
 
     def test_dropping_the_same_trip_twice_counts_once(self):
         b = self.bench()
         P._record_the_drop(b.ctx, self._three(), [2])
         P._record_the_drop(b.ctx, self._three(), [2])
-        self.assertEqual(len(P.dropped_trip_keys(b.ctx)), 1)
+        self.assertEqual(len(P.dropped_trip_keys(b.ctx, "")), 1)
+
+    def test_a_finished_cycle_is_not_counted_into_the_next_one(self):
+        """Clean Workspace ends a cycle. A count that survives it reports last
+        week's decisions on a screen whose row above says the workspace is
+        empty, and the operator is left working out which trips he still has
+        to care about."""
+        b = self.bench()
+        b.ctx.selected_import = b.ctx.import_root / "2026-08-01"
+        P._record_the_drop(b.ctx, self._three(), [1, 2, 4])
+        self.assertEqual(len(P.dropped_trip_keys(b.ctx, "2026-08-01")), 3)
+        self.assertEqual(P.dropped_trip_keys(b.ctx, "2026-08-02"), ())
+        self.assertEqual(P.dropped_trip_keys(b.ctx, ""), ())
+        # ...and the seam's list is untouched by the scoping.
+        self.assertEqual(P.dropped_trip_ids(b.ctx), ("trip_2026-07-10_16-23_01",))
 
     def test_the_row_counts_trips_not_ids(self):
         line = P._excluded_line(P.W.World(dropped_ids=("trip_a",),

@@ -2373,10 +2373,28 @@ def dropped_trip_ids(ctx):
     return tuple(sorted(str(i) for i in _excluded_record(ctx).get("ids", [])))
 
 
-def dropped_trip_keys(ctx):
-    """Every trip deleted on purpose, ever, including the ones that never
-    rendered — see _excluded_record for why that is a different list."""
-    return tuple(sorted(str(k) for k in _excluded_record(ctx).get("trips", [])))
+def dropped_trip_keys(ctx, namespace):
+    """The trips deleted on purpose FROM THIS IMPORT, keyed by its folder name.
+
+    Per import rather than for all time, because the one thing that reads this
+    is the progress block, and the progress block describes a cycle. Clean
+    Workspace ends a cycle; a count that survives it reports last week's
+    decisions on a screen whose row above says the workspace is empty, and the
+    operator is left wondering which trips he is supposed to still care about.
+
+    Only this list is scoped. dropped_ids stays permanent and unscoped: a
+    builder rebuilding an index needs every trip ever dropped here, because a
+    dropped trip and a published-then-cleaned-up one are indistinguishable to
+    it forever after.
+
+    A record written before this was keyed reads as a plain list, and every
+    namespace finds nothing in it. That is the right answer rather than a
+    migration: those drops belong to cycles that are over.
+    """
+    trips = _excluded_record(ctx).get("trips", {})
+    if not isinstance(trips, dict):
+        return ()
+    return tuple(sorted(str(k) for k in trips.get(namespace, [])))
 
 
 def _strings(values):
@@ -2394,16 +2412,24 @@ def record_excluded_stamps(ctx, stamps):
     return merged
 
 
-def record_dropped_trips(ctx, trip_ids, keys=()):
+def record_dropped_trips(ctx, trip_ids, keys=(), namespace=""):
     """Persist what a drop removed: the trip ids, and the trips themselves.
 
     Both in one write. They are two keys of one record, and a second write for
     the second key is the rewrite the record's own docstring warns about.
+
+    The ids go in flat and forever; the trips go in under the import they came
+    from, because the progress block counts a cycle and not a workspace's whole
+    history.
     """
     record = _excluded_record(ctx)
     merged = _strings(record.get("ids", ())) | _strings(trip_ids)
     record["ids"] = sorted(merged)
-    record["trips"] = sorted(_strings(record.get("trips", ())) | _strings(keys))
+    trips = record.get("trips")
+    if not isinstance(trips, dict):
+        trips = {}
+    trips[namespace] = sorted(_strings(trips.get(namespace, ())) | _strings(keys))
+    record["trips"] = trips
     _write_excluded(ctx, record)
     return merged
 
@@ -4822,6 +4848,11 @@ def _existing_sidecars(base):
     return [p for p in paths if p.is_file()]
 
 
+def _namespace_now(ctx):
+    """The import a drop belongs to, by folder name."""
+    return ctx.selected_import.name if ctx.selected_import else ""
+
+
 def _record_the_drop(ctx, by_index, picked):
     """Write down that these trips went ON PURPOSE.
 
@@ -4852,7 +4883,7 @@ def _record_the_drop(ctx, by_index, picked):
     # Recorded, not announced. Both ledgers are bookkeeping the operator
     # cannot act on, and each was a dim line above the one green sentence that
     # says what actually happened.
-    record_dropped_trips(ctx, ids, keys)
+    record_dropped_trips(ctx, ids, keys, _namespace_now(ctx))
 
 
 def _clear_intermediates(ctx):
@@ -6891,7 +6922,7 @@ def _world_of(ctx, scope, imports, root, metas, renders, trip_ids, target,
         imports=imports, selected_import=root, metas=metas,
         renders=renders, renders_here=_renders_here(ctx, root),
         trip_ids=trip_ids, dropped_ids=dropped_trip_ids(ctx),
-        dropped_trips=dropped_trip_keys(ctx),
+        dropped_trips=dropped_trip_keys(ctx, root.name if root else ""),
         import_files=mine, unsourced_files=_unsourced_files(root, ctx.card, mine),
         card_shares_the_import=_card_shares(ctx.card, root),
         final_folders=_final_folders(ctx), expected_trips=_expected_trips(ctx, root, metas),
