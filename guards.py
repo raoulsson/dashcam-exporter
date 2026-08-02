@@ -197,7 +197,48 @@ def _local_count_unproven(world) -> Optional[Verdict]:
     return _verdict_of(WORKSPACE_GATES[0][0], reading)
 
 
-_FLOORS = (nothing_was_rendered_here, _local_count_unproven)
+def _only_copy_is_here(world) -> Optional[Verdict]:
+    """A clip this sweep would delete that exists nowhere else.
+
+    The third floor, and the one the other two cannot see. They reason about
+    TRIPS: how many were rendered, and whether the destination has them. A trip
+    too short to render gets no sidecar, so it is in no trip_ids and counts
+    toward no expected_trips — the local count is met by the renders that do
+    exist, and the destination answers YES honestly about the trips it was
+    asked about. The fragment's footage then goes with the sweep, having been
+    accounted for by nothing but sitting in the folder about to be erased.
+
+    Reachable in the order the graph calls SAFE: erase the card while its clips
+    are provably in the workspace, then clean the workspace once the renders
+    are published. That reasoning is sound for a trip that was rendered and
+    silently false for one that never will be.
+
+    The remedy is named rather than left to be worked out. Excluding is what
+    this tool already calls "this footage never happened, deliberately": it
+    records the decision, every guard honours it afterwards, and the delta
+    import stops offering the clips back every cycle.
+    """
+    if not world.orphan_clips:
+        return None
+    n = len(world.orphan_clips)
+    plural = "" if n == 1 else "s"
+    # Two different facts, and only one of them is about the footage. With no
+    # card in the slot nothing has been ruled out -- the clips may be sitting
+    # safely on a card in the car -- and saying they exist nowhere else would
+    # be asserting something nobody checked.
+    if not world.card.dcim:
+        return blocked(
+            "%d clip%s here %s in no rendered trip, and there is no card to "
+            "vouch for %s" % (n, plural, "is" if n == 1 else "are",
+                              "it" if n == 1 else "them"),
+            evidence=world.orphan_clips[:8])
+    return blocked(
+        "%d clip%s here exist%s nowhere else — not on the card, in no rendered "
+        "trip, not excluded" % (n, plural, "s" if n == 1 else ""),
+        evidence=world.orphan_clips[:8])
+
+
+_FLOORS = (nothing_was_rendered_here, _local_count_unproven, _only_copy_is_here)
 
 
 def _decided_by_the_destination(world) -> Verdict:

@@ -6046,6 +6046,8 @@ def clean_workspace_plan(ctx, world):
     verdict = guards.clean_is_allowed(world)
     if verdict.blocked:
         print(C.red("  Refusing: %s." % verdict.reason))
+        _print_all(_evidence_lines(verdict))
+        _print_all(_the_way_out(world))
         _print_all(guards.unsourced_lines(world))
         _print_gate_detail(world)
         return _nothing(ctx, CLEAN_WS, started, "refused: %s" % verdict.reason)
@@ -6091,6 +6093,32 @@ def _why_it_may_go(world):
     print()
     _print_gates(world)
     return ()
+
+
+def _the_way_out(world):
+    """Name the step that resolves this, when there is one.
+
+    A refusal that only says no leaves the operator to work out which of nine
+    entries un-sticks it, and the answer here is not obvious: the clips belong
+    to a trip too short to render, which is why nothing accounts for them, and
+    the entry that helps is the one for deleting trips on purpose.
+
+    Only for the orphan floor. The other two refusals are answered by doing the
+    work -- render the trips, publish them -- and a step that says "go and
+    render" is telling him what he already came here from.
+    """
+    if not world.orphan_clips:
+        return ()
+    if not world.card.dcim:
+        return (C.yellow("  Put the card back in and they are accounted for"
+                         " again, or drop them in %d) %s" % (EXCLUDE, NAME[EXCLUDE])),
+                C.yellow("  if the footage is not wanted — that records the"
+                         " decision instead of losing it."))
+    return (C.yellow("  They belong to trips too short to render, so nothing"
+                     " will ever account for them."),
+            C.yellow("  Drop them in %d) %s — that records the decision, and"
+                     " the import stops offering" % (EXCLUDE, NAME[EXCLUDE])),
+            C.yellow("  them back every cycle. Then this step goes through."))
 
 
 def _print_gate_detail(world):
@@ -6355,6 +6383,37 @@ def _spans_of(metas):
 def _digits14(v):
     """A timestamp in the 14-digit form a clip filename carries. None is ""."""
     return str(v or "").replace("-", "").replace(":", "").replace(" ", "")[:14]
+
+
+def orphan_clips(ctx, root):
+    """Clips in this import whose ONLY copy is this import.
+
+    Not on the card, not inside a trip that was rendered, not excluded on
+    purpose. Every other clip in the workspace has something else vouching for
+    it; these have nothing, and Clean Workspace is about to delete them.
+
+    They exist because a trip too short to render gets no sidecar, so it is in
+    no trip_ids and counts toward no expected_trips — which makes it invisible
+    to both of item 8's gates. The destination answers YES honestly about the
+    trips it was asked about, the local floor is satisfied by the renders that
+    do exist, and the fragment goes with the sweep.
+    """
+    if root is None:
+        return ()
+    here = _import_clip_stamps(root)
+    if not here:
+        return ()
+    accounted = (set(card_stamps(ctx)) | set(excluded_stamps(ctx))
+                 | set(covered_stamps(ctx, here)))
+    return tuple(sorted(here - accounted))
+
+
+def _import_clip_stamps(root):
+    front = root / "DCIM" / VIDEO_DIR / "front"
+    if not front.is_dir():
+        return set()
+    return {m.group(1) for f in front.glob("*.mp4")
+            for m in [STAMP_RE.search(f.name)] if m}
 
 
 def workspace_stamps(ctx, stamps):
@@ -6974,6 +7033,7 @@ def _world_of(ctx, scope, imports, root, metas, renders, trip_ids, target,
         dropped_trips=dropped_trip_keys(ctx, root.name if root else ""),
         import_files=mine, unsourced_files=_unsourced_files(root, ctx.card, mine),
         card_shares_the_import=_card_shares(ctx.card, root),
+        orphan_clips=orphan_clips(ctx, root),
         final_folders=_final_folders(ctx), expected_trips=_expected_trips(ctx, root, metas),
         has_track=_has_track(imports), stills_current=_stills_current(ctx),
         local_page=_page_exists(ctx), ledger_mark=last_imported_stamp(ctx),

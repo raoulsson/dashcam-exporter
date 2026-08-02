@@ -264,6 +264,53 @@ class TestWorkingAreaIsExpendable(GuardTest):
 # purge_published_renders — what Clean Workspace keeps when it is allowed to run
 # ---------------------------------------------------------------------------
 
+class TestAClipWithNoSecondCopyStopsTheSweep(unittest.TestCase):
+    """The floor the other two cannot see.
+
+    They reason about TRIPS: how many were rendered, and whether the
+    destination has them. A trip too short to render gets no sidecar, so it is
+    in no trip_ids and counts toward no expected_trips — the local count is met
+    by the renders that do exist, and the destination answers YES honestly
+    about the trips it was asked about. Its footage then went with the sweep.
+
+    Reachable in the order the graph calls SAFE: erase the card while its clips
+    are provably in the workspace, then clean once the renders are published.
+    Sound for a trip that was rendered, silently false for one that never will
+    be.
+    """
+
+    def _world(self, orphans=()):
+        return W.World(
+            out_dir=Path("/ws"), imports=(Path("/ws/import"),),
+            selected_import=Path("/ws/import"),
+            renders=tuple(W.Render("t%d.mp4" % i, 10) for i in range(4)),
+            renders_here=tuple(W.Render("t%d.mp4" % i, 10) for i in range(4)),
+            expected_trips=4, trip_ids=("t0", "t1", "t2", "t3"),
+            card=W.Card(path=Path("/card"), dcim=True, present=False),
+            target=W.TargetFacts(configured=True, name="site",
+                                 complete=M.Evidence.YES, namespace="import"),
+            orphan_clips=orphans)
+
+    def test_the_sweep_is_refused(self):
+        verdict = guards.clean_is_allowed(self._world(("20260728155513",)))
+        self.assertTrue(verdict.blocked)
+        self.assertIn("nowhere else", verdict.reason)
+
+    def test_the_clips_are_named_rather_than_counted(self):
+        """He decides whether footage matters by looking at it, and a headcount
+        is not something anyone can act on."""
+        verdict = guards.clean_is_allowed(self._world(("20260728155513",)))
+        self.assertEqual(verdict.evidence, ("20260728155513",))
+
+    def test_everything_else_unchanged_still_goes_through(self):
+        self.assertFalse(guards.clean_is_allowed(self._world()).blocked)
+
+    def test_excluding_them_is_what_lifts_it(self):
+        """Not a flag that skips the gate: excluding records the decision, and
+        orphan_clips is derived with the exclusions subtracted."""
+        self.assertFalse(guards.clean_is_allowed(self._world(())).blocked)
+
+
 class TestPurgeKeepsState(GuardTest):
     """RESTATED. Two of these asserted the receipts stay where they were.
 
