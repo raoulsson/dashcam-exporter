@@ -1681,7 +1681,7 @@ class TestGpsAloneIsStillWorkToDo(SeamTest):
 
     def test_the_track_alone_counts_as_work(self):
         b = self._imported_without_its_track()
-        _here, todo, _size, files = P._delta_counts(b.ctx, "")
+        _here, todo, _size, files, _d, _ds = P._delta_counts(b.ctx, "")
         self.assertEqual(todo, 0, "no clip is missing")
         self.assertEqual([f for f in files if "203gps" in f],
                          ["DCIM/203gps/20260101000000_0480_T.git"])
@@ -1696,7 +1696,7 @@ class TestGpsAloneIsStillWorkToDo(SeamTest):
         dst = b.ctx.render_root / "DCIM" / "203gps"
         dst.mkdir(parents=True, exist_ok=True)
         (dst / "20260101000000_0480_T.git").write_text("track")
-        _here, _todo, _size, files = P._delta_counts(b.ctx, "")
+        _here, _todo, _size, files, _d, _ds = P._delta_counts(b.ctx, "")
         self.assertEqual(files, [], "it offered what the workspace already had")
 
 
@@ -1769,7 +1769,7 @@ class TestWhatIsOfferedIsWhatIsFetched(SeamTest):
     def test_the_list_holds_exactly_what_was_offered(self):
         """The old clip is accounted for — dropped on purpose — so only the
         new one is wanted, and only the new one is in the list."""
-        _here, todo, _size, files = self._counts(
+        _here, todo, _size, files, _d, _ds = self._counts(
             ["20260724185433", "20260801120000"], "20260724185433",
             excluded=["20260724185433"])
         self.assertEqual(todo, 1)
@@ -1780,7 +1780,7 @@ class TestWhatIsOfferedIsWhatIsFetched(SeamTest):
         """The case that broke both ways. AFTER_STAMP would skip it; no filter
         at all would fetch the whole card. The list names it and nothing
         else."""
-        _here, todo, _size, files = self._counts(
+        _here, todo, _size, files, _d, _ds = self._counts(
             ["20260502102459", "20260801120000"], "20260724185433")
         self.assertEqual(todo, 2, "the old clip was not offered")
         self.assertEqual(sorted(f for f in files if f.endswith(".mp4")),
@@ -1795,7 +1795,7 @@ class TestWhatIsOfferedIsWhatIsFetched(SeamTest):
         front = b.ctx.card / "DCIM" / "200video" / "front"
         front.mkdir(parents=True, exist_ok=True)
         (front / "20260801120000_0060.mp4").write_text("x" * 500)
-        _here, _todo, size, files = P._delta_counts(b.ctx, "")
+        _here, _todo, size, files, _d, _ds = P._delta_counts(b.ctx, "")
         self.assertEqual(size, P._weigh(b.ctx.card, files))
 
 

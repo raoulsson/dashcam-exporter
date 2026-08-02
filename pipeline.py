@@ -106,9 +106,17 @@ EXPORTER_DIR = Path(__file__).resolve().parent
 # ---------------------------------------------------------------------------
 
 def human_bytes(n):
+    """Decimal GB, the way df -H and the label on the disk report it.
+
+    Powers of ten, not two. The operator compares these figures against what
+    the Finder and df tell him about the same card, and 1024-based units are
+    seven per cent smaller than both at gigabyte scale -- so a 136.6 GB card
+    read as "127.2 GB" and the difference looked like footage the tool could
+    not see.
+    """
     if n is None:
         return "?"
-    step = 1024.0
+    step = 1000.0
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if n < step or unit == "TB":
             return ("%.0f %s" % (n, unit)) if unit == "B" else ("%.1f %s" % (n, unit))
@@ -1384,8 +1392,13 @@ def _state(label, state, where):
     path every launch and the state is the part that changed. Left where the
     state was, the eye has to find the one word that moved among three
     different-length paths.
+
+    The state column is wide enough for the longest state any row can hold --
+    "mounted  239 clips (48.7 GB)" -- because a column that only usually lines
+    up is one the eye stops trusting, and then the path it was drawn for is no
+    easier to find than it was before.
     """
-    return "    %s%s(%s)" % (_padded(label, 13), _padded(state, 26), C.dim(where))
+    return "    %s%s(%s)" % (_padded(label, 13), _padded(state, 30), C.dim(where))
 
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -1555,8 +1568,21 @@ def _volume_path(mount):
 
 
 def _card_note(ctx):
-    n = clip_count(ctx.card)
-    return C.dim("%s clips" % (n if n is not None else "?"))
+    """What this card is WORTH, not what it holds.
+
+    The clips an import would fetch and their weight, because that is the
+    figure the operator is deciding on. A DDPAI card hoards: it keeps every
+    old day until the space is needed, so the total is mostly rounds this
+    machine finished with weeks ago and says nothing about the work in front
+    of him.
+    """
+    try:
+        _here, todo, size, _files, _done, _done_size = _delta_counts(
+            ctx, last_imported_stamp(ctx))
+    except Exception:
+        n = clip_count(ctx.card)
+        return C.dim("%s clips" % (n if n is not None else "?"))
+    return C.dim("%d clips (%s)" % (todo, human_bytes(size)))
 
 
 def print_configuration(ctx):
@@ -2906,7 +2932,7 @@ def _same_card(ctx, leftovers):
 
 
 def _delta_counts(ctx, after):
-    """(already here, still to fetch, bytes, the file list) for this import.
+    """(already here, to fetch, bytes, files, already done, their bytes).
 
     One computation, and the list it produces is what the script is given.
     The screen used to count clips here while import-sd-card.sh worked out
@@ -2917,12 +2943,18 @@ def _delta_counts(ctx, after):
     fact about rounds long since rendered and swept; what is being decided is
     how much of THIS card is not on this machine yet.
     """
+    stamps = frozenset(card_stamps(ctx))
     owed, _note = card_accounting(ctx)
-    new = to_import(ctx, frozenset(card_stamps(ctx)), after,
-                    frozenset(excluded_stamps(ctx)), owed)
+    new = to_import(ctx, stamps, after, frozenset(excluded_stamps(ctx)), owed)
     here = workspace_stamps(ctx, new)
     files = _not_here_yet(ctx, _files_for(ctx.card, new - here))
-    return len(here), len(new - here), _weigh(ctx.card, files), files
+    # What the card holds that this import does NOT offer: clips a previous
+    # round took and this machine has finished with. Named because the two
+    # figures are read side by side -- 416 on the status row, 239 on this one
+    # -- and an unexplained gap reads as a tool that cannot see the rest.
+    done = stamps - new
+    return (len(here), len(new - here), _weigh(ctx.card, files), files,
+            len(done), _weigh(ctx.card, _files_for(ctx.card, done)))
 
 
 def _not_here_yet(ctx, relative):
@@ -3017,16 +3049,20 @@ def _stamp_of_name(name):
     return m.group(1) if m else None
 
 
-def _delta_lines(here, todo, size, files):
-    """What the y is answering, in one line above the prompt.
+def _delta_lines(here, todo, size, files, done=0, done_size=0):
+    """What the y is answering: what comes over, then what already has.
 
-    Clips AND files, because they are different numbers and both are true: a
-    clip is one recording and the camera writes it twice, with its GPS track
-    beside it. The screen offered 14 and the run reported 60, and nothing on
-    either line said they were counting different things.
+    Clips and gigabytes, not the file count. The file count was on this line
+    because a clip is written twice with its GPS beside it, so 239 clips and
+    601 files are both true -- but the second number answers a question about
+    the camera's layout, and the one being asked is how much is about to be
+    copied. The size says that.
 
-    Amber on the figures: they are the only part that changes between runs,
-    and the whole decision is what they say.
+    The already-done line is dim and second because it is reassurance rather
+    than the decision: 239 offered out of 416 on the card reads as a tool that
+    cannot see half of them until something says where the other 177 went.
+
+    Amber on the figures: they are the only part that changes between runs.
     """
     tail = "%s files, %s" % (C.yellow("%d" % files), size)
     if here:
@@ -3036,7 +3072,11 @@ def _delta_lines(here, todo, size, files):
         # No clips, but something to fetch: the GPS for clips that came over
         # before the tracks were being collected at all.
         return ("  no new clips, %s to fetch" % tail, "")
-    return ("  %s clips to import (%s)" % (C.yellow("%d" % todo), tail), "")
+    lines = ["  %s clips to import (%s)" % (C.yellow("%d" % todo), size)]
+    if done:
+        lines.append(C.dim("  %d clips already processed (%s)"
+                           % (done, human_bytes(done_size))))
+    return tuple(lines) + ("",)
 
 
 def _leftover_lines():
@@ -3145,12 +3185,13 @@ def step_import(ctx):
     # clip new again, and item 8 does exactly that when it discards an import.
     after = last_imported_stamp(ctx)
     excluded_stamps(ctx)                 # refresh the cache the split reads
-    here, todo, size, wanted = _delta_counts(ctx, after)
+    here, todo, size, wanted, done, done_size = _delta_counts(ctx, after)
     print()
     if not wanted:
         print(C.green("  Nothing new at the source — it is already all imported."))
         return record(ctx, NAME[IMPORT], SATISFIED, started, "no new clips")
-    _print_all(_delta_lines(here, todo, human_bytes(size), len(wanted)))
+    _print_all(_delta_lines(here, todo, human_bytes(size), len(wanted),
+                            done, done_size))
     if not confirm("  Run delta import", True):
         return record(ctx, NAME[IMPORT], ABORTED, started,
                       "Aborted by user pre-run.")
