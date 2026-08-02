@@ -4369,13 +4369,14 @@ def step_preview(ctx):
                  tilde(index)))
     print(C.green("  100%% - %s clip stills to walk the boundaries by, under %s."
                   % (C.yellow("%d" % shots), tilde(review))))
-    # What the run actually did, which on a second press is almost nothing.
-    # Without it the two lines above are identical to the first run's and read
-    # as though every frame was seeked again.
-    if made + clips_made + dropped:
-        print(C.dim("  %d new, %d already there, %d no longer wanted"
-                    % (made + clips_made,
-                       len(stills) + shots - made - clips_made, dropped)))
+    # ALWAYS, including when it is "0 new". The two lines above are the same on
+    # every run, so a pass that rebuilt nothing looks exactly like one that
+    # rebuilt everything -- and a step that finishes in half a second reads as
+    # a step that did not run. The reassurance is wanted most precisely when
+    # there is nothing to report.
+    print(C.dim("  %d new, %d already there, %d no longer wanted"
+                % (made + clips_made,
+                   len(stills) + shots - made - clips_made, dropped)))
     return record(ctx, NAME[PREVIEW], RAN, started,
                   "%d trips, %d stills in %s" % (len(trips), len(stills), previews_dir))
 
