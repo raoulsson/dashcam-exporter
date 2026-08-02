@@ -905,11 +905,7 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
                 # was being pushed off the right edge by it.
                 t = re.sub(r"^\[[^\]]*\]\s*", "", t)
                 t = re.sub(r"^Completed\s+[\d.]+\s*\w+\s*/\s*~?[\d.]+\s*\w+\s*", "", t)
-            if len(t) > room:
-                # Keep the START. Both encoders and aws put what identifies the
-                # line at the front ("[ 4/6] 2026… encoding", "Completed 3.0
-                # MiB/20.0 MiB"); the ends are filenames and units that repeat.
-                t = t[:room - 1] + "…"
+            t = _fit(t, room)
             tail = "  " + C.dim(t)
         # No wrapper round the whole line: every piece carries its own colour
         # now, and a colour that spans a nested one ends at the nested one's
@@ -1132,6 +1128,31 @@ def _sweep_line(label, i, elapsed):
     line, this one is a head that the child's latest output is appended to.
     """
     return Waiting(label).render_at(i, elapsed).strip()
+
+
+def _fit(text, room):
+    """Trim a child's line to the space left, keeping BOTH ends.
+
+    It used to keep only the start, on the reasoning that an encoder puts what
+    identifies a line at the front. That is true of "[ 4/6] 2026-07-28
+    encoding" and false of "concatenating 99 clips -> trip_2026-07-28_14-14_01
+    _h1080.mp4", where the front is the same words every time and the name at
+    the end is the only part that says which trip is being written. Cut from
+    the front, that line reads "concatenating 99 clips -> trip_2026-".
+
+    So the middle goes. Whatever the line's shape, the two things worth reading
+    -- what is happening, and what it is happening to -- are at the ends.
+    """
+    if len(text) <= room:
+        return text
+    if room < 12:
+        return text[:room]
+    # Clamped so head stays at least 1. Unclamped it went negative in a narrow
+    # terminal, and text[:-1] slices from the END -- returning nearly the whole
+    # line into a space that could not hold it.
+    tail = min(room - 2, max(12, room // 2))
+    head = room - tail - 1
+    return text[:head] + "…" + text[-tail:]
 
 
 def _bar_line(label, frac, elapsed, note, note_first):

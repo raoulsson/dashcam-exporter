@@ -410,6 +410,35 @@ class TheLiveProgressLineIsActuallyDrawn(unittest.TestCase):
         self.assertNotIn("%", out)
 
 
+class TheChildsLineKeepsBothEnds(unittest.TestCase):
+    """What is happening, and what it is happening to.
+
+    The trim kept only the start, on the reasoning that an encoder puts what
+    identifies a line at the front. True of "[ 4/6] 2026-07-28 encoding" and
+    false of "concatenating 99 clips -> trip_..._h1080.mp4", where the front is
+    the same words every time and the name at the end is the only part saying
+    which trip is being written.
+    """
+
+    LINE = "concatenating 99 clips -> trip_2026-07-28_14-14_01_h1080.mp4"
+
+    def test_the_name_at_the_end_survives(self):
+        got = P._fit(self.LINE, 34)
+        self.assertIn("h1080.mp4", got, "cut from the front this said 'trip_2026-'")
+        self.assertTrue(got.startswith("concatenating"))
+
+    def test_it_fits_exactly_the_room_it_was_given(self):
+        for room in range(12, 70):
+            with self.subTest(room=room):
+                self.assertLessEqual(len(P._fit(self.LINE, room)), room)
+
+    def test_a_line_that_fits_is_untouched(self):
+        self.assertEqual(P._fit("short", 40), "short")
+
+    def test_no_room_at_all_still_returns_something_printable(self):
+        self.assertEqual(len(P._fit(self.LINE, 5)), 5)
+
+
 class DiscardingAnImportUnclaimsIt(unittest.TestCase):
     """After throwing away the local copy, the ledger must stop saying it has
     it.
