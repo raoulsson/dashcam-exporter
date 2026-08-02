@@ -3409,11 +3409,13 @@ def _imported_line(world):
 
 
 def _excluded_line(world):
-    # Never dim: dim means "nothing here yet", which is a statement about
-    # work outstanding, and excluding a trip is not work anyone owes. Zero
-    # excluded is the ordinary finished state of a cycle where every trip was
-    # worth keeping, and greying it read as a step not done.
-    return _fact("%d" % len(world.dropped_trips), "Trips excluded", True)
+    # Dim at zero, like every other row. The reasoning for keeping it bright
+    # was that dim says "work outstanding" and nobody owes an exclusion — but
+    # the row counts this cycle now, and at the start of one there is nothing
+    # to say. A lit zero among four dim ones draws the eye to the only number
+    # on the block that means nothing yet.
+    n = len(world.dropped_trips)
+    return _fact("%d" % n, "Trips excluded", bool(n))
 
 
 def _meta_line(world):
