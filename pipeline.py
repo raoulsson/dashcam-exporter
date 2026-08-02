@@ -6412,14 +6412,20 @@ def copy_still_exists(ctx):
 
 
 def wipe_card(ctx):
-    """Erase the card's files, keeping its folder tree. Returns (gone, freed, reason).
+    """Erase the card: DCIM and everything under it. Returns (gone, freed, reason).
 
     The guarded core of item 9 without the conversation. The guard is the same
     pure predicate the item's evaluate and its post-word re-check use — one
     implementation, three call sites, so they cannot drift — asked against a
-    world derived right now. Deletes FILES only: the camera writes into
-    DCIM/200video/{front,rear} and expects those folders to exist, so erasing
-    the tree makes the next recording fail in the car. reason is "" on success.
+    world derived right now.
+
+    DCIM is emptied and kept. Everything under it goes, folders included — the
+    camera makes the ones it needs again on the next recording, so leaving
+    200video/front and its siblings behind was keeping a shape nothing
+    depended on. DCIM itself stays because it is how this tool knows a card is
+    in the slot at all, and nothing outside it is touched.
+
+    reason is "" on success.
     """
     dcim = ctx.card / "DCIM"
     if not dcim.is_dir():
@@ -6431,16 +6437,33 @@ def wipe_card(ctx):
 
 
 def _unlink_card_files(ctx, dcim):
+    """Weigh what is under DCIM, then remove all of it, keeping DCIM.
+
+    Counted before rather than as it goes, because rmtree reports nothing and
+    the figure on the closing line is what says the card is actually empty. One
+    walk to measure, then one removal per top-level folder: on a full card that
+    is 888 stat-and-unlink pairs replaced by five tree removals.
+    """
     gone = freed = 0
-    for f in [f for f in dcim.rglob("*") if f.is_file()]:
+    for f in dcim.rglob("*"):
+        if _real_file(f):
+            try:
+                freed += f.stat().st_size
+                gone += 1
+            except OSError:
+                pass
+    failed = ""
+    for child in sorted(_safe_iterdir(dcim)):
         try:
-            freed += f.stat().st_size
-            f.unlink()
-            gone += 1
+            if _real_dir(child):
+                shutil.rmtree(str(child))
+            else:
+                child.unlink()
         except OSError as e:
-            print(C.red("  Could not erase %s: %s" % (f.name, e)))
-    # No "folders kept so the camera can record" -- the banner said that four
-    # lines up, before the word was typed, which is when it mattered.
+            failed = str(e)
+            print(C.red("  Could not erase %s: %s" % (child.name, e)))
+    if failed:
+        return gone, freed, failed
     _unlink_quietly(ctx.workspace / ORPHAN_LIST)
     done_line("erased %s files from the card, %s freed"
               % (C.yellow("%d" % gone), human_bytes(freed)))

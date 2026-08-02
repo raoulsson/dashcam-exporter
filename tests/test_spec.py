@@ -517,13 +517,23 @@ class TestPostState(SpecTest):
         P.after_render(self.b.ctx)                          # expected entry point
         self.assertFalse(any(inter.iterdir()) if inter.exists() else False)
 
-    def test_wiping_the_sim_keeps_the_folder_tree(self):
-        """The camera writes into DCIM/200video/{front,rear} and expects them."""
+    def test_wiping_the_sim_empties_dcim_and_keeps_it(self):
+        """The camera makes the folders it needs on the next recording, so
+        everything under DCIM goes. DCIM itself stays: it is how this tool
+        knows a card is in the slot, and an erased card that reads as no card
+        makes item 9 answer "no card at ..." with one sitting there."""
         self.b.card_in().imported().sidecars()
         P.wipe_card(self.b.ctx)                             # expected entry point
-        front = self.b.ctx.card / "DCIM" / "200video" / "front"
-        self.assertTrue(front.is_dir(), "folders must survive the wipe")
-        self.assertEqual(list(front.glob("*.mp4")), [])
+        dcim = self.b.ctx.card / "DCIM"
+        self.assertTrue(dcim.is_dir(), "DCIM is the card-is-here marker")
+        self.assertEqual(list(dcim.iterdir()), [], "everything under it goes")
+
+    def test_an_erased_card_still_reads_as_a_card(self):
+        self.b.card_in().imported().sidecars()
+        P.wipe_card(self.b.ctx)
+        card = P.capture_world(self.b.ctx, M.Scope.LOCAL).card
+        self.assertTrue(card.dcim, "the card is still in the slot")
+        self.assertFalse(card.present, "and it holds nothing")
 
     def test_deleting_the_workspace_keeps_the_state_and_moves_the_receipts(self):
         """What survives is the state, not the payload — and the receipts now
