@@ -8060,11 +8060,16 @@ def _tell_the_plugin(ctx, item, outcome):
     the workspace it is handed and therefore what its destination should be
     asked about.
 
-    The trigger is derived rather than listed: a step that performed work, and
-    is not a VIEW. A view changes nothing by definition, so Progress does not
-    invalidate anything; a blocked or already-satisfied step did nothing, so
-    neither does that. A hand-kept list of the steps that matter would be a
-    list to forget to add to.
+    A step that performed work, is not a VIEW, and moves what the destination
+    is asked about. The first two are derived; the third the item declares,
+    because nothing here can see whether making a still or encoding an mp4
+    changed a published trip -- and the answer is no, while writing a sidecar
+    or dropping a trip changes the very list is_complete() is asked about.
+
+    It defaults to true, so forgetting to think about it costs a refresh
+    rather than correctness. Nine seconds of ssh is the price of the safe
+    mistake; a stale YES is the price of the other one, and it is paid in
+    footage.
     """
     plugin = getattr(ctx, "plugin", None)
     if _changed_the_input(plugin, item, outcome):
@@ -8079,6 +8084,8 @@ def _changed_the_input(plugin, item, outcome):
 
 def _did_real_work(item, outcome):
     if menu.is_view(item):
+        return False
+    if not getattr(item, "CHANGES_THE_QUESTION", True):
         return False
     return outcome.performed
 

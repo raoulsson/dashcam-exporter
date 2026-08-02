@@ -52,8 +52,8 @@ sys.path.insert(0, str(REPO))
 import items                     # noqa: E402,F401  (registers the ten)
 import menu as M                 # noqa: E402
 import uploader as U             # noqa: E402
-from menu import (META, EXCLUDE, BUILD, UPLOAD, CLEAN_WS,
-                  ERASE_CARD)                                   # noqa: E402
+from menu import (IMPORT, META, PREVIEW, EXCLUDE, BUILD, RENDER, UPLOAD,
+                  CLEAN_WS, ERASE_CARD)                         # noqa: E402
 
 
 def load_pipeline():
@@ -1435,6 +1435,68 @@ class TestWipingAWorkspaceWhoseSourceIsStillInTheSlot(SeamTest):
         self.assertNotIn("ORIGINAL", said)
         self.assertIn("removes 1 trips and the metadata", said)
         self.assertIn("still on the SIM card", said)
+
+
+class TestOnlyTheStepsThatMoveItInvalidateTheAnswer(unittest.TestCase):
+    """is_complete() costs a round trip: ssh, a bucket listing, a fetch of the
+    live index. Nine seconds, paid on the next menu draw every time a step
+    tells the plugin to forget.
+
+    Only a step that moves WHAT IT IS ASKED should do that — the trip list, or
+    the destination itself.
+    """
+
+    def _by_number(self):
+        return M.registry()
+
+    def test_the_steps_that_move_the_trip_list_or_the_destination_do(self):
+        """An import lands, sidecars are written, a trip is dropped, the
+        workspace is erased, or something was published. Each changes the
+        question, so each has to."""
+        by_number = self._by_number()
+        for number in (IMPORT, META, EXCLUDE, UPLOAD, CLEAN_WS):
+            with self.subTest(item=number):
+                self.assertTrue(by_number[number].CHANGES_THE_QUESTION)
+
+    def test_stills_renders_and_the_card_do_not(self):
+        """A still, an mp4 and an erased card leave both the trip list and
+        what is published exactly as they were."""
+        by_number = self._by_number()
+        for number in (PREVIEW, RENDER, ERASE_CARD):
+            with self.subTest(item=number):
+                self.assertFalse(by_number[number].CHANGES_THE_QUESTION)
+
+    def test_it_defaults_to_true_so_forgetting_costs_time_not_correctness(self):
+        """A new item that says nothing refreshes needlessly. The other
+        mistake is a stale YES, and that one is paid in footage."""
+        class Newcomer(M.MenuItem, abstract=True):
+            pass
+        self.assertTrue(Newcomer.CHANGES_THE_QUESTION)
+
+    def _told(self, item_cls, outcome):
+        """Does the plugin get told to forget. The stand-in carries the real
+        class's flag, so this pins the WIRING while the two tests above pin
+        the values."""
+        told = []
+        plugin = type("Plug", (), {"reset": lambda self: told.append(1),
+                                   "name": "x"})()
+        stub = type("Stub", (), {
+            "outbound": lambda self: M.Edges(frozenset()),
+            "CHANGES_THE_QUESTION": item_cls.CHANGES_THE_QUESTION,
+        })()
+        P._tell_the_plugin(type("C", (), {"plugin": plugin})(), stub, outcome)
+        return told
+
+    def test_a_render_does_not_reach_the_plugin(self):
+        """The behaviour, not the flag: the reset is what costs the round trip."""
+        by_number = self._by_number()
+        self.assertEqual(self._told(by_number[RENDER], M.did("encoded")), [],
+                         "an encode published nothing")
+
+    def test_writing_sidecars_does(self):
+        by_number = self._by_number()
+        self.assertEqual(self._told(by_number[META], M.did("described")), [1],
+                         "the trip list it is asked about just moved")
 
 
 class TestPreviewBuildsByDelta(SeamTest):

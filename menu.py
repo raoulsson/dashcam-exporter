@@ -312,6 +312,17 @@ class MenuItem(ABC):
     DESTR = False
     WORD = ""                       # the word typed before an irreversible act
     SCOPE = Scope.LOCAL
+    # Does running this change WHAT THE DESTINATION IS ASKED? is_complete() is
+    # asked about a list of trips, so the answer goes stale when the list moves
+    # (an import, sidecars written, a trip dropped, the workspace erased) or
+    # when the destination itself moves (an upload). Nothing else invalidates
+    # it, and invalidating it costs a full round trip -- ssh, a bucket listing
+    # and a fetch of the live index -- on the next menu draw.
+    #
+    # Defaults TRUE so that forgetting to think about it is the SAFE mistake:
+    # a needless refresh is nine seconds, and a stale YES is what stands
+    # between Clean Workspace and footage whose only copy is here.
+    CHANGES_THE_QUESTION = True
     INBOUND_KIND: Optional[type] = None       # None = derive from the outbounds
     OUT: Dict[Strategy, Neighbours] = {}
     IN_AUTHORED: Dict[Strategy, Optional[FrozenSet[int]]] = {}

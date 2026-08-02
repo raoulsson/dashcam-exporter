@@ -261,6 +261,9 @@ class BuildPreview(MenuItem):
     number = PREVIEW
     NAME = "Build Preview"
     DESCRIPTION = "Make one still per trip so you can see what you have."
+    # Stills and a contact sheet. It writes no sidecar and sends nothing
+    # anywhere, so neither the trip list nor the destination has moved.
+    CHANGES_THE_QUESTION = False
     OUT = _and_upload(PREVIEW, META, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD)
     IN_AUTHORED = _both_sets(PREVIEW, META, EXCLUDE)
 
@@ -328,6 +331,10 @@ class RenderVideos(MenuItem):
     number = RENDER
     NAME = "Render Trips"
     DESCRIPTION = "Encode the trips into watchable videos. Hours for a full card."
+    # An encode produces mp4s. The trips were already described, so the list
+    # is_complete() is asked about is the same list, and nothing has been
+    # published — which is the question it answers.
+    CHANGES_THE_QUESTION = False
     # RESTORED TO THE OWNER'S TABLE: he gave item 6 an outbound edge to 7 and
     # it was taken away, on the reasoning that item 7 uploads the BUILT site so
     # reaching it from Render skips the building. That reasoning was wrong
@@ -602,6 +609,9 @@ class DeleteSimData(Destructive):
     # matter is the one below, and it survives the swap intact.
     OVERRIDE_WORD = "ERASE"
     DESCRIPTION = "Erase the card, once every clip is accounted for elsewhere."
+    # The card is not the workspace and not the destination. Erasing it leaves
+    # both the trip list and what is published exactly as they were.
+    CHANGES_THE_QUESTION = False
     END = True
     DESTR = True
     WORD = "DELETE"
