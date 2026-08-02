@@ -1437,40 +1437,61 @@ class TestWipingAWorkspaceWhoseSourceIsStillInTheSlot(SeamTest):
         self.assertIn("still on the SIM card", said)
 
 
-class TestPreviewRebuildsFromEmpty(SeamTest):
-    """Both folders hold one file per trip and per clip, named after what the
-    grouping said at the time.
+class TestPreviewBuildsByDelta(SeamTest):
+    """A still already there is a frame of the same thing, so it is kept.
 
-    Exclude a trip, or let a GPS track arrive and move the boundaries, and
-    what is left is a mix of current stills and stills of things that no
-    longer exist — with nothing on the name to say which is which.
+    The folders hold one file per trip and per clip, named after what the
+    grouping said at the time. Rebuilding them from empty was one ffmpeg seek
+    per trip AND per clip on every run — minutes on a thousand-clip card, to
+    produce pictures identical to the ones it had just deleted.
+
+    What made that wipe necessary is done at the end instead: a still whose
+    name nothing asks for any more is a picture of something gone, and it is
+    swept then.
     """
 
-    def test_a_still_of_something_gone_does_not_survive(self):
-        b = self.bench()
+    def _folders(self, b):
         previews = b.ctx.out_dir / P.PREVIEW_DIRNAME
         review = b.ctx.out_dir / P.CLIP_REVIEW_DIRNAME
         for d in (previews, review / "trip_09_2026-01-01_00-00"):
             d.mkdir(parents=True, exist_ok=True)
-        (previews / "trip_09_2026-01-01_00-00.jpg").write_text("stale")
+        return previews, review
+
+    def test_a_still_of_something_gone_is_swept(self):
+        b = self.bench()
+        previews, _review = self._folders(b)
+        stale = previews / "trip_09_2026-01-01_00-00.jpg"
+        stale.write_text("stale")
+        self.assertEqual(P._drop_orphans(previews, set()), 1)
+        self.assertFalse(stale.exists())
+
+    def test_a_still_something_still_asks_for_is_kept(self):
+        b = self.bench()
+        previews, _review = self._folders(b)
+        keep = previews / "trip_01_2026-07-12_17-46.jpg"
+        keep.write_text("current")
+        self.assertEqual(P._drop_orphans(previews, {keep}), 0)
+        self.assertTrue(keep.is_file())
+
+    def test_the_folder_a_dropped_trip_leaves_behind_goes_too(self):
+        """One directory per trip, so an excluded trip leaves an empty one."""
+        b = self.bench()
+        _previews, review = self._folders(b)
         (review / "trip_09_2026-01-01_00-00" / "01_x.jpg").write_text("stale")
-        P._emptied(previews)
-        P._emptied(review)
-        self.assertEqual(list(previews.iterdir()), [])
-        self.assertEqual(list(review.iterdir()), [])
+        P._drop_orphans(review, set())
+        self.assertFalse((review / "trip_09_2026-01-01_00-00").exists())
 
-    def test_the_folders_are_there_afterwards(self):
-        """Emptied, not removed: what follows writes straight into them."""
+    def test_a_clip_still_is_not_seeked_twice(self):
         b = self.bench()
-        d = b.ctx.out_dir / P.PREVIEW_DIRNAME
-        P._emptied(d)
-        self.assertTrue(d.is_dir())
-
-    def test_emptying_something_that_was_never_there_is_fine(self):
-        b = self.bench()
-        d = b.ctx.out_dir / "never-existed"
-        P._emptied(d)
-        self.assertTrue(d.is_dir())
+        folder = b.ctx.out_dir / P.CLIP_REVIEW_DIRNAME / "trip_01"
+        folder.mkdir(parents=True, exist_ok=True)
+        src = Path("/tmp/20260712174654_0060.mp4")
+        dst = folder / ("01_%s.jpg" % src.stem)
+        dst.write_text("already here")
+        got, made = P._one_clip_still(src, folder, 1)
+        self.assertEqual(got, dst)
+        self.assertFalse(made, "an existing still must not be rebuilt")
+        self.assertEqual(dst.read_text(), "already here")
 
 
 class TestEveryExcludedTripIsCounted(SeamTest):

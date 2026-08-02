@@ -3877,7 +3877,9 @@ PREVIEW_STILL_T = 1.0       # seconds into the clip; see extract_still
 
 
 def write_clip_review(ctx, trips):
-    """A still from every CLIP, in a folder per trip. Returns (stills, root).
+    """A still from every CLIP, in a folder per trip.
+
+    Returns (expected, root, newly made, orphans dropped).
 
     The trip still answers "what is this drive"; this answers "where does the
     grouping think each clip sits", which is the question when the boundaries
@@ -3890,22 +3892,46 @@ def write_clip_review(ctx, trips):
     to be able to look at exactly those.
     """
     root = ctx.out_dir / CLIP_REVIEW_DIRNAME
-    bar, made, total = Bar("Clips"), 0, sum(len(t.get("front") or []) for t in trips)
+    root.mkdir(parents=True, exist_ok=True)
+    seen, made = set(), 0
+    bar, n_done, total = Bar("Clips"), 0, sum(len(t.get("front") or []) for t in trips)
     for trip in trips:
         folder = _review_folder(root, trip)
         for n, clip in enumerate(trip.get("front") or [], 1):
-            made += 1
-            _still_bar(bar, made, total, Path(clip).name)
-            _one_clip_still(Path(clip), folder, n)
+            n_done += 1
+            _still_bar(bar, n_done, total, Path(clip).name)
+            dst, was_made = _one_clip_still(Path(clip), folder, n)
+            seen.add(dst)
+            made += was_made
     bar.close()
-    return made, root
+    dropped = _drop_orphans(root, seen)
+    return n_done, root, made, dropped
 
 
-def _emptied(folder):
-    """Remove it and put it back, so what is in it afterwards is only what
-    this run wrote."""
-    shutil.rmtree(str(folder), ignore_errors=True)
-    folder.mkdir(parents=True, exist_ok=True)
+def _drop_orphans(folder, keep):
+    """Remove what no longer corresponds to anything, and the folders left empty.
+
+    The other half of building by delta. A still is named for the trip or the
+    clip it shows, so one whose name nothing asks for any more is a picture of
+    something that is gone -- an excluded trip, or a boundary that moved and
+    renumbered the trips after it. Left there it is indistinguishable from a
+    current one, which is the whole reason this folder gets swept at all.
+    """
+    gone = 0
+    for f in sorted(folder.rglob("*")):
+        if _real_file(f) and f not in keep:
+            try:
+                f.unlink()
+                gone += 1
+            except OSError:
+                pass
+    for d in sorted(folder.rglob("*"), reverse=True):
+        if d.is_dir():
+            try:
+                d.rmdir()
+            except OSError:
+                pass
+    return gone
 
 
 def _review_folder(root, trip):
@@ -3918,10 +3944,18 @@ def _review_folder(root, trip):
 
 
 def _one_clip_still(src, folder, n):
-    """Always written: the folder was emptied before this run started, so
-    there is never one already there to keep."""
+    """(path, was_made). Skipped when it is already there.
+
+    A clip still is named for the clip it came from, so a file that exists is
+    a frame of that same clip -- there is nothing about it a second seek would
+    change. Only clips with no still yet cost anything.
+    """
     dst = folder / ("%02d_%s.jpg" % (n, src.stem))
+    if dst.is_file():
+        return dst, False
+    folder.mkdir(parents=True, exist_ok=True)
     extract_still(src, dst, seconds=CLIP_REVIEW_T, width=PREVIEW_STILL_W)
+    return dst, True
 
 
 # A beat in, not frame zero: a dashcam's first frame is often still
@@ -4275,20 +4309,19 @@ def step_preview(ctx):
 
     # Stills. Every trip gets one, including the auto-skipped fragments — he
     # is deciding what to keep, and a trip he cannot see is one he cannot judge.
-    # Both folders are emptied first. They hold one file per trip and per
-    # clip, named after what the grouping said at the time -- so after a trip
-    # is excluded, or after the boundaries move because a GPS track finally
-    # arrived, what is left is a mix of current stills and stills of things
-    # that no longer exist, and nothing on the name says which is which.
-    # Rebuilding from empty is the only version where everything in there is
-    # about the workspace as it is now.
     #
-    # It costs one ffmpeg seek per trip and per clip, every time. That is
-    # seconds for a card's worth of trips and minutes for a thousand clips,
-    # and it buys a folder the operator can trust without checking dates.
-    _emptied(previews_dir)
-    _emptied(ctx.out_dir / CLIP_REVIEW_DIRNAME)
-    stills, failed = {}, []
+    # BY DELTA, not by rebuilding. A still is named for the trip or the clip it
+    # shows, so one that is already there is a frame of that same thing and a
+    # second seek would produce the same picture. Only what is missing costs
+    # anything, which on a thousand-clip card is the difference between
+    # minutes and nothing at all.
+    #
+    # What makes that safe is the sweep at the end rather than a wipe at the
+    # start: a still whose name nothing asks for any more is a picture of
+    # something gone — an excluded trip, or a boundary that moved and
+    # renumbered the trips after it — and it goes then.
+    previews_dir.mkdir(parents=True, exist_ok=True)
+    stills, failed, made = {}, [], 0
     # A bar rather than a line per trip. Forty trips was forty lines of scroll
     # for a countable loop, and the two shapes it printed -- one for a still
     # that was made and one for a trip with no front clip at all -- were the
@@ -4302,10 +4335,14 @@ def step_preview(ctx):
         if not front:
             failed.append(t["index"])
             continue
+        if dst.is_file():
+            stills[t["index"]] = dst
+            continue
         src = Path(front[0])
         if extract_still(src, dst,
                          seconds=ctx.still_seconds, width=ctx.still_width):
             stills[t["index"]] = dst
+            made += 1
         else:
             failed.append(t["index"])
     bar.close()
@@ -4316,7 +4353,11 @@ def step_preview(ctx):
                        % (len(failed), ", ".join(str(i) for i in failed))))
 
     index = write_contact_sheet(ctx, root, payload, previews_dir, stills)
-    shots, review = write_clip_review(ctx, trips)
+    # The contact sheet is rewritten every run and belongs to this folder, so
+    # it is kept alongside the stills it links to.
+    dropped = _drop_orphans(previews_dir, set(stills.values()) | {index})
+    shots, review, clips_made, clips_dropped = write_clip_review(ctx, trips)
+    dropped += clips_dropped
 
     # No trips.json refresh here any more. Preview used to re-index the site
     # manifest "while we're here", which made a looking-step write into the
@@ -4328,6 +4369,13 @@ def step_preview(ctx):
                  tilde(index)))
     print(C.green("  100%% - %s clip stills to walk the boundaries by, under %s."
                   % (C.yellow("%d" % shots), tilde(review))))
+    # What the run actually did, which on a second press is almost nothing.
+    # Without it the two lines above are identical to the first run's and read
+    # as though every frame was seeked again.
+    if made + clips_made + dropped:
+        print(C.dim("  %d new, %d already there, %d no longer wanted"
+                    % (made + clips_made,
+                       len(stills) + shots - made - clips_made, dropped)))
     return record(ctx, NAME[PREVIEW], RAN, started,
                   "%d trips, %d stills in %s" % (len(trips), len(stills), previews_dir))
 
