@@ -292,7 +292,7 @@ one setting:
 | Configured | You get |
 |---|---|
 | nothing | Import, render, and `dashcam_export_data_site.html` — one self-contained page, every still embedded, every route drawn from its GPX. Opens from `file://` with no network. |
-| `website_uploader` | Item 5 builds what YOUR plugin publishes instead of the local page, and item 7, Upload Website, wakes up. |
+| `upload_plugin` | Item 5 builds what YOUR plugin publishes instead of the local page, and item 7, Upload Website, wakes up. |
 
 Unconfigured, item 7 stays in the menu, greyed out, and `p` gives the reason.
 Run the cycle and the result is gathered into `final_<day>_<import>/` — page,
@@ -304,7 +304,7 @@ whether it publishes depends on whether you supplied something that publishes.
 The value lives in the **gitignored `.env`**, never in `config.txt`:
 
 ```
-SET_WEBSITE_UPLOADER      SET_HOME_LAT      SET_HOME_LON
+SET_UPLOAD_PLUGIN      SET_HOME_LAT      SET_HOME_LON
 ```
 
 `config.txt` is tracked, so a value written there gets committed and pushed —
@@ -431,7 +431,7 @@ and it calls whatever classes you point it at.
 Set one thing, in the gitignored `.env`:
 
 ```
-SET_WEBSITE_UPLOADER=~/dev/my-site/my_plugin.py:MySiteBuilder:MySiteUploader
+SET_UPLOAD_PLUGIN=~/dev/my-site/my_plugin.py:MySiteBuilder:MySiteUploader
 ```
 
 `<path to a .py>:<BuilderClass>:<UploaderClass>`. One plugin, two classes: the

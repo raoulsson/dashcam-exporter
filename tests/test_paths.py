@@ -156,7 +156,7 @@ class FakePublisher:
 
     def evaluate(self, world):
         if self._local:
-            return M.blocked("no website_uploader is configured")
+            return M.blocked("no upload_plugin is configured")
         return M.go()
 
     def execute(self, world):

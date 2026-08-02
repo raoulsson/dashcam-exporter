@@ -260,7 +260,7 @@ def unproven_lines(world) -> Tuple[str, ...]:
 def _no_target_line(world) -> str:
     if world.target.configured:
         return ""
-    return ("no website_uploader configured, so no copy off this machine was"
+    return ("no upload_plugin configured, so no copy off this machine was"
             " checked")
 
 

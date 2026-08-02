@@ -919,7 +919,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         b = self.bench().imported().sidecars().grouped()
         ran = b.run(EXCLUDE, typed=["1", "DELETE"])
         self.assertIn("ONLY copy", ran.printed)
-        self.assertIn("No website_uploader is configured", ran.printed)
+        self.assertIn("No upload_plugin is configured", ran.printed)
 
     def test_a_copy_that_stays_behind_is_named(self):
         """The note above the file list: deleting locally does not unpublish.
@@ -993,15 +993,15 @@ class TestAFailureToLoadIsLoud(unittest.TestCase):
     """
 
     def setUp(self):
-        self.was = os.environ.get("SET_WEBSITE_UPLOADER")
-        os.environ["SET_WEBSITE_UPLOADER"] = "/no/such/implementation.py:Nope"
+        self.was = os.environ.get("SET_UPLOAD_PLUGIN")
+        os.environ["SET_UPLOAD_PLUGIN"] = "/no/such/implementation.py:Nope"
         self.addCleanup(self._restore)
 
     def _restore(self):
         if self.was is None:
-            os.environ.pop("SET_WEBSITE_UPLOADER", None)
+            os.environ.pop("SET_UPLOAD_PLUGIN", None)
             return
-        os.environ["SET_WEBSITE_UPLOADER"] = self.was
+        os.environ["SET_UPLOAD_PLUGIN"] = self.was
 
     def test_the_tool_exits_before_it_takes_the_lock_or_draws_a_menu(self):
         lock = mock.patch.object(P, "acquire_single_instance_lock")
@@ -1017,7 +1017,7 @@ class TestAFailureToLoadIsLoud(unittest.TestCase):
         with quiet() as out:
             P.main()
         said = out.getvalue()
-        self.assertIn("website_uploader", said)
+        self.assertIn("upload_plugin", said)
         self.assertIn("/no/such/implementation.py", said)
 
 

@@ -34,7 +34,7 @@
 #                   7) Upload Website stays greyed and says "not available for
 #                   local page". This is the whole tool for most people.
 #
-#   UPLOADER     -- `website_uploader` names a plugin you supply.
+#   UPLOADER     -- `upload_plugin` names a plugin you supply.
 #                   5) and 7) become that plugin's: it decides what a website
 #                   is and where it goes -- S3, rsync, FTP, a folder on a NAS.
 #                   The tool never learns what your destination is; it asks the
@@ -180,13 +180,13 @@
 # drives the menu through it, so it cannot rot into a lie. Read that first,
 # then copy it.
 #
-#   website_uploader = ~/dev/dashcam-exporter/examples/local_website.py:LocalWebSiteBuilderPlugin:LocalWebSiteUploader
+#   upload_plugin = ~/dev/dashcam-exporter/examples/local_website.py:LocalWebSiteBuilderPlugin:LocalWebSiteUploader
 #
 # A file path rather than a dotted module name, because the implementation
 # lives somewhere that is not installed and must not have to be — and when the
 # path is wrong the error names YOUR file instead of Python's search path.
 #
-# The value belongs in the gitignored .env as SET_WEBSITE_UPLOADER, not here:
+# The value belongs in the gitignored .env as SET_UPLOAD_PLUGIN, not here:
 # this file is tracked, and a path to your own work written here gets
 # committed. The line above is the SHAPE; .env holds the value.
 #
@@ -194,7 +194,7 @@
 # drawn. It never falls back to the local edition — a menu that has quietly
 # stopped publishing looks exactly like a menu that is publishing fine, and the
 # renders stop reaching the world with nothing on screen to say so.
-#website_uploader =
+#upload_plugin =
 
 # THE DELETE GUARD. 8) Clean Workspace erases the original clips and the renders
 # they produced, and what it can prove first depends on what is set here. (The
@@ -227,7 +227,7 @@
 # those two the wrong way round is how footage gets erased on the strength of a
 # check that never ran.
 #
-# With no website_uploader configured nothing can be verified: it says so in
+# With no upload_plugin configured nothing can be verified: it says so in
 # red, names the check that could not run, keeps the renders instead of purging
 # them, and still makes you type DELETE.
 #
@@ -377,7 +377,7 @@ software = true
 # heading gets committed and pushed. The real values belong in `.env`, which
 # .gitignore excludes, under these names:
 #
-#   SET_WEBSITE_UPLOADER   SET_HOME_LAT   SET_HOME_LON
+#   SET_UPLOAD_PLUGIN   SET_HOME_LAT   SET_HOME_LON
 #
 # .env wins over anything set above, and a real environment variable of the
 # same name wins over .env. See .env.example for the full block.

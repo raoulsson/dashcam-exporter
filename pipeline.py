@@ -27,7 +27,7 @@ parse into a progress bar. Where real progress cannot be derived it shows an
 elapsed-time spinner rather than inventing a percentage.
 
 This repo does import, render and a local page on its own. Publishing is
-supplied from outside: `website_uploader` names a file and the two classes in
+supplied from outside: `upload_plugin` names a file and the two classes in
 it — a uploader.Builder for item 5 and a uploader.Uploader for item 7 — and
 where they send things is their business, not this module's. Set it and items 5
 and 7 do what they do; leave it unset (what a fresh clone gets) and item 7 stays
@@ -95,7 +95,7 @@ FALLBACK_CARD = "/Volumes/NO NAME"                # make_dashcam_videos.DEFAULT_
 FALLBACK_OUT = "~/dashcam-data/output"            # make_dashcam_videos.FALLBACK_OUT
 FALLBACK_WORKSPACE = "~/dashcam-data"             # the declared root, if unset
 FALLBACK_IMPORT_ROOT = "~/dashcam-data/import"    # import-sd-card.sh DEST_ROOT
-# There is deliberately no default for `website_uploader`. A default would
+# There is deliberately no default for `upload_plugin`. A default would
 # mean a clone loading and running someone else's code on every launch.
 
 EXPORTER_DIR = Path(__file__).resolve().parent
@@ -316,7 +316,7 @@ def _expand_refs(value, so_far):
 # and why they resolve from the gitignored .env first. Same rule the home
 # coordinates already followed: config.txt may carry a commented EXAMPLE, the
 # real value lives in .env or not at all.
-PRIVATE_KEYS = ("website_uploader", "home_lat", "home_lon", "card")
+PRIVATE_KEYS = ("upload_plugin", "home_lat", "home_lon", "card")
 
 
 def as_bool(v, default=False):
@@ -375,7 +375,7 @@ class Ctx:
         # broken stops the tool rather than quietly becoming the local edition,
         # because a menu that silently stops publishing looks exactly like a
         # menu that is publishing fine.
-        self.plugin = _loaded_plugin(self.cfg_opt("website_uploader"), self.exporter)
+        self.plugin = _loaded_plugin(self.cfg_opt("upload_plugin"), self.exporter)
 
         # The workspace holding the footage to work on. `root` is the old name
         # and still read, because configs carrying it exist; import_dir wins.
@@ -481,7 +481,7 @@ class Ctx:
     def cfg_opt(self, key):
         """A configured value, or None when the setting is absent.
 
-        Empty counts as absent: `website_uploader =` with nothing after it is
+        Empty counts as absent: `upload_plugin =` with nothing after it is
         someone clearing the setting, and the alternative — an empty string
         that still gets used — is a spec that cannot be parsed and a tool that
         refuses to start over a line the operator thought he had removed.
@@ -1340,7 +1340,7 @@ def _plugin_rows(plugin):
 def _local_site_rows(ctx):
     """The local edition's deliverable, which is a file on this machine."""
     return (_setting("Export-Mode", "local page: one self-contained .html, "
-                                "no website_uploader configured"),
+                                "no upload_plugin configured"),
             _setting("Local site", _built_or_not(_result_page(ctx))))
 
 
@@ -4613,7 +4613,7 @@ def _target_caveat(world, consulted):
     that simply timed out.
     """
     if not world.target.configured:
-        return [C.red("  (No website_uploader is configured, so nothing of this is"),
+        return [C.red("  (No upload_plugin is configured, so nothing of this is"),
                 C.red("   off this machine.)")]
     return _unreachable_caveat(world, consulted)
 
@@ -8267,9 +8267,9 @@ def _uploader_broken(error):
     nothing was being published at all.
     """
     print()
-    print(C.red("  website_uploader is configured and will not load:"))
+    print(C.red("  upload_plugin is configured and will not load:"))
     print(C.red("    %s" % error))
-    print(C.dim("  Fix it, or remove website_uploader to run the local edition"
+    print(C.dim("  Fix it, or remove upload_plugin to run the local edition"
                 " on purpose."))
     return 4
 

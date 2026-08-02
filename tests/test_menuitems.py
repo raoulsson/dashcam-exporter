@@ -1110,7 +1110,7 @@ class TestTheWorkspaceIsExpendableRule(unittest.TestCase):
         with one implementation it is genuinely one condition."""
         lines = guards.unproven_lines(rendered_world())
         self.assertEqual(len(lines), 1)
-        self.assertIn("website_uploader", lines[0])
+        self.assertIn("upload_plugin", lines[0])
 
     def test_a_configured_plugin_that_answers_does_not_get_that_sentence(self):
         lines = guards.unproven_lines(

@@ -2,10 +2,10 @@
 
 The point of this file is to be READ. It is the shortest thing that is still a
 real implementation of both acts, so what is left is the shape every publisher
-has to have and nothing else. Point `website_uploader` at it in config.txt (or
-SET_WEBSITE_UPLOADER in .env, which is the same setting and stays out of git):
+has to have and nothing else. Point `upload_plugin` at it in config.txt (or
+SET_UPLOAD_PLUGIN in .env, which is the same setting and stays out of git):
 
-    website_uploader = ~/dev/dashcam-exporter/examples/local_website.py:LocalWebSiteBuilderPlugin:LocalWebSiteUploader
+    upload_plugin = ~/dev/dashcam-exporter/examples/local_website.py:LocalWebSiteBuilderPlugin:LocalWebSiteUploader
 
 One plugin, two classes: the builder is item 5, the uploader is item 7. Where
 things go is this file's own business, not the exporter's — the two directories

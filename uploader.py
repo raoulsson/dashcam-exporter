@@ -398,7 +398,7 @@ def _parts(spec: str):
     parts = spec.split(":")
     if len(parts) != 3:
         raise UploaderNotLoaded(
-            "website_uploader reads <file.py>:<BuilderClass>:<UploaderClass>,"
+            "upload_plugin reads <file.py>:<BuilderClass>:<UploaderClass>,"
             " not %r" % spec)
     return parts
 
