@@ -1288,57 +1288,44 @@ class TestTheLogTimesTheWorkAndNotTheLogging(unittest.TestCase):
         self.assertEqual(P._hms(3661), "01:01:01")
 
 
-class TestATripWithNoFixIsStillDescribed(SeamTest):
-    """A trip the camera recorded no position for has no track and no map,
-    because there is nothing to draw.
+class TestGenerateMetaRebuildsRatherThanSkips(SeamTest):
+    """Item 2 wipes this import's sidecars and writes them again.
 
-    The completeness test wanted all three sidecars — .gpx, .html and the
-    meta — so such a trip could never be done, `need` stayed true, and item 2
-    re-ran the whole pass every time it was pressed. Two trips on this card
-    are exactly that: the camera wrote no GPS file for those days.
+    It used to answer SATISFIED when every trip already had its set, which is
+    the wrong answer to the reason anyone presses 2 twice: the inputs changed.
+    A GPS track can arrive after the first pass, and a sidecar written without
+    it sits there looking current because nothing in a _meta.json says which
+    run wrote it.
     """
 
-    def _base(self, points):
-        b = self.bench()
+    def _described(self, b):
         folder = b.ctx.out_dir / "2026-07-10"
         folder.mkdir(parents=True, exist_ok=True)
         base = folder / "trip_2026-07-10_16-23_01"
-        (folder / "trip_2026-07-10_16-23_01_meta.json").write_text(
-            '{"gps_points": %d, "day": "2026-07-10",'
-            ' "start": "2026-07-10 16:23:38", "end": "2026-07-10 16:47:40"}' % points)
-        return b, str(base)
+        for suffix in ("_meta.json", ".gpx", ".html", "_links.txt"):
+            Path(str(base) + suffix).write_text("stale")
+        return {"trips": [{"out_base": str(base)}]}, base
 
-    def test_the_meta_alone_is_enough_without_a_fix(self):
-        _b, base = self._base(points=0)
-        self.assertTrue(P._is_described(base))
-
-    def test_but_not_once_the_import_holds_a_track_for_that_day(self):
-        """A no-fix answer is only final while there is no track that could
-        change it. The import fetches GPS whether or not it fetched clips, so
-        one can land after the meta was written — and then the meta is an
-        answer reached without evidence that now exists."""
-        _b, base = self._base(points=0)
-        self.assertFalse(P._is_described(base, frozenset({"20260710"})))
-        self.assertTrue(P._is_described(base, frozenset({"20260931"})),
-                        "another day's track re-opened this trip")
-
-    def test_the_day_comes_from_the_meta_and_the_gps_from_its_name(self):
+    def test_the_old_sidecars_go(self):
         b = self.bench()
-        gps = b.ctx.render_root / "DCIM" / "203gps" / "tar" / "tmp"
-        gps.mkdir(parents=True, exist_ok=True)
-        (gps / "20260712191931_0120_T.git").write_text("track")
-        self.assertEqual(P._gps_days(b.ctx.render_root), frozenset({"20260712"}))
+        payload, base = self._described(b)
+        self.assertEqual(P._wipe_sidecars(payload), 4)
+        for suffix in ("_meta.json", ".gpx", ".html", "_links.txt"):
+            self.assertFalse(Path(str(base) + suffix).exists())
 
-    def test_a_trip_with_a_fix_still_wants_its_track_and_map(self):
-        b, base = self._base(points=412)
-        self.assertFalse(P._is_described(base), "a route was promised and not written")
-        for ext in (".gpx", ".html"):
-            Path(base + ext).write_text("x")
-        self.assertTrue(P._is_described(base))
-
-    def test_no_meta_at_all_is_not_described(self):
+    def test_a_render_beside_them_is_not_touched(self):
+        """Hours of encoding, and not derived from anything this step knows.
+        The four files beside it are seconds and are derived from all of it."""
         b = self.bench()
-        self.assertFalse(P._is_described(str(b.ctx.out_dir / "nothing")))
+        payload, base = self._described(b)
+        mp4 = Path(str(base) + "_h1080.mp4")
+        mp4.write_text("render")
+        P._wipe_sidecars(payload)
+        self.assertTrue(mp4.is_file(), "the render must survive a meta rebuild")
+
+    def test_a_trip_with_no_out_base_is_skipped_quietly(self):
+        """A fragment too short to render never had one."""
+        self.assertEqual(P._wipe_sidecars({"trips": [{"index": 1}]}), 0)
 
 
 class TestThePreviewBoxTicksWhenThereIsAPreview(SeamTest):

@@ -3510,31 +3510,24 @@ def step_generate_meta(ctx):
     if root is None:
         return record(ctx, NAME[META], SKIPPED, started, "no import folder")
 
-    # Only wake the renderer when a trip is missing its set. "Missing" is per
-    # trip, and a trip counts as done when all three files exist. A partial set
-    # means an interrupted pass, so that trip gets redone — and since
-    # --sidecars-only has no per-trip selection, one missing trip means the
-    # whole pass runs again. Correct and occasionally slow beats fast and
-    # subtly incomplete.
     have = load_groups(ctx, root)
     if have is None:
         # The scan failed and said so in red. Carrying on runs the whole pass
         # again on a grouping nobody could read -- minutes of work behind a
         # failure the operator has already been shown.
         return record(ctx, NAME[META], FAILED, started, "the trip scan failed")
-    need = True
-    if have:
-        gs = [g for g in have.get("trips", []) if g.get("renderable", True)]
-        if gs:
-            days = _gps_days(root)
-            done = sum(1 for g in gs if _is_described(g.get("out_base"), days))
-            need = done < len(gs)
-            if not need:
-                # Nothing printed here. The postcondition holds, and the runner
-                # says so in green from the note below -- said twice it was the
-                # same sentence in two colours on consecutive lines.
-                return record(ctx, NAME[META], SATISFIED, started,
-                              "sidecars already complete for %d trips" % len(gs))
+    # The sidecars go first, then they are written again. This used to answer
+    # SATISFIED when every trip already had its set, which is the wrong answer
+    # to the reason anyone presses 2 a second time: the inputs changed. A GPS
+    # track arrived that the first pass did not have, or the grouping moved, or
+    # the tool learned something about the data it did not know before -- and a
+    # sidecar written under the old understanding sits there looking current,
+    # because nothing in a _meta.json says which run wrote it.
+    #
+    # ONLY the sidecars. A render is hours and is not derived from anything
+    # this step knows; the four files beside it are seconds and are derived
+    # from everything it knows.
+    _wipe_sidecars(have)
     # The renderer prints its usual "[Trip a/b]" headers here, so the real trip
     # counter drives the bar. They are not KEPT: the bar's note already reads
     # "trip 2/6", and a permanent line per trip in the renderer's words is the
@@ -3556,6 +3549,20 @@ def step_generate_meta(ctx):
     return record(ctx, NAME[META], RAN, started, "%d trips described" % n)
 
 
+def _wipe_sidecars(payload):
+    """Remove this import's .gpx, .html, _links.txt and _meta.json.
+
+    Named suffixes rather than "everything that is not an mp4", because the
+    export tree also holds the contact sheet, the clip stills and the caches,
+    and a sweep that took those would have item 2 quietly undo item 3.
+    """
+    doomed = [f for trip in payload.get("trips", [])
+              if trip.get("out_base")
+              for f in _existing_sidecars(trip["out_base"])]
+    deleted, _freed, _errors = _unlink_all(doomed)
+    return deleted
+
+
 def _skipped_note(payload):
     """Why the count here is smaller than the number of trips on the card.
 
@@ -3573,51 +3580,11 @@ def _skipped_note(payload):
         len((payload or {}).get("trips", [])), len(skipped))
 
 
-def _is_described(base, gps_days=frozenset()):
-    """Has this trip got its sidecar set, for the set it can have.
-
-    The set was ".gpx, .html, _meta.json, all three or it is not done". A trip
-    with no GPS fix gets no track and no map -- there is nothing to draw -- so
-    it could never have all three, `need` stayed true forever and item 2 ran
-    the whole pass again every time it was pressed.
-
-    So: the meta is the sidecar every trip has, and the track and the map are
-    required only of a trip that recorded a position.
-
-    `gps_days` is what stops that becoming a trap of its own. A meta saying
-    gps_points 0 is only final while there is no track that could change its
-    mind -- and a track can arrive AFTER it, because an import fetches GPS
-    whether or not it fetched clips. So a trip with no fix counts as described
-    only when the import holds no GPS for its day at all.
-
-    By day rather than by mtime: rsync preserves the card's timestamps, so a
-    track that landed a minute ago is dated when the camera wrote it, which is
-    older than every meta. And by day rather than by span, because being wrong
-    here costs one re-run of a pass that is idempotent, while span arithmetic
-    over archive names is how the track went missing in the first place.
-    """
-    if not base:
-        return False
-    meta = Path(base + "_meta.json")
-    if not meta.is_file():
-        return False
-    if not _has_fix(meta):
-        return _day_of(meta) not in (gps_days or frozenset())
-    return all(Path(base + s).is_file() for s in (".gpx", ".html"))
-
-
 def _day_of(meta):
     try:
         return re.sub(r"\D", "", str(json.loads(meta.read_text()).get("day") or ""))
     except (OSError, ValueError):
         return ""
-
-
-def _gps_days(root):
-    """The days the import holds any GPS for, as YYYYMMDD."""
-    return frozenset(filter(None, (
-        (_stamp_of_name(p.name) or "")[:8]
-        for p in _safe_rglob(root / "DCIM" / GPS_DIR, "*") if p.is_file())))
 
 
 def _has_fix(meta):
