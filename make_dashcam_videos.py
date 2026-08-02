@@ -633,39 +633,6 @@ def _nmea_to_decimal(value: str, hemi: str) -> float | None:
         return None
 
 
-def parse_gpx_speeds(gpx_path: Path) -> list[float]:
-    """Return per-second km/h values parsed from the NMEA $GPRMC lines in a GPX file."""
-    return [pt[2] for pt in parse_gpx_track(gpx_path)]
-
-
-def _parse_camtime_header(gpx_path: Path) -> datetime | None:
-    """
-    Read the DDPAI-specific `$GPSCAMTIME YYYYMMDDhhmmss` header at the top of
-    a GPX file. The value is the dashcam's LOCAL wall-clock at the moment GPS
-    first reported a fix in this clip — which lets us compute the exact
-    LOCAL↔UTC offset for this device even when the dashcam's display clock
-    has drifted (a real-world case: the file we tested had a 7:56:46 offset
-    rather than a clean +8h timezone).
-    """
-    try:
-        with gpx_path.open(encoding="utf-8", errors="ignore") as fh:
-            for line in fh:
-                line = line.strip()
-                if line.startswith("$GPSCAMTIME"):
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        try:
-                            return datetime.strptime(parts[1], "%Y%m%d%H%M%S")
-                        except ValueError:
-                            return None
-                # Header is right at the top; bail as soon as we hit GPS data.
-                if line.startswith("$GPRMC") or line.startswith("$GPGGA"):
-                    return None
-    except OSError:
-        pass
-    return None
-
-
 def parse_clip_speeds(clip: "Clip", gps_dirs: tuple[Path | None, ...]) -> list[float]:
     """
     Per-second km/h aligned to the clip's VIDEO timeline (not the GPS-fix
@@ -688,10 +655,11 @@ def parse_clip_speeds(clip: "Clip", gps_dirs: tuple[Path | None, ...]) -> list[f
     symptom. Handled, speeds[i] is the GPS reading at the SAME video-second the
     user sees burned-in on the timestamp watermark.
     """
-    gpx = find_gpx_for(clip.timestamp, *gps_dirs)
-    if gpx is None:
-        return []
-    points = parse_gpx_track(gpx)
+    # The clip's own fixes, selected by time. Resolving the file by name gave
+    # this the same wrong answer it gave the track: a clip whose receiver
+    # never fixed got a replayed sentence from an earlier drive, and its
+    # speeds with it.
+    points = gather_track([clip], gps_dirs)
     if not points:
         return []
     try:
@@ -699,12 +667,14 @@ def parse_clip_speeds(clip: "Clip", gps_dirs: tuple[Path | None, ...]) -> list[f
     except ValueError:
         return [p[2] for p in points]
 
-    # Prefer the exact `$GPSCAMTIME` offset when DDPAI writes it; fall back
-    # to mod-3600 lag-prepend for non-DDPAI files.
-    camtime_local = _parse_camtime_header(gpx)
-    if camtime_local is not None:
-        # offset = LOCAL_at_first_fix - UTC_at_first_fix
-        offset = camtime_local - points[0][3]
+    # The camera's own LOCAL<->UTC offset, read from $GPSCAMTIME across the
+    # card rather than from one file's header: the file a clip is named for
+    # may have no header at all, and that is exactly the file whose fixes
+    # cannot be trusted to be its own. Zero means no DDPAI header anywhere,
+    # which is the non-DDPAI card the fallback below is for.
+    _pool, utc_off = _pooled_track(gps_dirs)
+    if utc_off:
+        offset = -utc_off                 # local = utc + offset
         # Place each point at its true clip-second via its UTC timestamp.
         raw: list[float | None] = [None] * clip.duration
         for p in points:
@@ -814,14 +784,121 @@ def parse_gpx_track(gpx_path: Path,
     return [p for p in points if (latest - p[3]).total_seconds() <= window_seconds]
 
 
-def gather_track(clips: list[Clip], gps_dirs: tuple[Path | None, ...]) -> list[tuple[float, float, float, datetime]]:
-    """Concatenate all parsed track points for the clips in a group, in clip order."""
-    out: list[tuple[float, float, float, datetime]] = []
-    for c in clips:
-        gpx = find_gpx_for(c.timestamp, *gps_dirs)
-        if gpx is not None:
-            out.extend(parse_gpx_track(gpx))
+# The pooled track, built once per set of GPS directories. gather_track is
+# called per clip while boundaries are being found, and re-reading several
+# hundred NMEA files each time would dominate the scan.
+_TRACK_POOL: dict[tuple, tuple[list, timedelta]] = {}
+
+# Real timezones are whole quarter-hours, so the offset is rounded to one.
+# That turns a per-file reading that can be a second or two out into the same
+# exact value for every file, which is what makes the median stable.
+_TZ_QUANTUM = 900
+
+# A clip's own fixes can start fractionally before its filename second and run
+# fractionally past its end. Wide enough to absorb that, far narrower than any
+# stale replay: the one on this card is 26 minutes adrift.
+_SPAN_MARGIN = timedelta(seconds=90)
+
+
+def _camera_utc_offset(paths: list[Path]) -> timedelta:
+    """UTC minus camera-local, read from the camera's own statement.
+
+    Every healthy NMEA file opens with `$GPSCAMTIME <local yyyymmddHHMMSS>`
+    and then carries `$GPRMC,<utc hhmmss>` lines. The pair gives the camera's
+    timezone directly, per file, with no setting to configure and nothing to
+    infer from filenames.
+
+    The median across files, because a file whose GPS never got a fix replays
+    an old sentence and reads wildly off -- which is the very defect this
+    exists to survive. One such file cannot move a median.
+    """
+    readings = []
+    for path in paths:
+        local = utc = None
+        try:
+            with path.open(encoding="utf-8", errors="ignore") as fh:
+                for line in fh:
+                    if line.startswith("$GPSCAMTIME") and local is None:
+                        try:
+                            local = datetime.strptime(line.split()[1][:14], "%Y%m%d%H%M%S")
+                        except (IndexError, ValueError):
+                            pass
+                    elif line.startswith("$GPRMC") and utc is None:
+                        f = line.split(",")
+                        if len(f) > 2 and f[2] == "A" and len(f[1]) >= 6:
+                            utc = f[1][:6]
+                    if local is not None and utc is not None:
+                        break
+        except OSError:
+            continue
+        if local is None or utc is None:
+            continue
+        secs = ((int(utc[:2]) * 3600 + int(utc[2:4]) * 60 + int(utc[4:6]))
+                - (local.hour * 3600 + local.minute * 60 + local.second))
+        # Fold into (-12h, +12h]: the time-of-day difference wraps at midnight.
+        secs = (secs + 43200) % 86400 - 43200
+        readings.append(round(secs / _TZ_QUANTUM) * _TZ_QUANTUM)
+    if not readings:
+        return timedelta(0)
+    return timedelta(seconds=sorted(readings)[len(readings) // 2])
+
+
+def _gpx_files(gps_dirs: tuple[Path | None, ...]) -> list[Path]:
+    """Every NMEA file under these directories, at any depth.
+
+    rglob, not listdir. The camera moves older files down into a `tmp`
+    subdirectory as it rolls, so the top level holds only what it happens to
+    be writing now.
+    """
+    out: list[Path] = []
+    for d in gps_dirs:
+        if d is not None and d.is_dir():
+            out.extend(sorted(f for f in d.rglob("*.gpx") if f.is_file()))
     return out
+
+
+def _pooled_track(gps_dirs: tuple[Path | None, ...]):
+    """(every fix under these dirs sorted by time, the camera's UTC offset).
+
+    ONE TIME SERIES, NOT A FILE PER CLIP. The camera writes GPS continuously
+    and its writer rolls into a new file whenever it decides to, so a
+    filename says when a file was opened and nothing about whose fixes are
+    inside it. Matching a clip to the file that shares its name was reading a
+    coincidence as a promise, and it fails in both directions: a file can hold
+    a replay from an earlier drive, and a minute's fixes can sit in a file
+    named for a different minute.
+
+    Deduplicated by the second, because the camera writes the same minute
+    twice -- once loose and once into the tar archives -- and both are read.
+    """
+    key = tuple(str(d) for d in gps_dirs if d is not None)
+    if key not in _TRACK_POOL:
+        files = _gpx_files(gps_dirs)
+        seen: set[datetime] = set()
+        pool: list[tuple[float, float, float, datetime]] = []
+        for f in files:
+            for pt in parse_gpx_track(f):
+                if pt[3] not in seen:
+                    seen.add(pt[3])
+                    pool.append(pt)
+        pool.sort(key=lambda pt: pt[3])
+        _TRACK_POOL[key] = (pool, _camera_utc_offset(files))
+    return _TRACK_POOL[key]
+
+
+def gather_track(clips: list[Clip], gps_dirs: tuple[Path | None, ...]) -> list[tuple[float, float, float, datetime]]:
+    """The fixes recorded while these clips were being filmed.
+
+    Selected by TIME rather than by filename. A fix belongs to a clip when the
+    camera recorded it while that clip was rolling; nothing else is evidence
+    of that, and the filename in particular is not.
+    """
+    if not clips:
+        return []
+    pool, offset = _pooled_track(gps_dirs)
+    lo = min(c.dt for c in clips) + offset - _SPAN_MARGIN
+    hi = max(c.dt + timedelta(seconds=c.duration) for c in clips) + offset + _SPAN_MARGIN
+    return [pt for pt in pool if lo <= pt[3] <= hi]
 
 
 DRIVE_RESUME_THRESHOLD_KMH = 5.0   # higher than parking threshold to reject GPS jitter
@@ -1135,10 +1212,10 @@ def clip_is_parked(clip: Clip, gps_dirs: tuple[Path | None, ...]) -> bool:
     triggers a skip when the *total* run length is long enough, so brief
     mid-drive GPS dropouts (a few clips through a tunnel) won't trip this.
     """
-    gpx = find_gpx_for(clip.timestamp, *gps_dirs)
-    if gpx is None:
-        return True
-    speeds = parse_gpx_speeds(gpx)
+    # By time, not by filename: a clip whose receiver never fixed is named for
+    # a file full of an earlier drive's sentences, and judging whether THIS
+    # clip was parked from THOSE speeds is judging the wrong minute.
+    speeds = [pt[2] for pt in gather_track([clip], gps_dirs)]
     if not speeds:
         return True
     # Sparse-coverage + fast-speed check: if the GPX file holds far fewer
@@ -1304,22 +1381,6 @@ def find_parking_runs(
             runs.append((i, park_sec, end_idx))
         i = end_idx + 1
     return runs
-
-
-def find_gpx_for(timestamp: str, *dirs: Path) -> Path | None:
-    """Match a clip timestamp like '20260511180649' to a GPX in any of the given dirs."""
-    for d in dirs:
-        if d is None or not d.is_dir():
-            continue
-        for f in os.listdir(d):
-            m = GPX_RE.match(f)
-            if m and m.group(1) == timestamp:
-                return d / f
-            # Some tarred members lack the trailing _D, e.g. 20260506122637_0060.gpx
-            m2 = re.match(r"^(\d{14})_\d+\.gpx$", f)
-            if m2 and m2.group(1) == timestamp:
-                return d / f
-    return None
 
 
 import tarfile  # noqa: E402  (kept near use site for clarity)
@@ -1981,11 +2042,9 @@ def render_clip_marker_video(
     except ImportError:
         return False, None
 
-    # Per-clip points
-    gpx = find_gpx_for(clip.timestamp, *gps_dirs)
-    if gpx is None:
-        return False, None
-    clip_points = parse_gpx_track(gpx)
+    # Per-clip points, selected by time rather than by the filename that
+    # happens to match.
+    clip_points = gather_track([clip], gps_dirs)
     if not clip_points:
         return False, None
     # Reject scrambled buffers (parking-mode stale-data dumps)
