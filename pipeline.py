@@ -6446,25 +6446,33 @@ def _unlink_card_files(ctx, dcim):
     walk to measure, then one removal per top-level folder: on a full card that
     is 888 stat-and-unlink pairs replaced by five tree removals.
     """
-    gone = freed = 0
-    for f in dcim.rglob("*"):
-        if _real_file(f):
-            try:
-                freed += f.stat().st_size
-                gone += 1
-            except OSError:
-                pass
+    # The indeterminate bar, because neither half of this reports progress and
+    # both take real time on a full card: the walk stats every file on a slow
+    # bus, and rmtree of 130 GB is not instant. Without it the screen sat on
+    # the typed word for a minute or more with nothing between "DELETE" and
+    # the closing line, which is the one moment an operator most wants to see
+    # that something is happening.
     failed = ""
-    for child in sorted(_safe_iterdir(dcim)):
-        try:
-            if _real_dir(child):
-                shutil.rmtree(str(child))
-            else:
-                child.unlink()
-        except OSError as e:
-            failed = str(e)
-            print(C.red("  Could not erase %s: %s" % (child.name, e)))
+    with waiting("Erasing"):
+        gone = freed = 0
+        for f in dcim.rglob("*"):
+            if _real_file(f):
+                try:
+                    freed += f.stat().st_size
+                    gone += 1
+                except OSError:
+                    pass
+        for child in sorted(_safe_iterdir(dcim)):
+            try:
+                if _real_dir(child):
+                    shutil.rmtree(str(child))
+                else:
+                    child.unlink()
+            except OSError as e:
+                failed = str(e)
     if failed:
+        print(C.red("  Could not erase everything under %s: %s"
+                    % (tilde(dcim), failed)))
         return gone, freed, failed
     _unlink_quietly(ctx.workspace / ORPHAN_LIST)
     done_line("erased %s files from the card, %s freed"
