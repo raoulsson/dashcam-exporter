@@ -2221,15 +2221,25 @@ BANNER_WIDTH = max(len(line) for line in BANNER.splitlines())
 
 VERSION_FALLBACK = "0.0.0"
 VERSION_FILE = "VERSION"
+# Set by hand, and the only part of the version that is a decision. Bump it
+# when the tool changes in a way that makes a habit wrong -- a menu that means
+# something else, an output layout that moves. The other two numbers cannot
+# carry that, because they only know how many commits there have been.
+VERSION_MAJOR = 3
 
 
 def version(exporter=None):
-    """major.minor.patch, read off the commit count.
+    """major.minor.patch: the major by hand, the rest off the commit count.
 
-    249 commits splits into 2, 4, 9 and the patch is the one being written, so
-    the working tree is 2.4.10. It costs a subprocess at launch and it cannot
-    disagree with what is checked out, which is more than a hand-kept constant
-    manages: the number is the history rather than a note about it.
+    418 commits is 3.4.18 -- hundreds are the minor, the remainder is the
+    patch. It costs a subprocess at launch and it cannot disagree with what is
+    checked out, which is more than a hand-kept constant manages: two thirds of
+    the number are the history rather than a note about it.
+
+    The digits used to be sliced apart instead (249 -> 2.4.9), which spent the
+    major on nothing but the passage of a hundred commits and could say
+    neither 99 nor 1000. Arithmetic on the count leaves the major free to mean
+    the one thing a major number is for, and counts as high as you like.
 
     A copy without git -- an archive, an install -- has no history to count and
     says so rather than inventing one.
@@ -2308,19 +2318,22 @@ def _counted(where):
 def _version_of(count):
     if not _countable(count):
         return VERSION_FALLBACK
-    return "%s.%s.%d" % (count[0], count[1], int(count[2:]) + 1)
+    n = int(count)
+    return "%d.%d.%d" % (VERSION_MAJOR, n // 100, n % 100)
 
 
 def _countable(count):
+    """A commit count: a plain non-negative integer, of any width.
+
+    It had to be exactly three digits while the version was those digits
+    sliced apart. The arithmetic above has no such edge: 7 commits is 3.0.7
+    and 1042 is 3.10.42, both perfectly sayable.
+    """
     if not count:
         return False
-    return _three_digits(count)
+    return count.isdigit()
 
 
-def _three_digits(count):
-    if not count.isdigit():
-        return False
-    return len(count) >= 3
 REPO_URL = "https://github.com/raoulsson/dashcam-exporter"
 SPONSORS_URL = "https://github.com/sponsors/raoulsson"
 COFFEE_URL = "https://www.buymeacoffee.com/raoulsson"

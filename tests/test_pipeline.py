@@ -1298,5 +1298,37 @@ class NoDeadEnds(unittest.TestCase):
                 self.assertIn(n, reachable)
 
 
+class TheVersionIsTheCommitCount(unittest.TestCase):
+    """major is set by hand; minor and patch are arithmetic on the history.
+
+    The old scheme sliced the count's DIGITS apart — 249 became 2.4.9 — which
+    made the major number advance every hundred commits and capped the whole
+    thing at 999. It also could not represent a count of fewer than three
+    digits at all.
+    """
+
+    def test_the_count_splits_into_hundreds_and_remainder(self):
+        self.assertEqual(P._version_of("418"), "3.4.18")
+
+    def test_the_major_is_not_taken_from_the_history(self):
+        for count in ("418", "912", "1500"):
+            with self.subTest(count=count):
+                self.assertTrue(P._version_of(count).startswith("3."))
+
+    def test_a_hundredth_commit_rolls_the_minor_and_zeroes_the_patch(self):
+        self.assertEqual(P._version_of("499"), "3.4.99")
+        self.assertEqual(P._version_of("500"), "3.5.0")
+
+    def test_the_count_is_no_longer_capped_at_three_digits(self):
+        """1000 commits used to be unrepresentable, and 99 equally so."""
+        self.assertEqual(P._version_of("1042"), "3.10.42")
+        self.assertEqual(P._version_of("7"), "3.0.7")
+
+    def test_no_history_to_count_says_so_rather_than_inventing_one(self):
+        for count in (None, "", "abc", "4.1.8"):
+            with self.subTest(count=count):
+                self.assertEqual(P._version_of(count), P.VERSION_FALLBACK)
+
+
 if __name__ == "__main__":
     unittest.main()
