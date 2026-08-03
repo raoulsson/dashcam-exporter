@@ -794,10 +794,17 @@ _TRACK_POOL: dict[tuple, tuple[list, timedelta]] = {}
 # exact value for every file, which is what makes the median stable.
 _TZ_QUANTUM = 900
 
-# A clip's own fixes can start fractionally before its filename second and run
-# fractionally past its end. Wide enough to absorb that, far narrower than any
-# stale replay: the one on this card is 26 minutes adrift.
-_SPAN_MARGIN = timedelta(seconds=90)
+# NO MARGIN, and the upper bound is exclusive. Clips are CONTIGUOUS: one ends
+# on the second the next begins, so any margin at all hands a clip its
+# neighbours' fixes. At 90 seconds on a 60-second clip it handed over both of
+# them whole, and _clip_endpoints -- which reads the first and last fix to
+# decide where the car was when a clip started and stopped -- then answered
+# with a position from the clip before and one from the clip after. Trip
+# boundaries are found from exactly those two readings.
+#
+# Half-open rather than merely zero-width, because a fix landing exactly on the
+# boundary second would otherwise belong to both clips.
+_SPAN_MARGIN = timedelta(0)
 
 
 def _camera_utc_offset(paths: list[Path]) -> timedelta:
@@ -898,7 +905,7 @@ def gather_track(clips: list[Clip], gps_dirs: tuple[Path | None, ...]) -> list[t
     pool, offset = _pooled_track(gps_dirs)
     lo = min(c.dt for c in clips) + offset - _SPAN_MARGIN
     hi = max(c.dt + timedelta(seconds=c.duration) for c in clips) + offset + _SPAN_MARGIN
-    return [pt for pt in pool if lo <= pt[3] <= hi]
+    return [pt for pt in pool if lo <= pt[3] < hi]
 
 
 DRIVE_RESUME_THRESHOLD_KMH = 5.0   # higher than parking threshold to reject GPS jitter
