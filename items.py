@@ -545,6 +545,14 @@ class CleanWorkspace(Destructive):
     END = True
     DESTR = True
     WORD = "DELETE"
+    # The way past its own refusal, and ERASE like item 9's for the same
+    # reason: stepping over a guard must not be reachable by the muscle memory
+    # of the word that guard asks for.
+    #
+    # It exists because item 4 cannot reach what this refuses about. Item 4
+    # drops TRIPS; most orphan clips were grouped into no trip at all, so an
+    # operator told to exclude them there finds nothing to select.
+    OVERRIDE_WORD = "ERASE"
     SCOPE = Scope.FULL
     OUT = _both(_e(IMPORT, CLEAN_WS))
     IN_AUTHORED = {
@@ -567,6 +575,16 @@ class CleanWorkspace(Destructive):
         return _first_block(
             _no_import(world, "nothing imported — nothing to clean up"),
             guards.nothing_to_clean_up(world))
+
+    def override(self, world):
+        """Record the orphan clips as dropped, which makes the refusal false.
+
+        Not a door around the guard: afterwards clean_is_allowed is asked
+        again and has to say yes on its own.
+        """
+        if not world.orphan_clips:
+            return None
+        return self._work.drop_orphans_then_clean(world)
 
     def _plan(self, world) -> Plan:
         return self._work.clean_workspace_plan(world)

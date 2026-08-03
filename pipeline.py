@@ -6102,7 +6102,7 @@ def _orphan_detail(ctx, root, world):
     # The cache only. A refusal must not start a minutes-long boundary scan to
     # phrase itself, and without a grouping the counted line below still says
     # the whole truth -- just without naming the trips.
-    payload = _cached_grouping(ctx, root) or {}
+    payload = _cached_grouping(ctx, root) or load_groups(ctx, root) or {}
     by_stamp = {}
     for trip in payload.get("trips", []):
         for clip in trip.get("front") or []:
@@ -6124,8 +6124,14 @@ def _orphan_detail(ctx, root, world):
                            % (index, trip.get("day", "?"), n,
                               "" if n == 1 else "s")))
     if loose:
-        lines.append(C.dim("        %d clip%s the scan grouped into no trip"
-                           % (loose, "" if loose == 1 else "s")))
+        # Said plainly, because the way out differs. Item 4 drops TRIPS, and a
+        # clip the scanner joined to no drive cannot be selected there at all
+        # -- told to go and exclude it, he finds nothing to pick and comes
+        # back to the same refusal.
+        lines.append(C.dim("        %d clip%s in no trip at all — parking-mode"
+                           " snippets, not selectable in %d) %s"
+                           % (loose, "" if loose == 1 else "s",
+                              EXCLUDE, NAME[EXCLUDE])))
     return tuple(lines)
 
 
@@ -6180,16 +6186,13 @@ def _the_way_out(world):
     """
     if not world.orphan_clips:
         return ()
-    if not world.card.dcim:
-        return (C.yellow("  Put the card back in and they are accounted for"
-                         " again, or drop them in %d) %s" % (EXCLUDE, NAME[EXCLUDE])),
-                C.yellow("  if the footage is not wanted — that records the"
-                         " decision instead of losing it."))
-    return (C.yellow("  They belong to trips too short to render, so nothing"
-                     " will ever account for them."),
-            C.yellow("  Drop them in %d) %s — that records the decision, and"
-                     " the import stops offering" % (EXCLUDE, NAME[EXCLUDE])),
-            C.yellow("  them back every cycle. Then this step goes through."))
+    back = (C.yellow("  Put the card back in and they are accounted for again."),) \
+        if not world.card.dcim else ()
+    return back + (
+        C.yellow("  Or drop them here with the word below — that records the"
+                 " decision instead of"),
+        C.yellow("  losing it, and the import stops offering them back every"
+                 " cycle."))
 
 
 def _print_gate_detail(world):
@@ -6337,6 +6340,59 @@ def _card_advisory(ctx, world):
                      % C.yellow("%d" % len(unpublished)))]
 
 
+def _dropped_on_purpose(ctx, number, stamps, guard, scope, started):
+    """Record these clips as dropped, then re-ask the guard. (fresh, refusal).
+
+    Both ways past a refusal do this, and it is the whole of what makes them
+    safe: neither skips its gate. Excluding is what this tool already calls
+    "this footage never happened, deliberately" -- it is permanent, it survives
+    every clean-up, the delta import stops offering the clips back, and every
+    guard honours it. So the refusal becomes FALSE and the act then passes the
+    same gates it always did.
+
+    `fresh` is the world captured after the recording, for a caller that goes
+    on to act on it. `refusal` is non-None when something ELSE is still in the
+    way, which is a stop rather than a failure: the ledger changed, nothing
+    was erased, and the reason is on screen.
+    """
+    stamps = frozenset(stamps)
+    if not stamps:
+        return None, None
+    record_excluded_stamps(ctx, stamps)
+    print(C.dim("  %d clips recorded as dropped on purpose." % len(stamps)))
+    fresh = looked_at(ctx, scope)
+    verdict = guard(fresh)
+    if verdict.blocked:
+        print(C.red("  Still refusing: %s." % verdict.reason))
+        return None, _outcome(record(ctx, NAME[number], SKIPPED, started,
+                                     "refused: %s" % verdict.reason))
+    return fresh, None
+
+
+def drop_orphans_then_clean(ctx, world):
+    """Record the orphan clips as dropped on purpose, then clean normally.
+
+    The same shape as item 9's way past, and for the same reason: the refusal
+    is a fact about the world, so the way past changes the world rather than
+    skipping the gate. Once these clips are excluded, nothing is unaccounted
+    for, clean_is_allowed says so on its own, and the clean goes through every
+    gate it always did.
+
+    It exists because item 4 cannot reach these. Item 4 drops TRIPS, and most
+    of these clips were grouped into no trip at all -- parking-mode snippets
+    the scanner never joined to a drive. Told to exclude them there, the
+    operator finds nothing to select and the refusal stands forever.
+    """
+    started = time.time()
+    _fresh, refusal = _dropped_on_purpose(ctx, CLEAN_WS, world.orphan_clips,
+                                          guards.clean_is_allowed,
+                                          menu.Scope.FULL, started)
+    # No commit here, unlike item 9. The clean has a target to settle and a
+    # word to ask for, and both belong to its plan; this only removes what was
+    # standing in the way, and the next press goes through it.
+    return refusal
+
+
 def erase_card_plan(ctx, world):
     """Item 9's plan."""
     started = time.time()
@@ -6375,16 +6431,12 @@ def drop_unaccounted_then_erase(ctx, world):
     changed only the ledger.
     """
     started = time.time()
-    stamps = frozenset(world.card.new_stamps)
-    record_excluded_stamps(ctx, stamps)
-    print(C.dim("  %d clips recorded as dropped on purpose." % len(stamps)))
-    fresh = looked_at(ctx, menu.Scope.LOCAL)
-    verdict = guards.card_is_expendable(fresh)
-    if verdict.blocked:
-        print(C.red("  Still refusing: %s." % verdict.reason))
-        return _outcome(record(ctx, NAME[ERASE_CARD], SKIPPED, started,
-                               "refused: %s" % verdict.reason))
-    return _erase_card_commit(ctx, started)
+    fresh, refusal = _dropped_on_purpose(ctx, ERASE_CARD, world.card.new_stamps,
+                                         guards.card_is_expendable,
+                                         menu.Scope.LOCAL, started)
+    if refusal is not None:
+        return refusal
+    return _erase_card_commit(ctx, started) if fresh else None
 
 
 def _erase_card_commit(ctx, started):
@@ -7438,6 +7490,9 @@ class Work:
 
     def clean_workspace_plan(self, world):
         return clean_workspace_plan(self.ctx, world)
+
+    def drop_orphans_then_clean(self, world):
+        return drop_orphans_then_clean(self._ctx, world)
 
     def erase_card_plan(self, world):
         return erase_card_plan(self.ctx, world)
