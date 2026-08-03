@@ -6796,35 +6796,34 @@ def wipe_card(ctx):
 
 
 def _unlink_card_files(ctx, dcim):
-    """Weigh what is under DCIM, then remove all of it, keeping DCIM.
+    """Every FILE under DCIM. Every FOLDER stays, at every depth.
 
-    Counted before rather than as it goes, because rmtree reports nothing and
-    the figure on the closing line is what says the card is actually empty. One
-    walk to measure, then one removal per top-level folder: on a full card that
-    is 888 stat-and-unlink pairs replaced by five tree removals.
+    The camera does not rebuild its own tree. Handed a card with DCIM there but
+    200video/front missing, it sits on "loading card" and records nothing —
+    which is a failure discovered in the car, hours after the erase, with
+    nothing recorded in between.
+
+    So the whole structure is left standing and only its contents go. That
+    costs a stat and an unlink per file where removing five trees would have
+    been five calls, and the trade is not close: the fast version cannot be
+    trusted to leave a card the camera will accept.
     """
     # The indeterminate bar, because neither half of this reports progress and
     # both take real time on a full card: the walk stats every file on a slow
-    # bus, and rmtree of 130 GB is not instant. Without it the screen sat on
-    # the typed word for a minute or more with nothing between "DELETE" and
-    # the closing line, which is the one moment an operator most wants to see
-    # that something is happening.
+    # bus, and 888 unlinks over a card reader is not instant. Without it the
+    # screen sat on the typed word for a minute or more with nothing between
+    # the word and the closing line.
     failed = ""
     with waiting("Erasing"):
         gone = freed = 0
-        for f in dcim.rglob("*"):
-            if _real_file(f):
-                try:
-                    freed += f.stat().st_size
-                    gone += 1
-                except OSError:
-                    pass
-        for child in sorted(_safe_iterdir(dcim)):
+        for f in sorted(dcim.rglob("*")):
+            if not _real_file(f):
+                continue
             try:
-                if _real_dir(child):
-                    shutil.rmtree(str(child))
-                else:
-                    child.unlink()
+                size = f.stat().st_size
+                f.unlink()
+                gone += 1
+                freed += size
             except OSError as e:
                 failed = str(e)
     if failed:

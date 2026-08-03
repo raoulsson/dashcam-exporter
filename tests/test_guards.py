@@ -787,14 +787,15 @@ class TestTheDestructiveSequence(GuardTest):
         self.assertFalse(self.item.completed())
         self.assertTrue(self.clip.is_file(), "the footage must survive a cancel")
 
-    def test_the_word_empties_dcim_and_leaves_dcim_standing(self):
+    def test_the_word_takes_the_files_and_leaves_the_folders(self):
         outcome = self._run("DELETE")
         self.assertTrue(outcome.completed, outcome.note)
         self.assertFalse(self.clip.exists())
         dcim = self.w.ctx.card / "DCIM"
         self.assertTrue(dcim.is_dir(), "DCIM is the card-is-here marker")
-        self.assertEqual(list(dcim.iterdir()), [],
-                         "the camera makes the folders it needs again")
+        self.assertTrue((dcim / "200video" / "front").is_dir(),
+                        "the camera writes here and does not create it itself")
+        self.assertEqual([f for f in dcim.rglob("*") if f.is_file()], [])
 
     def test_a_second_run_does_not_reach_the_prompt(self):
         """The idempotence invariant, as behaviour rather than as intent.

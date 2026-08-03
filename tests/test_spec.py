@@ -517,16 +517,19 @@ class TestPostState(SpecTest):
         P.after_render(self.b.ctx)                          # expected entry point
         self.assertFalse(any(inter.iterdir()) if inter.exists() else False)
 
-    def test_wiping_the_sim_empties_dcim_and_keeps_it(self):
-        """The camera makes the folders it needs on the next recording, so
-        everything under DCIM goes. DCIM itself stays: it is how this tool
-        knows a card is in the slot, and an erased card that reads as no card
-        makes item 9 answer "no card at ..." with one sitting there."""
+    def test_wiping_the_sim_keeps_every_folder_and_takes_every_file(self):
+        """The camera does not rebuild its own tree. Handed a card with DCIM
+        there but 200video/front missing it sits on "loading card" and records
+        nothing — a failure discovered in the car, hours later, with nothing
+        recorded in between."""
         self.b.card_in().imported().sidecars()
-        P.wipe_card(self.b.ctx)                             # expected entry point
         dcim = self.b.ctx.card / "DCIM"
+        before = sorted(str(d.relative_to(dcim)) for d in dcim.rglob("*") if d.is_dir())
+        P.wipe_card(self.b.ctx)                             # expected entry point
+        after = sorted(str(d.relative_to(dcim)) for d in dcim.rglob("*") if d.is_dir())
         self.assertTrue(dcim.is_dir(), "DCIM is the card-is-here marker")
-        self.assertEqual(list(dcim.iterdir()), [], "everything under it goes")
+        self.assertEqual(after, before, "the camera writes into these")
+        self.assertEqual([f for f in dcim.rglob("*") if f.is_file()], [])
 
     def test_an_erased_card_still_reads_as_a_card(self):
         self.b.card_in().imported().sidecars()
