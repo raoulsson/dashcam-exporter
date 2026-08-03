@@ -1437,6 +1437,68 @@ class TestWipingAWorkspaceWhoseSourceIsStillInTheSlot(SeamTest):
         self.assertIn("still on the SIM card", said)
 
 
+class TestTheBuilderSaysWhatItHolds(unittest.TestCase):
+    """holds() is asked on both sides of the build, so the line can say what
+    CHANGED. "35 trips" is the same sentence on every run and cannot tell a
+    rebuild of the same thirty-five from one that added a trip."""
+
+    def _reported(self, counts, note="Website built", completed=True):
+        """Run the wrapper over a builder whose holds() returns `counts` in
+        turn, and give back the note the operator would read."""
+        outcome = M.did(note) if completed else M.stopped(note)
+        return P._with_the_count(outcome, counts[0], counts[1])
+
+    def test_one_new_trip_is_named_as_one(self):
+        self.assertEqual(self._reported((34, 35)).note,
+                         "Website built, 1 new trip added, 35 total")
+
+    def test_several_are_pluralised(self):
+        self.assertEqual(self._reported((30, 35)).note,
+                         "Website built, 5 new trips added, 35 total")
+
+    def test_a_rebuild_that_added_nothing_says_so(self):
+        """The case that matters most: pressing 5 twice must not read as
+        though the second press did the same work as the first."""
+        self.assertEqual(self._reported((35, 35)).note,
+                         "Website built, no new trips, 35 total")
+
+    def test_without_a_before_it_reports_the_total_alone(self):
+        """First build of a fresh workspace: nothing to compare against."""
+        self.assertEqual(self._reported((None, 35)).note,
+                         "Website built, 35 trips total")
+
+    def test_a_builder_that_will_not_count_says_what_it_always_said(self):
+        """holds() defaults to None on the interface, so an implementation
+        written before the question existed keeps working."""
+        self.assertEqual(self._reported((None, None)).note, "Website built")
+
+    def test_a_failed_build_gains_no_count(self):
+        got = self._reported((34, 35), note="build_manifest.py exited 1",
+                             completed=False)
+        self.assertEqual(got.note, "build_manifest.py exited 1")
+
+    def test_a_builder_whose_count_raises_is_not_the_runs_problem(self):
+        class Angry:
+            def holds(self):
+                raise RuntimeError("no manifest")
+        self.assertIsNone(P._holds(Angry()))
+
+    def test_the_interface_answers_none_by_default(self):
+        import uploader as U
+
+        class Bare(U.Builder):
+            def describe(self):
+                return ""
+
+            def evaluate(self, workspace):
+                return M.go()
+
+            def execute(self, workspace):
+                return M.did("built")
+
+        self.assertIsNone(Bare().holds())
+
+
 class TestOnlyTheStepsThatMoveItInvalidateTheAnswer(unittest.TestCase):
     """is_complete() costs a round trip: ssh, a bucket listing, a fetch of the
     live index. Nine seconds, paid on the next menu draw every time a step

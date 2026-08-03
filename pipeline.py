@@ -7505,8 +7505,13 @@ class TargetBuild:
         return self._act.evaluate(_handed_over(self._ctx, world))
 
     def execute(self, world):
-        return _logged(self._ctx, BUILD,
-                       lambda: self._act.execute(_handed_over(self._ctx, world)))
+        # Counted on both sides of the act, because the interesting number is
+        # the difference. The act's own note says what it did; this says what
+        # changed, which is the thing a second press cannot fake.
+        before = _holds(self._act)
+        outcome = _logged(self._ctx, BUILD,
+                          lambda: self._act.execute(_handed_over(self._ctx, world)))
+        return _with_the_count(outcome, before, _holds(self._act))
 
 
 class TargetPublish(TargetBuild):
@@ -7520,6 +7525,34 @@ class TargetPublish(TargetBuild):
     def execute(self, world):
         return _logged(self._ctx, UPLOAD,
                        lambda: self._act.execute(_handed_over(self._ctx, world)))
+
+
+def _holds(act):
+    """What the builder says its result contains, or None if it will not say."""
+    try:
+        return act.holds()
+    except Exception:
+        return None      # a builder's bookkeeping is not this module's problem
+
+
+def _with_the_count(outcome, before, after):
+    """The act's own words, plus what the build changed.
+
+    Only when the answer is a real one and the act succeeded. A builder that
+    cannot count, or a build that failed, says exactly what it said before.
+    """
+    if after is None or not outcome.completed:
+        return outcome
+    added = after - before if before is not None else None
+    return menu.did("%s, %s" % (outcome.note, _delta_words(added, after)))
+
+
+def _delta_words(added, total):
+    if added is None:
+        return "%d trip%s total" % (total, "" if total == 1 else "s")
+    if added <= 0:
+        return "no new trips, %d total" % total
+    return "%d new trip%s added, %d total" % (added, "" if added == 1 else "s", total)
 
 
 class NoPublisher:

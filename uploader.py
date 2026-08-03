@@ -275,6 +275,27 @@ class Builder(Act):
     the half that answers is_complete().
     """
 
+    def holds(self) -> Optional[int]:
+        """How many trips the built result contains, or None if you cannot say.
+
+        Asked immediately BEFORE and AFTER execute(), so the exporter can
+        report what the build changed rather than only what it now amounts to.
+        "35 trips" says nothing about whether this run added one or rebuilt the
+        same thirty-five; "1 new, 35 total" is the sentence an operator reads
+        to know the run did something.
+
+        A count of the RESULT, not of the workspace. What the exporter handed
+        over is already known to it; what it cannot see is how much of that
+        reached the thing you build, and whether anything you were carrying
+        forward from a previous build is still in there.
+
+        Not abstract, and deliberately so: this is a published interface, and
+        an implementation written before the question existed must keep
+        working. None means "no answer", and the exporter then says what it
+        always said.
+        """
+        return None
+
 
 class Uploader(Act):
     """Item 7: put what was built online. One job, however many transports.

@@ -57,6 +57,17 @@ STYLE = "body{font:16px/1.5 system-ui;margin:3rem auto;max-width:40rem}\n"
 class LocalWebSiteBuilderPlugin(Builder):
     """Item 5: stage a tiny site from the trips the exporter described."""
 
+    def holds(self):
+        """Trip pages on the staged site, which is what this build produces.
+
+        index.html is the site, not a trip. Counted off the staging directory
+        rather than remembered from the last run: the directory IS the result.
+        """
+        staged = _staging()
+        if not staged.is_dir():
+            return None
+        return len([p for p in staged.glob("*.html") if p.name != "index.html"])
+
     def describe(self) -> str:
         return "Build a small HTML site in %s." % _staging()
 
