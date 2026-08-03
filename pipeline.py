@@ -795,7 +795,7 @@ def _renderer_env(ctx):
 
 
 def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
-               env_extra=None, tail_lines=40, stdout_file=None, note_first=False,
+               env_extra=None, tail_lines=40, stdout_file=None, note_first=True,
                quiet_finish=False):
     """Run a command, stream its output, return (rc, all_lines).
 
@@ -1069,16 +1069,13 @@ def _remember_name(state, line):
 # "1023.0 MB" -- nine characters -- for the twenty-four megabytes between 1000
 # and a gigabyte. A field one short there shifts everything to its right by a
 # character, twice per gigabyte, which is the left half of the line wiggling.
-NAME_W, RATE_W, SIZE_W = 23, 10, 9
+NAME_W, RATE_W, SIZE_W = uploader.NAME_W, uploader.RATE_W, uploader.SIZE_W
 
 
 def _import_progress(state, moved, total, rate):
     if not total:
         return None
-    note = "%s   %s    %s/%-*s" % (_fitted(state["name"], NAME_W),
-                                   _right(rate, RATE_W),
-                                   _right(human_bytes(moved), SIZE_W),
-                                   SIZE_W, human_bytes(total))
+    note = uploader.progress_note(state["name"], rate, moved, total)
     # \0: no log tail after this. The tail shows the child's last raw line,
     # and for rsync that line IS where these numbers came from -- it printed
     # the rate and a percentage again, truncated, after the ones on the left.
@@ -1159,11 +1156,13 @@ def _fit(text, room):
 def _bar_line(label, frac, elapsed, note, note_first):
     """Where the bar sits in the line, which is not the same question twice.
 
-    A step whose note is a counter reads best as "Render [####] 40% 2:10/5:30"
-    -- the label first, because five steps draw bars and the label is what
-    tells them apart. The import's note is the file being copied, its rate and
-    how far through the whole card it is, which is the sentence; the bar is
-    the picture of it and belongs after.
+    One shape for every step: what is moving on the left, the bar and the
+    percentage on the right. A render, a copy and an upload then read the same
+    way and the eye learns one line rather than three.
+
+    The label leads only when a step has nothing to say about what it is
+    working on -- there is no filename in a boundary scan -- and then the
+    label is the only thing distinguishing one bar from another.
     """
     bar = Bar(label)
     if not (note_first and note):
@@ -3296,7 +3295,7 @@ def step_import(ctx):
     # whoever ran it by hand; here they say twice, in the script's words, what
     # the line below says once in the tool's.
     rc, lines = run_stream(cmd, ctx.exporter, "Import", parser=watch,
-                           note_first=True, quiet_finish=True, env_extra=env)
+                           quiet_finish=True, env_extra=env)
     if rc != 0:
         return record(ctx, NAME[IMPORT], FAILED, started, "exit %d" % rc)
 

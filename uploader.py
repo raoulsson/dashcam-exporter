@@ -65,6 +65,66 @@ from world import Render, TripMeta                               # noqa: F401
 # What the exporter lends an implementation while it works
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# The one shape a progress line's left-hand side takes
+# ---------------------------------------------------------------------------
+
+# Fixed columns, so the figures sit still while they change. A field that grows
+# from "9 MB" to "10 MB" and shifts everything after it is a line the eye has
+# to re-read on every redraw.
+NAME_W, RATE_W, SIZE_W = 23, 10, 9
+
+
+def human_bytes(n) -> str:
+    """Decimal, the way df and the label on the disk report it.
+
+    Powers of ten, not two. These figures are compared against what the Finder
+    and df say about the same card, and 1024-based units read seven per cent
+    small at gigabyte scale.
+    """
+    if n is None:
+        return "?"
+    n = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1000 or unit == "TB":
+            return ("%.0f %s" % (n, unit)) if unit == "B" else ("%.1f %s" % (n, unit))
+        n /= 1000.0
+    return "?"
+
+
+def progress_note(name="", rate="", done=None, total=None, tail="") -> str:
+    """`<what>   <rate>   <done>/<total>   <tail>` — every bar's left-hand side.
+
+    What is moving, how fast, how far through. The bar and the percentage go
+    on the right of it, so a render, a copy and an upload all read the same
+    way and the eye learns one line rather than three.
+
+    Anything absent is left out rather than blanked, so a step with no rate to
+    report does not print a hole where one would be.
+    """
+    parts = []
+    if name:
+        parts.append(_fitted(str(name), NAME_W))
+    if rate:
+        parts.append(_right(str(rate), RATE_W))
+    if done is not None and total is not None:
+        parts.append("%s/%-*s" % (_right(human_bytes(done), SIZE_W),
+                                  SIZE_W, human_bytes(total)))
+    if tail:
+        parts.append(str(tail))
+    return "   ".join(parts)
+
+
+def _fitted(text, width):
+    if len(text) > width:
+        return text[:width - 1] + "\u2026"
+    return "%-*s" % (width, text)
+
+
+def _right(text, width):
+    return "%*s" % (width, text)
+
+
 class Ui(ABC):
     """The exporter's output, lent to an implementation for one call.
 
