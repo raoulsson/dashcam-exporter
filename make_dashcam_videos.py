@@ -125,7 +125,7 @@ PARKING_CLIP_FRACTION       = 0.75   # fraction of seconds-in-clip below thresho
 DEFAULT_PARKING_MIN_SECS    = 300    # minimum run length (s) before we skip (5 min)
 DEFAULT_PARKING_PAD_SECS    = 5      # legacy alias — kept for back-compat
 DEFAULT_PARKING_ENTRY_PAD   = 3      # seconds AFTER park onset, before FF
-DEFAULT_PARKING_EXIT_PAD    = 10     # how many seconds of footage precede drive-resume after the FF
+DEFAULT_PARKING_EXIT_PAD    = 4      # how many seconds of footage precede drive-resume after the FF
 # Standard exit-slice skip after a parking gap. The exit slice trims this
 # many seconds off the head of the first clip. Drive-resume detection
 # refines it when GPS clearly shows >=30s of continuous motion; otherwise
@@ -631,6 +631,20 @@ def _nmea_to_decimal(value: str, hemi: str) -> float | None:
         return result
     except (ValueError, IndexError):
         return None
+
+
+def settle_speeds_after(speeds: list[float], park_sec: int) -> list[float]:
+    """Zero the speed overlay from the second the FRAMES say the car stopped.
+
+    parse_clip_speeds below fixes the lag it CAN fix — the clock offset, the
+    dropouts, the late lock — all of which are alignment problems. This is the
+    residual it cannot: a receiver losing lock reports a decaying speed for the
+    real fixes it does emit. Rolling into a covered lot on 08-03 it read 18, 17,
+    14 km/h across three seconds in which the optical flow was pinned at 0.01
+    and the frame did not move. No realignment recovers that; only the frames
+    know. So where a park onset has been detected, the overlay follows it, and
+    a stationary car is never captioned with a speed."""
+    return [0.0 if s >= park_sec else v for s, v in enumerate(speeds)]
 
 
 def parse_clip_speeds(clip: "Clip", gps_dirs: tuple[Path | None, ...]) -> list[float]:
@@ -1229,6 +1243,13 @@ def find_park_second_by_video(clip: Clip) -> float | None:
     return None if onset is None else max(0.0, onset / EGO_FPS)
 
 
+def exit_trim_start(drive_away_sec: float, exit_pad: int) -> int:
+    """Where the parking-exit slice starts: `exit_pad` seconds of footage ahead
+    of the drive-away, so the viewer sees the car sitting there and then pull
+    out, rather than being dropped into a manoeuvre already under way."""
+    return max(0, int(drive_away_sec) - exit_pad)
+
+
 def clip_is_parked(clip: Clip, gps_dirs: tuple[Path | None, ...]) -> bool:
     """
     Decide whether a clip is stationary. Three signals all count as "parked":
@@ -1339,6 +1360,17 @@ def find_park_second(
     return None
 
 
+def _leads_into_parking(
+    group: "list[Clip]", i: int, gps_dirs: "tuple[Path | None, ...]",
+) -> bool:
+    """Whether clip `i` is the one the car could have come to rest in: the clip
+    after it is parked and this one is not parked already. The arrival lives in
+    exactly one clip per run, and this finds it without decoding the rest."""
+    return (i + 1 < len(group)
+            and clip_is_parked(group[i + 1], gps_dirs)
+            and not clip_is_parked(group[i], gps_dirs))
+
+
 def find_parking_runs(
     group: list[Clip],
     gps_dirs: tuple[Path | None, ...],
@@ -1372,6 +1404,23 @@ def find_parking_runs(
             c, gps_dirs,
             next_clips=group[i + 1: i + 3],
         )
+        # The smoothing detector above misses the arrival that matters most: a
+        # car rolling into a lot where the receiver is losing lock. On 08-03 it
+        # reported 18 km/h for ten seconds after the frames had gone still, and
+        # no onset was found at all. So where this clip leads into parking, ask
+        # the same detectors the trip's end-trim already trusts — video first,
+        # because it reads the wheels rather than a stale fix, GPS second for
+        # the arrival too dark to give video anything to track. Bounded to the
+        # one clip per run that can hold the arrival: asking every clip would
+        # decode the whole trip.
+        if park_sec is None and _leads_into_parking(group, i, gps_dirs):
+            park_sec = find_park_second_by_video(c)
+            if park_sec is None:
+                park_sec = find_park_second_by_gps(c, gps_dirs)
+            # Both answer in fractional video-seconds; a run's onset is a whole
+            # clip-second, because the render slices with it.
+            if park_sec is not None:
+                park_sec = int(park_sec)
         # Fallback: if smoothing-based detection misses, fall back to the
         # whole-clip parked heuristic. This catches the case where the GPS
         # data is too noisy / sparse for sustained-window detection but
@@ -1393,6 +1442,14 @@ def find_parking_runs(
                 end_idx = j
             else:
                 break
+        # clip_is_parked answers YES for a clip with no fix at all, which is
+        # exactly what a car pulling out of a lot produces — the receiver has
+        # not reacquired yet. So the run kept growing through the departure and
+        # skipped it whole, and the render resumed on the NEXT clip, already
+        # driving. A clip the car leaves in is not parked: end the run before
+        # it, and it becomes the exit clip the render cuts into.
+        while end_idx > i and find_drive_away_by_video(group[end_idx]) is not None:
+            end_idx -= 1
         # Total stopped time = partial entry tail + fully-parked clips +
         # wall-clock engine-off gap to next moving clip.
         partial_entry = max(0, group[i].duration - park_sec)
@@ -2426,6 +2483,7 @@ def encode_clip(
     map_video: Path | None = None,
     trim_start: int = 0,
     trim_seconds: int | None = None,
+    settled_at: int | None = None,
     no_audio: bool = False,
     output_height: int = 0,
 ) -> None:
@@ -2446,6 +2504,8 @@ def encode_clip(
         # recording before GPS reacquired lock. Without this, the speed
         # overlay can be ~10 seconds AHEAD of what's actually visible.
         all_speeds = parse_clip_speeds(clip, gps_dirs)
+        if all_speeds and settled_at is not None:
+            all_speeds = settle_speeds_after(all_speeds, settled_at)
         if all_speeds:
             window = all_speeds[trim_start:trim_start + duration]
             srt_path = out_path.with_suffix(".speed.srt")
@@ -4040,6 +4100,10 @@ def main() -> int:
             # head so we land closer to the actual drive moment.
             trim_start = 0
             trim_seconds: int | None = None
+            # Set only where a park onset is known, so the speed overlay cannot
+            # caption a stationary car with a decaying fix. See
+            # settle_speeds_after.
+            settled_at: int | None = None
             if action in ("entry", "entry_end"):
                 # Entry slice anchors on within-clip park onset (when GPS speed
                 # first sustains below threshold) + entry_pad, so the slice ends
@@ -4048,12 +4112,13 @@ def main() -> int:
                 # but the render loop emits no FF transition after it.
                 park_sec = park_sec_for_entry.get(ci0, 0)
                 trim_seconds = park_sec + entry_pad
+                settled_at = park_sec
             elif action == "exit":
                 # Prefer VIDEO ego-motion to anchor the drive-away — GPS speed is
                 # unreliable here (parking-mode snippets are full of passing
                 # people/cars). find_drive_away_by_video pinpoints the wheels
-                # turning; keep a small EGO_CONTEXT_PAD before it. Silently fall
-                # back to GPS drive-resume, then a fixed skip, when video isn't
+                # turning; keep parking_exit_pad of footage before it. Silently
+                # fall back to GPS drive-resume, then a fixed skip, when video isn't
                 # available (no numpy/opencv) or finds nothing. The user only
                 # cares that the cut is clean, not how it's found; the choice to
                 # KEEP the parking movements instead is --no-skip-parking. The
@@ -4061,7 +4126,11 @@ def main() -> int:
                 vid_sec = (None if args.no_video_drive_detect
                            else find_drive_away_by_video(clip))
                 if vid_sec is not None:
-                    trim_start = max(0, int(vid_sec) - EGO_CONTEXT_PAD)
+                    # parking_exit_pad, not EGO_CONTEXT_PAD: the knob config.txt
+                    # documents for this cut was being ignored on the video path
+                    # — which is the normal path — in favour of a 2-second
+                    # constant. Two seconds is too tight to read a reverse-out.
+                    trim_start = exit_trim_start(vid_sec, exit_pad)
                     print(f"        exit: video drive-away at {vid_sec:.1f}s "
                           f"→ trim from {trim_start}s")
                 else:
@@ -4099,6 +4168,7 @@ def main() -> int:
                     how = "gps"
                 if park_sec is not None and int(park_sec) >= trim_start:
                     trim_seconds = max(1, int(park_sec) - trim_start + EGO_END_PAD)
+                    settled_at = int(park_sec)
                     print(f"        end-trim ({how}): parks at {park_sec:.1f}s → "
                           f"stop after {trim_seconds}s")
 
@@ -4192,6 +4262,7 @@ def main() -> int:
                 clip, inter, font_path, use_vt, with_timestamp,
                 gps_dirs, with_speed, map_video=map_video,
                 trim_start=trim_start, trim_seconds=trim_seconds,
+                settled_at=settled_at,
                 no_audio=args.no_audio, output_height=args.output_height,
             )
             intermediates.append(inter)

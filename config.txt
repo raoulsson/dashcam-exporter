@@ -548,7 +548,12 @@ software = true
 
 # How much pre-drive padding to keep AFTER the Fast-forwarding slide.
 # Larger = you see more "about to drive" before the actual drive-away.
-#parking_exit_pad = 10
+# The drive-away is found by optical flow, to about a quarter-second, so this
+# is a framing choice rather than a safety margin. Default 4 mirrors the 3 of
+# parking_entry_pad: a beat to register the parked car, then the wheels turn.
+# Ten seconds of a motionless frame directly after the slide reads as the same
+# dead air the slide exists to remove.
+#parking_exit_pad = 4
 
 # Drive-mode head-trim padding (in seconds). When the first clip of a drive
 # has GPS that proves the car only started moving partway in, the video is
