@@ -1935,13 +1935,10 @@ class TestTheWayPastTheCardRefusal(SeamTest):
                             built[ERASE_CARD].WORD,
                             "the way past a guard is reachable by habit")
         self.assertEqual([n for n, i in built.items() if i.OVERRIDE_WORD],
-                         [CLEAN_WS, ERASE_CARD],
-                         "an item grew a way past its guard without one being needed")
-        for number in (CLEAN_WS, ERASE_CARD):
-            with self.subTest(item=number):
-                self.assertNotEqual(built[number].OVERRIDE_WORD,
-                                    built[number].word(),
-                                    "the way past is reachable by habit")
+                         [ERASE_CARD], "a second item grew a way past its guard")
+        self.assertNotEqual(built[ERASE_CARD].OVERRIDE_WORD,
+                            built[ERASE_CARD].word(),
+                            "the way past is reachable by habit")
 
 
 class TestARefusalIsAlwaysInTheLog(SeamTest):

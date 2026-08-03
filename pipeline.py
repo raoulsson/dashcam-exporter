@@ -37,6 +37,7 @@ code left here.
 """
 from __future__ import annotations
 
+import collections
 import contextlib
 import base64
 import html
@@ -6057,20 +6058,14 @@ def clean_workspace_plan(ctx, world):
         return _nothing(ctx, CLEAN_WS, started, "nothing at the target")
 
     size, files = tree_size(target), count_files(target)
+    rows, loose = _trip_rows(ctx, root, world)
     print("  Target: %s" % tilde(target))
     print()
-    # Amber on the count, as on the import screen: it is the figure the typed
-    # word is answering, and the only one on this screen that moves.
-    print("  %s files (%s)" % (C.yellow("%d" % files), human_bytes(size)))
+    _print_all(_cleaning_block(rows, files, size, loose))
 
-    # The verdict first. What-this-will-do and the gate table are the case FOR
-    # pressing on, and printing them above a refusal put four lines of "yes"
-    # over the sentence saying no.
     verdict = guards.clean_is_allowed(world)
     if verdict.blocked:
-        print(C.red("  Refusing: %s." % verdict.reason))
-        _print_all(_orphan_detail(ctx, root, world) or _evidence_lines(verdict))
-        _print_all(_the_way_out(world))
+        _print_all(_refusal_block(rows, verdict, world))
         if not world.orphan_clips:
             # Only when they bear on the refusal. Over an orphan refusal the
             # gates all read yes -- that is exactly why this floor exists --
@@ -6086,6 +6081,110 @@ def clean_workspace_plan(ctx, world):
                      lambda fresh: _clean_workspace_commit(ctx, fresh, root, target,
                                                            size, files, started),
                      banner=_clean_banner(ctx, world, target, size))
+
+
+# One row per trip in the import: what it is, and what accounts for it.
+# `state` is the whole question this screen exists to answer, so it is a word
+# rather than a flag -- "not excluded" is what the operator has to act on, and
+# it has to read as such next to the two that need nothing.
+TripRow = collections.namedtuple("TripRow", "index day clips bytes state")
+
+
+def _trip_rows(ctx, root, world):
+    """Every trip in this import, and whether anything accounts for it.
+
+    Rendered means it became a video, which is what the destination is then
+    asked about. Excluded means he decided it never happened. A trip that is
+    neither is footage about to be deleted on no one's decision, and that is
+    what the refusal is about.
+
+    Returns (rows, clips the scan grouped into no trip at all).
+    """
+    payload = _cached_grouping(ctx, root) or load_groups(ctx, root) or {}
+    excluded = excluded_stamps(ctx)
+    rendered = {r.name for r in world.renders_here}
+    rows, grouped = [], set()
+    for trip in payload.get("trips", []):
+        stamps = {m.group(1) for c in (trip.get("front") or [])
+                  for m in [STAMP_RE.search(Path(c).name)] if m}
+        base = _out_base_name(trip) or ""
+        if stamps and stamps <= excluded:
+            state = "excluded"
+        elif base and any(n.startswith(base) for n in rendered):
+            state = "rendered"
+        else:
+            state = "not excluded"
+        rows.append(TripRow(trip.get("index"), trip.get("day", "?"),
+                            len(trip.get("front") or []), trip_bytes(trip), state))
+        grouped |= stamps
+    return rows, len(_import_clip_stamps(root) - grouped)
+
+
+def _cleaning_block(rows, files, size, loose):
+    """What is about to go, before anything is decided about it."""
+    lines = [C.green("  Cleaning:"),
+             C.green("    Total:   %s files (%s)" % (files, human_bytes(size))),
+             C.green("    %d trips:" % len(rows))]
+    lines.extend(_trip_line(r) for r in rows)
+    if loose:
+        # Counted, not listed, and named as what they are. A card's
+        # parking-mode snippets are dozens of one-clip nothings that belong to
+        # no drive and never will -- item 4 cannot select them, so a list of
+        # them is a list nobody can act on.
+        lines.append(C.dim("    %d clip%s in no trip — parking-mode snippets"
+                           % (loose, "" if loose == 1 else "s")))
+    return tuple(lines) + ("",)
+
+
+def _trip_line(row):
+    text = _trip_line_plain(row)
+    # Dim for the two that need nothing, so the eye lands on the ones that do.
+    return C.green(text) if row.state == "not excluded" else C.dim(text)
+
+
+def _refusal_block(rows, verdict, world):
+    """The one red line, then exactly what to do about it.
+
+    Numbered, because it is two steps in a fixed order and the second is easy
+    to forget: excluding does not clean, it only removes the reason this
+    refused.
+    """
+    owed = [r for r in rows if r.state == "not excluded"]
+    if not owed:
+        return (C.red("  Refusing to clean workspace: %s." % verdict.reason),
+                ) + _orphan_detail_lines(world)
+    lines = [C.red("  Refusing to clean workspace: %d trip%s not rendered and"
+                   " not excluded." % (len(owed), "" if len(owed) == 1 else "s")),
+             ""]
+    lines.extend(C.green(t) for t in (_trip_line_plain(r) for r in owed))
+    lines.extend(["",
+                  C.green("  To proceed:"),
+                  C.green("    1. Select \"%d) %s\" from the menu and exclude the"
+                          " trips in this list." % (EXCLUDE, NAME[EXCLUDE])),
+                  C.green("    2. Run \"%d) %s\" again."
+                          % (CLEAN_WS, NAME[CLEAN_WS])),
+                  "",
+                  C.dim("  Excluding them there records the decision against the"
+                        " trip. When the same"),
+                  C.dim("  footage turns up on a later card, we know it is not"
+                        " wanted."),
+                  ""])
+    return tuple(lines)
+
+
+def _trip_line_plain(row):
+    return ("      Trip %2s   - %5d clip%s (%8s)   - %s"
+            % (row.index, row.clips, " " if row.clips == 1 else "s",
+               human_bytes(row.bytes), row.state))
+
+
+def _orphan_detail_lines(world):
+    """The clips no trip holds, when they are what is left refusing."""
+    n = len(world.orphan_clips)
+    if not n:
+        return ()
+    return (C.dim("      %d clip%s in no trip at all — parking-mode snippets"
+                  % (n, "" if n == 1 else "s")),)
 
 
 def _orphan_detail(ctx, root, world):
@@ -6367,30 +6466,6 @@ def _dropped_on_purpose(ctx, number, stamps, guard, scope, started):
         return None, _outcome(record(ctx, NAME[number], SKIPPED, started,
                                      "refused: %s" % verdict.reason))
     return fresh, None
-
-
-def drop_orphans_then_clean(ctx, world):
-    """Record the orphan clips as dropped on purpose, then clean normally.
-
-    The same shape as item 9's way past, and for the same reason: the refusal
-    is a fact about the world, so the way past changes the world rather than
-    skipping the gate. Once these clips are excluded, nothing is unaccounted
-    for, clean_is_allowed says so on its own, and the clean goes through every
-    gate it always did.
-
-    It exists because item 4 cannot reach these. Item 4 drops TRIPS, and most
-    of these clips were grouped into no trip at all -- parking-mode snippets
-    the scanner never joined to a drive. Told to exclude them there, the
-    operator finds nothing to select and the refusal stands forever.
-    """
-    started = time.time()
-    _fresh, refusal = _dropped_on_purpose(ctx, CLEAN_WS, world.orphan_clips,
-                                          guards.clean_is_allowed,
-                                          menu.Scope.FULL, started)
-    # No commit here, unlike item 9. The clean has a target to settle and a
-    # word to ask for, and both belong to its plan; this only removes what was
-    # standing in the way, and the next press goes through it.
-    return refusal
 
 
 def erase_card_plan(ctx, world):
@@ -7490,9 +7565,6 @@ class Work:
 
     def clean_workspace_plan(self, world):
         return clean_workspace_plan(self.ctx, world)
-
-    def drop_orphans_then_clean(self, world):
-        return drop_orphans_then_clean(self._ctx, world)
 
     def erase_card_plan(self, world):
         return erase_card_plan(self.ctx, world)
