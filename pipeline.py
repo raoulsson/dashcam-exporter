@@ -3564,6 +3564,15 @@ def step_generate_meta(ctx):
     # Counted where they were written, not across the whole export tree: an
     # rglob there counts every earlier import's trips too, so six scanned trips
     # reported eighteen.
+    # The trips themselves, here and nowhere else. This is the step that works
+    # out what they ARE, and until now it said only how many -- the list lived
+    # behind item 4, which is the entry for throwing one away. Reading what the
+    # card turned out to hold should not require opening the screen that
+    # deletes it.
+    #
+    # The same table item 4 prints, from the same function: two spellings of
+    # one list would disagree the first time either changed.
+    _print_trip_table(ctx, root, (have or {}).get("trips", []))
     n = _sidecars_for(ctx, root)
     done_line("described %s trips%s, sidecars under %s"
               % (C.yellow("%d" % n), _skipped_note(have),
@@ -4415,11 +4424,15 @@ def _print_trip_table(ctx, root, trips):
     print()
     by_index = {}
     for t in trips:
-        by_index[t["index"]] = t
+        by_index[t.get("index")] = t
         note = "" if t.get("renderable") else C.dim("  [%s]" % (t.get("reason") or "skipped"))
-        print("  %2d) %s  %s -> %s  %3d clips  %8s  %9s%s" % (
-            t["index"], t["day"], t["start"][11:16], t["end"][11:16], t.get("clips", 0),
-            human_secs(t.get("duration_secs")), human_bytes(trip_bytes(t)), note))
+        # Every field read with a default. A grouping that is short of one is a
+        # reason to print a thinner row, not to take down the step drawing it.
+        print("  %2s) %s  %s -> %s  %3d clips  %8s  %9s%s" % (
+            t.get("index", "?"), t.get("day", "?"),
+            t.get("start", "")[11:16] or "--:--", t.get("end", "")[11:16] or "--:--",
+            t.get("clips", 0), human_secs(t.get("duration_secs")),
+            human_bytes(trip_bytes(t)), note))
     print()
     print(C.dim("  Stills and maps for these are in %s"
                 % tilde(ctx.out_dir / PREVIEW_DIRNAME)))
