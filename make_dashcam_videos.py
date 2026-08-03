@@ -1098,13 +1098,34 @@ def _ego_drive_onset(med: "list[float]") -> "int | None":
     return onset
 
 
+_EGO_FLOW_CACHE: "dict[Path, list[float] | None]" = {}
+
+
+def _ego_flow(clip: Clip) -> "list[float] | None":
+    """The median-flow signal for a clip, computed at most once.
+
+    Decoding a clip at EGO_FPS and running Lucas-Kanade over it is the whole
+    cost of video ego-motion, and the same clip gets asked more than once: the
+    parking-run boundaries ask whether a clip parks and whether it drives away,
+    and the render then re-asks the exit clip. Answering from the signal makes
+    every question after the first free. Keyed by path because a Clip is
+    rebuilt from the scan each time; the file it names does not change under us
+    within a run."""
+    key = clip.front
+    if key not in _EGO_FLOW_CACHE:
+        frames = _ego_extract_frames(clip)
+        _EGO_FLOW_CACHE[key] = (None if frames is None or len(frames) < 4
+                                else _ego_median_flow(frames))
+    return _EGO_FLOW_CACHE[key]
+
+
 def find_drive_away_by_video(clip: Clip) -> float | None:
     """Video-second within `clip` at which the car starts driving (ego-motion),
     robust to passing people/cars; None if unavailable or no motion found."""
-    frames = _ego_extract_frames(clip)
-    if frames is None or len(frames) < 4:
+    med = _ego_flow(clip)
+    if med is None:
         return None
-    onset = _ego_drive_onset(_ego_median_flow(frames))
+    onset = _ego_drive_onset(med)
     return None if onset is None else max(0.0, onset / EGO_FPS)
 
 
@@ -1201,10 +1222,10 @@ def find_park_second_by_video(clip: Clip) -> float | None:
     to a sustained stop through the end of the clip). None if it doesn't park
     here (still moving) or video is unavailable. Used to close a trip at the
     real arrival, not merely on entering the anchor radius."""
-    frames = _ego_extract_frames(clip)
-    if frames is None or len(frames) < 4:
+    med = _ego_flow(clip)
+    if med is None:
         return None
-    onset = _ego_park_onset(_ego_median_flow(frames))
+    onset = _ego_park_onset(med)
     return None if onset is None else max(0.0, onset / EGO_FPS)
 
 
