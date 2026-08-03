@@ -6077,10 +6077,10 @@ def clean_workspace_plan(ctx, world):
         return _nothing(ctx, CLEAN_WS, started, "nothing at the target")
 
     size, files = tree_size(target), count_files(target)
-    rows, loose = _trip_rows(ctx, root, world)
+    rows, _loose = _trip_rows(ctx, root, world)
     print("  Target: %s" % tilde(target))
     print()
-    _print_all(_cleaning_block(rows, files, size, loose))
+    _print_all(_cleaning_block(rows, files, size))
 
     verdict = guards.clean_is_allowed(world)
     if verdict.blocked:
@@ -6145,19 +6145,18 @@ def _trip_rows(ctx, root, world):
     return rows, len(_import_clip_stamps(root) - grouped)
 
 
-def _cleaning_block(rows, files, size, loose):
-    """What is about to go, before anything is decided about it."""
+def _cleaning_block(rows, files, size):
+    """What is about to go, before anything is decided about it.
+
+    Trips only. The parking-mode snippets that belong to no drive are already
+    inside the total, and naming them here answers a question nobody asked on
+    the way past -- this screen is about to delete everything either way. They
+    still get their line in the REFUSAL, where they are the reason.
+    """
     lines = [C.green("  Cleaning:"),
              C.green("    Total:   %s files (%s)" % (files, human_bytes(size))),
-             C.green("    %d trips:" % len(rows))]
+             C.green("    %d trip%s:" % (len(rows), "" if len(rows) == 1 else "s"))]
     lines.extend(_trip_line(r) for r in rows)
-    if loose:
-        # Counted, not listed, and named as what they are. A card's
-        # parking-mode snippets are dozens of one-clip nothings that belong to
-        # no drive and never will -- item 4 cannot select them, so a list of
-        # them is a list nobody can act on.
-        lines.append(C.dim("    %d clip%s in no trip — parking-mode snippets"
-                           % (loose, "" if loose == 1 else "s")))
     return tuple(lines) + ("",)
 
 
@@ -6314,12 +6313,12 @@ def _what_goes_lines(world):
     that sentence stays however tidy the screen gets.
     """
     if not guards.import_is_disposable(world):
-        return ("", C.red("  This is the ORIGINAL footage and it is not recoverable."))
+        return (C.red("  This is the ORIGINAL footage and it is not recoverable."),)
     trips = max(len(world.metas), len(world.renders))
     if not trips:
         return ()
-    return ("", C.dim("  Cleaning the workspace removes %d trips and the metadata."
-                      % trips),
+    return (C.dim("  Cleaning the workspace removes %d trips and the metadata."
+                  % trips),
             C.dim("  All sources are still on the SIM card and the process can be"),
             C.dim("  restarted without any loss."))
 
