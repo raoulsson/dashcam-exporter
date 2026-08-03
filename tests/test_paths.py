@@ -505,7 +505,7 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
         prompt cannot teach the wrong idea of what is about to happen."""
         b = Bench(UPLOADER, current=PREVIEW)
         b.type("4", "2", "9", "8")
-        self.assertEqual(b.work.asked, ["EXCLUDE", "DELETE", "DELETE"])
+        self.assertEqual(b.work.asked, ["EXCLUDE", "DELETE", "CLEAN"])
 
 
 class TestIdempotence(unittest.TestCase):

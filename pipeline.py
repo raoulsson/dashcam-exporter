@@ -6074,7 +6074,7 @@ def clean_workspace_plan(ctx, world):
             # path explaining itself about a path nobody took.
             _print_all(guards.unsourced_lines(world))
             _print_gate_detail(world)
-        return _nothing(ctx, CLEAN_WS, started, "refused: %s" % verdict.reason)
+        return _nothing(ctx, CLEAN_WS, started, _refusal_note(rows, verdict))
 
     _print_all(_what_goes_lines(world))
     _print_all(_why_it_may_go(world))
@@ -6141,6 +6141,25 @@ def _trip_line(row):
     text = _trip_line_plain(row)
     # Dim for the two that need nothing, so the eye lands on the ones that do.
     return C.green(text) if row.state == "not excluded" else C.dim(text)
+
+
+def _refusal_note(rows, verdict):
+    """The one line this refusal leaves in the session summary.
+
+    In trips, like the screen it came from. The guard counts clips because
+    clips are what it can see in a World, but a summary read hours later has
+    to say what the operator has to DO, and what he does is exclude a trip.
+    """
+    owed = [r for r in rows if r.state == "not excluded"]
+    # Only for the refusal this is about. The orphan floor is the one that
+    # names what it refused over, so its verdict is the one carrying evidence;
+    # the floors above it are different facts -- "nothing from this import was
+    # rendered" is not answered by excluding a trip, and a note saying so
+    # would send the operator to the wrong entry hours later.
+    if not (owed and verdict.evidence):
+        return "refused: %s" % verdict.reason
+    return ("%d trip%s not excluded, refused to clean workspace"
+            % (len(owed), "" if len(owed) == 1 else "s"))
 
 
 def _refusal_block(rows, verdict, world):

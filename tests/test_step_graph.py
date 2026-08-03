@@ -406,7 +406,8 @@ class TestInterfaceMatchesBehaviour(GraphTest):
         """
         built = M.build_menu(M.Strategy.UPLOADER, NullWork())
         words = {n: i.word() for n, i in built.items() if i.destr()}
-        self.assertEqual(sorted(set(words.values())), ["DELETE", "EXCLUDE"])
+        self.assertEqual(sorted(set(words.values())),
+                         ["CLEAN", "DELETE", "EXCLUDE"])
         self.assertNotEqual(built[ERASE_CARD].OVERRIDE_WORD,
                             built[ERASE_CARD].word(),
                             "the way past a guard is reachable by habit")

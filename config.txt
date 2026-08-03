@@ -200,7 +200,7 @@
 # they produced, and what it can prove first depends on what is set here. (The
 # card is not this item's business — that is 9) Delete SIM Data, with its own
 # evidence.) Each asks for its own verb before it erases anything: EXCLUDE at
-# item 4, DELETE at items 8 and 9.
+# item 4, CLEAN at item 8, DELETE at item 9.
 # The one way PAST a refusal — item 9's, when clips exist nowhere else — asks
 # for ERASE instead, so habit cannot type you through it.
 #
@@ -230,7 +230,7 @@
 #
 # With no upload_plugin configured nothing can be verified: it says so in
 # red, names the check that could not run, keeps the renders instead of purging
-# them, and still makes you type DELETE.
+# them, and still makes you type CLEAN.
 #
 # When it DOES go ahead on your answer, the gate table and the banner name the
 # implementation that gave it, and so does the recorded step, so that

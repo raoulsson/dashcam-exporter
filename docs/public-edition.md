@@ -93,7 +93,7 @@ the outside: the menu looks normal, item 5 writes a local page, item 7 sits
 greyed out, and the renders quietly stop reaching the world. The shape check
 happens at startup for the same reason — an uploader missing `is_complete()`
 would otherwise raise at the moment item 8 asks, which is after the operator
-has typed DELETE.
+has typed CLEAN.
 
 ## The Build Website item
 

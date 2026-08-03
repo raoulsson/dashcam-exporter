@@ -550,7 +550,11 @@ class CleanWorkspace(Destructive):
     DESCRIPTION = "Delete the imported footage and its renders."
     END = True
     DESTR = True
-    WORD = "DELETE"
+    # CLEAN, the entry's own verb, as at item 4. What this does is empty the
+    # working area of copies whose originals are published or still on the
+    # card; DELETE is item 9's word, and it names an act with nothing behind
+    # it.
+    WORD = "CLEAN"
     # NO way past. Item 4 is the only place a trip is dropped on purpose, and
     # it is where this sends him: a decision made there is recorded against the
     # trip and honoured for good, so the same footage arriving on a later card

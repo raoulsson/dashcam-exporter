@@ -96,9 +96,11 @@ the workspace is not a step in working through it.
 
 Items 4, 8 and 9 destroy footage, and each asks for a word to be typed rather
 than an Enter pressed. The word is the entry's own verb: `EXCLUDE` at Exclude
-Trip, `DELETE` at Clean Workspace and Delete SIM Data. Excluding records a
-decision against the trip and the other two do not, so a prompt that named them
-alike taught the wrong idea of what was about to happen.
+Trip, `CLEAN` at Clean Workspace, `DELETE` at Delete SIM Data. Each names what
+that entry actually does, so a prompt cannot teach the wrong idea of what is
+about to happen — excluding records a decision against the trip, cleaning
+empties a working area whose originals are elsewhere, and deleting the card is
+the one with nothing behind it.
 
 Delete SIM Data has one refusal with a way past it — dropping clips that exist
 nowhere else, deliberately — and that way past asks for `ERASE`. Stepping over

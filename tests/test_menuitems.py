@@ -404,7 +404,7 @@ class TestWhatEachItemDeclares(unittest.TestCase):
         """
         words = {n: self.menu[n].word() for n in (EXCLUDE, CLEAN_WS, ERASE_CARD)}
         self.assertEqual(words[EXCLUDE], "EXCLUDE")
-        self.assertEqual(words[CLEAN_WS], "DELETE")
+        self.assertEqual(words[CLEAN_WS], "CLEAN")
         self.assertEqual(words[ERASE_CARD], "DELETE")
         self.assertNotEqual(self.menu[ERASE_CARD].OVERRIDE_WORD,
                             self.menu[ERASE_CARD].word())
@@ -1010,7 +1010,7 @@ class TestCleanWorkspaceIsOffered(unittest.TestCase):
         self.assertIs(item_for(CLEAN_WS).SCOPE, M.Scope.FULL)
 
 
-def clean_with(guard, fresh, word="DELETE"):
+def clean_with(guard, fresh, word="CLEAN"):
     """Drive item 8 all the way to its re-check, with `fresh` as the world the
     guard is re-asked against after the word is typed."""
     act = Act("workspace erased")
@@ -1353,7 +1353,7 @@ class TestIdempotence(unittest.TestCase):
         that an erasure happened.
         """
         act = Act()
-        work = FakeWork(plan=a_plan(act=act), word="DELETE")
+        work = FakeWork(plan=a_plan(act=act), word="CLEAN")
         item = menu_for(UPLOADER, work)[CLEAN_WS]
         item.execute(imported())
         second = item.execute(world())
@@ -1363,7 +1363,7 @@ class TestIdempotence(unittest.TestCase):
 
 
 def _word_for(number):
-    return {EXCLUDE: "EXCLUDE", CLEAN_WS: "DELETE", ERASE_CARD: "DELETE"}.get(number, "")
+    return {EXCLUDE: "EXCLUDE", CLEAN_WS: "CLEAN", ERASE_CARD: "DELETE"}.get(number, "")
 
 
 # ---------------------------------------------------------------------------
