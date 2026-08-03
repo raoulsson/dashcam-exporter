@@ -6109,10 +6109,16 @@ def _trip_rows(ctx, root, world):
         stamps = {m.group(1) for c in (trip.get("front") or [])
                   for m in [STAMP_RE.search(Path(c).name)] if m}
         base = _out_base_name(trip) or ""
+        has_render = bool(base) and any(n.startswith(base) for n in rendered)
         if stamps and stamps <= excluded:
             state = "excluded"
-        elif base and any(n.startswith(base) for n in rendered):
+        elif has_render and stamps <= covered_stamps(ctx, stamps):
             state = "rendered"
+        elif has_render:
+            # A render exists but does not reach every clip of the trip. The
+            # grouping moved after it was encoded, so the trip has clips the
+            # video does not contain -- and those clips are covered by nothing.
+            state = "render is stale"
         else:
             state = "not excluded"
         rows.append(TripRow(trip.get("index"), trip.get("day", "?"),
@@ -6139,8 +6145,10 @@ def _cleaning_block(rows, files, size, loose):
 
 def _trip_line(row):
     text = _trip_line_plain(row)
-    # Dim for the two that need nothing, so the eye lands on the ones that do.
-    return C.green(text) if row.state == "not excluded" else C.dim(text)
+    # Dim for the states that need nothing, so the eye lands on the ones that
+    # do -- a trip to exclude, or one whose video no longer reaches it.
+    needs_him = row.state in ("not excluded", "render is stale")
+    return C.green(text) if needs_him else C.dim(text)
 
 
 def _refusal_note(rows, verdict):
@@ -6150,7 +6158,7 @@ def _refusal_note(rows, verdict):
     clips are what it can see in a World, but a summary read hours later has
     to say what the operator has to DO, and what he does is exclude a trip.
     """
-    owed = [r for r in rows if r.state == "not excluded"]
+    owed = [r for r in rows if r.state in ("not excluded", "render is stale")]
     # Only for the refusal this is about. The orphan floor is the one that
     # names what it refused over, so its verdict is the one carrying evidence;
     # the floors above it are different facts -- "nothing from this import was
@@ -6169,26 +6177,49 @@ def _refusal_block(rows, verdict, world):
     to forget: excluding does not clean, it only removes the reason this
     refused.
     """
+    stale = [r for r in rows if r.state == "render is stale"]
     owed = [r for r in rows if r.state == "not excluded"]
-    if not owed:
+    if not (stale or owed):
         return (C.red("  Refusing to clean workspace: %s." % verdict.reason),
                 ) + _orphan_detail_lines(world)
-    lines = [C.red("  Refusing to clean workspace: %d trip%s not rendered and"
-                   " not excluded." % (len(owed), "" if len(owed) == 1 else "s"))]
-    lines.extend(C.green(t) for t in (_trip_line_plain(r) for r in owed))
-    lines.extend(["",
-                  C.green("  To proceed:"),
-                  C.green("    1. Select \"%d) %s\" from the menu and exclude the"
-                          " trips in this list." % (EXCLUDE, NAME[EXCLUDE])),
-                  C.green("    2. Run \"%d) %s\" again."
-                          % (CLEAN_WS, NAME[CLEAN_WS])),
-                  "",
-                  C.dim("  Excluding them there records the decision against the"
-                        " trip. When the same"),
-                  C.dim("  footage turns up on a later card, we know it is not"
-                        " wanted."),
-                  ""])
+    lines = [C.red("  Refusing to clean workspace: %s." % _what_is_owed(stale, owed))]
+    lines.extend(C.green(_trip_line_plain(r)) for r in stale + owed)
+    lines.append("")
+    lines.append(C.green("  To proceed:"))
+    step = 1
+    if stale:
+        # Not excludable, and it must not be: the trip is wanted, its video is
+        # simply short of it. Re-encoding is the answer, and item 2 first
+        # because the sidecar was written from the old grouping too.
+        lines.append(C.green("    %d. Run \"%d) %s\" then \"%d) %s\" — the grouping"
+                             " moved, so the video"
+                             % (step, META, NAME[META], RENDER, NAME[RENDER])))
+        lines.append(C.green("       no longer reaches every clip of the trip."))
+        step += 1
+    if owed:
+        lines.append(C.green("    %d. Select \"%d) %s\" from the menu and exclude"
+                             " the trips in this list." % (step, EXCLUDE, NAME[EXCLUDE])))
+        step += 1
+    lines.append(C.green("    %d. Run \"%d) %s\" again." % (step, CLEAN_WS, NAME[CLEAN_WS])))
+    if owed:
+        lines.extend(["",
+                      C.dim("  Excluding them there records the decision against"
+                            " the trip. When the same"),
+                      C.dim("  footage turns up on a later card, we know it is"
+                            " not wanted.")])
+    lines.append("")
     return tuple(lines)
+
+
+def _what_is_owed(stale, owed):
+    parts = []
+    if stale:
+        parts.append("%d trip%s whose render no longer covers it"
+                     % (len(stale), "" if len(stale) == 1 else "s"))
+    if owed:
+        parts.append("%d trip%s not rendered and not excluded"
+                     % (len(owed), "" if len(owed) == 1 else "s"))
+    return " and ".join(parts)
 
 
 def _trip_line_plain(row):
@@ -6603,7 +6634,7 @@ def _digits14(v):
 
 
 def orphan_clips(ctx, root):
-    """Clips in this import whose ONLY copy is this import.
+    """Clips OF A TRIP whose only copy is this import.
 
     Not on the card, not inside a trip that was rendered, not excluded on
     purpose. Every other clip in the workspace has something else vouching for
@@ -6611,9 +6642,21 @@ def orphan_clips(ctx, root):
 
     They exist because a trip too short to render gets no sidecar, so it is in
     no trip_ids and counts toward no expected_trips — which makes it invisible
-    to both of item 8's gates. The destination answers YES honestly about the
-    trips it was asked about, the local floor is satisfied by the renders that
-    do exist, and the fragment goes with the sweep.
+    to both of item 8's other gates. The destination answers YES honestly about
+    the trips it was asked about, the local floor is satisfied by the renders
+    that do exist, and the fragment goes with the sweep.
+
+    OF A TRIP, and that is the whole of the restriction. A camera parked for a
+    week writes event snippets that join no drive, and the scanner groups them
+    into nothing — so no render can cover them and item 4, which drops TRIPS,
+    cannot select them. Counted here they would refuse the clean-up forever
+    with no way to answer it. They are named on the screen as what they are and
+    they go with the sweep.
+
+    The grouping comes from this session's cache. Without one nothing here can
+    tell a trip's clip from a snippet, and it says nothing rather than guessing
+    -- the plan reads the grouping before it prints, and the re-check after the
+    typed word runs with it cached.
     """
     if root is None:
         return ()
@@ -6622,7 +6665,17 @@ def orphan_clips(ctx, root):
         return ()
     accounted = (set(card_stamps(ctx)) | set(excluded_stamps(ctx))
                  | set(covered_stamps(ctx, here)))
-    return tuple(sorted(here - accounted))
+    return tuple(sorted((here - accounted) & _clips_in_a_trip(ctx, root)))
+
+
+def _clips_in_a_trip(ctx, root):
+    """Every stamp the cached grouping put in some trip."""
+    payload = _cached_grouping(ctx, root)
+    if not payload:
+        return set()
+    return {m.group(1) for trip in payload.get("trips", [])
+            for clip in (trip.get("front") or [])
+            for m in [STAMP_RE.search(Path(clip).name)] if m}
 
 
 def _import_clip_stamps(root):
