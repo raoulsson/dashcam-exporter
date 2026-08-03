@@ -310,7 +310,13 @@ class ExcludeTrip(Destructive):
     # DELETE, like item 8. The two erase different things and both erase from
     # the WORKSPACE; the card keeps its own word, because that is the one with
     # no second copy behind it.
-    WORD = "DELETE"
+    # EXCLUDE, the entry's own verb. This asked for DELETE, and delete is what
+    # item 8 and item 9 do -- they remove footage and record nothing about it.
+    # This one records a DECISION, against the trip, honoured for good: the
+    # delta import stops offering those clips and a rebuild downstream knows
+    # the trip was dropped rather than merely cleaned up. Asking for the word
+    # that names the other act taught the wrong idea of what was happening.
+    WORD = "EXCLUDE"
     SCOPE = Scope.FULL          # the only-copy warning has to ask the target
     OUT = _and_upload(EXCLUDE, META, PREVIEW, CLEAN_WS, ERASE_CARD)
     IN_AUTHORED = _both_sets(EXCLUDE, META, PREVIEW)

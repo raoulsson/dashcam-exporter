@@ -94,11 +94,15 @@ the workspace is not a step in working through it.
 | 8 | **Clean Workspace** &#9888; | Erases the imported footage and the renders it produced, once this machine and the publishing target both say they are safe. |
 | 9 | **Delete SIM Data** &#9888; | Erases the card's clips, keeping its folders so the camera can record, once every clip is accounted for elsewhere. |
 
-Items 4, 8 and 9 destroy footage, and each asks for `DELETE` to be typed rather
-than an Enter pressed. Delete SIM Data has one refusal with a way past it —
-dropping clips that exist nowhere else, deliberately — and that way past asks
-for `ERASE` instead. Stepping over a guard is not reachable by the muscle memory
-of the erase it is guarding.
+Items 4, 8 and 9 destroy footage, and each asks for a word to be typed rather
+than an Enter pressed. The word is the entry's own verb: `EXCLUDE` at Exclude
+Trip, `DELETE` at Clean Workspace and Delete SIM Data. Excluding records a
+decision against the trip and the other two do not, so a prompt that named them
+alike taught the wrong idea of what was about to happen.
+
+Delete SIM Data has one refusal with a way past it — dropping clips that exist
+nowhere else, deliberately — and that way past asks for `ERASE`. Stepping over
+a guard is not reachable by the muscle memory of the word that guard asks for.
 
 One item runs at a time. There is no batch selection, because what may follow
 depends on what the last item actually did — an Exclude Trip that the operator

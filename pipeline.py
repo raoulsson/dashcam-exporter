@@ -4697,8 +4697,9 @@ def _last_copy_banner(world, only_copy, consulted):
     lines = [bar,
              C.red("  Trips %s are NOT rendered anywhere and NOT published."
                    % ", ".join(str(i) for i in only_copy)),
-             C.red("  These files are the ONLY copy of that footage. Deleting them"),
-             C.red("  ends it — there is nothing to restore from, here or online.")]
+             C.red("  These files are the ONLY copy of that footage. Excluding"),
+             C.red("  them ends it — there is nothing to restore from, here or"),
+             C.red("  online.")]
     lines.extend(_why_unchecked(world, consulted))
     lines.append(bar)
     return lines
@@ -4788,7 +4789,7 @@ def _drop_plan_for(ctx, world, payload, by_index, picked, started):
     # files one per line in full, is the same screen twice and then some -- and
     # the figure the typed word answers was the one thing not standing out.
     print()
-    print("  Dropping trips %s: %s files (%s) from workspace."
+    print("  Excluding trips %s: %s files (%s) from workspace."
           % (", ".join(str(i) for i in picked), C.yellow("%d" % len(files)),
              C.yellow(human_bytes(total))))
 
@@ -4835,7 +4836,7 @@ def _drop_commit(ctx, picked, by_index, files, render_files, started):
         return _outcome(record(ctx, NAME[EXCLUDE], FAILED, started,
                                "%d of %d files deleted, %d errors"
                                % (deleted, len(files), len(errors))))
-    done_line("dropped trips %s: %s files, %s freed"
+    done_line("excluded trips %s: %s files, %s freed"
               % (", ".join(str(i) for i in picked), C.yellow("%d" % deleted),
                  human_bytes(freed)))
     return _outcome(record(ctx, NAME[EXCLUDE], RAN, started,
@@ -6154,8 +6155,7 @@ def _refusal_block(rows, verdict, world):
         return (C.red("  Refusing to clean workspace: %s." % verdict.reason),
                 ) + _orphan_detail_lines(world)
     lines = [C.red("  Refusing to clean workspace: %d trip%s not rendered and"
-                   " not excluded." % (len(owed), "" if len(owed) == 1 else "s")),
-             ""]
+                   " not excluded." % (len(owed), "" if len(owed) == 1 else "s"))]
     lines.extend(C.green(t) for t in (_trip_line_plain(r) for r in owed))
     lines.extend(["",
                   C.green("  To proceed:"),

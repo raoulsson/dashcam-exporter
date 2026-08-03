@@ -480,7 +480,7 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
         b.work.answer = "yes"
         b.type("4")
         self.assertEqual(b.work.done, [])
-        self.assertEqual(b.work.asked, ["DELETE"])
+        self.assertEqual(b.work.asked, ["EXCLUDE"])
         self.assertEqual(b.offered_at[1], MID_CYCLE_PUBLISHING)
 
     def test_a_world_that_changes_while_the_prompt_is_on_screen_stops_the_act(self):
@@ -500,13 +500,12 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
         self.assertEqual(len(b.work.refused), 1)
         self.assertIn("new clips", b.work.refused[0])
 
-    def test_every_word_on_the_path_is_the_same_one(self):
-        """RESTATED TWICE: DROP, ERASE, DELETE, then two of three, now one.
-        Item 9 asking ERASE under a heading that says Delete SIM Data was a
-        name and a password for one act disagreeing where it matters most."""
+    def test_each_word_on_the_path_names_its_own_act(self):
+        """Item 4 excludes, items 8 and 9 delete. The word names the act, so a
+        prompt cannot teach the wrong idea of what is about to happen."""
         b = Bench(UPLOADER, current=PREVIEW)
         b.type("4", "2", "9", "8")
-        self.assertEqual(b.work.asked, ["DELETE", "DELETE", "DELETE"])
+        self.assertEqual(b.work.asked, ["EXCLUDE", "DELETE", "DELETE"])
 
 
 class TestIdempotence(unittest.TestCase):

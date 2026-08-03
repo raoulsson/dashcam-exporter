@@ -127,9 +127,9 @@ be reshaped; break one of these and footage goes.
   inbound set — `menu.disagreements()` exists to report where the derivation
   parts company with the owner's table, and a hand-edit hides that.
 - **Destructive items ask for a typed word, then capture the world AGAIN** and
-  re-ask the same guard callable before acting. Items 4, 8 and 9 ask `DELETE`;
-  the way past item 9's own refusal asks `ERASE`, so habit cannot carry anyone
-  through a guard.
+  re-ask the same guard callable before acting. Each asks for its own verb —
+  `EXCLUDE` at item 4, `DELETE` at items 8 and 9 — and the way past item 9's
+  own refusal asks `ERASE`, so habit cannot carry anyone through a guard.
 - **`is_complete()` is three-valued and fails closed.** A destination that
   cannot be reached answers UNKNOWN, never NO and never YES, because the next
   thing the operator does is erase the only local copy.

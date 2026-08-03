@@ -886,7 +886,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         up, and an operator who sees it wrongly once stops reading it."""
         target = Recorder(complete=YES)
         b = self._published_then_cleaned_up(target)
-        ran = b.run(EXCLUDE, typed=["1", "DELETE"])
+        ran = b.run(EXCLUDE, typed=["1", "EXCLUDE"])
         # Twice, not once: item 4 captures a full world to plan with and
         # another after the word, because Destructive re-derives whatever the
         # guard it was given happens to read.
@@ -908,7 +908,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         of the two produced it.
         """
         b = self._published_then_cleaned_up(Recorder(complete=UNKNOWN))
-        ran = b.run(EXCLUDE, typed=["1", "DELETE"])
+        ran = b.run(EXCLUDE, typed=["1", "EXCLUDE"])
         self.assertIn("ONLY copy", ran.printed)
         self.assertIn("gave no answer covering these trips", ran.printed)
 
@@ -917,7 +917,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         one that timed out, and saying so wrongly in a delete prompt is a lie
         the operator acts on."""
         b = self.bench().imported().sidecars().grouped()
-        ran = b.run(EXCLUDE, typed=["1", "DELETE"])
+        ran = b.run(EXCLUDE, typed=["1", "EXCLUDE"])
         self.assertIn("ONLY copy", ran.printed)
         self.assertIn("No upload_plugin is configured", ran.printed)
 
@@ -930,7 +930,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         looser question those states needed.
         """
         b = self.bench(Recorder(complete=YES)).complete()
-        ran = b.run(EXCLUDE, typed=["1", "DELETE"])
+        ran = b.run(EXCLUDE, typed=["1", "EXCLUDE"])
         self.assertIn("stay there", ran.printed)
         self.assertIn("Deleting locally does not remove them", ran.printed)
 
@@ -939,7 +939,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         destination with nothing for this trip must not produce it — the
         operator would go looking for a copy that was never there."""
         b = self.bench(Recorder(complete=NO)).complete()
-        ran = b.run(EXCLUDE, typed=["1", "DELETE"])
+        ran = b.run(EXCLUDE, typed=["1", "EXCLUDE"])
         self.assertNotIn("stay there", ran.printed)
 
     def test_dropping_a_trip_records_that_it_was_on_purpose(self):
@@ -952,7 +952,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         installed next week.
         """
         b = self.bench(Recorder()).complete()
-        ran = b.run(EXCLUDE, typed=["1", "DELETE"])
+        ran = b.run(EXCLUDE, typed=["1", "EXCLUDE"])
         self.assertTrue(ran.completed, ran.note)
         self.assertEqual(P.dropped_trip_ids(b.ctx), (TRIP,))
 
@@ -962,7 +962,7 @@ class TestExcludeTripAsksTheTarget(SeamTest):
         output is gone, and this is the one thing that tells it not to."""
         target = Recorder()
         b = self.bench(target).complete()
-        b.run(EXCLUDE, typed=["1", "DELETE"])
+        b.run(EXCLUDE, typed=["1", "EXCLUDE"])
         b.sidecars().render()               # something to build from again
         b.run(BUILD)
         self.assertEqual(target.handed[-1].dropped_ids, (TRIP,))

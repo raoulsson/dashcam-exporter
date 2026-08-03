@@ -386,24 +386,26 @@ class TestWhatEachItemDeclares(unittest.TestCase):
                 item = self.menu[number]
                 self.assertEqual(item.destr(), bool(item.word()))
 
-    def test_every_destructive_item_asks_the_same_word(self):
-        """RESTATED TWICE. It was DROP, DELETE, ERASE — three distinct words,
-        so a second prompt could not be answered from muscle memory. Then 4 and
-        8 converged on DELETE, and the card kept ERASE for being the one target
-        with nothing behind it.
+    def test_each_destructive_item_asks_for_its_own_verb(self):
+        """RESTATED THREE TIMES, and this is the shape that holds. It was DROP,
+        DELETE, ERASE — three arbitrary words. Then all three converged on
+        DELETE, because an entry called Delete SIM Data asking for ERASE is a
+        name and a password disagreeing where it matters most.
 
-        Now 9 asks DELETE too, because the entry is called Delete SIM Data and
-        asking for ERASE was a name and a password for one act disagreeing on
-        the very screen where the operator is told to be sure. What guards the
-        card is the per-clip accounting, not the spelling of the word; the word
-        confirms he meant it.
+        The same argument then applies to item 4, in the other direction. It is
+        called Exclude Trip and it records a DECISION: the delta import stops
+        offering those clips, and a rebuild downstream knows the trip was
+        dropped rather than merely cleaned up. Items 8 and 9 delete and record
+        nothing about it. Asking for DELETE there taught the wrong idea of
+        what was about to happen.
 
-        The distinctness that DOES earn its place is below: item 9's way PAST
-        its own guard still asks a different word, which is the only prompt in
-        the tool habit could carry someone through.
+        The distinctness that earns its place is item 9's way PAST its own
+        guard, which asks a word its own prompt never does.
         """
         words = {n: self.menu[n].word() for n in (EXCLUDE, CLEAN_WS, ERASE_CARD)}
-        self.assertEqual(set(words.values()), {"DELETE"})
+        self.assertEqual(words[EXCLUDE], "EXCLUDE")
+        self.assertEqual(words[CLEAN_WS], "DELETE")
+        self.assertEqual(words[ERASE_CARD], "DELETE")
         self.assertNotEqual(self.menu[ERASE_CARD].OVERRIDE_WORD,
                             self.menu[ERASE_CARD].word())
 
@@ -771,7 +773,7 @@ class TestExcludeTrip(unittest.TestCase):
         """The owner's own sentence: Exclude Trip is complete IFF a trip was
         removed."""
         act = Act("dropped trip t1")
-        work = FakeWork(plan=a_plan(act=act), word="DELETE")
+        work = FakeWork(plan=a_plan(act=act), word="EXCLUDE")
         item = menu_for(UPLOADER, work)[EXCLUDE]
         outcome = item.execute(imported())
         self.assertTrue(outcome.completed)
@@ -1317,7 +1319,7 @@ class TestIdempotence(unittest.TestCase):
         """The plan finds no target, so no word is asked for and neither half
         of it is called."""
         act = Act()
-        work = FakeWork(plan=a_plan(act=act), word="DELETE")
+        work = FakeWork(plan=a_plan(act=act), word="EXCLUDE")
         item = menu_for(UPLOADER, work)[EXCLUDE]
         item.execute(imported())
         work.plan = M.Plan.nothing_to_do("that trip is already gone")
@@ -1361,7 +1363,7 @@ class TestIdempotence(unittest.TestCase):
 
 
 def _word_for(number):
-    return {EXCLUDE: "DELETE", CLEAN_WS: "DELETE", ERASE_CARD: "DELETE"}.get(number, "")
+    return {EXCLUDE: "EXCLUDE", CLEAN_WS: "DELETE", ERASE_CARD: "DELETE"}.get(number, "")
 
 
 # ---------------------------------------------------------------------------
