@@ -6062,21 +6062,71 @@ def clean_workspace_plan(ctx, world):
     # Amber on the count, as on the import screen: it is the figure the typed
     # word is answering, and the only one on this screen that moves.
     print("  %s files (%s)" % (C.yellow("%d" % files), human_bytes(size)))
-    _print_all(_what_goes_lines(world))
-    _print_all(_why_it_may_go(world))
+
+    # The verdict first. What-this-will-do and the gate table are the case FOR
+    # pressing on, and printing them above a refusal put four lines of "yes"
+    # over the sentence saying no.
     verdict = guards.clean_is_allowed(world)
     if verdict.blocked:
         print(C.red("  Refusing: %s." % verdict.reason))
-        _print_all(_evidence_lines(verdict))
+        _print_all(_orphan_detail(ctx, root, world) or _evidence_lines(verdict))
         _print_all(_the_way_out(world))
-        _print_all(guards.unsourced_lines(world))
-        _print_gate_detail(world)
+        if not world.orphan_clips:
+            # Only when they bear on the refusal. Over an orphan refusal the
+            # gates all read yes -- that is exactly why this floor exists --
+            # and "601 of the 601 files are not on the card" is the DISCARD
+            # path explaining itself about a path nobody took.
+            _print_all(guards.unsourced_lines(world))
+            _print_gate_detail(world)
         return _nothing(ctx, CLEAN_WS, started, "refused: %s" % verdict.reason)
 
+    _print_all(_what_goes_lines(world))
+    _print_all(_why_it_may_go(world))
     return menu.Plan(guards.clean_is_allowed,
                      lambda fresh: _clean_workspace_commit(ctx, fresh, root, target,
                                                            size, files, started),
                      banner=_clean_banner(ctx, world, target, size))
+
+
+def _orphan_detail(ctx, root, world):
+    """WHICH trips go, not which clip stamps.
+
+    A stamp is a filename; a trip is the thing he decided to keep or drop, and
+    it is what item 4 asks him to name. Clips the scanner grouped into no trip
+    at all are counted rather than listed -- a card's parking-mode event
+    snippets are dozens of one-clip nothings, and naming each teaches nothing
+    the count does not.
+    """
+    if not world.orphan_clips:
+        return ()
+    # The cache only. A refusal must not start a minutes-long boundary scan to
+    # phrase itself, and without a grouping the counted line below still says
+    # the whole truth -- just without naming the trips.
+    payload = _cached_grouping(ctx, root) or {}
+    by_stamp = {}
+    for trip in payload.get("trips", []):
+        for clip in trip.get("front") or []:
+            m = STAMP_RE.search(Path(clip).name)
+            if m:
+                by_stamp[m.group(1)] = trip
+    named, loose = {}, 0
+    for stamp in world.orphan_clips:
+        trip = by_stamp.get(stamp)
+        if trip is None:
+            loose += 1
+        else:
+            named.setdefault(trip["index"], trip)
+    lines = []
+    for index in sorted(named):
+        trip = named[index]
+        n = len(trip.get("front") or [])
+        lines.append(C.red("        trip %d, %s, %d clip%s — this footage goes"
+                           % (index, trip.get("day", "?"), n,
+                              "" if n == 1 else "s")))
+    if loose:
+        lines.append(C.dim("        %d clip%s the scan grouped into no trip"
+                           % (loose, "" if loose == 1 else "s")))
+    return tuple(lines)
 
 
 def _what_goes_lines(world):

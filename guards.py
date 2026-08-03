@@ -231,11 +231,11 @@ def _only_copy_is_here(world) -> Optional[Verdict]:
             "%d clip%s here %s in no rendered trip, and there is no card to "
             "vouch for %s" % (n, plural, "is" if n == 1 else "are",
                               "it" if n == 1 else "them"),
-            evidence=world.orphan_clips[:8])
+            evidence=world.orphan_clips)
     return blocked(
         "%d clip%s here exist%s nowhere else — not on the card, in no rendered "
         "trip, not excluded" % (n, plural, "s" if n == 1 else ""),
-        evidence=world.orphan_clips[:8])
+        evidence=world.orphan_clips)
 
 
 _FLOORS = (nothing_was_rendered_here, _local_count_unproven, _only_copy_is_here)
