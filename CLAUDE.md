@@ -24,7 +24,7 @@ as a child process and decides what may run when:
 | `world.py`    | ~200  | the frozen facts a guard is allowed to look at |
 | `uploader.py` | ~480  | the seam an outside publisher implements |
 
-`./run-tests.sh` runs 506 Python tests and 7 shell tests and prints `all green`;
+`./run-tests.sh` runs 561 Python tests and 7 shell tests and prints `all green`;
 it also fails on pyflakes undefined names and redefinitions. Anything touching
 `guards.py`, `items.py` or `menu.py` is expected to come with a test, because
 those decide whether footage may be deleted. The renderer itself stays a
@@ -91,6 +91,29 @@ update `prev_emitted_clip` so gap detection stays honest, and `gap_pre_pause`
 inter-clip gaps. It is the fastest way to check that the parking exit slice
 lands on actual drive-away footage rather than still-parked frames (that cut is
 anchored by `find_drive_away_by_video` optical flow; see below).
+
+### A parked run's boundaries come from the frames
+
+`find_parking_runs` walks clips with `clip_is_parked` (GPS), which is the right
+cheap sweep but wrong at the two ends — and the two ends are the only frames a
+viewer sees, since everything between them is replaced by the slide. In a lot
+the receiver decays instead of dropping to zero (18 km/h reported ten seconds
+after the frame went still) and a car pulling out has no fix at all, which
+reads as "parked". So the run's FIRST and LAST clip get the same ladder the
+end-trim uses: `find_park_second_by_video`, then `find_park_second_by_gps`, then
+the old smoothing detector. `_leads_into_parking` bounds that to the one clip
+per run that can hold the arrival, and the far end is one walk-back per run —
+asking every clip would decode the whole trip. `_ego_flow` caches the
+median-flow signal per clip, so the render re-asking the exit clip is free.
+
+`parking_exit_pad` (default 4, mirroring `parking_entry_pad`'s 3) is live on the
+video path; it used to be ignored there in favour of a 2-second constant. Note
+`--debug-cuts N` shows N seconds from the START of the exit slice, so N must
+exceed `parking_exit_pad` for a preview to reach the drive-away at all.
+
+`settle_speeds_after` zeroes the speed overlay from a detected park onset.
+`parse_clip_speeds` fixes alignment lag; a decaying receiver is not an
+alignment problem, and only the frames can settle it.
 
 ### Parking-exit drive-away = video ego-motion, not GPS
 
