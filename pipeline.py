@@ -1016,7 +1016,7 @@ RE_RSYNC_P2 = re.compile(r"^\s*([\d,]+)\s+(\d+)%\s+(\S+)\s+(\d+:\d{2}:\d{2})")
 # That loop is the long silent stretch of a scan, so it is the only thing that
 # can honestly drive a bar there.
 RE_SCAN = re.compile(r"^\[scan\s+(\d+)/(\d+)\]")
-RE_TRIP = re.compile(r"^\[Trip\s+(\d+)/(\d+)\]")
+RE_TRIP = re.compile(r"^\[Trip\s+(\d+)/(\d+)\]\s*(\S+\s+\S+)?")
 #                          "  [ 12/ 87] 2026-07-19 12:46:03  encoding ..."
 RE_CLIP = re.compile(r"^\s*\[\s*(\d+)\s*/\s*(\d+)\s*\]")
 
@@ -1223,7 +1223,8 @@ def make_render_parser():
     it cannot be used as a counter — we count how many headers we have seen and
     take only the denominator from it.
     """
-    state = {"trips_seen": 0, "trips_total": None, "clip": 0, "clips": 0}
+    state = {"trips_seen": 0, "trips_total": None, "clip": 0, "clips": 0,
+             "name": ""}
 
     def parse(line):
         m = RE_TRIP.match(line)
@@ -1231,6 +1232,11 @@ def make_render_parser():
             state["trips_seen"] += 1
             state["trips_total"] = int(m.group(2))
             state["clip"], state["clips"] = 0, 0
+            # WHICH trip, from the header the renderer already prints. Every
+            # other bar names what it is working on in the left-hand column;
+            # this one had only a counter, and on a card of one long trip a
+            # counter reading 1/1 says nothing at all.
+            state["name"] = (m.group(3) or "").strip()
         else:
             m = RE_CLIP.match(line)
             if m:
@@ -1245,10 +1251,10 @@ def make_render_parser():
         # Show the clip counter too. A trip takes minutes and its number barely
         # moves; the clip counter ticks every few seconds, and it is the thing
         # that tells you the encode is alive rather than wedged.
-        note = "trip %d/%d" % (state["trips_seen"], total)
+        doing = "trip %d/%d" % (state["trips_seen"], total)
         if state["clips"]:
-            note += " clip %d/%d" % (state["clip"], state["clips"])
-        return min(frac, 1.0), note
+            doing += "  clip %d/%d" % (state["clip"], state["clips"])
+        return min(frac, 1.0), uploader.progress_note(state["name"], tail=doing)
 
     return parse
 
