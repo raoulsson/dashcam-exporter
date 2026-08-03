@@ -307,6 +307,13 @@ class MenuItem(ABC):
     number: int
     NAME: str
     DESCRIPTION: str
+    # DESCRIPTION is the menu row: one line, present tense, what the step does.
+    # ABOUT is what `h <n>` prints above the graph — the part a one-liner has no
+    # room for, and the part an operator needs BEFORE running something for the
+    # first time: what it costs, what it assumes has already happened, and what
+    # it will not do for you. Blank lines separate paragraphs; the help screen
+    # wraps it to the terminal.
+    ABOUT = ""
     START = False
     END = False
     DESTR = False
@@ -350,6 +357,9 @@ class MenuItem(ABC):
 
     def description(self) -> str:
         return self.DESCRIPTION
+
+    def about(self) -> str:
+        return self.ABOUT
 
     def start(self) -> bool:
         return self.START

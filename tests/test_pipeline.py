@@ -32,6 +32,7 @@ The rules pinned here, in the owner's words:
 
 import functools
 import importlib.util
+import re
 import io
 import shutil
 import sys
@@ -1296,6 +1297,77 @@ class NoDeadEnds(unittest.TestCase):
         for n in sorted(REAL):
             with self.subTest(item=n):
                 self.assertIn(n, reachable)
+
+
+class TheHelpScreen(unittest.TestCase):
+    """`h <n>` answers what the menu row has no room for."""
+
+    def setUp(self):
+        # Items 5 and 7 ask the installed plugin to describe its own job, so
+        # the fake has to answer that rather than hand back None.
+        class FakePlugin:
+            def describe(self):
+                return "Build the website from the described trips."
+
+        class FakeWork:
+            def __getattr__(self, name):
+                return lambda *a, **kw: FakePlugin()
+        self.items = M.build_menu(M.Strategy.UPLOADER, FakeWork())
+
+    def _plain(self, number):
+        return [re.sub(r"\x1b\[[0-9;]*m", "", ln)
+                for ln in P._about(self.items, None, number)]
+
+    def _prose(self, number):
+        """The wrapped paragraphs: after the description, before the graph."""
+        lines = self._plain(number)
+        stop = next(i for i, ln in enumerate(lines) if ln.startswith("    leads to"))
+        return [ln for ln in lines[2:stop] if ln.strip()]
+
+    def test_every_entry_says_more_than_its_menu_row(self):
+        for n in self.items:
+            with self.subTest(entry=n):
+                self.assertTrue(self.items[n].about().strip(),
+                                "%d) %s has no help text"
+                                % (n, self.items[n].name()))
+
+    def test_the_graph_comes_after_the_prose_not_before_it(self):
+        lines = self._plain(9)
+        prose = next(i for i, ln in enumerate(lines) if "keeps its folder tree" in ln)
+        graph = next(i for i, ln in enumerate(lines) if ln.startswith("    leads to"))
+        self.assertLess(prose, graph)
+
+    def test_the_graph_rows_are_dim(self):
+        with mock.patch.object(P.C, "enabled", True):
+            raw = P._about(self.items, None, 9)
+        for row in raw:
+            if "leads to" in row or "reached from" in row or "erases" in row:
+                self.assertIn("\x1b[2m", row, "graph row is not dimmed")
+
+    def test_the_prose_does_not_run_off_the_terminal(self):
+        """The graph rows name every entry they reach and are as long as they
+        are; the paragraphs are wrapped, and a paragraph that is not is a wall
+        of text on a wide window."""
+        for n in self.items:
+            for line in self._prose(n):
+                with self.subTest(entry=n):
+                    self.assertLessEqual(len(line), 100)
+
+    def test_a_step_back_is_not_described_as_a_view(self):
+        """All three edgeless shapes answer edges() with None. Reading them the
+        same way told the operator that the entry which erases a card was a
+        view of one."""
+        leads = next(ln for ln in self._plain(9) if ln.startswith("    leads to"))
+        self.assertNotIn("view", leads)
+
+    def test_the_entry_point_is_reached_from_nothing_not_from_anywhere(self):
+        came = next(ln for ln in self._plain(1) if ln.startswith("    reached from"))
+        self.assertNotIn("view", came)
+
+    def test_the_view_still_says_it_is_one(self):
+        for row in ("    leads to", "    reached from"):
+            line = next(ln for ln in self._plain(0) if ln.startswith(row))
+            self.assertIn("view", line)
 
 
 class TheVersionIsTheCommitCount(unittest.TestCase):

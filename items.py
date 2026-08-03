@@ -143,6 +143,17 @@ class Progress(MenuItem):
     number = PROGRESS
     NAME = "Progress"
     DESCRIPTION = "Show what is here and what has been done to it."
+    ABOUT = (
+        "Counts what is on disk and what has become of it: clips in the "
+        "workspace, trips described, trips excluded, trips rendered. It shows "
+        "work still owed rather than an inventory, so a line reading zero "
+        "means there is nothing left to do, not that nothing is there.\n\n"
+        "Looking is free and never moves the pipeline — this entry is a view, "
+        "not a step, which is why it can be reached from anywhere and why "
+        "standing on it is impossible. On an installation that publishes it "
+        "also asks the destination what it already holds, so it can take a few "
+        "seconds; the answer is what the later steps are judged against."
+    )
     INBOUND_KIND = Anywhere
     OUT = _both(Anywhere())
     IN_AUTHORED = _both(None)
@@ -176,6 +187,20 @@ class ImportSim(MenuItem):
     number = IMPORT
     NAME = "Import SIM"
     DESCRIPTION = "Copy the card into the workspace and verify it file-for-file."
+    ABOUT = (
+        "Copies the DCIM tree into a dated folder in the workspace and then "
+        "reads it back file for file. The source is any directory holding a "
+        "DCIM tree, so a mounted card and a card already copied onto an "
+        "external disk work the same way. Nothing is deleted here: the card "
+        "keeps every clip until item 9 is run deliberately, and the verify "
+        "pass is what earns the right to run it.\n\n"
+        "An unfinished session refuses a new import. Importing on top of one "
+        "mixes two cards into a single grouping with no record of which clip "
+        "came from which card, and there is no way to unpick that afterwards. "
+        "Clear the previous round with item 8 first; this entry offers no "
+        "shortcut past it, because a wipe hidden inside a copy is a wipe "
+        "nobody chose."
+    )
     START = True
     INBOUND_KIND = StartNode
     # IMPORT leads to itself, exactly as GenerateMeta does. A card holds more
@@ -232,6 +257,21 @@ class GenerateMeta(MenuItem):
     number = META
     NAME = "Generate Meta"
     DESCRIPTION = "Work out where each trip begins and ends, and describe it."
+    ABOUT = (
+        "Decides where one drive ends and the next begins, then writes a "
+        "sidecar per trip: the day, the span, the track, the distance. A trip "
+        "is the publishing unit and it is not an engine-on session and not a "
+        "calendar day — it runs from pulling out to parking back at the "
+        "anchor, so a stop somewhere else in the middle stays inside one "
+        "trip however long it lasts. Departure and arrival are read from the "
+        "footage itself, by optical flow, because GPS in a car park is late "
+        "or absent.\n\n"
+        "Run it again whenever the grouping should change — after excluding a "
+        "trip, or after adding clips. It rebuilds rather than skipping what "
+        "exists, so the sidecars always describe the footage that is there "
+        "now. It reads clips and writes small text files; a card takes about "
+        "a minute, and nothing it does is irreversible."
+    )
     OUT = _and_upload(META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD)
     IN_AUTHORED = _both_sets(META, IMPORT, EXCLUDE)
 
@@ -261,6 +301,18 @@ class BuildPreview(MenuItem):
     number = PREVIEW
     NAME = "Build Preview"
     DESCRIPTION = "Make one still per trip so you can see what you have."
+    ABOUT = (
+        "Pulls one frame out of each trip and lays them out as a contact "
+        "sheet, so a card can be judged by eye in a few seconds instead of by "
+        "reading timestamps. It exists for the decision item 4 asks for: which "
+        "of these was worth driving, and which is a fragment of manoeuvring "
+        "outside the house.\n\n"
+        "It writes stills and nothing else — no sidecar, no video, nothing "
+        "sent anywhere — so it cannot change what the later steps see and it "
+        "is safe to run at any point. Running it again rebuilds the stills "
+        "from scratch rather than adding to them, which is what you want after "
+        "the grouping has moved."
+    )
     # Stills and a contact sheet. It writes no sidecar and sends nothing
     # anywhere, so neither the trip list nor the destination has moved.
     CHANGES_THE_QUESTION = False
@@ -306,6 +358,22 @@ class ExcludeTrip(Destructive):
     number = EXCLUDE
     NAME = "Exclude Trip"
     DESCRIPTION = "Select which trips to exclude from meta and render."
+    ABOUT = (
+        "Deletes the original clips of the trips you name, so nothing "
+        "downstream ever sees them again. This is the one place footage is "
+        "dropped on purpose, and it asks you to type EXCLUDE before anything "
+        "goes. A blank selection, an index that is not on the list, or "
+        "anything but the word at the prompt leaves everything exactly as it "
+        "was.\n\n"
+        "The decision is recorded against the trip rather than against the "
+        "files, so when the same footage turns up on a later card it is "
+        "already known to be unwanted and does not have to be judged twice. "
+        "That is also why item 8 sends you here instead of quietly deleting a "
+        "trip nobody accounted for: a trip that is neither rendered nor "
+        "excluded is footage about to disappear on no one's decision. "
+        "Regenerate the sidecars afterwards, since they still describe the "
+        "grouping that included what you just dropped."
+    )
     DESTR = True
     # DELETE, like item 8. The two erase different things and both erase from
     # the WORKSPACE; the card keeps its own word, because that is the one with
@@ -337,6 +405,22 @@ class RenderVideos(MenuItem):
     number = RENDER
     NAME = "Render Trips"
     DESCRIPTION = "Encode the trips into watchable videos. Hours for a full card."
+    ABOUT = (
+        "Encodes one video per trip with the timestamp, speed, map and stats "
+        "burned in. Parking inside a trip is cut out and replaced by a "
+        "fast-forward slide, and the cuts are placed off the footage rather "
+        "than off GPS — the slide arrives a few seconds after the wheels stop, "
+        "and the picture comes back a few seconds before they turn again — so "
+        "an hour parked at a supermarket costs the viewer three seconds. The "
+        "trip therefore plays continuously even though the camera stopped and "
+        "started several times inside it.\n\n"
+        "This is the long one: hours for a full card, and the only step worth "
+        "starting and walking away from. It is restartable — a trip whose "
+        "video already exists is left alone — so an interrupted run picks up "
+        "where it stopped rather than beginning again. Preview the card first; "
+        "encoding a trip you were going to exclude is the most expensive "
+        "mistake available here."
+    )
     # An encode produces mp4s. The trips were already described, so the list
     # is_complete() is asked about is the same list, and nothing has been
     # published — which is the question it answers.
@@ -394,6 +478,20 @@ class BuildWebsite(MenuItem):
     number = BUILD
     NAME = "Build Website"
     DESCRIPTION = "Build the website from the described trips."
+    ABOUT = (
+        "Builds whatever this installation publishes, out of the trips that "
+        "have been described. It comes before rendering on purpose: a trip is "
+        "publishable as soon as item 2 has said where it begins and ends, and "
+        "the pages are seconds of work where the videos are hours. Build and "
+        "put the pages up first, then let the encoding catch up behind them.\n\n"
+        "What it produces depends on how the tool is set up, and the entry "
+        "answers for its own job rather than for the installation. With no "
+        "publisher configured it writes a single local page and gathers the "
+        "renders into one folder per day — that gathering is what makes the "
+        "workspace expendable, so it happens here or nowhere. With a publisher "
+        "configured the page is that publisher's to build, and the local page "
+        "is not written at all."
+    )
     # DEVIATION FROM THE OWNER'S TABLE: 7 added to the outbound under the
     # publishing edition. His inbound column for item 7 says {7,5} — build the
     # site, then put it online — but no outbound set anywhere offered 7, so
@@ -459,6 +557,21 @@ class UploadWebsite(MenuItem):
     number = UPLOAD
     NAME = "Upload Website"
     DESCRIPTION = "Put the website online. Resumes where it left off."
+    ABOUT = (
+        "Puts what item 5 built online. The pages go first and the videos "
+        "after, so the site is live and correct while the large files are "
+        "still arriving; a trip whose video has not landed yet simply has no "
+        "video to play. How many transports that takes — a bucket, a server, "
+        "one copy into a folder — is the installation's business, and this "
+        "entry reports one answer for the whole job rather than a half "
+        "success.\n\n"
+        "It resumes rather than restarting: what is already at the "
+        "destination is not sent again, so an interrupted upload costs only "
+        "what was left. Being reachable from everywhere is deliberate — the "
+        "moment a page is worth having online is not always the end of a "
+        "cycle. Note that this is the step that puts things in front of the "
+        "world, and what goes up may be cached or indexed after you remove it."
+    )
     SCOPE = Scope.FULL
     # DEVIATION FROM THE OWNER'S TABLE: 6 added to the outbound under the
     # publishing edition. He wrote 7 into item 5's INBOUND column — after
@@ -548,6 +661,20 @@ class CleanWorkspace(Destructive):
     number = CLEAN_WS
     NAME = "Clean Workspace"
     DESCRIPTION = "Delete the imported footage and its renders."
+    ABOUT = (
+        "Empties the working area: the imported clips, the sidecars and the "
+        "renders made from them. It asks you to type CLEAN first. Whether "
+        "this is cheap or serious depends on where the originals are — if the "
+        "card still holds them it removes a second copy, and if the card has "
+        "already been erased it removes the only one. The screen says which "
+        "of the two you are looking at before it asks.\n\n"
+        "It refuses while any trip is neither rendered nor excluded, and names "
+        "the trips and the remedy. That refusal is the point of the step: "
+        "footage nobody accounted for is footage about to vanish on no one's "
+        "decision, and the way past is item 4, where dropping a trip is a "
+        "decision that gets recorded. Once the workspace is gone the only way "
+        "on is a new import, so this genuinely ends a cycle."
+    )
     END = True
     DESTR = True
     # CLEAN, the entry's own verb, as at item 4. What this does is empty the
@@ -624,6 +751,23 @@ class DeleteSimData(Destructive):
     # matter is the one below, and it survives the swap intact.
     OVERRIDE_WORD = "ERASE"
     DESCRIPTION = "Erase the card, once every clip is accounted for elsewhere."
+    ABOUT = (
+        "Erases the card's clips and keeps its folder tree, so the camera can "
+        "record again without rebuilding anything — remove the folders too and "
+        "it sits on \"loading card\" instead. It asks you to type DELETE. The "
+        "guard is per clip, not per card: every file has to be provably "
+        "somewhere else before any of them go, and the check is the accounting "
+        "rather than the word.\n\n"
+        "This is the one refusal in the tool with a way past it, because "
+        "\"these clips exist nowhere else\" is true and is sometimes not a "
+        "reason to keep them — old strays, a fragment nothing would ever "
+        "render, footage you have looked at and do not want. You are shown "
+        "every such path and the file they were written to before being asked, "
+        "and the way past asks for ERASE rather than DELETE, so the habit of "
+        "typing the usual word cannot carry you through the guard. Freeing the "
+        "card does not end the cycle: it hands the position back to wherever "
+        "you came from, and cleaning the workspace is still ahead of you."
+    )
     # The card is not the workspace and not the destination. Erasing it leaves
     # both the trip list and what is published exactly as they were.
     CHANGES_THE_QUESTION = False

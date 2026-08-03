@@ -53,6 +53,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
 try:
     import termios
@@ -8052,19 +8053,61 @@ def _entry_help(menu_items, position, arg):
 
 
 def _about(menu_items, position, number):
+    """The one-liner, then what it leaves out, then the graph.
+
+    The graph rows answer a question about the SHAPE of the tool, which is the
+    thing you want once you already know what the step does. Read first they
+    are three lines of notation in front of the sentence you came for, so they
+    sit at the end and in dim: still there for whoever wants them, no longer
+    the first thing the eye lands on.
+    """
     item = menu_items[number]
-    return (rule("Help: %s" % item.name(), ch="="),
-            "    " + item.description(),
-            "",
-            "    leads to     %s" % (_named_list(menu_items, item.outbound().edges())),
-            "    reached from %s" % (_named_list(menu_items, item.inbound().edges())),
-            "    erases       %s" % ("yes, and asks for a typed word" if item.destr() else "no"),
-            "")
+    return ((rule("Help: %s" % item.name(), ch="="),
+             "    " + item.description())
+            + _about_paragraphs(item.about())
+            + ("",
+               C.dim("    leads to     %s"
+                     % _named_list(menu_items, item.outbound())),
+               C.dim("    reached from %s"
+                     % _named_list(menu_items, item.inbound())),
+               C.dim("    erases       %s"
+                     % ("yes, and asks for a typed word" if item.destr() else "no")),
+               ""))
 
 
-def _named_list(menu_items, numbers):
+def _about_paragraphs(text):
+    """Wrap ABOUT to the terminal, blank line between paragraphs.
+
+    Clamped rather than wrapped to whatever the window happens to be: a full-
+    width paragraph on a wide terminal is a line the eye loses its place in on
+    the way back, and the rest of this screen is indented four spaces anyway.
+    """
+    if not text:
+        return ()
+    room = max(40, min(92, term_width() - 8))
+    out = []
+    for para in text.split("\n\n"):
+        out.append("")
+        out.extend("    " + line for line in textwrap.wrap(para, room))
+    return tuple(out)
+
+
+# Three shapes answer edges() with None, and they do not mean the same thing.
+# Reading all three as the first one told the operator that Delete SIM Data,
+# which erases a card, "is a view".
+_NO_EDGES = {
+    menu.Anywhere:  "anywhere (it is a view)",
+    menu.StartNode: "nothing — this is where a cycle starts",
+    menu.StepBack:  "back to whoever offered it",
+}
+
+
+def _named_list(menu_items, where):
+    numbers = where.edges()
+    if numbers is None:
+        return C.dim(_NO_EDGES.get(type(where), "nothing"))
     if not numbers:
-        return C.dim("anywhere (it is a view)" )
+        return C.dim("nothing")
     return ", ".join("%d) %s" % (n, menu_items[n].name()) for n in sorted(numbers))
 
 
