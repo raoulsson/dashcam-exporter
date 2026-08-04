@@ -369,12 +369,7 @@ class ExcludeTrip(Destructive):
         "was.\n\n"
         "The decision is recorded against the trip rather than against the "
         "files, so when the same footage turns up on a later card it is "
-        "already known to be unwanted and does not have to be judged twice. "
-        "That is also why item 8 sends you here instead of quietly deleting a "
-        "trip nobody accounted for: a trip that is neither rendered nor "
-        "excluded is footage about to disappear on no one's decision. "
-        "Regenerate the sidecars afterwards, since they still describe the "
-        "grouping that included what you just dropped."
+        "already known to be unwanted and does not have to be judged twice."
     )
     DESTR = True
     # DELETE, like item 8. The two erase different things and both erase from
