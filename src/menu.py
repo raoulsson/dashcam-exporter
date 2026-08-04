@@ -16,11 +16,19 @@ OUTBOUND IS AUTHORED, INBOUND IS DERIVED. They are two views of one relation,
 not two opinions. Written twice, they disagreed sixteen times in a ten-row
 table authored in one sitting — a cross-check its own author cannot pass is a
 second place to be wrong, not a safety net. So each item writes its outbound,
-and `derive_inbound` computes every inbound from every other item's outbound.
-The hand-written inbound column survives as IN_AUTHORED and is DIFFED against
-the derivation by `disagreements()`, which reports rather than reconciles: a
-difference is a finding for the person who wrote the table, printed by
-tests/print_step_graph.py.
+and `MenuGraph.inbound()` computes every inbound from every other item's
+outbound. The hand-written inbound column survives as IN_AUTHORED and is
+DIFFED against the derivation by `MenuGraph.disagreements()`, which reports
+rather than reconciles: a difference is a finding for the person who wrote the
+table, printed by tests/print_step_graph.py.
+
+WHAT IS A CLASS AND WHAT IS A NAME. Every behaviour here belongs to a type:
+Verdict and Outcome build and read themselves, Neighbours answers about edges,
+Registry admits an item class, MenuGraph reads the ten classes as a graph for
+one strategy, Position holds where we are. The short block of functions at the
+foot of the file is the module's SURFACE -- the names pipeline.py, guards.py,
+items.py and the published plugin interface in uploader.py already say -- and
+each is one call into the type that does the work.
 """
 
 from __future__ import annotations
@@ -47,6 +55,19 @@ class Strategy(Enum):
         how anybody publishes.
         """
         return cls.UPLOADER if plugin is not None else cls.LOCAL_PAGE
+
+    @classmethod
+    def both(cls, value) -> Dict["Strategy", object]:
+        """One value under every strategy: the row that does not branch.
+
+        Most of the ten items sit in the same place in both products, and the
+        strategy table is read by number for every draw, so the entry has to
+        exist under every member. Written as a dict literal ten times it is a
+        row that can be authored with one key and fail at whichever draw first
+        looks under the other -- which is why _declare refuses a table that
+        does not cover every member. This spells the covering case once.
+        """
+        return {strategy: value for strategy in cls}
 
 
 # Item numbers, named once so the graph reads as sentences rather than integers.
@@ -83,36 +104,41 @@ class Verdict:
     def selectable(self) -> bool:
         return not self.blocked
 
+    # -- the four ways one is made ----------------------------------------
+    @classmethod
+    def go(cls) -> "Verdict":
+        return cls(Ruling.GO)
 
-def go() -> Verdict:
-    return Verdict(Ruling.GO)
+    @classmethod
+    def satisfied(cls, reason: str) -> "Verdict":
+        return cls(Ruling.SATISFIED, reason)
 
+    @classmethod
+    def refuse(cls, reason: str, evidence: Tuple[str, ...] = ()) -> "Verdict":
+        """The BLOCKED constructor, spelled `refuse` because `blocked` is taken.
 
-def satisfied(reason: str) -> Verdict:
-    return Verdict(Ruling.SATISFIED, reason)
+        Every guard in the tool reads `verdict.blocked` to ask whether it is in
+        the way. A classmethod of that name would replace the property in the
+        class body outright, and `verdict.blocked` would then be a bound method
+        -- truthy always, so every refusal check would pass and nothing would
+        ever be in the way. The module-level `blocked()` below is what callers
+        outside this file still say; this is the same thing under a name that
+        cannot collide.
+        """
+        return cls(Ruling.BLOCKED, reason, tuple(evidence))
 
+    @staticmethod
+    def first_reason(*reasons):
+        """The first reason anything is in the way, or None."""
+        return next(filter(None, reasons), None)
 
-def blocked(reason: str, evidence: Tuple[str, ...] = ()) -> Verdict:
-    return Verdict(Ruling.BLOCKED, reason, tuple(evidence))
-
-
-def reason(*reasons):
-    """The first reason anything is in the way, or None."""
-    return next(filter(None, reasons), None)
-
-
-def first_block(*reasons) -> Verdict:
-    """The first reason anything is in the way, or GO."""
-    return _blocked_or_go(reason(*reasons))
-
-
-def _blocked_or_go(stop) -> Verdict:
-    """Stays private: only first_block above ever needs it, and a name that
-    crossed the module boundary would have to shed its underscore and read as
-    a second way to build a Verdict beside blocked() and go()."""
-    if stop:
-        return blocked(stop)
-    return go()
+    @classmethod
+    def first_block(cls, *reasons) -> "Verdict":
+        """The first reason anything is in the way, or GO."""
+        stop = cls.first_reason(*reasons)
+        if stop:
+            return cls.refuse(stop)
+        return cls.go()
 
 
 @dataclass(frozen=True)
@@ -129,42 +155,43 @@ class Outcome:
     note: str
     performed: bool = True      # False when the postcondition already held
 
+    @classmethod
+    def did(cls, note: str) -> "Outcome":
+        return cls(True, note)
 
-def did(note: str) -> Outcome:
-    return Outcome(True, note)
+    @classmethod
+    def stopped(cls, note: str, performed: bool = False) -> "Outcome":
+        """An item that did not complete, and by default did not DO anything.
 
+        performed drove one thing: whether the plugin is told its input moved.
+        It defaulted to True here, so declining a prompt -- typing anything but
+        the word, answering n, pressing q -- announced a change that had not
+        happened, the plugin dropped whatever it had cached, and the next menu
+        draw paid for a fresh answer. Eight seconds of "Reading the
+        workspace..." for a keypress that touched nothing.
 
-def stopped(note: str, performed: bool = False) -> Outcome:
-    """An item that did not complete, and by default did not DO anything.
+        An abort part-way through a copy or an encode IS a change, so that one
+        passes performed=True from where it knows: Aborted carries mid_run.
+        """
+        return cls(False, note, performed)
 
-    performed drove one thing: whether the plugin is told its input moved. It
-    defaulted to True here, so declining a prompt -- typing anything but the
-    word, answering n, pressing q -- announced a change that had not happened,
-    the plugin dropped whatever it had cached, and the next menu draw paid for
-    a fresh answer. Eight seconds of "Reading the workspace..." for a keypress
-    that touched nothing.
+    @classmethod
+    def not_doing(cls, verdict: Verdict) -> "Outcome":
+        """The two ways an item does not run, which are not the same answer.
 
-    An abort part-way through a copy or an encode IS a change, so that one
-    passes performed=True from where it knows: Aborted carries mid_run.
-    """
-    return Outcome(False, note, performed)
+        BLOCKED did not happen and does not complete: the pipeline stays where
+        it was. SATISFIED did not happen either and DOES complete: the
+        postcondition already holds, nothing is owed, and the pipeline may move
+        on. That is the whole reason evaluate() is three-valued while
+        completed() is two-valued.
 
-
-def _not_doing(verdict: Verdict) -> Outcome:
-    """The two ways an item does not run, which are not the same answer.
-
-    BLOCKED did not happen and does not complete: the pipeline stays where it
-    was. SATISFIED did not happen either and DOES complete: the postcondition
-    already holds, nothing is owed, and the pipeline may move on. That is the
-    whole reason evaluate() is three-valued while completed() is two-valued.
-
-    This is also what makes execute() idempotent rather than merely re-runnable.
-    A second Delete SIM Data on a card it has just emptied must not reach the
-    ERASE prompt to find out there is nothing behind it.
-    """
-    if verdict.blocked:
-        return stopped(verdict.reason)
-    return Outcome(True, verdict.reason, performed=False)
+        This is also what makes execute() idempotent rather than merely
+        re-runnable. A second Delete SIM Data on a card it has just emptied
+        must not reach the ERASE prompt to find out there is nothing behind it.
+        """
+        if verdict.blocked:
+            return cls.stopped(verdict.reason)
+        return cls(True, verdict.reason, performed=False)
 
 
 class NotRun(Exception):
@@ -208,6 +235,37 @@ class Neighbours(ABC):
     def settles_at(self, number: int, current: int) -> int:
         """Where the position lands after this item completes."""
 
+    def reaches(self, number: int) -> bool:
+        """Is that number one of the edges this side contributes.
+
+        Concrete on the interface because the three kinds that answer None
+        would each have to write the same `edges is not None and n in edges`
+        otherwise, and the derivation of the inbound column and the sentence
+        the menu prints about an unreachable entry both ask it. Two readers of
+        one relation, asking through one method: None and the empty set both
+        answer no, and neither reader has to know which it got.
+        """
+        numbers = self.edges()
+        return bool(numbers) and number in numbers
+
+    def is_view(self) -> bool:
+        """A view neighbours everything and is never a position of its own.
+
+        Answered by the kinds rather than by an isinstance at the call site, so
+        adding a second view-like kind does not mean finding every place that
+        named this one.
+        """
+        return False
+
+    def no_edges(self) -> bool:
+        """This side declares an edge set and it is empty.
+
+        Not the same as declaring none: a view and a start node answer None
+        here and are emphatically still in the graph. Only a side that named
+        its numbers and named none of them is a side nothing can cross.
+        """
+        return self.edges() == frozenset()
+
 
 @dataclass(frozen=True)
 class Edges(Neighbours):
@@ -221,6 +279,35 @@ class Edges(Neighbours):
 
     def settles_at(self, number, current):
         return number
+
+    @classmethod
+    def of(cls, *numbers) -> "Edges":
+        """An outbound row, written as the numbers it names.
+
+        Was the module-level `e()`: short because an outbound row is a dense
+        line and a longer word buried the numbers. As a classmethod it keeps
+        the row readable and now says which type it is building.
+        """
+        return cls(frozenset(numbers))
+
+    @classmethod
+    def and_upload(cls, *numbers) -> Dict[Strategy, "Edges"]:
+        """These neighbours, plus item 7 wherever item 7 is a real entry.
+
+        Item 7 is offered from everywhere in the cycle, and the graph is
+        deliberately not the thing that decides whether it may run. Publishing
+        needs a built site, which is a FACT about the destination's material and
+        is the publisher's to answer -- it says "nothing has been built to
+        upload yet" and means it. Encoded as edges instead, the same fact became
+        an ordering rule that hid the entry, and hiding it is how the operator
+        who just rendered an mp4 is told to go and rebuild an index the encode
+        did not change.
+
+        Under the local edition item 7 exists but publishes nothing, so it stays
+        out of every outbound there, exactly as before.
+        """
+        return {Strategy.UPLOADER: cls.of(*numbers, UPLOAD),
+                Strategy.LOCAL_PAGE: cls.of(*numbers)}
 
 
 class Anywhere(Neighbours):
@@ -239,6 +326,9 @@ class Anywhere(Neighbours):
 
     def settles_at(self, number, current):
         return current
+
+    def is_view(self) -> bool:
+        return True
 
     def __repr__(self):                       # pragma: no cover - debug aid
         return "*"
@@ -285,44 +375,9 @@ class StepBack(Neighbours):
         return "step back by 1"
 
 
-# ---------------------------------------------------------------------------
-# Writing the outbound column. Every item declares its neighbours per strategy,
-# and most declare the same set twice; these four say the three shapes that
-# recur, so an outbound row reads as the sentence it is rather than as a dict
-# literal repeated ten times.
-# ---------------------------------------------------------------------------
-
-def e(*numbers) -> Edges:
-    return Edges(frozenset(numbers))
-
-
-def both(neighbours):
-    return {Strategy.UPLOADER: neighbours,
-            Strategy.LOCAL_PAGE: neighbours}
-
-
-def and_upload(*numbers):
-    """These neighbours, plus item 7 wherever item 7 is a real entry.
-
-    Item 7 is offered from everywhere in the cycle, and the graph is
-    deliberately not the thing that decides whether it may run. Publishing
-    needs a built site, which is a FACT about the destination's material and is
-    the publisher's to answer — it says "nothing has been built to upload yet"
-    and means it. Encoded as edges instead, the same fact became an ordering
-    rule that hid the entry, and hiding it is how the operator who just
-    rendered an mp4 is told to go and rebuild an index the encode did not
-    change.
-
-    Under the local edition item 7 exists but publishes nothing, so it stays
-    out of every outbound there, exactly as before.
-    """
-    return {Strategy.UPLOADER: e(*numbers, UPLOAD),
-            Strategy.LOCAL_PAGE: e(*numbers)}
-
-
-def both_sets(*numbers):
-    return {Strategy.UPLOADER: frozenset(numbers),
-            Strategy.LOCAL_PAGE: frozenset(numbers)}
+# The three shapes an outbound row takes now live on the types that answer for
+# them: Strategy.both for the row that does not branch, Edges.of for the row
+# that names its numbers, and Edges.and_upload for the one branch there is.
 
 
 class Scope(Enum):
@@ -340,24 +395,46 @@ class Scope(Enum):
 
 
 # ---------------------------------------------------------------------------
-# The interface
+# The interface every item implements, and the register it lands in
 # ---------------------------------------------------------------------------
 
-_REGISTRY: Dict[int, type] = {}
+class Registry:
+    """The ten item classes by number, and the gate they pass to get in.
+
+    One instance, filled by __init_subclass__ as items.py imports. It exists as
+    a type rather than a module dict because admitting a class and vetting it
+    are one act: a class that skipped the vetting and still landed in the dict
+    would be found by the first menu draw that indexed its table under the
+    strategy it forgot, which is the wrong end of the session to find it.
+
+    Declaration order is insertion order and is preserved: the menu is printed
+    in it.
+    """
+
+    def __init__(self):
+        self._classes: Dict[int, type] = {}
+
+    def declare(self, cls) -> None:
+        """Import-time checks. A malformed item fails to load, not to run."""
+        self._require(set(cls.OUT) == set(Strategy),
+                      "%s: OUT must cover every Strategy" % cls)
+        self._require(set(cls.IN_AUTHORED) == set(Strategy),
+                      "%s: IN_AUTHORED must cover every Strategy" % cls)
+        self._require(cls.DESTR == bool(cls.WORD),
+                      "%s: DESTR and WORD must agree" % cls)
+        self._classes[cls.number] = cls
+
+    def classes(self) -> Dict[int, type]:
+        """A copy: what the caller does with it is not the registry's problem."""
+        return dict(self._classes)
+
+    @staticmethod
+    def _require(ok: bool, message: str) -> None:
+        if not ok:
+            raise TypeError(message)
 
 
-def _check(ok: bool, message: str) -> None:
-    if not ok:
-        raise TypeError(message)
-
-
-def _declare(cls) -> None:
-    """Import-time checks. A malformed item fails to load, not to run."""
-    _check(set(cls.OUT) == set(Strategy), "%s: OUT must cover every Strategy" % cls)
-    _check(set(cls.IN_AUTHORED) == set(Strategy),
-           "%s: IN_AUTHORED must cover every Strategy" % cls)
-    _check(cls.DESTR == bool(cls.WORD), "%s: DESTR and WORD must agree" % cls)
-    _REGISTRY[cls.number] = cls
+REGISTRY = Registry()
 
 
 class MenuItem(ABC):
@@ -397,7 +474,7 @@ class MenuItem(ABC):
         super().__init_subclass__(**kw)
         if abstract:
             return
-        _declare(cls)
+        REGISTRY.declare(cls)
 
     def __init__(self, strategy: Strategy, work, inbound: Neighbours):
         # The strategy is resolved ONCE, here. Items 5, 6 and 7 differ between
@@ -482,7 +559,7 @@ class MenuItem(ABC):
         runner asks it. An abort is simply not completing: the position stays
         where it was, which is the same thing a declined prompt means.
         """
-        self._outcome = stopped(note, performed)
+        self._outcome = Outcome.stopped(note, performed)
         return self._outcome
 
     # -- doing it ----------------------------------------------------------
@@ -502,7 +579,7 @@ class MenuItem(ABC):
         verdict = self.evaluate(world)
         if verdict.ruling is Ruling.GO:
             return self._perform(world)
-        return _not_doing(verdict)
+        return Outcome.not_doing(verdict)
 
     @abstractmethod
     def evaluate(self, world) -> Verdict:
@@ -519,24 +596,6 @@ class MenuItem(ABC):
 # ---------------------------------------------------------------------------
 # Destructive items: the sequence that puts a fresh world under the guard
 # ---------------------------------------------------------------------------
-
-def nothing_to_recheck(world) -> Verdict:
-    """A deliberate no-op re-check, for the one item whose evidence cannot
-    change between the prompt and the act.
-
-    Exclude Trip deletes the clips the operator just picked off a list. A clip
-    that vanished while the prompt was on screen makes the delete a no-op
-    rather than a hazard, so there is nothing a second look could refuse on.
-    It is a NAMED function passed explicitly rather than a default, because
-    "this one needs no re-check" has to be a decision somebody wrote down and
-    not a field nobody filled in.
-    """
-    return go()
-
-
-def _no_plan(world) -> Verdict:          # pragma: no cover - never reached
-    return blocked("this plan found nothing to do")
-
 
 @dataclass(frozen=True)
 class Plan:
@@ -556,7 +615,28 @@ class Plan:
     @classmethod
     def nothing_to_do(cls, reason: str) -> "Plan":
         """No target, so no word is asked for and neither half is ever called."""
-        return cls(_no_plan, _no_plan, nothing=reason)
+        return cls(cls._never, cls._never, nothing=reason)
+
+    @staticmethod
+    def nothing_to_recheck(world) -> Verdict:
+        """A deliberate no-op re-check, for the one item whose evidence cannot
+        change between the prompt and the act.
+
+        Exclude Trip deletes the clips the operator just picked off a list. A
+        clip that vanished while the prompt was on screen makes the delete a
+        no-op rather than a hazard, so there is nothing a second look could
+        refuse on. It is a NAMED guard passed explicitly rather than a default,
+        because "this one needs no re-check" has to be a decision somebody
+        wrote down and not a field nobody filled in.
+        """
+        return Verdict.go()
+
+    @staticmethod
+    def _never(world) -> Verdict:        # pragma: no cover - never reached
+        """Both halves of a plan there is nothing to do. Never reached: the
+        item returns on `nothing` before either is called. It refuses rather
+        than passes so that a route that did reach it stops."""
+        return Verdict.refuse("this plan found nothing to do")
 
 
 class Destructive(MenuItem, abstract=True):
@@ -574,13 +654,13 @@ class Destructive(MenuItem, abstract=True):
     def _perform(self, world) -> Outcome:
         plan = self._plan(world)
         if plan.nothing:
-            return stopped(plan.nothing)
+            return Outcome.stopped(plan.nothing)
         return self._confirm(plan)
 
     def _confirm(self, plan: Plan) -> Outcome:
         self._work.show(plan.banner)
         if self._work.ask_word(self.WORD) != self.WORD:
-            return stopped("Aborted by user pre-run.")
+            return Outcome.stopped("Aborted by user pre-run.")
         return self._commit(plan)
 
     def _commit(self, plan: Plan) -> Outcome:
@@ -599,26 +679,6 @@ class Destructive(MenuItem, abstract=True):
 # The graph
 # ---------------------------------------------------------------------------
 
-def _out_sets(classes, strategy) -> Dict[int, Optional[FrozenSet[int]]]:
-    return {n: cls.OUT[strategy].edges() for n, cls in classes.items()}
-
-
-def _offers(numbers, n) -> bool:
-    return bool(numbers) and n in numbers
-
-
-def _inbound_for(n, cls, out) -> Neighbours:
-    if cls.INBOUND_KIND is not None:
-        return cls.INBOUND_KIND()
-    return Edges(frozenset(filter(lambda a: _offers(out[a], n), out)))
-
-
-def derive_inbound(classes, strategy) -> Dict[int, Neighbours]:
-    """Every item's inbound, computed from every other item's outbound."""
-    out = _out_sets(classes, strategy)
-    return {n: _inbound_for(n, cls, out) for n, cls in classes.items()}
-
-
 @dataclass(frozen=True)
 class Disagreement:
     """One row of the owner's inbound column against the derivation."""
@@ -635,70 +695,88 @@ class Disagreement:
     def missing(self) -> FrozenSet[int]:
         return self.authored - self.derived
 
+    @classmethod
+    def between(cls, number, authored, derived) -> Optional["Disagreement"]:
+        """The two columns for one item, or None when they agree.
 
-def _authored_edges(cls, strategy) -> Optional[FrozenSet[int]]:
-    """The owner's inbound column for this item, or None when it is a KIND.
+        Returning None for agreement rather than an "empty" Disagreement keeps
+        the report a list of findings: a row that is on it is a difference, and
+        nothing has to ask a Disagreement whether it disagrees.
+        """
+        if authored == derived:
+            return None
+        return cls(number, authored, derived)
 
-    Two items are exempt BY DEFINITION, not by a number on a skip list:
-    Import SIM declares StartNode (its inbound is empty because it is where
-    footage comes in, even though Clean Workspace offers it back), and
-    Progress declares Anywhere (it neighbours everything and must not force
-    the other nine to declare it back).
+
+class MenuGraph:
+    """The ten classes read as a graph, for ONE strategy.
+
+    The strategy is bound once, here, instead of being handed to five
+    functions in turn. It was the second argument of everything in this
+    section, and every one of them had to be trusted to pass on the same one:
+    the derivation, the authored column and the construction all read
+    OUT[strategy] and IN_AUTHORED[strategy], and a mismatch between any two of
+    them would have built a menu whose edges came from one product and whose
+    items came from the other.
+
+    It holds classes, never instances. Nothing here needs a built item, and
+    keeping it that way is what lets the graph be printed and diffed without a
+    `work` to hand -- tests/print_step_graph.py has none worth speaking of.
     """
-    if cls.INBOUND_KIND is not None:
-        return None
-    return cls.IN_AUTHORED[strategy]
 
+    def __init__(self, classes, strategy: Strategy):
+        self._classes = REGISTRY.classes() if classes is None else classes
+        self._strategy = strategy
 
-def _diff(n, authored, derived) -> Optional[Disagreement]:
-    if authored == derived:
-        return None
-    return Disagreement(n, authored, derived)
+    def build(self, work) -> Dict[int, MenuItem]:
+        """Construct the ten items, each handed the inbound derived for it."""
+        inbound = self.inbound()
+        return {n: cls(self._strategy, work, inbound[n])
+                for n, cls in self._classes.items()}
 
+    def inbound(self) -> Dict[int, Neighbours]:
+        """Every item's inbound, computed from every other item's outbound."""
+        out = self._outbound()
+        return {n: self._inbound_for(n, cls, out)
+                for n, cls in self._classes.items()}
 
-def _disagreement(n, cls, strategy, derived) -> Optional[Disagreement]:
-    authored = _authored_edges(cls, strategy)
-    if authored is None:
-        return None
-    return _diff(n, authored, derived[n].edges())
+    def disagreements(self) -> List[Disagreement]:
+        """Where the owner's hand-written inbound column and the derivation part.
 
+        Reported, never reconciled: the derivation is what the tool runs on, and
+        each difference is a line of the table for its author to confirm or fix.
+        """
+        derived = self.inbound()
+        found = map(lambda kv: self._disagreement(kv[0], kv[1], derived),
+                    self._classes.items())
+        return sorted(filter(None, found), key=lambda d: d.number)
 
-def _number_of(d: Disagreement) -> int:
-    return d.number
+    def _outbound(self) -> Dict[int, Neighbours]:
+        return {n: cls.OUT[self._strategy] for n, cls in self._classes.items()}
 
+    def _inbound_for(self, n, cls, out) -> Neighbours:
+        if cls.INBOUND_KIND is not None:
+            return cls.INBOUND_KIND()
+        return Edges(frozenset(filter(lambda a: out[a].reaches(n), out)))
 
-def disagreements(classes, strategy) -> List[Disagreement]:
-    """Where the owner's hand-written inbound column and the derivation part.
+    def _disagreement(self, n, cls, derived) -> Optional[Disagreement]:
+        authored = self._authored_edges(cls)
+        if authored is None:
+            return None
+        return Disagreement.between(n, authored, derived[n].edges())
 
-    Reported, never reconciled: the derivation is what the tool runs on, and
-    each difference is a line of the table for its author to confirm or fix.
-    """
-    derived = derive_inbound(classes, strategy)
-    found = map(lambda kv: _disagreement(kv[0], kv[1], strategy, derived),
-                classes.items())
-    return sorted(filter(None, found), key=_number_of)
+    def _authored_edges(self, cls) -> Optional[FrozenSet[int]]:
+        """The owner's inbound column for this item, or None when it is a KIND.
 
-
-def registry() -> Dict[int, type]:
-    """The item classes, by number, in declaration order."""
-    return dict(_REGISTRY)
-
-
-def _or_registry(classes) -> Dict[int, type]:
-    if classes is None:
-        return registry()
-    return classes
-
-
-def build_menu(strategy: Strategy, work, classes=None) -> Dict[int, MenuItem]:
-    """Construct the ten items for ONE strategy.
-
-    The only place the strategy branch is read. `classes` is injectable so a
-    test can drive the runner with mocks instead of the real ten.
-    """
-    chosen = _or_registry(classes)
-    inbound = derive_inbound(chosen, strategy)
-    return {n: cls(strategy, work, inbound[n]) for n, cls in chosen.items()}
+        Two items are exempt BY DEFINITION, not by a number on a skip list:
+        Import SIM declares StartNode (its inbound is empty because it is where
+        footage comes in, even though Clean Workspace offers it back), and
+        Progress declares Anywhere (it neighbours everything and must not force
+        the other nine to declare it back).
+        """
+        if cls.INBOUND_KIND is not None:
+            return None
+        return cls.IN_AUTHORED[self._strategy]
 
 
 # ---------------------------------------------------------------------------
@@ -727,6 +805,17 @@ class Position:
     starts: FrozenSet[int]
     current: int = NOWHERE
 
+    @classmethod
+    def for_menu(cls, menu: Dict[int, MenuItem]) -> "Position":
+        """A Position that knows this menu's universe, views and entry points.
+
+        Read off the built menu rather than passed in, so the three sets cannot
+        describe a different menu from the one they will be asked about.
+        """
+        views = frozenset(filter(lambda n: menu[n].outbound().is_view(), menu))
+        starts = frozenset(filter(lambda n: menu[n].start(), menu))
+        return cls(frozenset(menu), views, starts)
+
     def selectable(self, menu: Dict[int, MenuItem]) -> FrozenSet[int]:
         return self._reachable(menu) | self.views
 
@@ -750,19 +839,72 @@ class Position:
         forward to the same place. It saves the keypresses, nothing more.
         """
         hit = next(filter(lambda rule: rule[1](world), rules), None)
-        self.current = _rule_number(hit)
+        self.current = NOWHERE if hit is None else hit[0]
         return self.current
 
 
-def _rule_number(rule) -> int:
-    if rule is None:
-        return NOWHERE
-    return rule[0]
+# ---------------------------------------------------------------------------
+# The module surface
+#
+# Everything above answers for itself. What follows is the set of names the
+# rest of the tool -- and one published plugin interface -- says out loud, each
+# one word for word what it has always been and now a single call into the type
+# that owns the behaviour.
+#
+# `go`, `satisfied`, `blocked`, `did` and `stopped` are re-exported by
+# uploader.py and are how an outside plugin builds its answers: `from uploader
+# import Verdict, go, blocked, did`. They are somebody else's source code, not
+# ours, so they do not get renamed, moved onto a class, or given a keyword
+# argument -- there is no deprecation window for a file we cannot see.
+# ---------------------------------------------------------------------------
+
+def go() -> Verdict:
+    return Verdict.go()
+
+
+def satisfied(reason: str) -> Verdict:
+    return Verdict.satisfied(reason)
+
+
+def blocked(reason: str, evidence: Tuple[str, ...] = ()) -> Verdict:
+    return Verdict.refuse(reason, evidence)
+
+
+def did(note: str) -> Outcome:
+    return Outcome.did(note)
+
+
+def stopped(note: str, performed: bool = False) -> Outcome:
+    return Outcome.stopped(note, performed)
+
+
+def nothing_to_recheck(world) -> Verdict:
+    """The named no-op re-check, passed as a Plan guard. See Plan."""
+    return Plan.nothing_to_recheck(world)
+
+
+def registry() -> Dict[int, type]:
+    """The item classes, by number, in declaration order."""
+    return REGISTRY.classes()
+
+
+def build_menu(strategy: Strategy, work, classes=None) -> Dict[int, MenuItem]:
+    """Construct the ten items for ONE strategy.
+
+    The only place the strategy branch is read. `classes` is injectable so a
+    test can drive the runner with mocks instead of the real ten.
+    """
+    return MenuGraph(classes, strategy).build(work)
+
+
+def disagreements(classes, strategy) -> List[Disagreement]:
+    """The step table's two columns, diffed. See MenuGraph.disagreements."""
+    return MenuGraph(classes, strategy).disagreements()
 
 
 def is_view(item: MenuItem) -> bool:
     """A view neighbours everything and is never a position of its own."""
-    return isinstance(item.outbound(), Anywhere)
+    return item.outbound().is_view()
 
 
 def switched_off(item: MenuItem) -> bool:
@@ -777,9 +919,13 @@ def switched_off(item: MenuItem) -> bool:
     where a cycle begins, and it still leads somewhere; a view declares None on
     both sides rather than an empty set, which is not the same thing as having
     no edges.
+
+    Asked of the item's two sides rather than of the item, and that is
+    deliberate: the painter is handed doubles whose whole interface is
+    outbound() and inbound(), and every one of these three would otherwise be
+    a method the drawing code demands of anything it is shown.
     """
-    return (item.inbound().edges() == frozenset()
-            and item.outbound().edges() == frozenset())
+    return item.inbound().no_edges() and item.outbound().no_edges()
 
 
 def leads_to(menu: Dict[int, MenuItem], number: int) -> List[int]:
@@ -791,17 +937,15 @@ def leads_to(menu: Dict[int, MenuItem], number: int) -> List[int]:
     because prose does not fail a test.
 
     Views are not answers here: one neighbours everything by definition, so
-    naming it would tell the operator nothing about what to do next.
+    naming it would tell the operator nothing about what to do next -- and
+    Anywhere answers None to reaches(), so it is excluded without being named.
+
+    Stays a function rather than a method: it is a query over a menu the CALLER
+    owns -- build_menu hands back a plain dict, by contract with pipeline.py --
+    and the only object it could hang off is one nothing else would hold.
     """
-    return sorted(filter(lambda a: _reaches(menu[a], number), menu))
-
-
-def _reaches(item: MenuItem, number: int) -> bool:
-    return _offers(item.outbound().edges(), number)
+    return sorted(filter(lambda a: menu[a].outbound().reaches(number), menu))
 
 
 def position_for(menu: Dict[int, MenuItem]) -> Position:
-    """A Position that knows this menu's universe, views and entry points."""
-    views = frozenset(filter(lambda n: is_view(menu[n]), menu))
-    starts = frozenset(filter(lambda n: menu[n].start(), menu))
-    return Position(frozenset(menu), views, starts)
+    return Position.for_menu(menu)

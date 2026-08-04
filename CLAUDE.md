@@ -156,7 +156,7 @@ be reshaped; break one of these and footage goes.
   and never calls the plugin. Two reads of one world give one answer, which is
   what makes the re-check after a typed word meaningful.
 - **Outbound edges are authored on the item; inbound is derived** by
-  `menu.derive_inbound` from every other item's outbound. Never hand-write an
+  `menu.MenuGraph.inbound()` from every other item's outbound. Never hand-write an
   inbound set — `menu.disagreements()` exists to report where the derivation
   parts company with the owner's table, and a hand-edit hides that.
 - **Destructive items ask for a typed word, then capture the world AGAIN** and

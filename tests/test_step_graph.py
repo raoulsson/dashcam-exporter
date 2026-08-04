@@ -43,7 +43,7 @@ P = load_pipeline()
 
 
 # The owner's inbound column, transcribed. It is NOT what the tool runs on —
-# menu.derive_inbound computes that from every item's outbound — but it is not
+# MenuGraph.inbound() computes that from every item's outbound — but it is not
 # thrown away either: every difference between the two is a finding for the
 # person who wrote the table, and this is where they are pinned so a NEW one
 # fails the suite instead of passing unnoticed.
@@ -232,7 +232,7 @@ class TestGraphConsistency(GraphTest):
         a NEW divergence between what he wrote and what the items declare.
         """
         for strategy in M.Strategy:
-            derived = M.derive_inbound(M.registry(), strategy)
+            derived = M.MenuGraph(M.registry(), strategy).inbound()
             for number, authored in AUTHORED_INBOUND[strategy].items():
                 with self.subTest(strategy=strategy.value, item=number):
                     if derived[number].edges() == authored:

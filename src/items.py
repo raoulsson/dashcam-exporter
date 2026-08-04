@@ -10,15 +10,15 @@ The outbound column is authored here from the owner's table. THREE EDGES
 DIFFER from what he wrote, each marked at its declaration site and reported by
 tests/print_step_graph.py — see the notes on items 5, 6 and 7. The inbound
 column he wrote is transcribed verbatim into IN_AUTHORED and is never used to
-build the graph; menu.derive_inbound computes the real one and
-menu.disagreements diffs the two.
+build the graph; MenuGraph.inbound() computes the real one and
+MenuGraph.disagreements() diffs the two.
 """
 
 from __future__ import annotations
 
-from menu import (Anywhere, Destructive, Evidence, MenuItem, Plan, Ruling,
-                  Scope, StartNode, StepBack, Strategy, Verdict, blocked, go,
-                  satisfied, reason, first_block, e, both, and_upload, both_sets,
+from menu import (Anywhere, Destructive, Edges, Evidence, MenuItem, Plan,
+                  Ruling, Scope, StartNode, StepBack, Strategy, Verdict,
+                  blocked, go, satisfied,
                   PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER,
                   BUILD, UPLOAD, CLEAN_WS, ERASE_CARD)
 from handover import Handover
@@ -52,8 +52,8 @@ class Progress(MenuItem):
         "seconds; the answer is what the later steps are judged against."
     )
     INBOUND_KIND = Anywhere
-    OUT = both(Anywhere())
-    IN_AUTHORED = both(None)
+    OUT = Strategy.both(Anywhere())
+    IN_AUTHORED = Strategy.both(None)
 
     def evaluate(self, world) -> Verdict:
         return go()
@@ -106,8 +106,8 @@ class ImportSim(MenuItem):
     # the self-edge, orienting onto item 1 with footage in the workspace took
     # item 1 off the menu, and every entry it led to was blocked by its own
     # guard for want of a GPS track.
-    OUT = both(e(IMPORT, META, CLEAN_WS, ERASE_CARD))
-    IN_AUTHORED = both(None)
+    OUT = Strategy.both(Edges.of(IMPORT, META, CLEAN_WS, ERASE_CARD))
+    IN_AUTHORED = Strategy.both(None)
 
     def evaluate(self, world) -> Verdict:
         if not world.workspace_settled:
@@ -172,8 +172,9 @@ class GenerateMeta(MenuItem):
         "now. It reads clips and writes small text files; a card takes about "
         "a minute, and nothing it does is irreversible."
     )
-    OUT = and_upload(META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD)
-    IN_AUTHORED = both_sets(META, IMPORT, EXCLUDE)
+    OUT = Edges.and_upload(META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS,
+                           ERASE_CARD)
+    IN_AUTHORED = Strategy.both(frozenset((META, IMPORT, EXCLUDE)))
 
     def evaluate(self, world) -> Verdict:
         """Evidence only.
@@ -185,7 +186,7 @@ class GenerateMeta(MenuItem):
         sidecars are built from the track, and a source without one produces
         nothing however many times it is run.
         """
-        return first_block(
+        return Verdict.first_block(
             guards.no_import(world, "no import — nothing to build meta from"),
             guards.track_missing(world))
 
@@ -215,8 +216,9 @@ class BuildPreview(MenuItem):
     # Stills and a contact sheet. It writes no sidecar and sends nothing
     # anywhere, so neither the trip list nor the destination has moved.
     CHANGES_THE_QUESTION = False
-    OUT = and_upload(PREVIEW, META, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD)
-    IN_AUTHORED = both_sets(PREVIEW, META, EXCLUDE)
+    OUT = Edges.and_upload(PREVIEW, META, EXCLUDE, RENDER, BUILD, CLEAN_WS,
+                           ERASE_CARD)
+    IN_AUTHORED = Strategy.both(frozenset((PREVIEW, META, EXCLUDE)))
 
     def evaluate(self, world) -> Verdict:
         """The sidecars have to be ON DISK, not merely to have been written.
@@ -226,7 +228,7 @@ class BuildPreview(MenuItem):
         and the keypress, and an empty workspace settles the question rather
         than failing it.
         """
-        return first_block(
+        return Verdict.first_block(
             guards.no_import(world, "no import — nothing to preview"),
             guards.Gates(world).sidecars_missing())
 
@@ -280,11 +282,11 @@ class ExcludeTrip(Destructive):
     # that names the other act taught the wrong idea of what was happening.
     WORD = "EXCLUDE"
     SCOPE = Scope.FULL          # the only-copy warning has to ask the target
-    OUT = and_upload(EXCLUDE, META, PREVIEW, CLEAN_WS, ERASE_CARD)
-    IN_AUTHORED = both_sets(EXCLUDE, META, PREVIEW)
+    OUT = Edges.and_upload(EXCLUDE, META, PREVIEW, CLEAN_WS, ERASE_CARD)
+    IN_AUTHORED = Strategy.both(frozenset((EXCLUDE, META, PREVIEW)))
 
     def evaluate(self, world) -> Verdict:
-        return first_block(
+        return Verdict.first_block(
             guards.no_import(world, "no import — nothing to exclude"))
 
     def _plan(self, world) -> Plan:
@@ -322,7 +324,8 @@ class RenderVideos(MenuItem):
     # all, so the manifest built before it is still correct after it, and
     # sending the videos is the whole of what is left to do. The removed edge
     # bought nothing and cost a rebuild after every render.
-    OUT = and_upload(RENDER, META, PREVIEW, EXCLUDE, BUILD, CLEAN_WS, ERASE_CARD)
+    OUT = Edges.and_upload(RENDER, META, PREVIEW, EXCLUDE, BUILD, CLEAN_WS,
+                           ERASE_CARD)
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({RENDER, META, PREVIEW, EXCLUDE, BUILD, UPLOAD}),
         Strategy.LOCAL_PAGE: frozenset({RENDER, META, PREVIEW, EXCLUDE, BUILD}),
@@ -334,7 +337,7 @@ class RenderVideos(MenuItem):
         A mounted card is not a workspace: that distinction is evidence about
         two different directories, not a statement about which step ran first.
         """
-        return first_block(
+        return Verdict.first_block(
             guards.no_import(world,
                        "nothing to render"),
             guards.Gates(world).sidecars_missing())
@@ -374,10 +377,10 @@ class BuildWebsite(MenuItem):
     # Upload Website was unreachable by its own natural route. This is the edge
     # that makes publishing work.
     OUT = {
-        Strategy.UPLOADER: e(BUILD, META, PREVIEW, EXCLUDE, RENDER, UPLOAD,
-                                  CLEAN_WS, ERASE_CARD),
-        Strategy.LOCAL_PAGE: e(BUILD, META, PREVIEW, EXCLUDE, RENDER,
-                                           CLEAN_WS, ERASE_CARD),
+        Strategy.UPLOADER: Edges.of(BUILD, META, PREVIEW, EXCLUDE, RENDER,
+                                    UPLOAD, CLEAN_WS, ERASE_CARD),
+        Strategy.LOCAL_PAGE: Edges.of(BUILD, META, PREVIEW, EXCLUDE, RENDER,
+                                      CLEAN_WS, ERASE_CARD),
     }
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({BUILD, META, PREVIEW, EXCLUDE, RENDER, UPLOAD}),
@@ -461,9 +464,9 @@ class UploadWebsite(MenuItem):
     # outbound. Deriving the inbound would have silently deleted an edge he
     # authored.
     OUT = {
-        Strategy.UPLOADER: e(UPLOAD, META, PREVIEW, EXCLUDE, RENDER, BUILD,
-                                  CLEAN_WS, ERASE_CARD),
-        Strategy.LOCAL_PAGE: e(),
+        Strategy.UPLOADER: Edges.of(UPLOAD, META, PREVIEW, EXCLUDE, RENDER,
+                                    BUILD, CLEAN_WS, ERASE_CARD),
+        Strategy.LOCAL_PAGE: Edges.of(),
     }
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({UPLOAD, BUILD}),
@@ -509,7 +512,8 @@ class UploadWebsite(MenuItem):
         online, and with no sidecar anywhere the deploy pushes an index
         describing no trips.
         """
-        stop = reason(guards.nothing_to_send(world), guards.no_sidecars_at_all(world))
+        stop = Verdict.first_reason(guards.nothing_to_send(world),
+                                    guards.no_sidecars_at_all(world))
         if stop:
             return blocked(stop)
         return self._still_owed(world)
@@ -587,7 +591,7 @@ class CleanWorkspace(Destructive):
     # is known to be unwanted. A word typed here would drop the same clips
     # without any of that, and the next import would offer them back.
     SCOPE = Scope.FULL
-    OUT = both(e(IMPORT, CLEAN_WS))
+    OUT = Strategy.both(Edges.of(IMPORT, CLEAN_WS))
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({IMPORT, META, PREVIEW, EXCLUDE, RENDER,
                                           BUILD, UPLOAD}),
@@ -605,7 +609,7 @@ class CleanWorkspace(Destructive):
         menu that is not instant stops being recomputed and starts being
         remembered.
         """
-        return first_block(
+        return Verdict.first_block(
             guards.no_import(world, "nothing imported — nothing to clean up"),
             guards.Gates(world).nothing_to_clean_up())
 
@@ -681,7 +685,7 @@ class DeleteSimData(Destructive):
     # card erase on every publishing install and told the operator nothing. A
     # warning that is always on is a warning nobody reads.
     SCOPE = Scope.FULL
-    OUT = both(StepBack())
+    OUT = Strategy.both(StepBack())
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({IMPORT, META, PREVIEW, EXCLUDE, RENDER,
                                           BUILD, UPLOAD}),
