@@ -6314,6 +6314,13 @@ def _what_goes_lines(world):
     A sweep destroys the only copy of the raw footage there will ever be, and
     that sentence stays however tidy the screen gets.
     """
+    if guards.import_holds_no_footage(world):
+        # Not red, and not that sentence: every clip is already gone, dropped
+        # by item 4. Saying "the ORIGINAL footage" over a workspace holding no
+        # footage is a warning about nothing, and a warning that is sometimes
+        # about nothing is one the operator learns to click past.
+        return (C.dim("  No footage here: every trip was excluded. What goes "
+                      "is the sidecars and the GPS logs."),)
     if not guards.import_is_disposable(world):
         return (C.red("  This is the ORIGINAL footage and it is not recoverable."),)
     trips = max(len(world.metas), len(world.renders))

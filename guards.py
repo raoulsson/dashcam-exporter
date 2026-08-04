@@ -403,8 +403,35 @@ def _every_file_is_on_the_card(world) -> bool:
     return bool(world.import_files) and not world.unsourced_files
 
 
+def import_holds_no_footage(world) -> bool:
+    """There is no clip left here, and nothing was made from one either.
+
+    The state item 4 leaves behind when every trip of an import is excluded.
+    Excluding DELETES the trip's clips, so an operator who drops all of them
+    is left with a workspace of sidecars, GPS logs and tar archives, and not
+    one frame of video.
+
+    Every floor below is then asking about something that is not there.
+    "Nothing from this import was rendered" is true and is no longer a reason
+    to keep anything: what it protects is footage that was never encoded, and
+    there is no footage. Same for a short local count and for clips whose only
+    copy is here -- vacuous, both, over an import holding no clips.
+
+    Deliberately BOTH halves. Renders empty is exactly the case the first
+    floor blocks, so this adds a way through only there and nowhere else; and
+    were a render present, the sweep would be throwing away hours of encoding
+    on the strength of an empty import, which is a different question and one
+    this does not answer.
+    """
+    if not world.imports:
+        return False
+    if world.renders_here:
+        return False
+    return not any(name.lower().endswith(".mp4") for name in world.import_files)
+
+
 def clean_is_allowed(world) -> Verdict:
-    """Item 8's heavy gate, either way in.
+    """Item 8's heavy gate, three ways in.
 
     Two acts wear one number. Sweeping a finished cycle erases footage whose
     renders are published, and is decided by workspace_is_expendable. Throwing
@@ -413,8 +440,15 @@ def clean_is_allowed(world) -> Verdict:
     the first: it is available only when every gate the first would ask about
     has nothing to be asked about, and it refuses the moment one clip of that
     import is missing from the source.
+
+    The third is neither: an import with no clips in it at all. Exclude every
+    trip and that is what is left, and the operator could then clear nothing —
+    the card had been erased on the strength of the exclusions, so the discard
+    path was shut, and the sweep refused because an import that produced no
+    footage had produced no renders either. A dead end reached by using item 4
+    exactly as intended.
     """
-    if import_is_disposable(world):
+    if import_is_disposable(world) or import_holds_no_footage(world):
         return go()
     return workspace_is_expendable(world)
 

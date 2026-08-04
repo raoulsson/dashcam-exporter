@@ -1494,6 +1494,27 @@ class TheHelpScreen(unittest.TestCase):
             self.assertIn("view", line)
 
 
+class TheCleanScreenSaysWhatActuallyGoes(unittest.TestCase):
+    """A warning that is sometimes about nothing is one you learn to click
+    past, and this one sits directly above a typed confirmation."""
+
+    def _emptied(self):
+        return W.World(imports=(Path("/w/import/2026-08-04"),),
+                       import_files=frozenset(["DCIM/203gps/x.gpx"]),
+                       unsourced_files=frozenset(["DCIM/203gps/x.gpx"]))
+
+    def test_no_footage_left_means_no_warning_about_footage(self):
+        said = " ".join(P._what_goes_lines(self._emptied()))
+        self.assertNotIn("ORIGINAL footage", said)
+        self.assertIn("every trip was excluded", said)
+
+    def test_footage_still_here_still_warns(self):
+        world = W.World(imports=(Path("/w/import/2026-08-04"),),
+                        import_files=frozenset(["DCIM/200video/front/a.mp4"]),
+                        unsourced_files=frozenset(["DCIM/200video/front/a.mp4"]))
+        self.assertIn("ORIGINAL footage", " ".join(P._what_goes_lines(world)))
+
+
 class TheInfoScreen(unittest.TestCase):
     """`i` prints the facts a bug report has to quote."""
 

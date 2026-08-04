@@ -1032,5 +1032,62 @@ class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
         self.assertIn("card", guards.unsourced_lines(world)[0])
 
 
+class TestAnImportWithNoClipsLeftCanBeCleared(unittest.TestCase):
+    """The dead end item 4 could walk you into.
+
+    Exclude every trip of an import and its clips are deleted, which is what
+    excluding means. The card was erased on the strength of those exclusions,
+    so the discard path is shut -- and the sweep refused, because an import
+    that produced no footage produced no renders either, and "nothing from
+    this import was rendered" is the first floor. Nothing left to lose, and no
+    way to say so.
+    """
+
+    def _world(self, files, renders=0, imports=(Path("/w/import/2026-08-04"),)):
+        # unsourced == every file: the card was erased on the strength of the
+        # exclusions, which is what shuts the discard path and is the whole
+        # reason this state is a dead end. A world without it would answer
+        # through import_is_disposable and prove nothing about this guard.
+        return W.World(imports=imports,
+                       import_files=frozenset(files),
+                       unsourced_files=frozenset(files),
+                       renders_here=_renders(renders))
+
+    def test_the_card_route_is_genuinely_shut_in_these_worlds(self):
+        world = self._world(["DCIM/203gps/x.gpx"])
+        self.assertFalse(guards.import_is_disposable(world),
+                         "these tests would pass through the card path")
+
+    def test_a_workspace_of_sidecars_and_logs_may_go(self):
+        world = self._world(["DCIM/203gps/20260731061515_0060.gpx",
+                             "DCIM/203gps/tar/0731.git",
+                             "DCIM/IPSRecord.txt"])
+        self.assertTrue(guards.import_holds_no_footage(world))
+        self.assertFalse(guards.clean_is_allowed(world).blocked)
+
+    def test_one_clip_still_here_is_still_a_refusal(self):
+        """The floor is doing its job the moment there is footage to protect,
+        and one clip is enough -- this is the only copy, the card is gone."""
+        world = self._world(["DCIM/203gps/20260731061515_0060.gpx",
+                             "DCIM/200video/front/20260731061515_0060.mp4"])
+        self.assertFalse(guards.import_holds_no_footage(world))
+        self.assertTrue(guards.clean_is_allowed(world).blocked)
+
+    def test_the_suffix_is_read_whatever_its_case(self):
+        world = self._world(["DCIM/200video/front/20260731061515_0060.MP4"])
+        self.assertFalse(guards.import_holds_no_footage(world))
+
+    def test_a_render_on_disk_takes_this_way_out_away(self):
+        """Hours of encoding is not sidecars. An empty import is no reason to
+        throw a render away, and that is a different question from this one."""
+        world = self._world(["DCIM/203gps/20260731061515_0060.gpx"], renders=2)
+        self.assertFalse(guards.import_holds_no_footage(world))
+
+    def test_no_import_at_all_is_not_an_empty_import(self):
+        """Nothing selected is not the same fact, and must not read as a yes."""
+        world = self._world(["DCIM/203gps/x.gpx"], imports=())
+        self.assertFalse(guards.import_holds_no_footage(world))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
