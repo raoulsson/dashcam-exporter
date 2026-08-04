@@ -24,6 +24,49 @@ from menu import (Anywhere, Destructive, Edges, Evidence, MenuItem, Plan, Ruling
 import guards
 
 
+def _long_description(act):
+    """An act's own long-form help, or "" if it has none. Never raises: this
+    feeds a HELP SCREEN, the one place in the tool nothing should fail."""
+    try:
+        said = getattr(act, "get_website_upload_description", lambda: "")()
+    except Exception:
+        return ""
+    return said.strip() if isinstance(said, str) else ""
+
+
+def _plugin_name(act):
+    try:
+        return getattr(act, "plugin_name", lambda: None)()
+    except Exception:
+        return None
+
+
+def _tabbed(text):
+    """One tab onto every non-empty line, which is what marks a nested block.
+
+    Blank lines stay blank on purpose: they are what separates paragraphs, and
+    a tab on them would fuse the whole quotation into one.
+    """
+    return "\n".join(("\t" + ln) if ln else ln for ln in text.split("\n"))
+
+
+def _handover(work, opening, act):
+    """The exporter's sentences, then the plugin's own, set in and attributed.
+
+    Two things are always the exporter's to say: what the step is for, and
+    where the local edition puts the result. Everything past that belongs to
+    whoever is actually doing the work, so it is quoted rather than
+    paraphrased, under the name of the thing that said it -- a reader can then
+    tell which sentences this repo is answerable for and which it is not.
+    """
+    said = _long_description(act)
+    if not said:
+        return opening
+    name = _plugin_name(act) or "the plugin"
+    return "%s\n\nFrom the configured plugin %s:\n\n%s" % (
+        opening, work.amber(name), _tabbed(said))
+
+
 def _reason(*reasons):
     """The first reason anything is in the way, or None."""
     return next(filter(None, reasons), None)
@@ -511,18 +554,18 @@ class BuildWebsite(MenuItem):
         publishes somewhere we have never heard of is the only thing that can
         say, so its answer goes in verbatim.
 
-        The colon at the end of the handover sentence becomes a full stop when
-        nothing answers, so an install with no plugin does not read as a page
-        that lost its last paragraph.
+        Where the local edition writes is named as a real path rather than as
+        <dir>: the operator is being told where to go and look.
         """
         where = self._work.site_dir()
-        placed = ("placed in:\n\t%s" % where) if where else "placed in <dir>."
-        said = (self._builder.get_website_upload_description() or "").strip()
-        handover = ("In \"plugin\" mode the context is handed over to the "
-                    "plugin" + (":" if said else "."))
-        text = ("In \"local\" mode, a simple website gets generated and %s\n\n%s"
-                % (placed, handover))
-        return text + ("\n\n" + said if said else "")
+        return _handover(
+            self._work,
+            "This step builds the website out of the trips that have been "
+            "described. In local mode, a simple website gets generated and "
+            "placed in:\n\t%s\nIf you configured a plugin, the operational "
+            "details of the process are delegated to the plugin."
+            % (where or "<export_dir>"),
+            self._builder)
 
     def evaluate(self, world) -> Verdict:
         """The exporter's own question first, then the builder's own verdict.
@@ -594,12 +637,15 @@ class UploadWebsite(MenuItem):
         not. A destination we have never heard of can only be described by the
         thing that speaks to it.
         """
-        said = (self._publish.get_website_upload_description() or "").strip()
-        handover = ("In \"plugin\" mode the destination is the plugin's"
-                    + (":" if said else "."))
-        text = ("In \"local\" mode there is nothing to put online: that "
-                "edition writes a page and stops there.\n\n" + handover)
-        return text + ("\n\n" + said if said else "")
+        where = self._work.website_export_dir()
+        return _handover(
+            self._work,
+            "This step uploads the built website to its destination. In local "
+            "mode, the website is copied to the specified directory:\n\t%s\n"
+            "If you configured a plugin, the operational details of the "
+            "process are delegated to the plugin."
+            % (where or "<default_website_export_dir>"),
+            self._publish)
 
     def evaluate(self, world) -> Verdict:
         """The exporter's own evidence first, then the uploader, then the

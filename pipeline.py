@@ -195,6 +195,16 @@ class C:
         return cls._w("36", s)
 
     @classmethod
+    def amber(cls, s):
+        """A configured plugin's name, where help hands over to its own words.
+
+        256-colour rather than yellow (33), which this tool already spends on
+        "look at this" -- an entry the graph refuses, a number that did not
+        parse. Naming who is speaking is not a warning about anything.
+        """
+        return cls._w("38;5;214", s)
+
+    @classmethod
     def violet(cls, s):
         """The bars, and nothing else. 256-colour, because magenta (35) is the
         same weight as the red that means "this destroys something"."""
@@ -417,6 +427,13 @@ class Ctx:
         self.import_root = Path(os.environ.get("DASHCAM_IMPORT_ROOT")
                                 or self.render_root).expanduser()
         self.card = card_root(Path(self.cfg.get("card", FALLBACK_CARD)).expanduser())
+        # Where the LOCAL edition puts the finished site. Item 7 under that
+        # edition is a copy into here rather than a network transport; with a
+        # plugin configured nothing reads it. Defaults beside the export tree
+        # so an unconfigured install still has an answer to print.
+        self.website_export_dir = Path(
+            self.cfg.get("default_website_export_dir")
+            or (self.workspace / "website")).expanduser()
 
         try:
             self.output_height = int(self.cfg.get("output_height", "1080"))
@@ -7489,6 +7506,9 @@ class LocalPage:
     def get_website_upload_description(self):
         return ""      # nothing is handed over under this edition
 
+    def plugin_name(self):
+        return None    # there is no plugin to name
+
     def evaluate(self, world):
         """Its own renders floor, because THIS build also gathers.
 
@@ -7524,6 +7544,9 @@ class TargetBuild:
 
     def get_website_upload_description(self):
         return _long_description(self._act)
+
+    def plugin_name(self):
+        return type(self._act).__name__
 
     def evaluate(self, world):
         return self._act.evaluate(_handed_over(self._ctx, world))
@@ -7609,6 +7632,9 @@ class NoPublisher:
     def get_website_upload_description(self):
         return ""      # nothing is handed over under this edition
 
+    def plugin_name(self):
+        return None    # there is no plugin to name
+
     def evaluate(self, world):
         """What is missing from THIS installation, never how to change it.
 
@@ -7684,6 +7710,15 @@ class Work:
 
     def __init__(self, ctx):
         self.ctx = ctx
+
+    def amber(self, text):
+        """Paint, lent to the items. They own the words; colours live here."""
+        return C.amber(text)
+
+    def website_export_dir(self):
+        """Where the local edition puts the finished site, for help to name."""
+        out = getattr(self.ctx, "website_export_dir", None)
+        return tilde(out) if out else None
 
     def site_dir(self):
         """Where the local edition writes its page, for item 5's help to name.
@@ -8128,11 +8163,19 @@ def _about_paragraphs(text):
     out = []
     for para in text.split("\n\n"):
         out.append("")
+        # A paragraph opening with a tab is a nested block -- the plugin's own
+        # words, set in from the exporter's. One tab is stripped and paid back
+        # as indentation, which leaves a SECOND tab inside it doing what a
+        # first one does at the outer level: keeping a path off the wrap.
+        nested = para.startswith("\t")
+        pad, width = ("        ", room - 4) if nested else ("    ", room)
         for line in para.split("\n"):
+            if nested and line.startswith("\t"):
+                line = line[1:]
             if line[:1] in (" ", "\t"):
-                out.append("    " + line.replace("\t", "    ").rstrip())
+                out.append(pad + line.replace("\t", "    ").rstrip())
             else:
-                out.extend("    " + w for w in textwrap.wrap(line, room))
+                out.extend(pad + w for w in textwrap.wrap(line, width))
     return tuple(out)
 
 

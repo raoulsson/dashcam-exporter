@@ -148,6 +148,16 @@
 # `output_dir` and `out` are read as aliases for this setting. export_dir wins.
 #export_dir = ${workspace}/export
 
+# Where the finished website is placed by 7) Upload Website under the LOCAL
+# edition, which has no network destination to send it to. The whole directory
+# is replaced on each run, so point this at somewhere the tool owns rather than
+# at a folder that also holds anything of yours.
+#
+# Ignored entirely when an upload plugin is configured: the destination is then
+# the plugin's, and it is the plugin that says where its files go. `h 7` prints
+# whichever of the two applies to this installation.
+#default_website_export_dir = ${workspace}/website
+
 # ============================================================================
 # 3. PUBLISHING — all optional, all unset by default
 # ============================================================================

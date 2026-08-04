@@ -1391,14 +1391,19 @@ class TheHelpScreen(unittest.TestCase):
     def test_item_five_names_the_directory_when_it_knows_it(self):
         self.assertIn("~/dashcam-data/export", "\n".join(self._plain(5)))
 
-    def test_the_handover_sentence_closes_when_nothing_answers(self):
-        """A publisher predating this interface returns "", and a colon with
-        nothing after it reads as a page that lost its last paragraph."""
-        item = self.items[5]
-        with mock.patch.object(item._builder, "get_website_upload_description",
-                               return_value=""):
-            text = item.about()
-        self.assertTrue(text.rstrip().endswith("handed over to the plugin."))
+    def test_nothing_is_attributed_when_the_plugin_says_nothing(self):
+        """A publisher predating this interface returns "". An attribution
+        line over an empty space reads as a page that lost its last
+        paragraph."""
+        for number, act in ((5, "_builder"), (7, "_publish")):
+            item = self.items[number]
+            with mock.patch.object(getattr(item, act),
+                                   "get_website_upload_description",
+                                   return_value=""):
+                text = item.about()
+            with self.subTest(entry=number):
+                self.assertNotIn("From the configured plugin", text)
+                self.assertTrue(text.rstrip().endswith("delegated to the plugin."))
 
     def test_help_never_raises_on_the_real_collaborators(self):
         """The one that was missed. `about()` on items 5 and 7 asks its act for
@@ -1422,6 +1427,39 @@ class TheHelpScreen(unittest.TestCase):
         with mock.patch.object(item._builder, "get_website_upload_description",
                                side_effect=RuntimeError("plugin exploded")):
             self.assertIsInstance(P._long_description(item._builder), str)
+
+    def test_the_plugins_words_are_set_in_from_the_exporters(self):
+        """Quoted, not merged. A reader has to be able to tell which sentences
+        this repo is answerable for and which belong to the plugin."""
+        for n in (5, 7):
+            lines = [ln for ln in self._plain(n) if ln.strip()]
+            ours = next(ln for ln in lines if "If you configured a plugin" in ln)
+            theirs = next(ln for ln in lines
+                          if "in its own words" in ln or "publisher does" in ln)
+            with self.subTest(entry=n):
+                self.assertEqual(len(ours) - len(ours.lstrip()), 4)
+                self.assertEqual(len(theirs) - len(theirs.lstrip()), 8)
+
+    def test_the_quotation_is_attributed_to_the_plugin_by_name(self):
+        for n in (5, 7):
+            with self.subTest(entry=n):
+                self.assertIn("From the configured plugin",
+                              "\n".join(self._plain(n)))
+
+    def test_a_nested_block_still_wraps(self):
+        """Indenting the quotation must not turn it into preformatted text —
+        a paragraph that skips the wrap runs off any terminal."""
+        long = "word " * 60
+        lines = P._about_paragraphs("\t" + long.strip())
+        self.assertGreater(len([ln for ln in lines if ln.strip()]), 1)
+        for line in lines:
+            self.assertLessEqual(len(line), 100)
+
+    def test_a_path_inside_a_nested_block_stays_on_one_line(self):
+        lines = P._about_paragraphs("\tAt:\n\t\t/a/very/long/path/that/must/"
+                                    "not/be/wrapped/anywhere/at/all/here")
+        self.assertIn("            /a/very/long/path/that/must/not/be/wrapped/"
+                      "anywhere/at/all/here", lines)
 
     def test_the_view_still_says_it_is_one(self):
         for row in ("    leads to", "    reached from"):
