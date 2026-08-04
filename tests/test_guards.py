@@ -726,7 +726,8 @@ class TestWhatExcludeTripSaysAboutTheDestination(GuardTest):
                 "end": "2026-06-01T09:00:00", "clips": 1, "files": [],
                 "out_base": str(self.w.ctx.out_dir / ns / "2026-06-01" / trip_id)}
         return "\n".join(P._only_copy_lines(self.w.ctx, world,
-                                            {"trips": [trip]}, {1: trip}, [1]))
+                                            {"trips": [trip]},
+                                            P.Picked({1: trip}, [1])))
 
     def test_a_trip_of_the_import_that_was_asked_about_is_not_the_only_copy(self):
         """The baseline the mismatch tests are read against: inside the answer's

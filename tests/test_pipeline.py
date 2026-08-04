@@ -354,9 +354,10 @@ class TheLiveProgressLineIsActuallyDrawn(unittest.TestCase):
         buf = io.StringIO()
         with mock.patch.object(P.C, "enabled", True):
             with redirect_stdout(buf):
-                rc, lines = P.run_stream(cmd, str(REPO), "Import",
-                                         parser=P.make_import_parser(4096),
-                                         note_first=note_first)
+                rc, lines = P.run_stream(
+                    P.Child(cmd, str(REPO)),
+                    P.Readout("Import", P.make_import_parser(4096),
+                              note_first=note_first))
         return rc, buf.getvalue()
 
     def test_the_note_goes_in_front_of_the_bar(self):
@@ -380,8 +381,9 @@ class TheLiveProgressLineIsActuallyDrawn(unittest.TestCase):
         buf = io.StringIO()
         with mock.patch.object(P.C, "enabled", True):
             with redirect_stdout(buf):
-                rc, _ = P.run_stream(["/bin/sh", "-c", script], str(REPO),
-                                     "Deploy", quiet_finish=True)
+                rc, _ = P.run_stream(
+                    P.Child(["/bin/sh", "-c", script], str(REPO)),
+                    P.Readout("Deploy", quiet_finish=True))
         return rc, buf.getvalue()
 
     def test_a_step_with_no_denominator_draws_the_bar_not_a_spinner(self):

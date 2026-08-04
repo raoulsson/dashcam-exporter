@@ -484,86 +484,172 @@ def _renderer_env(ctx):
     return {"LOG_DIR": str(ctx.log_dir)}
 
 
-def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
-               env_extra=None, tail_lines=40, stdout_file=None, note_first=True,
-               quiet_finish=False):
-    """Run a command, stream its output, return (rc, all_lines).
+# The tail a failed child leaves behind. A constant rather than a parameter:
+# it was a parameter for years and no call site ever passed one, so it was
+# eleven arguments' worth of signature carrying one number.
+FAIL_TAIL_LINES = 40
+
+
+class Child:
+    """What to run: the command, where, and what it must be told.
+
+    Half of what run_stream used to take as loose arguments. Split from
+    Readout rather than boxed with it because the two vary independently and
+    the call sites prove it: Grouping redirects stdout and draws no bar,
+    Render draws a bar and redirects nothing, and the plugin's act supplies a
+    command and a label from two different places. One bag of everything would
+    have moved the smell rather than removed it.
+    """
+
+    def __init__(self, cmd, cwd, env=None, stdout_file=None):
+        self.cmd = cmd
+        self.cwd = cwd
+        self.env = env
+        self.stdout_file = stdout_file
+        self.proc = None
+        self._out_fh = None
+
+    def start(self):
+        """Spawn it and hand back the stream to read the progress from.
+
+        stdout_file redirects the child's STDOUT to that path and streams its
+        STDERR instead. That is for --print-groups, whose stdout is a JSON
+        document the caller parses: merging it into the progress stream (what
+        every other step wants) would corrupt the very thing we ran the
+        command for.
+        """
+        env = dict(os.environ)
+        if self.env:
+            env.update(self.env)
+        self._out_fh = open(self.stdout_file, "wb") if self.stdout_file else None
+        try:
+            self.proc = subprocess.Popen(
+                self.cmd, cwd=str(self.cwd),
+                stdout=(self._out_fh if self._out_fh else subprocess.PIPE),
+                stderr=(subprocess.PIPE if self._out_fh else subprocess.STDOUT),
+                env=env,
+                # Own process group: Ctrl-C reaches us first and we decide how the
+                # child dies, instead of the terminal SIGINT-ing both and racing us
+                # to it. Side effect worth knowing: a new session has no controlling
+                # terminal, so anything that insists on prompting at /dev/tty (an ssh
+                # host-key confirmation on a first-ever deploy, a passphrase-protected
+                # key) fails loudly instead of hanging. Loud is the right failure mode
+                # here; accept the host key once by hand and the deploy works
+                # from then on.
+                start_new_session=True,
+            )
+        except BaseException:
+            # A command that cannot even start (a missing interpreter, say) must not
+            # leave the redirect file handle open behind it.
+            self.close()
+            raise
+        return self.proc.stderr if self._out_fh else self.proc.stdout
+
+    def kill_group(self):
+        """Kill the whole child group, not just the wrapper shell — otherwise the
+        ffmpeg or rsync it spawned keeps running after we return to the menu.
+        """
+        try:
+            os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
+        except Exception:
+            pass
+        try:
+            self.proc.wait(timeout=5)
+        except Exception:
+            try:
+                os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
+            except Exception:
+                pass
+
+    def close(self):
+        if self._out_fh:
+            self._out_fh.close()
+            self._out_fh = None
+
+
+class Readout:
+    """How a streamed run shows on screen: one line, redrawn in place.
+
+    Progress, the n/m counters, then as much of the child's current output as
+    still fits. Two lines meant the counter and the log it belongs to were
+    never quite in the same glance; this way the whole state of the step is a
+    single row that just keeps moving. The full stream is still buffered, so a
+    failure dumps its real tail.
+
+    An object rather than the closure it used to be, and that is the point of
+    the change: the closure read six names from the enclosing scope and an
+    assignment to any one of them made every read of it local. That shipped an
+    UnboundLocalError on the first parsed line of a real import, which no test
+    could see because there is no live area when stdout is piped.
 
     parser(line) -> (fraction, note) or None. fraction is 0..1 for a real
     progress bar; return None from the parser (or pass none at all) and the
-    display falls back to an elapsed-time spinner. We never synthesise a
+    display falls back to an elapsed-time sweep. We never synthesise a
     percentage from a guess.
-
-    keep(line) -> bool marks lines worth leaving permanently on screen.
-    passthrough=True prints everything verbatim and draws no bar — used for
-    the trip listing, where the table IS the output.
-
-    stdout_file redirects the child's STDOUT to that path and streams its
-    STDERR instead. That is for --print-groups, whose stdout is a JSON document
-    the caller parses: merging it into the progress stream (what every other
-    step wants) would corrupt the very thing we ran the command for.
     """
-    env = dict(os.environ)
-    if env_extra:
-        env.update(env_extra)
 
-    out_fh = open(stdout_file, "wb") if stdout_file else None
-    try:
-        proc = subprocess.Popen(
-            cmd, cwd=str(cwd),
-            stdout=(out_fh if out_fh else subprocess.PIPE),
-            stderr=(subprocess.PIPE if out_fh else subprocess.STDOUT),
-            env=env,
-            # Own process group: Ctrl-C reaches us first and we decide how the
-            # child dies, instead of the terminal SIGINT-ing both and racing us
-            # to it. Side effect worth knowing: a new session has no controlling
-            # terminal, so anything that insists on prompting at /dev/tty (an ssh
-            # host-key confirmation on a first-ever deploy, a passphrase-protected
-            # key) fails loudly instead of hanging. Loud is the right failure mode
-            # here; accept the host key once by hand and the deploy works
-            # from then on.
-            start_new_session=True,
-        )
-    except BaseException:
-        # A command that cannot even start (a missing interpreter, say) must not
-        # leave the redirect file handle open behind it.
-        if out_fh:
-            out_fh.close()
-        raise
-    q = queue.Queue()
-    t = threading.Thread(target=_reader,
-                         args=(proc.stderr if out_fh else proc.stdout, q), daemon=True)
-    t.start()
+    def __init__(self, label, parser=None, note_first=True, quiet_finish=False):
+        self.label = label
+        self.parser = parser
+        self.note_first = note_first
+        self.quiet_finish = quiet_finish
+        self.started = time.time()
+        self.frac = None
+        self.note = ""
+        self.counts = ""
+        self.last_raw = ""
+        self.spin = 0
 
-    live = Live(enabled=C.enabled and not passthrough)
-    started = time.time()
-    lines = []
-    last_raw = ""
-    frac = None
-    note = ""
-    counts = ""
-    spin = 0
-    done = False
-    rc = None          # the finally block reads this; an abort can reach it
-                       # before proc.wait() ever assigns it
+    def begin(self):
+        """Start the clock at the spawn, not at construction.
 
-    def render():
-        """One line, redrawn in place: progress, the n/m counters, then as much
-        of the child's current output as still fits. Two lines meant the counter
-        and the log it belongs to were never quite in the same glance; this way
-        the whole state of the step is a single row that just keeps moving.
-        The full stream is still buffered, so a failure dumps its real tail.
+        The caller builds the Readout before the child exists, and a command
+        that takes a moment to start would otherwise have that moment counted
+        against the work.
         """
-        elapsed = time.time() - started
-        if frac is not None:
+        self.started = time.time()
+
+    @property
+    def elapsed(self):
+        return time.time() - self.started
+
+    def tick(self):
+        """One frame of the sweep, whether or not the child said anything."""
+        self.spin += 1
+
+    def feed(self, stripped):
+        """Take one line of the child's output into the display state."""
+        if stripped:
+            self.last_raw = stripped
+        if not self.parser:
+            return
+        got = self.parser(stripped)
+        if got is None:
+            return
+        self.frac, self.note = got
+        # A parser can ask for the tail to be dropped by ending its note with
+        # \0. The child prints nothing during a silent phase, so the last line
+        # it DID print would otherwise sit there looking like the file being
+        # worked on right now.
+        if self.note.endswith("\0"):
+            self.note = self.note[:-1]
+            self.last_raw = ""
+        # Keep the last real counter seen. The note at the END of a run is
+        # often a phase description ("finding drive boundaries"), which is the
+        # wrong thing to close on — the count is what says how much was done.
+        mc = re.search(r"\d+\s*/\s*\d+", self.note or "")
+        if mc:
+            self.counts = mc.group(0).replace(" ", "")
+
+    def _head(self):
+        if self.frac is not None:
             # The bar is deliberately narrow: the room goes to the log tail
             # below, which is the part that says it is still alive.
-            head = _bar_line(label, frac, elapsed, note, note_first)
-            # note_first has already put it in the line; appending it again
-            # would print it twice. NOT by rebinding `note` -- this is a
-            # closure over it, and an assignment here makes every read in this
-            # function local, including the one on the line above.
-            used = note_first and bool(note)
+            head = _bar_line(self.label, self.frac, self.elapsed, self.note,
+                             self.note_first)
+            # note_first has already put the note in the line; appending it
+            # again below would print it twice.
+            used = self.note_first and bool(self.note)
         else:
             # The indeterminate bar, not a spinner. Both say "still working",
             # but only one of them looks like the rest of the tool: a step with
@@ -571,123 +657,122 @@ def run_stream(cmd, cwd, label, parser=None, keep=None, passthrough=False,
             # bare |/-\, so the deploy read as a different program from the
             # render three lines above it. Waiting already knew how to draw
             # this for blocking calls; it just had no way in from here.
-            head = _sweep_line(label, spin, elapsed)
+            head = _sweep_line(self.label, self.spin, self.elapsed)
             used = False
-        if note and not used:
-            head += "  " + C.yellow(note)
+        if self.note and not used:
+            head += "  " + C.yellow(self.note)
+        return head
 
-        # give whatever is left of the terminal to the child's latest line.
-        # _visible_len, not len: the bar inside `head` carries colour now, and
-        # counting its escapes as width would shrink the tail by a dozen
-        # characters that are not on the screen.
+    def _tail(self, head):
+        """Whatever is left of the terminal, given to the child's latest line.
+
+        _visible_len, not len: the bar inside `head` carries colour now, and
+        counting its escapes as width would shrink the tail by a dozen
+        characters that are not on the screen.
+        """
         room = term_width() - _visible_len(head) - 4
-        tail = ""
-        if last_raw and room > 12:
-            t = last_raw.strip()
-            # The note already carries the counter, so a tail that starts with
-            # "[scan  17/ 239]" spends its width repeating it. Strip the bracket
-            # and show what it identifies — the file being worked on.
-            if note:
-                # Drop whatever the note already says. Two shapes do this:
-                # "[scan  17/ 239] NAME" and aws's "Completed 6.0 MiB/13.0 GiB
-                # (457.4 KiB/s) with 6 files remaining" — in both, the head of
-                # the line is the counter we have already extracted, and the
-                # useful remainder (the filename, or the rate and files left)
-                # was being pushed off the right edge by it.
-                t = re.sub(r"^\[[^\]]*\]\s*", "", t)
-                t = re.sub(r"^Completed\s+[\d.]+\s*\w+\s*/\s*~?[\d.]+\s*\w+\s*", "", t)
-            t = _fit(t, room)
-            tail = "  " + C.dim(t)
-        # No wrapper round the whole line: every piece carries its own colour
-        # now, and a colour that spans a nested one ends at the nested one's
-        # reset -- which is how the closing bracket and everything after it
-        # lost the amber the opening bracket had.
-        live.draw(["  " + head + tail])
+        if not (self.last_raw and room > 12):
+            return ""
+        t = self.last_raw.strip()
+        # The note already carries the counter, so a tail that starts with
+        # "[scan  17/ 239]" spends its width repeating it. Strip the bracket
+        # and show what it identifies — the file being worked on.
+        if self.note:
+            # Drop whatever the note already says. Two shapes do this:
+            # "[scan  17/ 239] NAME" and aws's "Completed 6.0 MiB/13.0 GiB
+            # (457.4 KiB/s) with 6 files remaining" — in both, the head of
+            # the line is the counter we have already extracted, and the
+            # useful remainder (the filename, or the rate and files left)
+            # was being pushed off the right edge by it.
+            t = re.sub(r"^\[[^\]]*\]\s*", "", t)
+            t = re.sub(r"^Completed\s+[\d.]+\s*\w+\s*/\s*~?[\d.]+\s*\w+\s*", "", t)
+        return "  " + C.dim(_fit(t, room))
+
+    def line(self):
+        """The whole row, ready to draw.
+
+        No wrapper round the whole line: every piece carries its own colour
+        now, and a colour that spans a nested one ends at the nested one's
+        reset -- which is how the closing bracket and everything after it
+        lost the amber the opening bracket had.
+        """
+        head = self._head()
+        return "  " + head + self._tail(head)
+
+    def finish_line(self):
+        """The line a finished step leaves behind.
+
+        live.close() erases the live area, so without this the progress simply
+        vanishes and the screen gives no evidence the work happened or how
+        much of it.
+        """
+        tail_bits = " ".join(x for x in (self.counts,) if x)
+        return C.green("%s [%s] 100%% %s  %s  completed"
+                       % (self.label, "#" * 24, human_secs(self.elapsed),
+                          tail_bits)).rstrip()
+
+
+def run_stream(child, readout):
+    """Run a Child, stream its output through a Readout, return (rc, all_lines).
+
+    Two arguments, and they are two objects rather than one bag: what to run
+    and how to show it are chosen by different code for different reasons.
+    """
+    stream = child.start()
+    q = queue.Queue()
+    t = threading.Thread(target=_reader, args=(stream, q), daemon=True)
+    t.start()
+
+    live = Live(enabled=C.enabled)
+    readout.begin()
+    lines = []
+    done = False
+    rc = None          # the finally block reads this; an abort can reach it
+                       # before proc.wait() ever assigns it
 
     try:
         while not done:
             try:
                 item = q.get(timeout=0.12)
             except queue.Empty:
-                spin += 1
-                render()
+                readout.tick()
+                live.draw([readout.line()])
                 continue
             if item is None:
                 done = True
                 break
             lines.append(item)
-            if passthrough or not live.enabled:
-                # No live area (piped output, --no-color, or a step whose full
-                # output is the point): print everything plainly. Suppressing it
-                # here would leave a long render looking like a hung terminal.
+            if not live.enabled:
+                # No live area (piped output or --no-color): print everything
+                # plainly. Suppressing it here would leave a long render
+                # looking like a hung terminal.
                 print(item)
                 continue
-            stripped = item.rstrip()
-            if stripped:
-                last_raw = stripped
-            if keep and keep(stripped):
-                live.emit("  " + stripped)
-            if parser:
-                got = parser(stripped)
-                if got is not None:
-                    frac, note = got
-                    # A parser can ask for the tail to be dropped by ending its
-                    # note with \0. The child prints nothing during a silent
-                    # phase, so the last line it DID print would otherwise sit
-                    # there looking like the file being worked on right now.
-                    if note.endswith("\0"):
-                        note = note[:-1]
-                        last_raw = ""
-                    # Keep the last real counter seen. The note at the END of a
-                    # run is often a phase description ("finding drive
-                    # boundaries"), which is the wrong thing to close on — the
-                    # count is what says how much was done.
-                    mc = re.search(r"\d+\s*/\s*\d+", note or "")
-                    if mc:
-                        counts = mc.group(0).replace(" ", "")
-            spin += 1
-            render()
-        rc = proc.wait()
+            readout.feed(item.rstrip())
+            readout.tick()
+            live.draw([readout.line()])
+        rc = child.proc.wait()
     except KeyboardInterrupt:
-        # Kill the whole child group, not just the wrapper shell — otherwise the
-        # ffmpeg or rsync it spawned keeps running after we return to the menu.
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except Exception:
-            pass
-        try:
-            proc.wait(timeout=5)
-        except Exception:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except Exception:
-                pass
+        child.kill_group()
         live.close()
         raise Aborted(mid_run=True)
     finally:
-        # A finished step should leave a line behind saying so. live.close()
-        # erases the live area, so without this the progress simply vanishes and
-        # the screen gives no evidence the work happened or how much of it.
-        if rc == 0 and live.enabled and not quiet_finish:
-            el = human_secs(time.time() - started)
-            bar = "#" * 24
-            tail_bits = " ".join(x for x in (counts,) if x)
-            live.draw([C.green("%s [%s] 100%% %s  %s  completed"
-                               % (label, bar, el, tail_bits)).rstrip()])
+        # A finished step should leave a line behind saying so.
+        if rc == 0 and live.enabled and not readout.quiet_finish:
+            live.draw([readout.finish_line()])
             print()          # commit that line; the next erase starts below it
         elif rc == 0 and live.enabled:
             live.close()     # the caller has its own sentence for this
             live.height = 0
         live.close()
-        if out_fh:
-            out_fh.close()
+        child.close()
 
     if rc != 0:
         # The command line is this module's business: which flags it composed
         # and where the script lives. What the operator can act on is the tail
         # below, which is what the child said before it gave up.
-        print(C.red("  %s failed (exit %d). Last lines:" % (label, rc)))
-        tail = [l for l in lines if l.strip()][-tail_lines:]
+        print(C.red("  %s failed (exit %d). Last lines:" % (readout.label, rc)))
+        tail = [l for l in lines if l.strip()][-FAIL_TAIL_LINES:]
         if tail:
             print(C.dim("  --- last %d lines of output ---" % len(tail)))
             for l in tail:
@@ -2622,8 +2707,19 @@ def _same_card(ctx, leftovers):
                    leftovers))
 
 
+# The delta accounting for one import, from one reading of the card.
+#
+# A named tuple rather than six loose values: they are worked out together by
+# _delta_counts, read together by the screen, and three of them are read again
+# by the run itself. Unpacked positionally at every hop, a reordering would
+# have been silent -- and the figure most easily swapped is the byte size the
+# operator's y is answering.
+Delta = collections.namedtuple("Delta", "here todo size wanted done done_size")
+
+
 def _delta_counts(ctx, after):
-    """(already here, to fetch, bytes, files, already done, their bytes).
+    """The Delta: already here, to fetch, bytes, files, already done, and their
+    bytes.
 
     One computation, and the list it produces is what the script is given.
     The screen used to count clips here while import-sd-card.sh worked out
@@ -2644,8 +2740,8 @@ def _delta_counts(ctx, after):
     # figures are read side by side -- 416 on the status row, 239 on this one
     # -- and an unexplained gap reads as a tool that cannot see the rest.
     done = stamps - new
-    return (len(here), len(new - here), _weigh(ctx.card, files), files,
-            len(done), _weigh(ctx.card, _files_for(ctx.card, done)))
+    return Delta(len(here), len(new - here), _weigh(ctx.card, files), files,
+                 len(done), _weigh(ctx.card, _files_for(ctx.card, done)))
 
 
 def _not_here_yet(ctx, relative):
@@ -2740,7 +2836,7 @@ def _stamp_of_name(name):
     return m.group(1) if m else None
 
 
-def _delta_lines(here, todo, size, files, done=0, done_size=0):
+def _delta_lines(delta):
     """What the y is answering: what comes over, then what already has.
 
     Clips and gigabytes, not the file count. The file count was on this line
@@ -2755,18 +2851,20 @@ def _delta_lines(here, todo, size, files, done=0, done_size=0):
 
     Amber on the figures: they are the only part that changes between runs.
     """
-    tail = "%s files, %s" % (C.yellow("%d" % files), size)
-    if here:
+    size = human_bytes(delta.size)
+    tail = "%s files, %s" % (C.yellow("%d" % len(delta.wanted)), size)
+    if delta.here:
         return ("  %s clips already imported, %s to go (%s)"
-                % (C.yellow("%d" % here), C.yellow("%d" % todo), tail), "")
-    if not todo:
+                % (C.yellow("%d" % delta.here), C.yellow("%d" % delta.todo),
+                   tail), "")
+    if not delta.todo:
         # No clips, but something to fetch: the GPS for clips that came over
         # before the tracks were being collected at all.
         return ("  no new clips, %s to fetch" % tail, "")
-    lines = ["  %s clips to import (%s)" % (C.yellow("%d" % todo), size)]
-    if done:
+    lines = ["  %s clips to import (%s)" % (C.yellow("%d" % delta.todo), size)]
+    if delta.done:
         lines.append(C.dim("  %d clips already processed (%s)"
-                           % (done, human_bytes(done_size))))
+                           % (delta.done, human_bytes(delta.done_size))))
     return tuple(lines) + ("",)
 
 
@@ -2876,13 +2974,13 @@ def step_import(ctx):
     # clip new again, and item 8 does exactly that when it discards an import.
     after = last_imported_stamp(ctx)
     excluded_stamps(ctx)                 # refresh the cache the split reads
-    here, todo, size, wanted, done, done_size = _delta_counts(ctx, after)
+    delta = _delta_counts(ctx, after)
+    wanted, todo, size = delta.wanted, delta.todo, delta.size
     print()
     if not wanted:
         print(C.green("  Nothing new at the source — it is already all imported."))
         return record(ctx, NAME[IMPORT], SATISFIED, started, "no new clips")
-    _print_all(_delta_lines(here, todo, human_bytes(size), len(wanted),
-                            done, done_size))
+    _print_all(_delta_lines(delta))
     if not confirm("  Run delta import", True):
         return record(ctx, NAME[IMPORT], ABORTED, started,
                       "Aborted by user pre-run.")
@@ -2938,8 +3036,8 @@ def step_import(ctx):
     # and "Done. Imported 306 files to <path>" are the script reporting to
     # whoever ran it by hand; here they say twice, in the script's words, what
     # the line below says once in the tool's.
-    rc, lines = run_stream(cmd, ctx.exporter, "Import", parser=watch,
-                           quiet_finish=True, env_extra=env)
+    rc, lines = run_stream(Child(cmd, ctx.exporter, env=env),
+                           Readout("Import", watch, quiet_finish=True))
     if rc != 0:
         return record(ctx, NAME[IMPORT], FAILED, started, "exit %d" % rc)
 
@@ -3199,9 +3297,9 @@ def step_generate_meta(ctx):
     # same count a second time, spelled differently.
     cmd = (["./make-trips-rendered.sh", "--sidecars-only", "--root", str(root),
             "--out", str(ctx.out_dir)] + ctx.config_args + ctx.scan_args)
-    rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars",
-                            parser=make_scan_parser(), quiet_finish=True,
-                            env_extra=_renderer_env(ctx))
+    rc, _lines = run_stream(Child(cmd, ctx.exporter, env=_renderer_env(ctx)),
+                            Readout("Sidecars", make_scan_parser(),
+                                    quiet_finish=True))
     if rc != 0:
         return record(ctx, NAME[META], FAILED, started, "sidecars exit %d" % rc)
     # Counted where they were written, not across the whole export tree: an
@@ -3403,16 +3501,19 @@ def load_groups(ctx, root, refresh=False):
     os.close(fd)
     try:
         rc, _lines = run_stream(
-            # The full path under src/, not a bare name against the checkout
-            # cwd: the sources moved and this call did not, so every grouping
-            # died with "can't open file". It also decides the child's
-            # sys.path[0] -- src/, which is what lets that module import its
-            # siblings the way make-trips-rendered.sh already runs it.
-            [renderer_python(ctx), "-u",
-             str(SRC_DIR / "make_dashcam_videos.py"), "--print-groups",
-             "--root", str(root), "--out", str(ctx.out_dir)] + ctx.config_args + ctx.scan_args,
-            ctx.exporter, "Grouping", stdout_file=tmp, quiet_finish=True,
-            env_extra=_renderer_env(ctx))
+            Child(
+                # The full path under src/, not a bare name against the
+                # checkout cwd: the sources moved and this call did not, so
+                # every grouping died with "can't open file". It also decides
+                # the child's sys.path[0] -- src/, which is what lets that
+                # module import its siblings the way make-trips-rendered.sh
+                # already runs it.
+                [renderer_python(ctx), "-u",
+                 str(SRC_DIR / "make_dashcam_videos.py"), "--print-groups",
+                 "--root", str(root), "--out", str(ctx.out_dir)]
+                + ctx.config_args + ctx.scan_args,
+                ctx.exporter, env=_renderer_env(ctx), stdout_file=tmp),
+            Readout("Grouping", quiet_finish=True))
         if rc != 0:
             return None
         try:
@@ -3947,9 +4048,10 @@ def build_sidecars(ctx):
         cmd = (["./make-trips-rendered.sh", "--sidecars-only",
                 "--root", str(cand), "--out", str(ctx.out_dir)]
                + ctx.config_args + ctx.scan_args)
-        rc, _lines = run_stream(cmd, ctx.exporter, "Sidecars",
-                                parser=make_scan_parser(), quiet_finish=True,
-                                env_extra=_renderer_env(ctx))
+        rc, _lines = run_stream(Child(cmd, ctx.exporter,
+                                      env=_renderer_env(ctx)),
+                                Readout("Sidecars", make_scan_parser(),
+                                        quiet_finish=True))
         if rc == 0:
             ran.append(cand)
     return ran
@@ -4088,6 +4190,60 @@ def _print_trip_table(ctx, root, trips):
     return by_index
 
 
+class Picked:
+    """The rows the operator chose out of the trip table, and what they are.
+
+    The indices and the table they index into were passed side by side through
+    six signatures, and every one of them then wrote the same two-line loop to
+    turn them back into trips, files or ids. They are one thing -- a selection
+    -- and the questions asked of a selection belong on it.
+
+    Read-only on purpose. This is item 4's destructive path: what the screen
+    printed and what the commit deletes must be the same list, so nothing here
+    recomputes a selection or narrows one.
+    """
+
+    def __init__(self, by_index, indices):
+        self.by_index = by_index
+        self.indices = list(indices)
+
+    def __bool__(self):
+        return bool(self.indices)
+
+    def __iter__(self):
+        return iter(self.indices)
+
+    def trips(self):
+        return [self.by_index[i] for i in self.indices]
+
+    def files(self):
+        """Every source clip behind the chosen trips."""
+        return [p for t in self.trips() for p in trip_files(t)]
+
+    def ids(self):
+        """The trip ids behind the chosen rows, e.g. trip_2026-07-28_08-57_01.
+
+        The name everything off this machine is keyed on: out_base is a path
+        under <out>, and only its last component means anything to a target.
+        """
+        return list(filter(None, map(_out_base_name, self.trips())))
+
+    def keys(self):
+        """This workspace's own handle on each chosen trip: its first clip's
+        stamp.
+
+        Unlike ids() this never comes back short. A trip with no out_base is a
+        trip nothing off this machine has ever heard of, which is precisely
+        why it has no id -- but it is still a trip the operator excluded, and
+        the row that counts them has to say so.
+        """
+        return list(filter(None, map(_trip_key, self.trips())))
+
+    def label(self):
+        """How the chosen rows are named on screen and in the summary row."""
+        return ", ".join(str(i) for i in self.indices)
+
+
 def _ask_trip_indices(by_index):
     """The indices to drop, or None when the answer was not one."""
     _print_all(_never_renders(by_index))
@@ -4145,10 +4301,10 @@ def _parse_indices(sel, by_index):
             return None
         if int(part) not in picked:
             picked.append(int(part))
-    return picked
+    return Picked(by_index, picked)
 
 
-def _renders_of(ctx, payload, by_index, picked):
+def _renders_of(ctx, payload, picked):
     """Every file that belongs to a picked trip's existing render.
 
     An already-rendered trip is not refused. Refusing would be the wrong answer
@@ -4157,36 +4313,16 @@ def _renders_of(ctx, payload, by_index, picked):
     rendering. So the render comes too — the mp4 and every sidecar beside it.
     """
     out = []
-    for i in picked:
-        same, _other = trip_renders(ctx, payload, by_index[i])
+    for trip in picked.trips():
+        same, _other = trip_renders(ctx, payload, trip)
         for mp4 in same:
             out.extend(sidecar_set(mp4))
     return out
 
 
-def _picked_ids(by_index, picked):
-    """The trip ids behind the chosen rows, e.g. trip_2026-07-28_08-57_01.
-
-    The name everything off this machine is keyed on: out_base is a path under
-    <out>, and only its last component means anything to a target.
-    """
-    return list(filter(None, map(lambda i: _out_base_name(by_index[i]), picked)))
-
-
 def _out_base_name(trip):
     base = trip.get("out_base")
     return Path(base).name if base else None
-
-
-def _picked_keys(by_index, picked):
-    """This workspace's own handle on each chosen trip: its first clip's stamp.
-
-    Unlike _picked_ids this never comes back short. A trip with no out_base is
-    a trip nothing off this machine has ever heard of, which is precisely why
-    it has no id — but it is still a trip the operator excluded, and the row
-    that counts them has to say so.
-    """
-    return list(filter(None, map(lambda i: _trip_key(by_index[i]), picked)))
 
 
 def _trip_key(trip):
@@ -4257,7 +4393,7 @@ class Consulted:
         return evidence is menu.Evidence.YES
 
 
-def _only_copy_lines(ctx, world, payload, by_index, picked):
+def _only_copy_lines(ctx, world, payload, picked):
     """The last-copy warning, and an honest account of what was checked.
 
     Three states, three sentences: the target was never asked (those trips have
@@ -4265,11 +4401,12 @@ def _only_copy_lines(ctx, world, payload, by_index, picked):
     target at all. Saying "not consulted" when the question actually failed is
     a lie in a delete prompt.
     """
-    if _all_still_on_the_card(ctx, files_picked(by_index, picked)):
+    if _all_still_on_the_card(ctx, picked.files()):
         return _safe_to_drop_lines()
     only_copy, elsewhere, consulted = [], [], Consulted()
     for i in picked:
-        (elsewhere if _exists_elsewhere(ctx, world, payload, by_index[i], consulted)
+        (elsewhere
+         if _exists_elsewhere(ctx, world, payload, picked.by_index[i], consulted)
          else only_copy).append(i)
     lines = []
     if elsewhere:
@@ -4279,10 +4416,6 @@ def _only_copy_lines(ctx, world, payload, by_index, picked):
     if only_copy:
         lines.extend(_last_copy_banner(world, only_copy, consulted))
     return tuple(lines)
-
-
-def files_picked(by_index, picked):
-    return [p for i in picked for p in trip_files(by_index[i])]
 
 
 def _all_still_on_the_card(ctx, files):
@@ -4429,22 +4562,22 @@ def drop_plan(ctx, world):
     picked = _ask_trip_indices(by_index)
     if not picked:
         return _nothing(ctx, EXCLUDE, started, "cancelled")
-    return _drop_plan_for(ctx, world, payload, by_index, picked, started)
+    return _drop_plan_for(ctx, world, payload, picked, started)
 
 
-def _drop_plan_for(ctx, world, payload, by_index, picked, started):
-    render_files = _renders_of(ctx, payload, by_index, picked)
+def _drop_plan_for(ctx, world, payload, picked, started):
+    render_files = _renders_of(ctx, payload, picked)
     if render_files:
         print()
         print(C.yellow("  Already rendered. The render goes too, %d files:"
                        % len(render_files)))
-        _note_trips_published(world, _picked_ids(by_index, picked))
+        _note_trips_published(world, picked.ids())
         for f in render_files[:8]:
             print(C.dim("      %s" % tilde(f)))
         if len(render_files) > 8:
             print(C.dim("      ... and %d more" % (len(render_files) - 8)))
 
-    files = [p for i in picked for p in trip_files(by_index[i])] + render_files
+    files = picked.files() + render_files
     total = sum(_size_of(p) for p in files)
     # The table above already listed every picked trip by index, day, span and
     # clip count. Repeating it under a rule of its own, then naming all 212
@@ -4452,13 +4585,12 @@ def _drop_plan_for(ctx, world, payload, by_index, picked, started):
     # the figure the typed word answers was the one thing not standing out.
     print()
     print("  Excluding trips %s: %s files (%s) from workspace."
-          % (", ".join(str(i) for i in picked), C.yellow("%d" % len(files)),
+          % (picked.label(), C.yellow("%d" % len(files)),
              C.yellow(human_bytes(total))))
 
-    banner = _only_copy_lines(ctx, world, payload, by_index, picked)
+    banner = _only_copy_lines(ctx, world, payload, picked)
     return menu.Plan(menu.nothing_to_recheck,
-                     lambda fresh: _drop_commit(ctx, picked, by_index, files,
-                                                render_files, started),
+                     lambda fresh: _drop_commit(ctx, picked, files, started),
                      banner=banner)
 
 
@@ -4469,8 +4601,14 @@ def _size_of(p):
         return 0
 
 
-def _drop_commit(ctx, picked, by_index, files, render_files, started):
-    """The irreversible half. Everything above this line only printed."""
+def _drop_commit(ctx, picked, files, started):
+    """The irreversible half. Everything above this line only printed.
+
+    `files` is the list the screen above printed a count and a size for, handed
+    in rather than recomputed: what the operator agreed to and what goes have
+    to be the same list, and re-deriving it here would be a second chance to
+    differ.
+    """
     deleted, freed, errors = _unlink_all(files)
     for e in errors[:10]:
         print(C.red("  Could not delete %s" % e))
@@ -4489,8 +4627,8 @@ def _drop_commit(ctx, picked, by_index, files, render_files, started):
     ctx.last_groups = None
     ctx.last_scan = None
 
-    _drop_orphan_sidecars(by_index, picked)
-    _record_the_drop(ctx, by_index, picked)
+    _drop_orphan_sidecars(picked)
+    _record_the_drop(ctx, picked)
 
     if errors:
         print(C.red("  Dropped %s of %s files (%s could not be deleted)."
@@ -4499,12 +4637,11 @@ def _drop_commit(ctx, picked, by_index, files, render_files, started):
                                "%d of %d files deleted, %d errors"
                                % (deleted, len(files), len(errors))))
     done_line("excluded trips %s: %s files, %s freed"
-              % (", ".join(str(i) for i in picked), C.yellow("%d" % deleted),
+              % (picked.label(), C.yellow("%d" % deleted),
                  human_bytes(freed)))
     return _outcome(record(ctx, NAME[EXCLUDE], RAN, started,
                            "trips %s, %d files, %s freed" % (
-                               ", ".join(str(i) for i in picked), deleted,
-                               human_bytes(freed))))
+                               picked.label(), deleted, human_bytes(freed))))
 
 
 def _unlink_all(files):
@@ -4520,7 +4657,7 @@ def _unlink_all(files):
     return deleted, freed, errors
 
 
-def _drop_orphan_sidecars(by_index, picked):
+def _drop_orphan_sidecars(picked):
     """Sidecars of trips that are now gone. Removed, not asked about.
 
     They are not source footage — they describe something that no longer
@@ -4537,8 +4674,8 @@ def _drop_orphan_sidecars(by_index, picked):
     choice of their own.
     """
     orphans = []
-    for i in picked:
-        base = by_index[i].get("out_base")
+    for trip in picked.trips():
+        base = trip.get("out_base")
         if base:
             orphans.extend(_existing_sidecars(base))
     if orphans:
@@ -4556,7 +4693,7 @@ def _namespace_now(ctx):
     return ctx.selected_import.name if ctx.selected_import else ""
 
 
-def _record_the_drop(ctx, by_index, picked):
+def _record_the_drop(ctx, picked):
     """Write down that these trips went ON PURPOSE.
 
     Deleting the files is NOT enough, and the reason is a fact about every
@@ -4574,8 +4711,8 @@ def _record_the_drop(ctx, by_index, picked):
     installed next week, and arrives where a builder can act on it: item 5
     hands it over as Workspace.dropped_ids.
     """
-    ids = _picked_ids(by_index, picked)
-    keys = _picked_keys(by_index, picked)
+    ids = picked.ids()
+    keys = picked.keys()
     if not ids and not keys:
         return
     # It used to return early on an empty id list, which is the ONLY case a
@@ -4843,8 +4980,9 @@ def step_render(ctx):
     # The "[Trip 3/6] ..." headers it prints are what the bar's own note
     # already says, and its "✓ <absolute path>" lines are one per video in the
     # renderer's words -- the sentence below counts them once, in the tool's.
-    rc, _lines = run_stream(cmd, ctx.exporter, "Render", parser=make_render_parser(),
-                            env_extra=_renderer_env(ctx), quiet_finish=True)
+    rc, _lines = run_stream(Child(cmd, ctx.exporter, env=_renderer_env(ctx)),
+                            Readout("Render", make_render_parser(),
+                                    quiet_finish=True))
     after = set(rendered_mp4s(ctx.out_dir))
     new = after - before
     if rc != 0:
@@ -5725,11 +5863,11 @@ def clean_workspace_plan(ctx, world):
         print(C.dim("  Nothing to delete at %s." % tilde(target)))
         return _nothing(ctx, CLEAN_WS, started, "nothing at the target")
 
-    size, files = tree_size(target), count_files(target)
+    doomed = _CleanTarget(root, target)
     rows, _loose = _trip_rows(ctx, root, world)
     print("  Target: %s" % tilde(target))
     print()
-    _print_all(_cleaning_block(rows, files, size))
+    _print_all(_cleaning_block(rows, doomed.files, doomed.size))
 
     gates = guards.Gates(world)
     verdict = gates.clean_is_allowed()
@@ -5747,9 +5885,32 @@ def clean_workspace_plan(ctx, world):
     _print_all(_what_goes_lines(gates))
     _print_all(_why_it_may_go(gates))
     return menu.Plan(_clean_gate,
-                     lambda fresh: _clean_workspace_commit(ctx, fresh, root, target,
-                                                           size, files, started),
-                     banner=_clean_banner(ctx, gates, target, size))
+                     lambda fresh: _clean_workspace_commit(ctx, fresh, doomed,
+                                                           started),
+                     banner=_clean_banner(ctx, gates, target, doomed.size))
+
+
+class _CleanTarget:
+    """The folder item 8 erases, measured once.
+
+    `root` is the import it belongs to and `target` is what actually goes --
+    a discard sweeps the import itself, a finished cycle sweeps only what sits
+    under it -- so the two are not one path and neither can be derived from
+    the other here.
+
+    The measurements are taken at construction and never retaken. This is the
+    destructive path: the file count and the size the screen printed, the ones
+    the operator read before typing the word, and the ones the summary row
+    reports afterwards must be a single reading of the disk. Two readings
+    either side of a prompt is how a delete comes to report a figure nobody
+    agreed to.
+    """
+
+    def __init__(self, root, target):
+        self.root = root
+        self.target = target
+        self.size = tree_size(target)
+        self.files = count_files(target)
 
 
 def _clean_gate(world):
@@ -6042,14 +6203,18 @@ def _print_gate_detail(world):
         print(C.dim("        " + world.target.note))
 
 
-def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
+def _clean_workspace_commit(ctx, fresh, doomed, started):
     """The irreversible half of item 8.
 
     `fresh` is the world captured AFTER the word was typed — the same one the
     guard just approved. The render sweep below re-asks a second question of
     it, and asking that of the world the menu was drawn with would judge the
     renders by an answer from before the prompt.
+
+    `doomed` is the folder and the figures the screen was drawn from, carried
+    rather than re-measured. See _CleanTarget.
     """
+    root, target = doomed.root, doomed.target
     if not _target_still(root, target):
         print(C.red("  Refusing: %s is not the folder that was checked any more."
                     % target))
@@ -6068,7 +6233,8 @@ def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
     ctx.last_scan = None
     ctx.last_groups = None
     done_line("deleted %s files (%s) from %s"
-              % (C.yellow("%d" % files), human_bytes(size), tilde(target)))
+              % (C.yellow("%d" % doomed.files), human_bytes(doomed.size),
+                 tilde(target)))
     if discarding:
         _unclaim_the_discarded(ctx, fresh)
 
@@ -6090,7 +6256,8 @@ def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
         _keeping_the_renders(why, stragglers)
     return _outcome(record(ctx, NAME[CLEAN_WS], RAN, started,
                            "%d files, %s freed"
-                           % (files + n, human_bytes(size + freed))))
+                           % (doomed.files + n,
+                              human_bytes(doomed.size + freed))))
 
 
 def _unclaim_the_discarded(ctx, world):
@@ -6935,16 +7102,7 @@ def capture_world(ctx, scope=menu.Scope.LOCAL):
     wrong, and the world moves under this tool — an operator swaps the card or
     deletes a sidecar in Finder while the prompt is on screen.
     """
-    imports = tuple(import_candidates(ctx))
-    root = _chosen_import(ctx, imports)
-    metas = _metas_of(ctx)
-    renders = _renders_of_tree(ctx.out_dir)
-    trip_ids = _trip_ids_here(metas, root, ctx.out_dir)
-    # The plugin is asked BEFORE the expendability check, because that check is
-    # now half local (a render in a final_ folder) and half its answer.
-    target = _target_facts(ctx, scope, root, trip_ids)
-    return _world_of(ctx, scope, imports, root, metas, renders, trip_ids, target,
-                     working_area_is_expendable(ctx, target))
+    return _Capture(ctx, scope).world()
 
 
 def looked_at(ctx, scope):
@@ -6969,32 +7127,59 @@ def _path_of(meta):
     return meta.path
 
 
-def _world_of(ctx, scope, imports, root, metas, renders, trip_ids, target,
-              expendable):
-    settled, why, stragglers = expendable
-    card = _card_facts(ctx)
-    mine = _import_files(root)
-    return W.World(
-        at=time.time(), scope=scope, strategy=menu.Strategy.of(ctx.plugin),
-        offline=ctx.offline,
-        # RESOLVED: an implementation may compare this against a symlink of its
-        # own, and a symlink resolves to the real path. Comparing /var/...
-        # against /private/var/... reports a mismatch on every macOS install.
-        out_dir=_resolved(ctx.out_dir), out_dir_owner=claim_out_dir(ctx),
-        imports=imports, selected_import=root, metas=metas,
-        renders=renders, renders_here=_renders_here(ctx, root),
-        trip_ids=trip_ids, dropped_ids=dropped_trip_ids(ctx),
-        dropped_trips=dropped_trip_keys(ctx, root.name if root else ""),
-        import_files=mine, unsourced_files=_unsourced_files(root, ctx.card, mine),
-        card_shares_the_import=_card_shares(ctx.card, root),
-        orphan_clips=orphan_clips(ctx, root),
-        final_folders=_final_folders(ctx), expected_trips=_expected_trips(ctx, root, metas),
-        has_track=_has_track(imports), stills_current=_stills_current(ctx),
-        local_page=_page_exists(ctx), ledger_mark=last_imported_stamp(ctx),
-        excluded=frozenset(excluded_stamps(ctx)), excluded_at=_excluded_at(ctx),
-        newest_meta_at=_newest_mtime(_meta_paths(metas)),
-        workspace_settled=settled, workspace_note=why,
-        stragglers=tuple(stragglers), card=card, target=target)
+class _Capture:
+    """One read of the disk, in the order the reads have to happen.
+
+    A builder rather than a function taking nine arguments, because those nine
+    were never the caller's to supply: every one of them is derived here from
+    ctx and scope. Passing them along a signature only created a second place
+    that had to know the ORDER — the plugin is asked before the expendability
+    check, because that check is now half local (a render in a final_ folder)
+    and half the plugin's answer. Written down once, as fields, it cannot be
+    got wrong by a caller that reads the arguments left to right.
+    """
+
+    def __init__(self, ctx, scope):
+        self.ctx = ctx
+        self.scope = scope
+        self.imports = tuple(import_candidates(ctx))
+        self.root = _chosen_import(ctx, self.imports)
+        self.metas = _metas_of(ctx)
+        self.renders = _renders_of_tree(ctx.out_dir)
+        self.trip_ids = _trip_ids_here(self.metas, self.root, ctx.out_dir)
+        # Before the expendability check. See the class docstring.
+        self.target = _target_facts(ctx, scope, self.root, self.trip_ids)
+        self.expendable = working_area_is_expendable(ctx, self.target)
+
+    def world(self):
+        """The frozen facts, assembled. Nothing here goes back to the disk for
+        anything the constructor already read."""
+        ctx, root = self.ctx, self.root
+        settled, why, stragglers = self.expendable
+        card = _card_facts(ctx)
+        mine = _import_files(root)
+        return W.World(
+            at=time.time(), scope=self.scope, strategy=menu.Strategy.of(ctx.plugin),
+            offline=ctx.offline,
+            # RESOLVED: an implementation may compare this against a symlink of its
+            # own, and a symlink resolves to the real path. Comparing /var/...
+            # against /private/var/... reports a mismatch on every macOS install.
+            out_dir=_resolved(ctx.out_dir), out_dir_owner=claim_out_dir(ctx),
+            imports=self.imports, selected_import=root, metas=self.metas,
+            renders=self.renders, renders_here=_renders_here(ctx, root),
+            trip_ids=self.trip_ids, dropped_ids=dropped_trip_ids(ctx),
+            dropped_trips=dropped_trip_keys(ctx, root.name if root else ""),
+            import_files=mine, unsourced_files=_unsourced_files(root, ctx.card, mine),
+            card_shares_the_import=_card_shares(ctx.card, root),
+            orphan_clips=orphan_clips(ctx, root),
+            final_folders=_final_folders(ctx),
+            expected_trips=_expected_trips(ctx, root, self.metas),
+            has_track=_has_track(self.imports), stills_current=_stills_current(ctx),
+            local_page=_page_exists(ctx), ledger_mark=last_imported_stamp(ctx),
+            excluded=frozenset(excluded_stamps(ctx)), excluded_at=_excluded_at(ctx),
+            newest_meta_at=_newest_mtime(_meta_paths(self.metas)),
+            workspace_settled=settled, workspace_note=why,
+            stragglers=tuple(stragglers), card=card, target=self.target)
 
 
 def _import_files(root):
@@ -7108,8 +7293,8 @@ class Console(uploader.Ui):
         # Outcome it returns. Without it every plugin child left the
         # streamer's own "Deploy [####] 100% 0:34  completed" behind, which is
         # this module announcing somebody else's work in its own words.
-        rc, _lines = run_stream(cmd, cwd, label, parser=parser, env_extra=env,
-                                quiet_finish=True)
+        rc, _lines = run_stream(Child(cmd, cwd, env=env),
+                                Readout(label, parser, quiet_finish=True))
         return rc
 
 
@@ -7703,10 +7888,8 @@ def print_menu(ctx, menu_items, position, world):
     print(rule(ch="="))
     verdicts = _verdicts(menu_items, world)
     offered = position.selectable(menu_items)
-    shown = _in_the_grid(menu_items)
-    cell = _cell_width(shown)
-    _print_all(_grid(shown, verdicts, offered, cell,
-                     _grid_columns(term_width(), cell)))
+    _print_all(_Grid(_in_the_grid(menu_items), verdicts, offered,
+                     term_width()).lines())
     # The reasons entries are greyed have moved to `p`. They are the same eight
     # lines under every menu draw, and a block that never changes stops being
     # read -- which is a problem when the one line that DID change is in it.
@@ -7793,19 +7976,36 @@ def _in_the_grid(menu_items):
     return {n: item for n, item in menu_items.items() if not menu.is_view(item)}
 
 
-def _grid(menu_items, verdicts, offered, cell, cols):
-    ordered = list(map(menu_items.get, sorted(menu_items)))
-    rows = (len(ordered) + cols - 1) // cols
-    return list(map(lambda r: _row(ordered, verdicts, offered, cell, cols, rows, r),
-                    range(rows)))
+class _Grid:
+    """The steps laid out in columns, painted a row at a time.
 
+    A class because no row can be drawn without the whole geometry -- how wide
+    a cell is, how many columns fit the terminal, how many rows that makes --
+    and handing all of it down to each row put seven arguments on a function
+    whose entire job is one line of text. Settled once here, asked rather than
+    passed.
+    """
 
-def _row(ordered, verdicts, offered, cell, cols, rows, r):
-    picks = map(lambda c: r + c * rows, range(cols))      # fill down, then across
-    here = filter(lambda i: i < len(ordered), picks)
-    return "  " + "".join(map(
-        lambda i: _menu_line(ordered[i], verdicts[ordered[i].number],
-                             ordered[i].number in offered, cell), here))
+    def __init__(self, menu_items, verdicts, offered, width):
+        self.ordered = list(map(menu_items.get, sorted(menu_items)))
+        self.verdicts = verdicts
+        self.offered = offered
+        self.cell = _cell_width(menu_items)
+        self.cols = _grid_columns(width, self.cell)
+        self.rows = (len(self.ordered) + self.cols - 1) // self.cols
+
+    def lines(self):
+        return list(map(self._row, range(self.rows)))
+
+    def _row(self, r):
+        picks = map(lambda c: r + c * self.rows, range(self.cols))  # down, then across
+        here = filter(lambda i: i < len(self.ordered), picks)
+        return "  " + "".join(map(self._cell, here))
+
+    def _cell(self, i):
+        item = self.ordered[i]
+        return _menu_line(item, self.verdicts[item.number],
+                          item.number in self.offered, self.cell)
 
 
 def _info_lines(plugin=None):

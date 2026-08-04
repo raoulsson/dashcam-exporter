@@ -1624,7 +1624,7 @@ class TestEveryExcludedTripIsCounted(SeamTest):
     """He excluded three trips and the progress block said one.
 
     Two of them were fragments -- too short to render, so no out_base, so no
-    trip id, so _picked_ids came back with one entry and _record_the_drop
+    trip id, so Picked.ids() came back with one entry and _record_the_drop
     returned early on the rest.
     """
 
@@ -1642,18 +1642,17 @@ class TestEveryExcludedTripIsCounted(SeamTest):
 
     def test_a_fragment_has_no_id_to_record(self):
         """The premise. If this ever stops being true the rest is moot."""
-        by_index = self._three()
-        self.assertEqual(P._picked_ids(by_index, [1, 2, 4]),
-                         ["trip_2026-07-10_16-23_01"])
+        picked = P.Picked(self._three(), [1, 2, 4])
+        self.assertEqual(picked.ids(), ["trip_2026-07-10_16-23_01"])
 
     def test_every_trip_has_a_key(self):
-        keys = P._picked_keys(self._three(), [1, 2, 4])
+        keys = P.Picked(self._three(), [1, 2, 4]).keys()
         self.assertEqual(sorted(keys),
                          ["20260502102459", "20260710162338", "20260714143354"])
 
     def test_the_drop_is_recorded_for_all_three(self):
         b = self.bench()
-        P._record_the_drop(b.ctx, self._three(), [1, 2, 4])
+        P._record_the_drop(b.ctx, P.Picked(self._three(), [1, 2, 4]))
         self.assertEqual(len(P.dropped_trip_keys(b.ctx, "")), 3)
         # The destination still hears only about the trip it could know.
         self.assertEqual(P.dropped_trip_ids(b.ctx), ("trip_2026-07-10_16-23_01",))
@@ -1661,7 +1660,7 @@ class TestEveryExcludedTripIsCounted(SeamTest):
     def test_a_drop_of_fragments_alone_is_still_recorded(self):
         """It used to return before writing anything at all."""
         b = self.bench()
-        P._record_the_drop(b.ctx, self._three(), [1, 4])
+        P._record_the_drop(b.ctx, P.Picked(self._three(), [1, 4]))
         self.assertEqual(len(P.dropped_trip_keys(b.ctx, "")), 2)
         self.assertEqual(P.dropped_trip_ids(b.ctx), ())
 
@@ -1669,14 +1668,14 @@ class TestEveryExcludedTripIsCounted(SeamTest):
         """One record, three keys: writing one must not drop the others."""
         b = self.bench()
         P.record_excluded_stamps(b.ctx, {"20260502102459"})
-        P._record_the_drop(b.ctx, self._three(), [1])
+        P._record_the_drop(b.ctx, P.Picked(self._three(), [1]))
         self.assertEqual(P.excluded_stamps(b.ctx), {"20260502102459"})
         self.assertEqual(P.dropped_trip_keys(b.ctx, ""), ("20260502102459",))
 
     def test_dropping_the_same_trip_twice_counts_once(self):
         b = self.bench()
-        P._record_the_drop(b.ctx, self._three(), [2])
-        P._record_the_drop(b.ctx, self._three(), [2])
+        P._record_the_drop(b.ctx, P.Picked(self._three(), [2]))
+        P._record_the_drop(b.ctx, P.Picked(self._three(), [2]))
         self.assertEqual(len(P.dropped_trip_keys(b.ctx, "")), 1)
 
     def test_a_finished_cycle_is_not_counted_into_the_next_one(self):
@@ -1686,7 +1685,7 @@ class TestEveryExcludedTripIsCounted(SeamTest):
         to care about."""
         b = self.bench()
         b.ctx.selected_import = b.ctx.import_root / "2026-08-01"
-        P._record_the_drop(b.ctx, self._three(), [1, 2, 4])
+        P._record_the_drop(b.ctx, P.Picked(self._three(), [1, 2, 4]))
         self.assertEqual(len(P.dropped_trip_keys(b.ctx, "2026-08-01")), 3)
         self.assertEqual(P.dropped_trip_keys(b.ctx, "2026-08-02"), ())
         self.assertEqual(P.dropped_trip_keys(b.ctx, ""), ())
@@ -1787,7 +1786,9 @@ class TestEveryRendererRunIsToldWhereToLog(SeamTest):
     """
 
     def _envs(self, run):
-        return [c.kwargs.get("env_extra") for c in run.call_args_list]
+        # The Child is the first positional argument, and it is what carries
+        # the environment now.
+        return [c.args[0].env for c in run.call_args_list]
 
     def test_the_sidecar_pass_carries_it(self):
         b = self.bench().imported()
