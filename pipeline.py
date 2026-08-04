@@ -7486,6 +7486,9 @@ class LocalPage:
         return ("Build the local result page from the renders. Nothing leaves "
                 "this machine.")
 
+    def get_website_upload_description(self):
+        return ""      # nothing is handed over under this edition
+
     def evaluate(self, world):
         """Its own renders floor, because THIS build also gathers.
 
@@ -7518,6 +7521,9 @@ class TargetBuild:
 
     def describe(self):
         return self._act.describe()
+
+    def get_website_upload_description(self):
+        return _long_description(self._act)
 
     def evaluate(self, world):
         return self._act.evaluate(_handed_over(self._ctx, world))
@@ -7553,6 +7559,22 @@ def _holds(act):
         return None      # a builder's bookkeeping is not this module's problem
 
 
+def _long_description(act):
+    """An act's own long-form help, or "" if it has none.
+
+    Same shape as _holds above and for the same reason: this is a published
+    interface and an act written before the question existed has to keep
+    working. getattr rather than hasattr-then-call, because a plugin is free to
+    answer it dynamically, and a raise here would take down a HELP SCREEN --
+    the one place in the tool nothing should ever fail.
+    """
+    try:
+        said = getattr(act, "get_website_upload_description", lambda: "")()
+    except Exception:
+        return ""
+    return said if isinstance(said, str) else ""
+
+
 def _with_the_count(outcome, before, after):
     """The act's own words, plus what the build changed.
 
@@ -7583,6 +7605,9 @@ class NoPublisher:
 
     def describe(self):
         return "Put what was built online. Not part of this edition."
+
+    def get_website_upload_description(self):
+        return ""      # nothing is handed over under this edition
 
     def evaluate(self, world):
         """What is missing from THIS installation, never how to change it.

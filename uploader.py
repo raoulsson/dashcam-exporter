@@ -267,6 +267,28 @@ class Act(ABC):
         """
 
 
+    def get_website_upload_description(self) -> str:
+        """What handing the context over to you amounts to, in your own words.
+
+        Printed verbatim under `h 5`, after the two sentences that explain the
+        choice between building locally and handing over. Those two are the
+        exporter's to write because the choice is the same everywhere; this is
+        not. Where the site ends up, what it is called, which of it is public,
+        what a second run does differently — the exporter cannot know any of
+        it, and an operator reading the help for the step that publishes their
+        driving deserves better than "it is handed to a plugin".
+
+        Paragraphs separated by a blank line, wrapped to the terminal by the
+        caller. A line beginning with whitespace is left exactly as written, so
+        a path stays on one line and stays copy-pasteable.
+
+        Not abstract, for the same reason as holds() above: an implementation
+        written before this existed must keep working, and "" simply means the
+        sentence ends there.
+        """
+        return ""
+
+
 class Builder(Act):
     """Item 5: produce whatever this installation publishes, from the trips
     the exporter has described.
@@ -295,27 +317,6 @@ class Builder(Act):
         always said.
         """
         return None
-
-    def get_website_upload_description(self) -> str:
-        """What handing the context over to you amounts to, in your own words.
-
-        Printed verbatim under `h 5`, after the two sentences that explain the
-        choice between building locally and handing over. Those two are the
-        exporter's to write because the choice is the same everywhere; this is
-        not. Where the site ends up, what it is called, which of it is public,
-        what a second run does differently — the exporter cannot know any of
-        it, and an operator reading the help for the step that publishes their
-        driving deserves better than "it is handed to a plugin".
-
-        Paragraphs separated by a blank line, wrapped to the terminal by the
-        caller. A line beginning with whitespace is left exactly as written, so
-        a path stays on one line and stays copy-pasteable.
-
-        Not abstract, for the same reason as holds() above: an implementation
-        written before this existed must keep working, and "" simply means the
-        sentence ends there.
-        """
-        return ""
 
 
 class Uploader(Act):

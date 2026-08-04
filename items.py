@@ -411,12 +411,8 @@ class RenderVideos(MenuItem):
         "an hour parked at a supermarket costs the viewer three seconds. The "
         "trip therefore plays continuously even though the camera stopped and "
         "started several times inside it.\n\n"
-        "This is the long one: hours for a full card, and the only step worth "
-        "starting and walking away from. It is restartable — a trip whose "
-        "video already exists is left alone — so an interrupted run picks up "
-        "where it stopped rather than beginning again. Preview the card first; "
-        "encoding a trip you were going to exclude is the most expensive "
-        "mistake available here."
+        "You can interrupt the rendering with ctrl-c and restart it later. It "
+        "will pick up where it was left from."
     )
     # An encode produces mp4s. The trips were already described, so the list
     # is_complete() is asked about is the same list, and nothing has been
@@ -562,21 +558,6 @@ class UploadWebsite(MenuItem):
     number = UPLOAD
     NAME = "Upload Website"
     DESCRIPTION = "Put the website online. Resumes where it left off."
-    ABOUT = (
-        "Puts what item 5 built online. The pages go first and the videos "
-        "after, so the site is live and correct while the large files are "
-        "still arriving; a trip whose video has not landed yet simply has no "
-        "video to play. How many transports that takes — a bucket, a server, "
-        "one copy into a folder — is the installation's business, and this "
-        "entry reports one answer for the whole job rather than a half "
-        "success.\n\n"
-        "It resumes rather than restarting: what is already at the "
-        "destination is not sent again, so an interrupted upload costs only "
-        "what was left. Being reachable from everywhere is deliberate — the "
-        "moment a page is worth having online is not always the end of a "
-        "cycle. Note that this is the step that puts things in front of the "
-        "world, and what goes up may be cached or indexed after you remove it."
-    )
     SCOPE = Scope.FULL
     # DEVIATION FROM THE OWNER'S TABLE: 6 added to the outbound under the
     # publishing edition. He wrote 7 into item 5's INBOUND column — after
@@ -604,6 +585,21 @@ class UploadWebsite(MenuItem):
         than restating how the tool is installed.
         """
         return self._publish.describe()
+
+    def about(self) -> str:
+        """The two modes, then whatever the installed plugin says about its own.
+
+        The same shape as item 5, and for the same reason: which mode you are
+        in is the exporter's to explain, and where the files actually go is
+        not. A destination we have never heard of can only be described by the
+        thing that speaks to it.
+        """
+        said = (self._publish.get_website_upload_description() or "").strip()
+        handover = ("In \"plugin\" mode the destination is the plugin's"
+                    + (":" if said else "."))
+        text = ("In \"local\" mode there is nothing to put online: that "
+                "edition writes a page and stops there.\n\n" + handover)
+        return text + ("\n\n" + said if said else "")
 
     def evaluate(self, world) -> Verdict:
         """The exporter's own evidence first, then the uploader, then the

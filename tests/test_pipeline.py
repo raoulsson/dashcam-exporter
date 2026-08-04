@@ -1400,6 +1400,29 @@ class TheHelpScreen(unittest.TestCase):
             text = item.about()
         self.assertTrue(text.rstrip().endswith("handed over to the plugin."))
 
+    def test_help_never_raises_on_the_real_collaborators(self):
+        """The one that was missed. `about()` on items 5 and 7 asks its act for
+        a long description, and the four REAL collaborators are the exporter's
+        own classes rather than plugins -- none of them had the method, so both
+        help screens raised AttributeError on a stock install while a test
+        using stubs that did have it passed."""
+        class Ctx:
+            out_dir = Path("/tmp/dashcam-help-test")
+        for strategy in (M.Strategy.UPLOADER, M.Strategy.LOCAL_PAGE):
+            work = P.Work(Ctx())
+            if strategy is M.Strategy.UPLOADER:
+                work.ctx.plugin = mock.Mock()
+            for number in (5, 7):
+                with self.subTest(strategy=strategy, entry=number):
+                    item = M.build_menu(strategy, work)[number]
+                    self.assertIsInstance(item.about(), str)
+
+    def test_an_act_that_raises_does_not_take_the_help_screen_down(self):
+        item = self.items[5]
+        with mock.patch.object(item._builder, "get_website_upload_description",
+                               side_effect=RuntimeError("plugin exploded")):
+            self.assertIsInstance(P._long_description(item._builder), str)
+
     def test_the_view_still_says_it_is_one(self):
         for row in ("    leads to", "    reached from"):
             line = next(ln for ln in self._plain(0) if ln.startswith(row))
