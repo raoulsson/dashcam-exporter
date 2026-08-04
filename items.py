@@ -307,9 +307,8 @@ class BuildPreview(MenuItem):
     ABOUT = (
         "Pulls one frame out of each trip and lays them out as a contact "
         "sheet, so a card can be judged by eye in a few seconds instead of by "
-        "reading timestamps. It lets you answer the question item 4 then asks: "
-        "which of these was worth driving, and which is a fragment of "
-        "manoeuvring outside the house.\n\n"
+        "reading timestamps. It lets you answer the question, whether you want "
+        "to keep that trip or not.\n\n"
         "It writes stills and nothing else — no sidecar, no video, nothing "
         "sent anywhere — so it cannot change what the later steps see and it "
         "is safe to run at any point. Running it again rebuilds the stills "
