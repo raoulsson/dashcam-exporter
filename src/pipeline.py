@@ -53,13 +53,7 @@ import signal
 import subprocess
 import sys
 import tempfile
-import textwrap
 import threading
-try:
-    import termios
-    import tty
-except ImportError:      # not a POSIX terminal; typed lines still work
-    termios = tty = None
 import time
 import traceback
 import urllib.parse
@@ -76,7 +70,7 @@ import items
 import menu
 import uploader
 import world as W
-from checkout import RealCheckout
+from checkout import RealCheckout            # noqa: F401
 from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                   UPLOAD, CLEAN_WS, ERASE_CARD)
 
@@ -87,6 +81,46 @@ from term import C, human_age, human_bytes, human_secs, rule, term_width, tilde
 from progress import (Bar, Live, Waiting, _bar_line, _erase_line,  # noqa: F401
                       _eta, _still_bar, _sweep_line, _write_line, show_cursor,
                       waiting)
+
+# Three layers that were in this file and are now under it. Imported back
+# under the same spellings, so no call site anywhere changed: `screens` is
+# every line the operator reads, `results` is what an outcome is called,
+# and `edition` is which install this is and what version it says.
+from edition import (CHECKOUT, COFFEE_URL, EXPORTER_DIR, REPO_URL,  # noqa: F401
+                     SPONSORS_URL, SRC_DIR, VERSION_FALLBACK, VERSION_FILE,
+                     VERSION_MAJOR, version, _already_says, _commit_count,
+                     _counted, _counted_or_recalled, _countable, _read_version,
+                     _recalled, _remembered, _try_write, _version_of,
+                     _write_version)
+from results import (ABORTED, Aborted, COMPLETING, FAILED, RAN,  # noqa: F401
+                     SATISFIED, SKIPPED, StepResult, record,
+                     _because, _changed_the_input, _crash_log_line,
+                     _did_real_work, _log_crash, _nothing_to_do_lines,
+                     _reset_quietly, _stamp_elapsed, _stayed_lines,
+                     _tell_the_plugin, _write_crash)
+from screens import (ORPHAN_LIST, SHOWN, TIME_COL, _Grid,  # noqa: F401
+                     _NO_EDGES, _PER_ROW, _LABEL_W, _STATUS_TAGS, _about,
+                     _about_paragraphs, _blocked_line, _blocked_lines,
+                     _cell_width, _colon, _dated, _destructive_list,
+                     _entry_help, _evidence_lines, _general_help,
+                     _graph_row, _grid_columns, _guard_reason, _help_lines,
+                     _hms, _in_the_grid, _info_lines, _info_setting,
+                     _last_name, _later_line, _menu_line, _named_list,
+                     _next_steps, _not_here_line, _not_offered_reason,
+                     _off_line, _orphan_file, _paint_body, _plugin_info_lines,
+                     _print_all, _safe_verdict, _status_tag, _summary_line,
+                     _total_line, _unlink_quietly, _verdicts, _where_lines,
+                     _why_lines, _why_not, print_menu, print_summary)
+
+# Reading the operator's key or line. Imported back under the same names,
+# and the module itself too, so a test can patch the prompt where it lives
+# rather than through this file's re-export.
+import prompt                                       # noqa: F401
+from prompt import (_HINTED, _echoed, _from_key, _help_command,  # noqa: F401
+                    _help_key, _hint_lines, _key_or_help, _meaning,
+                    _one_char, _one_char_at, _printable, _raw_capable,
+                    _raw_read, _read_answer, _readline_safe, _typed_answer,
+                    _yes_or_no, ask, confirm, hint_reset, read_key)
 
 # The item titles, read from the one place they are declared. A sentence with
 # a literal title in it is a second place, and second places go stale silently.
@@ -110,18 +144,6 @@ FALLBACK_IMPORT_ROOT = "~/dashcam-data/import"    # import-sd-card.sh DEST_ROOT
 # There is deliberately no default for `upload_plugin`. A default would
 # mean a clone loading and running someone else's code on every launch.
 
-# Two facts, not one. They were the same directory until the sources moved
-# under src/, and every use had to pick which it meant: the CHECKOUT is where
-# config.txt, .env, .venv, VERSION and the git history live, and is the cwd a
-# child process should run in; SRC_DIR is the one directory a plugin needs on
-# sys.path so that `from uploader import ...` resolves. Naming the checkout
-# after the source directory would have put the tool's memory in ~/.src.
-#
-# Both come off one Checkout now, so the two can no longer drift apart, and a
-# Ctx can be pointed at a different tree without any of this being reassigned.
-CHECKOUT = RealCheckout(__file__)
-SRC_DIR = CHECKOUT.src()
-EXPORTER_DIR = CHECKOUT.root()
 
 
 # ---------------------------------------------------------------------------
@@ -430,19 +452,6 @@ class Ctx:
 # ---------------------------------------------------------------------------
 # Subprocess streaming
 # ---------------------------------------------------------------------------
-
-class Aborted(Exception):
-    """The operator stopping the step, from a prompt or during the work.
-
-    `mid_run` is the difference between the two, and it is the only thing a
-    reader of the log a week later needs: nothing was touched before the work
-    started, and something was part way through once it had. A prompt raises
-    it plain; the child-process streamer raises it mid_run.
-    """
-
-    def __init__(self, mid_run=False):
-        super().__init__()
-        self.mid_run = mid_run
 
 
 def _reader(stream, q):
@@ -1391,217 +1400,6 @@ def print_status(ctx):
     _print_all(_volume_rows(ctx))
 
 
-# ---------------------------------------------------------------------------
-# Prompts
-# ---------------------------------------------------------------------------
-
-def _readline_safe(s):
-    """Mark ANSI sequences as zero-width for readline.
-
-    input() goes through readline, which counts the prompt to know where the
-    typed text starts. Raw escape codes are counted as printable, so a bolded
-    prompt makes it believe the cursor is further right than it is — the typing
-    lands in the wrong column and editing the line smears it. \\001 .. \\002
-    brackets tell readline "this part occupies no space".
-    """
-    return re.sub(r"(\x1b\[[0-9;]*m)", "\001\\1\002", s)
-
-
-# Printed once per step, above its first prompt. Ctrl-C is the way out of a
-# prompt sequence — Render alone asks four questions — and it is only obvious if
-# you already know it. Once per step, not once per prompt: repeating it four
-# times is the kind of noise that stops being read.
-_HINTED = [True]     # True at the menu, so the hint never appears there
-
-
-def hint_reset():
-    _HINTED[0] = False
-
-
-def read_key(prompt):
-    """One keypress at the menu, no Enter. Falls back to a typed line.
-
-    The menu is single characters -- a digit, p, h, i, q -- so making the
-    operator press return after each one is a keystroke that carries no
-    information. h is the exception: it takes a second key, and reads it the
-    same way, so `h` then `4` is help about entry 4 and `h` then anything else
-    is the general help.
-
-    Falls back to input() when stdin is not a terminal, which is every test and
-    any piped run, so nothing here changes what those see.
-    """
-    ch = _one_char_at(prompt)
-    if ch is None:
-        # Not a terminal: a typed line through the same prompt everything else
-        # uses, so a piped run and every test are unchanged.
-        return ask(prompt, quits=False).strip().lower()
-    return _echoed(ch)
-
-
-def _raw_capable():
-    return sys.stdin.isatty() and termios is not None
-
-
-def _one_char_at(prompt):
-    if not _raw_capable():
-        return None
-    sys.stdout.write(C.bold(prompt))
-    sys.stdout.flush()
-    return _one_char()
-
-
-def _one_char():
-    """A single character in raw mode, or None when that is not possible."""
-    if not _raw_capable():
-        return None
-    return _raw_read()
-
-
-def _raw_read():
-    fd = sys.stdin.fileno()
-    saved = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        return sys.stdin.read(1)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
-
-
-def _echoed(ch):
-    """Show what was pressed, since raw mode does not, and read h's second key."""
-    if ch in ("\x03", "\x04"):
-        print()
-        raise Aborted()
-    return _key_or_help(ch)
-
-
-def _key_or_help(ch):
-    if ch.lower() == "h":
-        return _help_key()
-    print(_printable(ch))
-    return ch.strip().lower()
-
-
-def _printable(ch):
-    if ch.isprintable():
-        return ch
-    return ""
-
-
-def _help_key():
-    sys.stdout.write("h")
-    sys.stdout.flush()
-    second = _one_char() or ""
-    print(_printable(second))
-    return _help_command(second)
-
-
-def _help_command(second):
-    if second.strip():
-        return "h " + second.strip()
-    return "h"
-
-
-def _hint_lines():
-    """Said once per step, by whichever prompt comes first."""
-    if _HINTED[0]:
-        return ()
-    _HINTED[0] = True
-    return (C.dim("  (q or ctrl-c to go back)"),)
-
-
-def ask(prompt, default="", quits=True):
-    """quits: a bare q answers "take me back to the menu".
-
-    Ctrl-C already did this, but only if you knew — and inside a step every
-    prompt looks like it wants a value, so q was being read as one (as an index,
-    as a height). It raises the same Aborted that Ctrl-C does, which the runner
-    catches per item, so the item stops and the menu comes back. Off at the menu
-    itself, where q is handled as a real answer.
-    """
-    _print_all(_hint_lines())
-    # Ctrl-C at a prompt has to mean the same thing as Ctrl-C during a child
-    # process: abort the step and let it be recorded, not slip out at exit 0.
-    try:
-        s = input(_readline_safe(C.bold(prompt))).strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        raise Aborted()
-    if quits and s.lower() in ("q", "quit"):
-        raise Aborted()
-    return s or default
-
-
-def confirm(prompt, default=False):
-    """y, n, or Enter for the default -- one keypress, no return.
-
-    A yes/no question carries one bit and the answer to it is one character,
-    so asking for a character and then for return as well is a keystroke that
-    says nothing. The menu has read this way for a while; the prompts inside
-    the steps had not, which made them feel like a different tool.
-
-    Anything that is not y, n or Enter is asked again rather than taken as a
-    no. These sit in front of copies and erases, and a fat-fingered r reading
-    as "no" is a silent wrong answer to a question the operator thought he had
-    answered. q and ctrl-c still abort the step, as everywhere else.
-    """
-    suffix = " [Y/n] " if default else " [y/N] "
-    return _yes_or_no(prompt + suffix, default)
-
-
-def _yes_or_no(prompt, default):
-    while True:
-        answer = _read_answer(prompt, default)
-        if answer is not None:
-            return answer
-
-
-def _read_answer(prompt, default):
-    """None means "that was not an answer, ask again"."""
-    if not _raw_capable():
-        return _typed_answer(prompt, default)
-    _print_all(_hint_lines())
-    ch = _one_char_at(prompt)
-    return _from_key(ch, default)
-
-
-def _from_key(ch, default):
-    """A key that is not an answer costs no line.
-
-    Every re-ask used to print the prompt again underneath, so leaning on the
-    keyboard left twenty identical lines above the one being answered. The
-    question has not changed, so neither should the screen: erase and ask
-    again in place.
-    """
-    if ch in ("\x03", "\x04", "q", "Q"):
-        print()
-        raise Aborted()
-    answer = _meaning(ch.strip().lower(), default)
-    if answer is None:
-        _erase_line()
-        return None
-    print(_printable(ch))
-    return answer
-
-
-def _meaning(key, default):
-    if not key:
-        return default                       # Enter
-    return {"y": True, "n": False}.get(key)  # None -> ask again
-
-
-def _typed_answer(prompt, default):
-    """Not a terminal: a typed line, which is every test and every piped run.
-
-    It answers on the first line rather than looping, because a pipe that is
-    out of input would spin here forever.
-    """
-    s = ask(prompt).lower()
-    if not s:
-        return default
-    return s in ("y", "yes")
-
-
 def pick_import(ctx, purpose):
     """Choose which import folder a step should work on."""
     cands = import_candidates(ctx)
@@ -1613,7 +1411,7 @@ def pick_import(ctx, purpose):
         ctx.selected_import = cands[0]
         return cands[0]
     if ctx.selected_import in cands:
-        keep = confirm("  Use %s for %s?" % (tilde(ctx.selected_import), purpose), True)
+        keep = prompt.confirm("  Use %s for %s?" % (tilde(ctx.selected_import), purpose), True)
         if keep:
             return ctx.selected_import
     print("  Import folders:")
@@ -1621,7 +1419,7 @@ def pick_import(ctx, purpose):
         n = clip_count(p)
         print("    %d) %-40s %s" % (i, tilde(p),
                                    C.dim("%s clips" % (n if n is not None else "?"))))
-    s = ask("  Which one? [1] ", "1")
+    s = prompt.ask("  Which one? [1] ", "1")
     try:
         ctx.selected_import = cands[int(s) - 1]
     except (ValueError, IndexError):
@@ -1630,42 +1428,6 @@ def pick_import(ctx, purpose):
     return ctx.selected_import
 
 
-# ---------------------------------------------------------------------------
-# Step results / summary
-# ---------------------------------------------------------------------------
-
-# Four outcomes, not three. SATISFIED is the one the item interface needs and
-# the old convention could not express: the postcondition already holds, so
-# nothing was done AND nothing is owed. Re-running the sidecar pass on complete
-# sidecars is that, and it is not the same answer as "you cancelled" — one
-# advances the pipeline and the other leaves it where it was.
-RAN, SATISFIED, SKIPPED, FAILED = "ran", "satisfied", "skipped", "failed"
-# Ctrl-C is the operator deciding, which is not the tool failing. The summary
-# said FAILED in red beside a step he had stopped on purpose, and the process
-# exited 1 for it. Its own word, and it does not colour the exit code.
-ABORTED = "aborted"
-
-# What counts as having done the step, for MenuItem.completed().
-COMPLETING = (RAN, SATISFIED)
-
-
-class StepResult:
-    def __init__(self, name, status, seconds, detail=""):
-        self.name, self.status, self.seconds, self.detail = name, status, seconds, detail
-
-
-def record(ctx, name, status, started, detail=""):
-    """Log one outcome and return it.
-
-    It used to return `status != FAILED`, which made "the user typed anything
-    but DROP" indistinguishable from "the trip was removed" — both True. The
-    three-valued answer was computed and thrown away at every return statement
-    in the file; now it is the return value, and the Work facade turns it into
-    the item's Outcome.
-    """
-    result = StepResult(name, status, time.time() - started, detail)
-    ctx.results.append(result)
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1929,124 +1691,6 @@ BANNER = r"""
 BANNER_WIDTH = max(len(line) for line in BANNER.splitlines())
 
 
-VERSION_FALLBACK = "0.0.0"
-VERSION_FILE = "VERSION"
-# Set by hand, and the only part of the version that is a decision. Bump it
-# when the tool changes in a way that makes a habit wrong -- a menu that means
-# something else, an output layout that moves. The other two numbers cannot
-# carry that, because they only know how many commits there have been.
-VERSION_MAJOR = 3
-
-
-def version(exporter=None):
-    """major.minor.patch: the major by hand, the rest off the commit count.
-
-    418 commits is 3.4.18 -- hundreds are the minor, the remainder is the
-    patch. It costs a subprocess at launch and it cannot disagree with what is
-    checked out, which is more than a hand-kept constant manages: two thirds of
-    the number are the history rather than a note about it.
-
-    The digits used to be sliced apart instead (249 -> 2.4.9), which spent the
-    major on nothing but the passage of a hundred commits and could say
-    neither 99 nor 1000. Arithmetic on the count leaves the major free to mean
-    the one thing a major number is for, and counts as high as you like.
-
-    A copy without git -- an archive, an install -- has no history to count and
-    says so rather than inventing one.
-    """
-    where = exporter or EXPORTER_DIR
-    return _counted_or_recalled(where, _version_of(_commit_count(where)))
-
-
-def _counted_or_recalled(where, counted):
-    if counted == VERSION_FALLBACK:
-        return _recalled(where)
-    return _remembered(where, counted)
-
-
-def _remembered(where, counted):
-    """Leave it on disk, so a copy of this folder knows what it is.
-
-    A deployed app is decoupled from the repository it was built from -- there
-    is no history to count in a zip, an rsync or a Docker layer -- and a tool
-    that cannot say which build it is is a tool nobody can report a bug
-    against. Written whenever git CAN answer, so the file is never staler than
-    the last run in a checkout, and carried along by whatever copies the
-    folder.
-    """
-    _write_version(where / VERSION_FILE, counted)
-    return counted
-
-
-def _write_version(path, counted):
-    if _already_says(path, counted):
-        return
-    _try_write(path, counted)
-
-
-def _try_write(path, counted):
-    try:
-        path.write_text(counted + "\n")
-    except OSError:
-        pass                                # read-only install: it still runs
-
-
-def _already_says(path, counted):
-    try:
-        return path.read_text().strip() == counted
-    except OSError:
-        return False
-
-
-def _recalled(where):
-    """What the last checkout that ran here wrote down, or nothing."""
-    return _read_version(where / VERSION_FILE) or VERSION_FALLBACK
-
-
-def _read_version(path):
-    try:
-        return path.read_text().strip()
-    except OSError:
-        return ""
-
-
-def _commit_count(where):
-    try:
-        return _counted(where)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-
-
-def _counted(where):
-    p = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=str(where),
-                       capture_output=True, text=True, timeout=5)
-    if p.returncode != 0:
-        return None
-    return p.stdout.strip()
-
-
-def _version_of(count):
-    if not _countable(count):
-        return VERSION_FALLBACK
-    n = int(count)
-    return "%d.%d.%d" % (VERSION_MAJOR, n // 100, n % 100)
-
-
-def _countable(count):
-    """A commit count: a plain non-negative integer, of any width.
-
-    It had to be exactly three digits while the version was those digits
-    sliced apart. The arithmetic above has no such edge: 7 commits is 3.0.7
-    and 1042 is 3.10.42, both perfectly sayable.
-    """
-    if not count:
-        return False
-    return count.isdigit()
-
-
-REPO_URL = "https://github.com/raoulsson/dashcam-exporter"
-SPONSORS_URL = "https://github.com/sponsors/raoulsson"
-COFFEE_URL = "https://www.buymeacoffee.com/raoulsson"
 
 
 def archive_dir(ctx):
@@ -2954,7 +2598,7 @@ def step_import(ctx):
             print(C.yellow("    %s  %s clips, %s"
                            % (tilde(src), clip_count(src), human_bytes(tree_size(src / "DCIM")))))
         _print_all(_leftover_lines())
-        if not confirm("  Import anyway, on top of what is there?", False):
+        if not prompt.confirm("  Import anyway, on top of what is there?", False):
             return record(ctx, NAME[IMPORT], ABORTED, started,
                           "Aborted by user pre-run.")
 
@@ -2981,7 +2625,7 @@ def step_import(ctx):
         print(C.green("  Nothing new at the source — it is already all imported."))
         return record(ctx, NAME[IMPORT], SATISFIED, started, "no new clips")
     _print_all(_delta_lines(delta))
-    if not confirm("  Run delta import", True):
+    if not prompt.confirm("  Run delta import", True):
         return record(ctx, NAME[IMPORT], ABORTED, started,
                       "Aborted by user pre-run.")
 
@@ -3011,7 +2655,7 @@ def step_import(ctx):
     else:
         print(C.dim("  The source is NOT erased by default; import-sd-card.sh only deletes"))
         print(C.dim("  its files after the copy verifies file-for-file."))
-        erase = confirm("  Erase the source's files after a verified copy?", False)
+        erase = prompt.confirm("  Erase the source's files after a verified copy?", False)
 
     env = {"DASHCAM_IMPORT_ROOT": str(ctx.import_root)}
     listing = _write_import_list(wanted)
@@ -4247,7 +3891,7 @@ class Picked:
 def _ask_trip_indices(by_index):
     """The indices to drop, or None when the answer was not one."""
     _print_all(_never_renders(by_index))
-    sel = ask("  Enter Trip indices to exclude: ")
+    sel = prompt.ask("  Enter Trip indices to exclude: ")
     if not sel.strip():
         return None
     return _parse_indices(sel, by_index)
@@ -4874,7 +4518,7 @@ def step_render(ctx):
             print("  Not yet rendered: %s"
                   % C.yellow(", ".join(str(i) for i in todo_idx)))
 
-    idx = ask("  Trip indices to render (space separated, blank = %s): "
+    idx = prompt.ask("  Trip indices to render (space separated, blank = %s): "
               % ("the %d not yet rendered" % len(todo_idx) if done_idx and todo_idx
                  else "nothing to do" if done_idx else "all renderable"))
     if not idx.strip() and done_idx:
@@ -4911,7 +4555,7 @@ def step_render(ctx):
     if vid_secs:
         print(C.dim("        estimates for %s of video, at the current crf" % human_secs(vid_secs)))
     print(C.dim("        or type any height"))
-    height = ask("  Height [%d]: " % ctx.output_height, str(ctx.output_height))
+    height = prompt.ask("  Height [%d]: " % ctx.output_height, str(ctx.output_height))
     try:
         height = int(height)
     except ValueError:
@@ -4954,7 +4598,7 @@ def step_render(ctx):
         print()
         print("  Replacing %s: %s files (%s). Only video goes."
               % (what, C.yellow("%d" % len(doomed)), C.yellow(human_bytes(size))))
-        if not confirm("  Delete and re-render?", True):
+        if not prompt.confirm("  Delete and re-render?", True):
             return record(ctx, NAME[RENDER], ABORTED, started,
                           "Aborted by user pre-run.")
         for f in doomed:
@@ -7714,7 +7358,7 @@ class Work:
 
     def ask_word(self, word):
         print()
-        return ask("  Type %s to confirm: " % word)
+        return prompt.ask("  Type %s to confirm: " % word)
 
     def recapture(self, scope):
         """The refresh point. Called after the word and before the act.
@@ -7747,552 +7391,6 @@ class Work:
         return menu.stopped(note)
 
 
-# ---------------------------------------------------------------------------
-# The painter. Everything it draws is derived from the position, the world and
-# the items' own methods — there is no second list of steps here to drift from
-# ALL_ITEMS, no hardcoded number and no hardcoded label. If it needs a fact it
-# asks the item or the world for it.
-# ---------------------------------------------------------------------------
-
-def _paint_body(item, verdict, offered):
-    """Grey means unselectable, bold means go. Two states, and that is all.
-
-    Destructive entries used to be red here. Nothing was gained by it: Exclude
-    Trip, Clean Workspace and Delete SIM Data say what they do in their own
-    names, and every one of them asks for a typed word before it erases
-    anything. What red bought was three alarming entries on screen at all
-    times, in a menu where the ordinary end of a cycle is to clean up — so the
-    colour that should mean "stop and read" was the colour of the resting
-    state, and stopped meaning anything.
-
-    It still means that where it is earned: the only-copy banner in front of a
-    drop, and a step that failed. Neither of those is on screen unless
-    something is genuinely wrong.
-
-    Unselectable comes from the item or its verdict, never from a table of
-    numbers: the position not offering it, or its own guard blocking it.
-    """
-    if _why_not(item, verdict, offered):
-        return C.dim(item.name())
-    return C.bold(item.name())
-
-
-def _cell_width(menu_items):
-    return max(len(i.name()) for i in menu_items.values()) + 9
-
-
-def _grid_columns(width, cell):
-    return max(1, min(4, width // cell))
-
-
-def _menu_line(item, verdict, offered, cell):
-    body = _paint_body(item, verdict, offered)
-    pad = cell - (len(item.name()) + len(str(item.number)) + 2)
-    return "%d) %s%s" % (item.number, body, " " * max(1, pad))
-
-
-def _why_lines(menu_items, verdicts, offered):
-    """Why the greyed entries are greyed, one gate at a time.
-
-    Two gates, and they are different problems, so they get different
-    sentences. The GUARD's refusal is about this world and is actionable —
-    "no GPS track in the import", "no card at <path>" — so it gets a line
-    each. The GRAPH's is about where the pipeline is, is the same sentence
-    for every entry it applies to, and gets one line naming them together;
-    printing it eight times taught the eye to skip the block that also holds
-    the actionable ones.
-    """
-    return _blocked_lines(menu_items, verdicts, offered) + _not_here_line(
-        menu_items, offered)
-
-
-def _blocked_lines(menu_items, verdicts, offered):
-    said = map(lambda n: _blocked_line(n, verdicts[n]), sorted(offered))
-    return list(filter(None, said))
-
-
-def _blocked_line(number, verdict):
-    if not verdict.blocked:
-        return ""
-    return C.dim("   %d) %s" % (number, verdict.reason))
-
-
-def _not_here_line(menu_items, offered):
-    """Two reasons an entry is not on the table, and they are not the same.
-
-    "Not from here" is where the pipeline stands and changes as it moves. An
-    item this product does not have never becomes selectable however far you
-    walk, so saying "not yet" of it is a lie that hides the one thing worth
-    knowing — which product you are running.
-    """
-    elsewhere = sorted(set(menu_items) - set(offered))
-    off = list(filter(lambda n: menu.switched_off(menu_items[n]), elsewhere))
-    return _off_line(menu_items, off) + _later_line(
-        list(filter(lambda n: n not in off, elsewhere)))
-
-
-def _off_line(menu_items, numbers):
-    if not numbers:
-        return []
-    return [C.dim("   %s) not available for %s"
-                  % (",".join(map(str, numbers)),
-                     menu_items[numbers[0]].strategy().value))]
-
-
-def _later_line(numbers):
-    if not numbers:
-        return []
-    return [C.dim("   %s) not available from here"
-                  % ",".join(map(str, numbers)))]
-
-
-def _why_not(item, verdict, offered):
-    """Is this entry unpickable, and by which gate. "" means it is pickable."""
-    if not offered:
-        return _not_offered_reason(item)
-    return _guard_reason(verdict)
-
-
-def _not_offered_reason(item):
-    if menu.switched_off(item):
-        return "not available for %s" % item.strategy().value
-    return "does not follow where we are"
-
-
-def _guard_reason(verdict):
-    """Blocked or SATISFIED both grey the entry, for different reasons.
-
-    Blocked means it cannot run. Satisfied means it would run and find its
-    work already done -- "Nothing to do: everything on the card is already
-    here", which is the whole output. A name in the same colour as the steps
-    that WILL do something invites pressing it to find that out, so it is
-    greyed and says why when asked.
-
-    It stays selectable: pressing it is harmless, completes, and moves the
-    position on, which is what a satisfied postcondition means to the graph.
-    """
-    if verdict.blocked:
-        return verdict.reason
-    if verdict.ruling is menu.Ruling.SATISFIED:
-        return verdict.reason or "nothing to do"
-    return ""
-
-
-def print_menu(ctx, menu_items, position, world):
-    """The grid, painted from the state machine and nothing else.
-
-    Opened with a heavy rule, because everything above it is whatever the last
-    step printed -- a render's log, a deploy's output, an erase's banner -- and
-    a line of the same dashes those use does not separate them from it.
-    """
-    print(rule(ch="="))
-    verdicts = _verdicts(menu_items, world)
-    offered = position.selectable(menu_items)
-    _print_all(_Grid(_in_the_grid(menu_items), verdicts, offered,
-                     term_width()).lines())
-    # The reasons entries are greyed have moved to `p`. They are the same eight
-    # lines under every menu draw, and a block that never changes stops being
-    # read -- which is a problem when the one line that DID change is in it.
-    # The destructive entries are already red, and every one of them asks for
-    # a typed word before it does anything. A line naming them under every
-    # draw was a third telling of the same fact.
-    print(C.dim("  p = progress   h = help   i = info   q = quit"))
-
-
-def _verdicts(menu_items, world):
-    return {n: _safe_verdict(item, world) for n, item in menu_items.items()}
-
-
-def _print_all(lines):
-    for line in lines:
-        print(line.rstrip())
-
-
-ORPHAN_LIST = "orphaned_clips_on_sim_card.txt"
-SHOWN = 5
-
-
-def _evidence_lines(verdict):
-    """What the refusal is about: enough to recognise, and a file for the rest.
-
-    Five is enough to see WHAT they are -- the dates and the clip lengths --
-    which is the decision the refusal is asking for. The whole list goes to a
-    file in the workspace, because a card that has never been imported puts
-    every clip in here and a thousand paths on the screen answer nothing.
-    """
-    files = getattr(verdict, "evidence", ()) or ()
-    lines = tuple(C.dim("        %s" % tilde(f)) for f in files[:SHOWN])
-    if len(files) > SHOWN:
-        lines += (C.dim("        ... and %d more" % (len(files) - SHOWN)),)
-    return lines
-
-
-def _orphan_file(ctx, files):
-    """Keep <workspace>/orphaned_clips_on_sim_card.txt in step with the truth.
-
-    Written whole on every refusal that has clips to name, and DELETED when
-    there are none -- a stale list of clips that have since been imported is
-    worse than no list, because it reads as current.
-    """
-    path = ctx.workspace / ORPHAN_LIST
-    if not files:
-        _unlink_quietly(path)
-        return ()
-    try:
-        path.write_text("\n".join(files) + "\n")
-    except OSError:
-        return ()
-    return (C.bold("        Full list: %s" % tilde(path)),)
-
-
-def _unlink_quietly(path):
-    try:
-        path.unlink()
-    except OSError:
-        pass
-
-
-def _colon(reason):
-    if not reason:
-        return ""
-    return ": " + reason
-
-
-def _safe_verdict(item, world):
-    """A guard that raises must not take the menu down with it."""
-    try:
-        return item.evaluate(world)
-    except Exception as e:                        # pragma: no cover - defensive
-        return menu.blocked("guard error: %s" % e)
-
-
-def _in_the_grid(menu_items):
-    """The entries the grid draws: the steps.
-
-    Progress is not one. It changes nothing, it is reached with `p` like the
-    other things that only show you something, and a number beside it invited
-    the reading that looking at the workspace is a step in working through it.
-    """
-    return {n: item for n, item in menu_items.items() if not menu.is_view(item)}
-
-
-class _Grid:
-    """The steps laid out in columns, painted a row at a time.
-
-    A class because no row can be drawn without the whole geometry -- how wide
-    a cell is, how many columns fit the terminal, how many rows that makes --
-    and handing all of it down to each row put seven arguments on a function
-    whose entire job is one line of text. Settled once here, asked rather than
-    passed.
-    """
-
-    def __init__(self, menu_items, verdicts, offered, width):
-        self.ordered = list(map(menu_items.get, sorted(menu_items)))
-        self.verdicts = verdicts
-        self.offered = offered
-        self.cell = _cell_width(menu_items)
-        self.cols = _grid_columns(width, self.cell)
-        self.rows = (len(self.ordered) + self.cols - 1) // self.cols
-
-    def lines(self):
-        return list(map(self._row, range(self.rows)))
-
-    def _row(self, r):
-        picks = map(lambda c: r + c * self.rows, range(self.cols))  # down, then across
-        here = filter(lambda i: i < len(self.ordered), picks)
-        return "  " + "".join(map(self._cell, here))
-
-    def _cell(self, i):
-        item = self.ordered[i]
-        return _menu_line(item, self.verdicts[item.number],
-                          item.number in self.offered, self.cell)
-
-
-def _info_lines(plugin=None):
-    """Who made it, what it is, and where the money goes if anyone wants to.
-
-    Its own screen rather than a banner, because it is the same every launch
-    and nobody needs it twice.
-
-    The version sits in the table rather than beside the title. It is a fact
-    about this checkout, like the licence and the date, and reading it off a
-    heading meant the one line nobody scans held the one number a bug report
-    needs. A configured plugin gets a section of its own, in its own words, so
-    a report says which of the two is at fault.
-    """
-    return (("",
-             C.bold("  dashcam-exporter"),
-             _info_setting("Designed by", "Raoul Marc Schmidiger"),
-             _info_setting("Implemented by", "Claude"),
-             _info_setting("Repository", REPO_URL),
-             _info_setting("Licence", "MIT"),
-             _info_setting("Version", version()))
-            + _dated("Last Update", uploader.last_change(EXPORTER_DIR))
-            + _plugin_info_lines(plugin)
-            + ("",
-               C.bold("  Funding"),
-               _info_setting("Sponsor", SPONSORS_URL),
-               _info_setting("Buy a coffee", COFFEE_URL),
-               ""))
-
-
-def _plugin_info_lines(plugin):
-    """The plugin's own section, printed only when there is one to print.
-
-    An empty heading over nothing says a plugin is configured and has nothing
-    to say, which is a different sentence from the true one.
-    """
-    rows = plugin.info if plugin is not None else ()
-    if not rows:
-        return ()
-    return ("", C.bold("  plugin")) + tuple(
-        _info_setting(str(label), str(value)) for label, value in rows)
-
-
-def _dated(label, when):
-    """The row, or no row. A date nothing could answer is left out rather than
-    printed as "unknown", which is a value nobody can act on."""
-    return (_info_setting(label, when),) if when else ()
-
-
-def _info_setting(label, value):
-    # Not dimmed. Dim is for what the eye may skip, and this screen is nothing
-    # but the facts a bug report has to quote -- the version, the licence, who
-    # wrote which half. There is no filler here to push into the background.
-    return "    %-16s %s" % (label, value)
-
-
-def _help_lines(menu_items, position, args):
-    """`h` for the keys, `h` then a digit for one entry, in its own words."""
-    if args:
-        return _entry_help(menu_items, position, args[0])
-    return _general_help(menu_items)
-
-
-def _general_help(menu_items):
-    return (rule("Help", ch="="),
-            C.bold("  keys"),
-            "    <n>          run entry n",
-            "    h<n>         what entry n is, and why it is or is not offered",
-            "    p            progress, and why each greyed entry is greyed",
-            "    i            version, licence, repository, funding",
-            "    q            quit",
-            "",
-            C.dim("  Entries erasing footage ask for a typed word first: %s."
-                  % _destructive_list(menu_items)),
-            "")
-
-
-def _entry_help(menu_items, position, arg):
-    if not arg.isdigit() or int(arg) not in menu_items:
-        return ("", C.yellow("  No entry %s. Press h then a number from the menu." % arg), "")
-    return _about(menu_items, position, int(arg))
-
-
-def _about(menu_items, position, number):
-    """The one-liner, then what it leaves out, then the graph.
-
-    The graph rows answer a question about the SHAPE of the tool, which is the
-    thing you want once you already know what the step does. Read first they
-    are three lines of notation in front of the sentence you came for, so they
-    sit at the end and in dim: still there for whoever wants them, no longer
-    the first thing the eye lands on.
-    """
-    item = menu_items[number]
-    erases = "yes, and asks for a typed word" if item.destr() else "no"
-    return ((rule("Help: %s" % item.name(), ch="="),
-             "    " + item.description())
-            + _about_paragraphs(item.about())
-            + ("",)
-            + _graph_row("leads to", _named_list(menu_items, item.outbound()))
-            + _graph_row("reached from", _named_list(menu_items, item.inbound()))
-            + _graph_row("erases", [erases])
-            + ("",))
-
-
-def _about_paragraphs(text):
-    """Wrap ABOUT to the terminal, blank line between paragraphs.
-
-    Clamped rather than wrapped to whatever the window happens to be: a full-
-    width paragraph on a wide terminal is a line the eye loses its place in on
-    the way back, and the rest of this screen is indented four spaces anyway.
-
-    A single newline inside a paragraph is kept as a line break, and a line
-    that begins with whitespace is emitted exactly as written. That is what
-    lets an entry put a path on its own line: reflowed into the prose it would
-    break across two lines and stop being a thing you can select and paste.
-    """
-    if not text:
-        return ()
-    room = max(40, min(92, term_width() - 8))
-    out = []
-    for para in text.split("\n\n"):
-        out.append("")
-        # A paragraph opening with a tab is a nested block -- the plugin's own
-        # words, set in from the exporter's. One tab is stripped and paid back
-        # as indentation, which leaves a SECOND tab inside it doing what a
-        # first one does at the outer level: keeping a path off the wrap.
-        nested = para.startswith("\t")
-        pad, width = ("        ", room - 4) if nested else ("    ", room)
-        for line in para.split("\n"):
-            if nested and line.startswith("\t"):
-                line = line[1:]
-            if line[:1] in (" ", "\t"):
-                out.append(pad + line.replace("\t", "    ").rstrip())
-            else:
-                out.extend(pad + w for w in textwrap.wrap(line, width))
-    return tuple(out)
-
-
-# Three shapes answer edges() with None, and they do not mean the same thing.
-# Reading all three as the first one told the operator that Delete SIM Data,
-# which erases a card, "is a view".
-_NO_EDGES = {
-    menu.Anywhere:  "anywhere (it is a view)",
-    menu.StartNode: "nothing — this is where a cycle starts",
-    menu.StepBack:  "back to whoever offered it",
-}
-
-
-# Eight neighbours on one line is a paragraph pretending to be a table: the eye
-# has nothing to count by, and it forces the widest line on the screen into the
-# part nobody came to read. Three is enough to still scan as a list.
-_PER_ROW = 3
-_LABEL_W = 13
-
-
-def _named_list(menu_items, where):
-    """The neighbours in printable chunks, or one phrase saying there are none."""
-    numbers = where.edges()
-    if numbers is None:
-        return [_NO_EDGES.get(type(where), "nothing")]
-    if not numbers:
-        return ["nothing"]
-    names = ["%d) %s" % (n, menu_items[n].name()) for n in sorted(numbers)]
-    return [", ".join(names[i:i + _PER_ROW])
-            + ("," if i + _PER_ROW < len(names) else "")
-            for i in range(0, len(names), _PER_ROW)]
-
-
-def _graph_row(label, chunks):
-    """One labelled row, wrapped under its own label rather than under the
-    left margin, so the continuation reads as more of the same answer."""
-    lead = "    %-*s" % (_LABEL_W, label)
-    return tuple(C.dim(lead + chunk if i == 0 else " " * len(lead) + chunk)
-                 for i, chunk in enumerate(chunks))
-
-
-def _next_steps(menu_items, verdicts, offered):
-    """What can be done from here, each in one sentence.
-
-    The menu is nine names and a number; it says what the steps ARE, not what
-    they do. Asked for status, the useful answer is the shortlist of what is
-    possible right now with a line of explanation each -- which is the thing a
-    grid of names cannot carry and a wall of every step's description would
-    bury.
-    """
-    # Nor a step whose work is already done: "next available" is what there is
-    # to DO, and an entry that would report "nothing to do" is not on that list.
-    ready = sorted(n for n in offered
-                   if not _why_not(menu_items[n], verdicts[n], True)
-                   and not menu.is_view(menu_items[n]))
-    if not ready:
-        return ()
-    return ("", C.bold("  Next available steps:")) + tuple(
-        "     %d - %s" % (n, menu_items[n].description()) for n in ready) + ("",)
-
-
-def _where_lines(menu_items, position):
-    """Where the pipeline is. On the status screen, not under every menu.
-
-    Under the grid it was one more thing that looks the same every draw. Asked
-    for, it is the answer to a question.
-    """
-    return ("  Last: %s" % _last_name(menu_items, position),)
-
-
-def _last_name(menu_items, position):
-    """The step just taken, by name and nothing else.
-
-    It was "Position: 8) Clean Workspace", bold. The number is already beside
-    that entry two lines down in the grid, bold is for something that wants
-    the eye, and "position" described the machine rather than answering what
-    the reader wants to know -- which is what he last did.
-    """
-    if position.current not in menu_items:
-        return "nothing yet"
-    return menu_items[position.current].name()
-
-
-def _destructive_list(menu_items):
-    hits = filter(lambda n: menu_items[n].destr(), sorted(menu_items))
-    return ",".join(map(str, hits))
-
-
-# ---------------------------------------------------------------------------
-# The runner: one selection, one item, one world per dispatch.
-# ---------------------------------------------------------------------------
-
-def print_summary(ctx, close=True):
-    """The session log. `close` draws the rule under it.
-
-    Inside Progress it does not, because the menu draws its own rule
-    immediately afterwards and two in a row read as an empty section between
-    them. On the way out there is nothing after it, so it closes itself.
-    """
-    if not ctx.results:
-        return
-    print()
-    print(rule("Summary", ch="="))
-    print(C.dim("  %-9s  %-37s %18s   %s"
-                % ("State", "Task", "CPU / Network Time", "Description")))
-    _print_all(map(_summary_line, ctx.results))
-    print(C.bold(_total_line(ctx.results)))
-    _print_all((rule(ch="="),) if close else ())
-
-
-# Where the time column ends: two spaces, the nine-wide status tag, two more,
-# the thirty-seven-wide name, a space, and eighteen right-aligned digits.
-TIME_COL = 2 + 9 + 2 + 37 + 1 + 18
-
-
-def _total_line(results):
-    """What the session cost, in the column it is the total of.
-
-    Right-aligned as one phrase so the figure lands on the same edge as every
-    row above it -- a total that does not line up with its column is a number
-    the eye has to hunt for to add anything up.
-    """
-    return "%*s" % (TIME_COL, "Total Runtime  %s"
-                    % _hms(sum(r.seconds or 0 for r in results)))
-
-
-def _summary_line(r):
-    return "  %s  %-37s %18s   %s" % (_status_tag(r.status), r.name,
-                                      _hms(r.seconds), C.dim(r.detail))
-
-
-def _hms(seconds):
-    """hh:mm:ss, always, and only here.
-
-    human_secs drops the hour when there is not one, which reads well in prose
-    -- a trip is "9:00 long" -- and badly in a column, where the same width
-    every row is what lets a long step be spotted by shape instead of read.
-    """
-    s = int(seconds or 0)
-    return "%02d:%02d:%02d" % (s // 3600, (s % 3600) // 60, s % 60)
-
-
-# "ran" is what the machine did; "processed" is what happened to the footage,
-# which is the sentence the operator is reading the summary for.
-_STATUS_TAGS = {RAN: lambda: C.green("processed"),
-                SATISFIED: lambda: C.green("satisfied"),
-                ABORTED: lambda: C.yellow("aborted  "),
-                FAILED: lambda: C.red("FAILED   ")}
-
-
-def _status_tag(status):
-    return _STATUS_TAGS.get(status, lambda: C.yellow("skipped  "))()
 
 
 class Runner:
@@ -8319,7 +7417,7 @@ class Runner:
         print_menu(self.ctx, self.menu, self.position, world)
         print()
         _HINTED[0] = True                      # no hint on the menu itself
-        return self._dispatch(read_key("Select> "))
+        return self._dispatch(prompt.read_key("Select> "))
 
     def _look(self):
         """The capture behind every menu draw, and it is not always cheap.
@@ -8443,7 +7541,7 @@ class Runner:
         if not (item.OVERRIDE_WORD and getattr(verdict, "evidence", ())):
             return
         print()
-        if ask("  Type %s to drop anyway: " % item.OVERRIDE_WORD) \
+        if prompt.ask("  Type %s to drop anyway: " % item.OVERRIDE_WORD) \
                 != item.OVERRIDE_WORD:
             print(C.dim("  Aborted by user pre-run."))
             return
@@ -8471,7 +7569,7 @@ class Runner:
         # it was the same two facts the step's own first two lines give. It
         # earns its place where a step is CHOSEN, not after it has been.
         print(rule(item.name(), ch="="))
-        hint_reset()
+        prompt.hint_reset()
         started, already = time.time(), len(self.ctx.results)
         outcome = self._execute(item, world)
         _stamp_elapsed(self.ctx.results[already:], time.time() - started)
@@ -8546,66 +7644,6 @@ class Runner:
         return item.aborted(note, performed=exc.mid_run)
 
 
-def _nothing_to_do_lines(outcome):
-    """An item whose postcondition already held says so.
-
-    It completes and the position moves on, which is right -- nothing is owed.
-    But it prints nothing on the way, so the screen showed the heading, the
-    description and then the menu again, and "already done" was indis-
-    tinguishable from "did nothing and would not say why".
-    """
-    if outcome.performed or not outcome.completed:
-        return []
-    return [C.green("  Nothing to do: %s." % (outcome.note or "already done"))]
-
-
-def _tell_the_plugin(ctx, item, outcome):
-    """A step changed the plugin's INPUT, so what it was holding is stale.
-
-    It cannot see an import land, a trip get dropped, or the working area get
-    erased — none of that goes anywhere near it — and every one of them changes
-    the workspace it is handed and therefore what its destination should be
-    asked about.
-
-    A step that performed work, is not a VIEW, and moves what the destination
-    is asked about. The first two are derived; the third the item declares,
-    because nothing here can see whether making a still or encoding an mp4
-    changed a published trip -- and the answer is no, while writing a sidecar
-    or dropping a trip changes the very list is_complete() is asked about.
-
-    It defaults to true, so forgetting to think about it costs a refresh
-    rather than correctness. Nine seconds of ssh is the price of the safe
-    mistake; a stale YES is the price of the other one, and it is paid in
-    footage.
-    """
-    plugin = getattr(ctx, "plugin", None)
-    if _changed_the_input(plugin, item, outcome):
-        _reset_quietly(plugin)
-
-
-def _changed_the_input(plugin, item, outcome):
-    if plugin is None:
-        return False
-    return _did_real_work(item, outcome)
-
-
-def _did_real_work(item, outcome):
-    if menu.is_view(item):
-        return False
-    if not getattr(item, "CHANGES_THE_QUESTION", True):
-        return False
-    return outcome.performed
-
-
-def _reset_quietly(plugin):
-    try:
-        plugin.reset()
-    except Exception as e:
-        # Its own cache is its own problem. A step that just finished must not
-        # be reported as failed because a notification about it went wrong.
-        print(C.dim("  (%s.reset() raised: %s)" % (plugin.name, e)))
-
-
 def _remember_position(ctx, item, position):
     """Written where it survives a clean-up, and only for real steps.
 
@@ -8618,76 +7656,6 @@ def _remember_position(ctx, item, position):
         return
     remember_step(ctx, position.current)
 
-
-def _stamp_elapsed(results, seconds):
-    """How long the operator waited, from the menu's side of the call.
-
-    Each step body used to time itself from its own first line, which left out
-    everything the operator sat through but the body did not do -- above all
-    the world capture, which at FULL scope now shells out over ssh and lists a
-    bucket. The menu knows when it dispatched and when it got control back,
-    and that is the number he is actually asking about.
-
-    One dispatch is normally one result; a body that logs more than one gets
-    the same elapsed on each, because they are one wait.
-    """
-    for result in results:
-        result.seconds = seconds
-
-
-def _stayed_lines(item, outcome):
-    """One line when a run did not complete.
-
-    It used to add "Still at Clean Workspace." -- the machine's half, that the
-    position had not moved. The menu redraws underneath it a line later and
-    `p` says where we are on request, so the clause was a third telling of
-    something the screen shows anyway, on the line whose job is to say what
-    happened.
-    """
-    if item.completed():
-        return []
-    return [C.dim("  %s" % _because(outcome))]
-
-
-def _because(outcome):
-    """The note, when it is already a sentence; a sentence about it when not.
-
-    "Aborted by user pre-run." says it. Wrapping that in "Did not complete
-    (...)" was the machine narrating a fact the sentence already carried, and
-    with the note's own brackets it closed two parens in a row. A note that is
-    not a sentence -- a crash carries "TypeError: ..." -- still gets one built
-    around it, because that one is a fragment.
-    """
-    note = getattr(outcome, "note", "")
-    if not note:
-        return "Did not complete."
-    if note.endswith("."):
-        return note
-    return "Did not complete: %s." % note
-
-
-def _crash_log_line(path):
-    if not path:
-        return []
-    return [C.dim("  Traceback written to %s" % tilde(path))]
-
-
-def _log_crash(ctx, item):
-    try:
-        return _write_crash(ctx, item)
-    except Exception:
-        # Best effort and deliberately silent. The operator is already looking
-        # at one error; a second one about the log file helps nobody.
-        return None
-
-
-def _write_crash(ctx, item):
-    path = ctx.log_dir / "crashes.log"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as fh:
-        fh.write("%s  %s\n%s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    item.name(), traceback.format_exc()))
-    return path
 
 
 def build_runner(ctx, classes=None):

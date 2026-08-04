@@ -196,7 +196,7 @@ def drive(menu_items, position, keys, plugin=None):
     buf = io.StringIO()
     with mock.patch.object(P, "capture_world", side_effect=captures) as captured, \
             mock.patch.object(P, "print_menu") as painter, \
-            mock.patch.object(P, "ask", side_effect=list(keys)):
+            mock.patch.object(P.prompt, "ask", side_effect=list(keys)):
         with redirect_stdout(buf):
             runner.loop()
     return Drive(runner, ctx, captured, painter, buf.getvalue())
@@ -308,8 +308,9 @@ class AYesNoQuestionTakesOneKey(unittest.TestCase):
     operator believed he had answered."""
 
     def _confirm(self, keys, default):
-        with mock.patch.object(P, "_raw_capable", return_value=True), \
-                mock.patch.object(P, "_one_char_at", side_effect=list(keys)):
+        with mock.patch.object(P.prompt, "_raw_capable", return_value=True), \
+                mock.patch.object(P.prompt, "_one_char_at",
+                                  side_effect=list(keys)):
             with redirect_stdout(io.StringIO()):
                 return P.confirm("  Go?", default)
 
@@ -331,8 +332,8 @@ class AYesNoQuestionTakesOneKey(unittest.TestCase):
     def test_a_pipe_answers_on_one_line_and_does_not_loop(self):
         """Not a terminal is every test and every piped run. It must not wait
         for a second key that is never coming."""
-        with mock.patch.object(P, "_raw_capable", return_value=False), \
-                mock.patch.object(P, "ask", return_value="r"):
+        with mock.patch.object(P.prompt, "_raw_capable", return_value=False), \
+                mock.patch.object(P.prompt, "ask", return_value="r"):
             with redirect_stdout(io.StringIO()):
                 self.assertIs(P.confirm("  Go?", False), False)
 

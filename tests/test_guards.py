@@ -780,7 +780,7 @@ class TestTheDestructiveSequence(GuardTest):
                                  P.Work(self.w.ctx))[M.ERASE_CARD]
 
     def _run(self, answer):
-        with mock.patch.object(P, "ask", return_value=answer):
+        with mock.patch.object(P.prompt, "ask", return_value=answer):
             return self.item.execute(P.capture_world(self.w.ctx, M.Scope.FULL))
 
     def test_the_wrong_word_erases_nothing_and_does_not_complete(self):
@@ -809,7 +809,7 @@ class TestTheDestructiveSequence(GuardTest):
         type DELETE to find out there is nothing behind it.
         """
         self._run("DELETE")
-        with mock.patch.object(P, "ask", side_effect=AssertionError(
+        with mock.patch.object(P.prompt, "ask", side_effect=AssertionError(
                 "an already-satisfied item must not prompt")):
             outcome = self.item.execute(P.capture_world(self.w.ctx, M.Scope.FULL))
         self.assertTrue(outcome.completed)
@@ -828,7 +828,7 @@ class TestTheDestructiveSequence(GuardTest):
             _sh.rmtree(str(self.w.ctx.render_root / "DCIM"))
             return "DELETE"
 
-        with mock.patch.object(P, "ask", side_effect=answer_and_move_the_world):
+        with mock.patch.object(P.prompt, "ask", side_effect=answer_and_move_the_world):
             outcome = self.item.execute(P.capture_world(self.w.ctx, M.Scope.FULL))
         self.assertFalse(outcome.completed)
         self.assertIn("Refused after the re-check", outcome.note)

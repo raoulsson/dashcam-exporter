@@ -305,7 +305,7 @@ class Bench:
         return out.getvalue()
 
     def _patched(self, pressed):
-        return _patches(mock.patch.object(P, "ask", side_effect=self._ask(pressed)),
+        return _patches(mock.patch.object(P.prompt, "ask", side_effect=self._ask(pressed)),
                      mock.patch.object(P, "capture_world",
                                        side_effect=lambda ctx, scope=None: self.world))
 

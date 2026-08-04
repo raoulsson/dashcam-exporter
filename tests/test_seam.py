@@ -380,7 +380,7 @@ class Bench:
     def _prompted(self, item, typed):
         self.asked = []
         return mock.patch.object(
-            P, "ask", side_effect=self._answering(_as_list(_or_word(item, typed))))
+            P.prompt, "ask", side_effect=self._answering(_as_list(_or_word(item, typed))))
 
     def _answering(self, answers):
         def ask(prompt, default="", quits=True):
@@ -1772,7 +1772,7 @@ class TestAutoSkippedIsNotAutoExcluded(SeamTest):
         """This is a delete. An empty answer must never be one, however good
         the suggestion above it."""
         by = {1: {"renderable": False}}
-        with quiet(), mock.patch.object(P, "ask", return_value="  "):
+        with quiet(), mock.patch.object(P.prompt, "ask", return_value="  "):
             self.assertIsNone(P._ask_trip_indices(by))
 
 
@@ -1973,7 +1973,7 @@ class TestTheWayPastTheCardRefusal(SeamTest):
     def test_it_records_the_drop_and_then_erases(self):
         b, w = self._carded()
         self.assertTrue(P.guards.card_is_expendable(w).blocked)
-        with quiet(), mock.patch.object(P, "ask", return_value="DELETE"):
+        with quiet(), mock.patch.object(P.prompt, "ask", return_value="DELETE"):
             out = P.drop_unaccounted_then_erase(b.ctx, w)
         self.assertTrue(out.completed, out.note)
         self.assertIn("20260502102459", P.excluded_stamps(b.ctx))
