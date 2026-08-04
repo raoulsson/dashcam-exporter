@@ -64,7 +64,7 @@ def _handover(work, opening, act):
         return opening
     name = _plugin_name(act) or "the plugin"
     return "%s\n\nFrom the configured plugin %s:\n\n%s" % (
-        opening, work.amber(name), _tabbed(said))
+        opening, work.yellow(name), _tabbed(said))
 
 
 def _reason(*reasons):

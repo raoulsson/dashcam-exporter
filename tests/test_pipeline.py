@@ -1461,6 +1461,21 @@ class TheHelpScreen(unittest.TestCase):
         self.assertIn("            /a/very/long/path/that/must/not/be/wrapped/"
                       "anywhere/at/all/here", lines)
 
+    def test_the_neighbours_fold_rather_than_run_on(self):
+        """Eight on one line is a paragraph pretending to be a table, and it
+        puts the widest line on the screen in the part nobody came to read."""
+        rows = [ln for ln in self._plain(6)
+                if ln.startswith("    leads to") or ln.startswith("                 ")]
+        self.assertGreater(len(rows), 1, "the list did not fold")
+        for row in rows:
+            self.assertLessEqual(row.count(")"), 3)
+
+    def test_a_folded_row_lines_up_under_its_label(self):
+        lines = self._plain(6)
+        first = next(i for i, ln in enumerate(lines) if ln.startswith("    leads to"))
+        head = len(lines[first]) - len(lines[first].lstrip()) + len("leads to     ")
+        self.assertEqual(len(lines[first + 1]) - len(lines[first + 1].lstrip()), head)
+
     def test_the_view_still_says_it_is_one(self):
         for row in ("    leads to", "    reached from"):
             line = next(ln for ln in self._plain(0) if ln.startswith(row))

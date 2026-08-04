@@ -195,16 +195,6 @@ class C:
         return cls._w("36", s)
 
     @classmethod
-    def amber(cls, s):
-        """A configured plugin's name, where help hands over to its own words.
-
-        256-colour rather than yellow (33), which this tool already spends on
-        "look at this" -- an entry the graph refuses, a number that did not
-        parse. Naming who is speaking is not a warning about anything.
-        """
-        return cls._w("38;5;214", s)
-
-    @classmethod
     def violet(cls, s):
         """The bars, and nothing else. 256-colour, because magenta (35) is the
         same weight as the red that means "this destroys something"."""
@@ -7711,9 +7701,9 @@ class Work:
     def __init__(self, ctx):
         self.ctx = ctx
 
-    def amber(self, text):
+    def yellow(self, text):
         """Paint, lent to the items. They own the words; colours live here."""
-        return C.amber(text)
+        return C.yellow(text)
 
     def website_export_dir(self):
         """Where the local edition puts the finished site, for help to name."""
@@ -8132,17 +8122,15 @@ def _about(menu_items, position, number):
     the first thing the eye lands on.
     """
     item = menu_items[number]
+    erases = "yes, and asks for a typed word" if item.destr() else "no"
     return ((rule("Help: %s" % item.name(), ch="="),
              "    " + item.description())
             + _about_paragraphs(item.about())
-            + ("",
-               C.dim("    leads to     %s"
-                     % _named_list(menu_items, item.outbound())),
-               C.dim("    reached from %s"
-                     % _named_list(menu_items, item.inbound())),
-               C.dim("    erases       %s"
-                     % ("yes, and asks for a typed word" if item.destr() else "no")),
-               ""))
+            + ("",)
+            + _graph_row("leads to", _named_list(menu_items, item.outbound()))
+            + _graph_row("reached from", _named_list(menu_items, item.inbound()))
+            + _graph_row("erases", [erases])
+            + ("",))
 
 
 def _about_paragraphs(text):
@@ -8189,13 +8177,32 @@ _NO_EDGES = {
 }
 
 
+# Eight neighbours on one line is a paragraph pretending to be a table: the eye
+# has nothing to count by, and it forces the widest line on the screen into the
+# part nobody came to read. Three is enough to still scan as a list.
+_PER_ROW = 3
+_LABEL_W = 13
+
+
 def _named_list(menu_items, where):
+    """The neighbours in printable chunks, or one phrase saying there are none."""
     numbers = where.edges()
     if numbers is None:
-        return C.dim(_NO_EDGES.get(type(where), "nothing"))
+        return [_NO_EDGES.get(type(where), "nothing")]
     if not numbers:
-        return C.dim("nothing")
-    return ", ".join("%d) %s" % (n, menu_items[n].name()) for n in sorted(numbers))
+        return ["nothing"]
+    names = ["%d) %s" % (n, menu_items[n].name()) for n in sorted(numbers)]
+    return [", ".join(names[i:i + _PER_ROW])
+            + ("," if i + _PER_ROW < len(names) else "")
+            for i in range(0, len(names), _PER_ROW)]
+
+
+def _graph_row(label, chunks):
+    """One labelled row, wrapped under its own label rather than under the
+    left margin, so the continuation reads as more of the same answer."""
+    lead = "    %-*s" % (_LABEL_W, label)
+    return tuple(C.dim(lead + chunk if i == 0 else " " * len(lead) + chunk)
+                 for i, chunk in enumerate(chunks))
 
 
 def _next_steps(menu_items, verdicts, offered):
