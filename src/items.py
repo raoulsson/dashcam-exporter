@@ -228,7 +228,7 @@ class BuildPreview(MenuItem):
         """
         return first_block(
             guards.no_import(world, "no import — nothing to preview"),
-            guards.sidecars_missing(world))
+            guards.Gates(world).sidecars_missing())
 
     def _perform(self, world):
         return self._work.build_preview(world)
@@ -337,7 +337,7 @@ class RenderVideos(MenuItem):
         return first_block(
             guards.no_import(world,
                        "nothing to render"),
-            guards.sidecars_missing(world))
+            guards.Gates(world).sidecars_missing())
 
     def _perform(self, world):
         return self._work.render(world)
@@ -607,7 +607,7 @@ class CleanWorkspace(Destructive):
         """
         return first_block(
             guards.no_import(world, "nothing imported — nothing to clean up"),
-            guards.nothing_to_clean_up(world))
+            guards.Gates(world).nothing_to_clean_up())
 
     def _plan(self, world) -> Plan:
         return self._work.clean_workspace_plan(world)

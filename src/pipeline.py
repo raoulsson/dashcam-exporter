@@ -5608,15 +5608,15 @@ def _clean_target_quietly(root):
     return root
 
 
-def _print_gates(world):
+def _print_gates(gates):
     """Who is being asked, then the gates and what each one answered.
 
     Which proofs are even possible depends on what is configured, so the count
     comes first and the gates number themselves against it. Writing "[1/3]"
     when only one check can run would claim two that never happened.
     """
-    _print_who_answers(world.target)
-    _print_readings(_applicable_readings(world))
+    _print_who_answers(gates.world.target)
+    _print_readings(_applicable_readings(gates))
 
 
 def _print_who_answers(target):
@@ -5632,8 +5632,8 @@ def _print_who_answers(target):
     return
 
 
-def _applicable_readings(world):
-    return list(filter(_can_answer, guards.gate_readings(world)))
+def _applicable_readings(gates):
+    return list(filter(_can_answer, gates.gate_readings()))
 
 
 def _can_answer(reading):
@@ -5652,7 +5652,7 @@ def _evidence_colour(e):
     return C.red(e.value)
 
 
-def _clean_banner(ctx, world, target, size):
+def _clean_banner(ctx, gates, target, size):
     """The last thing on screen before the word is asked for.
 
     Nothing, for a discard. The target and the file count are three lines up
@@ -5660,17 +5660,17 @@ def _clean_banner(ctx, world, target, size):
     screen insisting about a delete that takes a second copy. A sweep keeps
     its banner: that one destroys the only copy there is.
     """
-    if guards.import_is_disposable(world):
+    if gates.import_is_disposable():
         return ()
     return (C.red("  Deleting %s removes %s of original footage permanently."
-                  % (tilde(target), human_bytes(size))),) + _what_survives(ctx, world)
+                  % (tilde(target), human_bytes(size))),) + _what_survives(ctx, gates)
 
 
-def _what_survives(ctx, world):
-    unproven = guards.unproven_lines(world)
+def _what_survives(ctx, gates):
+    unproven = gates.unproven_lines()
     if unproven:
         return _nothing_off_this_machine_was_checked(ctx, unproven)
-    return _on_the_targets_word(world.target, guards.destination_proof(world))
+    return _on_the_targets_word(gates.world.target, gates.destination_proof())
 
 
 def _on_the_targets_word(target, proof):
@@ -5708,8 +5708,13 @@ def clean_workspace_plan(ctx, world):
 
     The heavy guard runs TWICE on purpose: here, so a refusal never reaches
     the prompt, and again inside the commit against a world captured
-    after the word was typed. Same callable both times, so the two cannot
-    drift the way two hand-copied chains did.
+    after the word was typed. Same method both times, so the two cannot
+    drift the way two hand-copied chains did — what differs is the world it
+    is bound to, which is the entire point of asking again.
+
+    One Gates for this whole screen. Every question below — may it go, what
+    goes, what survives, which gate answered what — is asked of the same
+    frozen world, and it is the object rather than a convention that says so.
     """
     started = time.time()
     root = pick_import(ctx, "clearing the workspace")
@@ -5726,7 +5731,8 @@ def clean_workspace_plan(ctx, world):
     print()
     _print_all(_cleaning_block(rows, files, size))
 
-    verdict = guards.clean_is_allowed(world)
+    gates = guards.Gates(world)
+    verdict = gates.clean_is_allowed()
     if verdict.blocked:
         _print_all(_refusal_block(rows, verdict, world))
         if not world.orphan_clips:
@@ -5738,12 +5744,23 @@ def clean_workspace_plan(ctx, world):
             _print_gate_detail(world)
         return _nothing(ctx, CLEAN_WS, started, _refusal_note(rows, verdict))
 
-    _print_all(_what_goes_lines(world))
-    _print_all(_why_it_may_go(world))
-    return menu.Plan(guards.clean_is_allowed,
+    _print_all(_what_goes_lines(gates))
+    _print_all(_why_it_may_go(gates))
+    return menu.Plan(_clean_gate,
                      lambda fresh: _clean_workspace_commit(ctx, fresh, root, target,
                                                            size, files, started),
-                     banner=_clean_banner(ctx, world, target, size))
+                     banner=_clean_banner(ctx, gates, target, size))
+
+
+def _clean_gate(world):
+    """Item 8's heavy guard in the shape menu.Plan asks for: world -> Verdict.
+
+    The gates the screen above was printed from are bound to the world it was
+    drawn with, and the re-check is only worth running against a world captured
+    after the word was typed. So the fresh world gets its own Gates here, and
+    the method asked of it is the same one.
+    """
+    return guards.Gates(world).clean_is_allowed()
 
 
 # One row per trip in the import: what it is, and what accounts for it.
@@ -5945,7 +5962,7 @@ def _orphan_detail(ctx, root, world):
     return tuple(lines)
 
 
-def _what_goes_lines(world):
+def _what_goes_lines(gates):
     """A discard names what else goes; a sweep says the one thing that matters.
 
     They are not the same act. A discard deletes a second copy of clips the
@@ -5956,16 +5973,16 @@ def _what_goes_lines(world):
     A sweep destroys the only copy of the raw footage there will ever be, and
     that sentence stays however tidy the screen gets.
     """
-    if guards.import_holds_no_footage(world):
+    if gates.import_holds_no_footage():
         # Not red, and not that sentence: every clip is already gone, dropped
         # by item 4. Saying "the ORIGINAL footage" over a workspace holding no
         # footage is a warning about nothing, and a warning that is sometimes
         # about nothing is one the operator learns to click past.
         return (C.dim("  No footage here: every trip was excluded. What goes "
                       "is the sidecars and the GPS logs."),)
-    if not guards.import_is_disposable(world):
+    if not gates.import_is_disposable():
         return (C.red("  This is the ORIGINAL footage and it is not recoverable."),)
-    trips = max(len(world.metas), len(world.renders))
+    trips = max(len(gates.world.metas), len(gates.world.renders))
     if not trips:
         return ()
     return (C.dim("  Cleaning the workspace removes %d trips and the metadata."
@@ -5974,7 +5991,7 @@ def _what_goes_lines(world):
             C.dim("  restarted without any loss."))
 
 
-def _why_it_may_go(world):
+def _why_it_may_go(gates):
     """The publish gates, and only when there is publishing to gate.
 
     A discard rests on the card holding every file, which the guard has just
@@ -5982,10 +5999,10 @@ def _why_it_may_go(world):
     front of a delete that takes a second copy. The gates stay on the sweep,
     where the operator is being asked to act on somebody else's answer.
     """
-    if guards.import_is_disposable(world):
+    if gates.import_is_disposable():
         return ()
     print()
-    _print_gates(world)
+    _print_gates(gates)
     return ()
 
 
@@ -6040,7 +6057,7 @@ def _clean_workspace_commit(ctx, fresh, root, target, size, files, started):
                     " Nothing was touched."))
         return _outcome(record(ctx, NAME[CLEAN_WS], SKIPPED, started,
                                "refused: the delete target moved"))
-    discarding = guards.import_is_disposable(fresh)
+    discarding = guards.Gates(fresh).import_is_disposable()
     try:
         shutil.rmtree(str(target))
     except OSError as e:

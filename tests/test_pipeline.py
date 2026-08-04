@@ -1504,7 +1504,7 @@ class TheCleanScreenSaysWhatActuallyGoes(unittest.TestCase):
                        unsourced_files=frozenset(["DCIM/203gps/x.gpx"]))
 
     def test_no_footage_left_means_no_warning_about_footage(self):
-        said = " ".join(P._what_goes_lines(self._emptied()))
+        said = " ".join(P._what_goes_lines(P.guards.Gates(self._emptied())))
         self.assertNotIn("ORIGINAL footage", said)
         self.assertIn("every trip was excluded", said)
 
@@ -1512,7 +1512,8 @@ class TheCleanScreenSaysWhatActuallyGoes(unittest.TestCase):
         world = W.World(imports=(Path("/w/import/2026-08-04"),),
                         import_files=frozenset(["DCIM/200video/front/a.mp4"]),
                         unsourced_files=frozenset(["DCIM/200video/front/a.mp4"]))
-        self.assertIn("ORIGINAL footage", " ".join(P._what_goes_lines(world)))
+        self.assertIn("ORIGINAL footage",
+                      " ".join(P._what_goes_lines(P.guards.Gates(world))))
 
 
 class TheInfoScreen(unittest.TestCase):

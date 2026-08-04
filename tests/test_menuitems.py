@@ -1021,6 +1021,16 @@ class TestCleanWorkspaceIsOffered(unittest.TestCase):
         self.assertIs(item_for(CLEAN_WS).SCOPE, M.Scope.FULL)
 
 
+def workspace_gate(world):
+    """The sweep's gate in the shape menu.Plan takes: world -> Verdict.
+
+    A Gates is built per world rather than per question, so the callable can
+    be handed the world captured after the word is typed and answer about that
+    one.
+    """
+    return guards.Gates(world).workspace_is_expendable()
+
+
 def clean_with(guard, fresh, word="CLEAN"):
     """Drive item 8 all the way to its re-check, with `fresh` as the world the
     guard is re-asked against after the word is typed."""
@@ -1064,13 +1074,13 @@ class TestTheWorkspaceIsExpendableRule(unittest.TestCase):
         """
         fresh = rendered_world(expected_trips=9,
                                target=a_target(complete=M.Evidence.YES))
-        _work, act, outcome = clean_with(guards.workspace_is_expendable, fresh)
+        _work, act, outcome = clean_with(workspace_gate, fresh)
         self.assertFalse(act.ran)
         self.assertFalse(outcome.completed)
 
     def test_a_destination_that_says_no_refuses_however_good_the_local_evidence(self):
         fresh = rendered_world(target=a_target(complete=M.Evidence.NO))
-        work, act, outcome = clean_with(guards.workspace_is_expendable, fresh)
+        work, act, outcome = clean_with(workspace_gate, fresh)
         self.assertFalse(act.ran)
         self.assertFalse(outcome.completed)
         self.assertTrue(work.refusals)
@@ -1080,7 +1090,7 @@ class TestTheWorkspaceIsExpendableRule(unittest.TestCase):
         count is fine"."""
         fresh = rendered_world(expected_trips=None,
                                target=a_target(complete=M.Evidence.YES))
-        _work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
+        _work, act, _outcome = clean_with(workspace_gate, fresh)
         self.assertFalse(act.ran)
 
     def test_a_destination_that_could_not_be_asked_fails_closed(self):
@@ -1089,7 +1099,7 @@ class TestTheWorkspaceIsExpendableRule(unittest.TestCase):
         permission — turning "could not find out" into "yes" is what this
         forbids, and one negation is all it would take."""
         fresh = rendered_world(target=a_target(complete=M.Evidence.UNKNOWN))
-        _work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
+        _work, act, _outcome = clean_with(workspace_gate, fresh)
         self.assertFalse(act.ran)
 
     def test_not_applicable_drops_the_gate_and_unknown_fails_it(self):
@@ -1101,7 +1111,7 @@ class TestTheWorkspaceIsExpendableRule(unittest.TestCase):
         for answer, expected in ((M.Evidence.NA, True), (M.Evidence.UNKNOWN, False)):
             with self.subTest(answer=answer.value):
                 fresh = rendered_world(target=a_target(complete=answer))
-                _work, act, _outcome = clean_with(guards.workspace_is_expendable,
+                _work, act, _outcome = clean_with(workspace_gate,
                                                   fresh)
                 self.assertIs(act.ran, expected)
 
@@ -1109,7 +1119,7 @@ class TestTheWorkspaceIsExpendableRule(unittest.TestCase):
         """Every trip encoded, and the destination has all of them. This is the
         case the whole rule exists to permit."""
         fresh = rendered_world(target=a_target(complete=M.Evidence.YES))
-        _work, act, outcome = clean_with(guards.workspace_is_expendable, fresh)
+        _work, act, outcome = clean_with(workspace_gate, fresh)
         self.assertTrue(act.ran)
         self.assertTrue(outcome.completed)
 
@@ -1121,13 +1131,13 @@ class TestTheWorkspaceIsExpendableRule(unittest.TestCase):
         One sentence where there used to be two. Not a weakened check — the
         two lines were one operator's two config keys for one condition, and
         with one implementation it is genuinely one condition."""
-        lines = guards.unproven_lines(rendered_world())
+        lines = guards.Gates(rendered_world()).unproven_lines()
         self.assertEqual(len(lines), 1)
         self.assertIn("upload_plugin", lines[0])
 
     def test_a_configured_plugin_that_answers_does_not_get_that_sentence(self):
-        lines = guards.unproven_lines(
-            rendered_world(target=a_target(complete=M.Evidence.YES)))
+        world = rendered_world(target=a_target(complete=M.Evidence.YES))
+        lines = guards.Gates(world).unproven_lines()
         self.assertEqual(lines, ())
 
 
@@ -1139,7 +1149,7 @@ class TestTheRecheckHappensAfterTheWordIsTyped(unittest.TestCase):
         swapped or a folder deleted while the prompt is on screen. The same
         callable is asked twice, against two worlds captured at two instants."""
         fresh = rendered_world(target=a_target(complete=M.Evidence.NO))
-        work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
+        work, act, _outcome = clean_with(workspace_gate, fresh)
         self.assertEqual(work.scopes, [M.Scope.FULL])
         self.assertFalse(act.ran)
 
@@ -1148,12 +1158,12 @@ class TestTheRecheckHappensAfterTheWordIsTyped(unittest.TestCase):
         that reasoning produced the defect this replaces. The act is handed the
         re-captured world by construction, so it cannot be handed a stale one."""
         fresh = rendered_world(target=a_target(complete=M.Evidence.YES))
-        _work, act, _outcome = clean_with(guards.workspace_is_expendable, fresh)
+        _work, act, _outcome = clean_with(workspace_gate, fresh)
         self.assertEqual(act.worlds, [fresh])
 
     def test_the_wrong_word_stops_before_the_re_check(self):
         fresh = rendered_world(target=a_target(complete=M.Evidence.YES))
-        work, act, outcome = clean_with(guards.workspace_is_expendable, fresh,
+        work, act, outcome = clean_with(workspace_gate, fresh,
                                         word="clean")
         self.assertFalse(act.ran)
         self.assertFalse(outcome.completed)

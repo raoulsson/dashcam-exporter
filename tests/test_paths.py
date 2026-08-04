@@ -164,6 +164,11 @@ class FakePublisher:
         return M.did("uploaded")
 
 
+def _workspace_gate(world):
+    """The sweep's gate in the shape menu.Plan takes: world -> Verdict."""
+    return guards.Gates(world).workspace_is_expendable()
+
+
 class FakeWork:
     """Every body an item can reach, replaced by a recorder.
 
@@ -213,7 +218,7 @@ class FakeWork:
         return M.Plan(M.nothing_to_recheck, self._drop, ("would drop trip_a",))
 
     def clean_workspace_plan(self, world):
-        return M.Plan(guards.workspace_is_expendable, self._clean,
+        return M.Plan(_workspace_gate, self._clean,
                       ("would erase the import and its renders",))
 
     def erase_card_plan(self, world):

@@ -292,23 +292,23 @@ class TestAClipWithNoSecondCopyStopsTheSweep(unittest.TestCase):
             orphan_clips=orphans)
 
     def test_the_sweep_is_refused(self):
-        verdict = guards.clean_is_allowed(self._world(("20260728155513",)))
+        verdict = guards.Gates(self._world(("20260728155513",))).clean_is_allowed()
         self.assertTrue(verdict.blocked)
         self.assertIn("nowhere else", verdict.reason)
 
     def test_the_clips_are_named_rather_than_counted(self):
         """He decides whether footage matters by looking at it, and a headcount
         is not something anyone can act on."""
-        verdict = guards.clean_is_allowed(self._world(("20260728155513",)))
+        verdict = guards.Gates(self._world(("20260728155513",))).clean_is_allowed()
         self.assertEqual(verdict.evidence, ("20260728155513",))
 
     def test_everything_else_unchanged_still_goes_through(self):
-        self.assertFalse(guards.clean_is_allowed(self._world()).blocked)
+        self.assertFalse(guards.Gates(self._world()).clean_is_allowed().blocked)
 
     def test_excluding_them_is_what_lifts_it(self):
         """Not a flag that skips the gate: excluding records the decision, and
         orphan_clips is derived with the exclusions subtracted."""
-        self.assertFalse(guards.clean_is_allowed(self._world(())).blocked)
+        self.assertFalse(guards.Gates(self._world(())).clean_is_allowed().blocked)
 
 
 class TestPurgeKeepsState(GuardTest):
@@ -533,7 +533,7 @@ class TestTheTripCountIsSomethingWeKnow(unittest.TestCase):
         """The symptom, stated as the gate's answer: six sidecars, six renders,
         no scan — yes, not unknown."""
         world = W.World(renders_here=_renders(6), expected_trips=6)
-        self.assertIs(guards.rendered_locally(world), M.Evidence.YES)
+        self.assertIs(guards.Gates(world).rendered_locally(), M.Evidence.YES)
 
 
 class TestWorkspaceRefusesWhenNothingElseCanDecide(GuardTest):
@@ -550,12 +550,14 @@ class TestWorkspaceRefusesWhenNothingElseCanDecide(GuardTest):
     """
 
     def test_under_rendered_import_refuses_with_no_target(self):
-        verdict = guards.workspace_is_expendable(_world(renders_here=1, expected=3))
+        verdict = guards.Gates(
+            _world(renders_here=1, expected=3)).workspace_is_expendable()
         self.assertTrue(verdict.blocked, verdict.reason)
         self.assertIn("rendered locally", verdict.reason)
 
     def test_unreadable_grouping_refuses_with_no_target(self):
-        verdict = guards.workspace_is_expendable(_world(renders_here=1, expected=None))
+        verdict = guards.Gates(
+            _world(renders_here=1, expected=None)).workspace_is_expendable()
         self.assertTrue(verdict.blocked, verdict.reason)
         self.assertIn("unknown", verdict.reason)
 
@@ -568,22 +570,22 @@ class TestWorkspaceRefusesWhenNothingElseCanDecide(GuardTest):
         written is in nobody's question, and an unreadable grouping means the
         count cannot be compared against anything at all.
         """
-        verdict = guards.workspace_is_expendable(
-            _world(renders_here=1, expected=3, complete=M.Evidence.YES))
+        world = _world(renders_here=1, expected=3, complete=M.Evidence.YES)
+        verdict = guards.Gates(world).workspace_is_expendable()
         self.assertTrue(verdict.blocked, verdict.reason)
         self.assertIn("rendered locally", verdict.reason)
 
     def test_a_no_from_the_destination_is_decisive_against_the_erase(self):
         """A NO stops it even when everything local agrees. That half of the
         rule is unchanged."""
-        no = guards.workspace_is_expendable(
-            _world(renders_here=3, expected=3, complete=M.Evidence.NO))
+        world = _world(renders_here=3, expected=3, complete=M.Evidence.NO)
+        no = guards.Gates(world).workspace_is_expendable()
         self.assertTrue(no.blocked, no.reason)
 
     def test_a_destination_that_could_not_answer_is_not_a_yes(self):
         """Fails closed: "could not find out" is not "it is there"."""
-        verdict = guards.workspace_is_expendable(
-            _world(renders_here=3, expected=3, complete=M.Evidence.UNKNOWN))
+        world = _world(renders_here=3, expected=3, complete=M.Evidence.UNKNOWN)
+        verdict = guards.Gates(world).workspace_is_expendable()
         self.assertTrue(verdict.blocked, verdict.reason)
 
     def test_not_applicable_drops_the_gate_rather_than_failing_it(self):
@@ -591,10 +593,11 @@ class TestWorkspaceRefusesWhenNothingElseCanDecide(GuardTest):
         an archive disk stores footage and does not publish it. Then the erase
         rests on the local render count alone, and unproven_lines says so."""
         world = _world(renders_here=3, expected=3, complete=M.Evidence.NA)
-        self.assertFalse(guards.workspace_is_expendable(world).blocked)
+        self.assertFalse(guards.Gates(world).workspace_is_expendable().blocked)
 
     def test_everything_proven_locally_is_expendable(self):
-        verdict = guards.workspace_is_expendable(_world(renders_here=3, expected=3))
+        verdict = guards.Gates(
+            _world(renders_here=3, expected=3)).workspace_is_expendable()
         self.assertFalse(verdict.blocked, verdict.reason)
 
 
@@ -617,8 +620,8 @@ class TestNothingRenderedIsBelowTheTargetsWordEntirely(GuardTest):
         below the floor is vacuously happy — the destination is talking about a
         previous round. The rmtree would take footage that exists in no render
         and at no destination."""
-        verdict = guards.workspace_is_expendable(
-            _world(renders_here=0, expected=3, complete=M.Evidence.YES))
+        world = _world(renders_here=0, expected=3, complete=M.Evidence.YES)
+        verdict = guards.Gates(world).workspace_is_expendable()
         self.assertTrue(verdict.blocked, verdict.reason)
         self.assertIn("nothing from this import was rendered", verdict.reason)
 
@@ -628,18 +631,18 @@ class TestNothingRenderedIsBelowTheTargetsWordEntirely(GuardTest):
         comparison happening to fail."""
         for expected in (None, 0, 3):
             with self.subTest(expected=expected):
-                verdict = guards.workspace_is_expendable(
+                verdict = guards.Gates(
                     _world(renders_here=0, expected=expected,
-                           complete=M.Evidence.YES))
+                           complete=M.Evidence.YES)).workspace_is_expendable()
                 self.assertTrue(verdict.blocked, verdict.reason)
 
     def test_the_gate_table_and_the_verdict_agree(self):
         """The screen printed "rendered locally .... no" and then proceeded to
         the prompt. A gate the operator can read must be a gate."""
         world = _world(renders_here=0, expected=3, complete=M.Evidence.YES)
-        readings = dict(guards.gate_readings(world))
+        readings = dict(guards.Gates(world).gate_readings())
         self.assertIs(readings["rendered locally"], M.Evidence.NO)
-        self.assertTrue(guards.workspace_is_expendable(world).blocked)
+        self.assertTrue(guards.Gates(world).workspace_is_expendable().blocked)
 
 
 # ---------------------------------------------------------------------------
@@ -857,12 +860,13 @@ class TestTheLocalRenderGateHasNoWayToAbstain(unittest.TestCase):
     """
 
     def test_an_import_with_no_renders_at_all_answers_no(self):
-        self.assertIs(guards.rendered_locally(_world(renders_here=0)),
+        self.assertIs(guards.Gates(_world(renders_here=0)).rendered_locally(),
                       M.Evidence.NO)
 
     def test_a_grouping_that_could_not_be_read_answers_unknown_not_yes(self):
-        self.assertIs(guards.rendered_locally(_world(renders_here=1, expected=None)),
-                      M.Evidence.UNKNOWN)
+        reading = guards.Gates(
+            _world(renders_here=1, expected=None)).rendered_locally()
+        self.assertIs(reading, M.Evidence.UNKNOWN)
 
     def test_it_never_answers_not_applicable(self):
         """Asserted over every shape of world the capture can produce, because
@@ -870,8 +874,9 @@ class TestTheLocalRenderGateHasNoWayToAbstain(unittest.TestCase):
         for renders_here in (0, 1, 3):
             for expected in (None, 0, 3):
                 with self.subTest(renders=renders_here, expected=expected):
-                    reading = guards.rendered_locally(
-                        _world(renders_here=renders_here, expected=expected))
+                    world = _world(renders_here=renders_here,
+                                   expected=expected)
+                    reading = guards.Gates(world).rendered_locally()
                     self.assertTrue(reading.applicable,
                                     "the floor abstained, so nothing holds the rule up")
 
@@ -957,8 +962,8 @@ class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
                        **rest)
 
     def test_a_bare_import_whose_clips_are_all_on_the_card(self):
-        self.assertTrue(guards.import_is_disposable(self._import()))
-        self.assertFalse(guards.clean_is_allowed(self._import()).blocked)
+        self.assertTrue(guards.Gates(self._import()).import_is_disposable())
+        self.assertFalse(guards.Gates(self._import()).clean_is_allowed().blocked)
 
     def test_one_file_short_and_it_is_not_disposable(self):
         """Per file, because a headcount cannot tell a card holding two of the
@@ -966,19 +971,20 @@ class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
         short is as likely to be a rear clip or a GPS tar as a front clip."""
         world = self._import(mine=("a.mp4", "b.mp4", "c.mp4"),
                              on_card=("a.mp4", "b.mp4"))
-        self.assertFalse(guards.import_is_disposable(world))
-        self.assertTrue(guards.clean_is_allowed(world).blocked)
+        self.assertFalse(guards.Gates(world).import_is_disposable())
+        self.assertTrue(guards.Gates(world).clean_is_allowed().blocked)
 
     def test_no_card_at_all_and_it_is_not_disposable(self):
         world = self._import(on_card=())
-        self.assertFalse(guards.import_is_disposable(world))
-        self.assertTrue(guards.clean_is_allowed(world).blocked)
+        self.assertFalse(guards.Gates(world).import_is_disposable())
+        self.assertTrue(guards.Gates(world).clean_is_allowed().blocked)
 
     def test_an_empty_import_is_not_disposable_by_this_route(self):
         """Vacuous truth is the failure mode: no files means no file is
         missing from the card, and "all of them are safe" would be a yes about
         nothing. sidecars_missing already settles the empty case."""
-        self.assertFalse(guards.import_is_disposable(self._import(mine=())))
+        self.assertFalse(
+            guards.Gates(self._import(mine=())).import_is_disposable())
 
     def test_what_was_made_from_it_does_not_take_this_route_away(self):
         """RESTATED: a sidecar, a render or a gathered folder used to block it.
@@ -998,22 +1004,23 @@ class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
                      {"final_folders": (Path("/w/out/final_2026-07-28"),)}):
             with self.subTest(**made):
                 world = self._import(**made)
-                self.assertTrue(guards.import_is_disposable(world))
-                self.assertFalse(guards.clean_is_allowed(world).blocked)
+                self.assertTrue(guards.Gates(world).import_is_disposable())
+                self.assertFalse(guards.Gates(world).clean_is_allowed().blocked)
 
     def test_but_the_card_must_still_hold_every_file(self):
         """The half that stayed. One file short and no amount of derived work
         makes the workspace expendable."""
         world = self._import(mine=("a.mp4", "b.mp4"), on_card=("a.mp4",),
                              renders=(W.Render("t.mp4", 10),))
-        self.assertFalse(guards.import_is_disposable(world))
-        self.assertTrue(guards.clean_is_allowed(world).blocked)
+        self.assertFalse(guards.Gates(world).import_is_disposable())
+        self.assertTrue(guards.Gates(world).clean_is_allowed().blocked)
 
     def test_the_cheap_half_lets_a_disposable_import_through(self):
         """Item 8's evaluate, which is what decides whether the entry is even
         offered. Blocked there, the operator never reaches the evidence."""
-        self.assertIsNone(guards.nothing_to_clean_up(self._import()))
-        self.assertIsNotNone(guards.nothing_to_clean_up(self._import(on_card=())))
+        self.assertIsNone(guards.Gates(self._import()).nothing_to_clean_up())
+        self.assertIsNotNone(
+            guards.Gates(self._import(on_card=())).nothing_to_clean_up())
 
     def test_the_refusal_names_the_files(self):
         said = guards.unsourced_lines(self._import(mine=("a.mp4", "b.mp4", "c.mp4"),
@@ -1027,8 +1034,8 @@ class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
         card_root() walks down to the import\'s own DCIM; the comparison then
         cannot fail, and the folder it approves deleting is the only copy."""
         world = self._import(card_shares_the_import=True)
-        self.assertFalse(guards.import_is_disposable(world))
-        self.assertTrue(guards.clean_is_allowed(world).blocked)
+        self.assertFalse(guards.Gates(world).import_is_disposable())
+        self.assertTrue(guards.Gates(world).clean_is_allowed().blocked)
         self.assertIn("card", guards.unsourced_lines(world)[0])
 
 
@@ -1061,48 +1068,48 @@ class TestAnImportWithNoClipsLeftCanBeCleared(unittest.TestCase):
         allowed is the dead end this whole change is about. They read one
         predicate so they cannot drift."""
         world = self._world(["DCIM/203gps/x.gpx"])
-        self.assertIsNone(guards.nothing_to_clean_up(world))
-        self.assertFalse(guards.clean_is_allowed(world).blocked)
+        self.assertIsNone(guards.Gates(world).nothing_to_clean_up())
+        self.assertFalse(guards.Gates(world).clean_is_allowed().blocked)
 
     def test_footage_here_shuts_both_of_them(self):
         world = self._world(["DCIM/200video/front/a.mp4"])
-        self.assertIsNotNone(guards.nothing_to_clean_up(world))
-        self.assertTrue(guards.clean_is_allowed(world).blocked)
+        self.assertIsNotNone(guards.Gates(world).nothing_to_clean_up())
+        self.assertTrue(guards.Gates(world).clean_is_allowed().blocked)
 
     def test_the_card_route_is_genuinely_shut_in_these_worlds(self):
         world = self._world(["DCIM/203gps/x.gpx"])
-        self.assertFalse(guards.import_is_disposable(world),
+        self.assertFalse(guards.Gates(world).import_is_disposable(),
                          "these tests would pass through the card path")
 
     def test_a_workspace_of_sidecars_and_logs_may_go(self):
         world = self._world(["DCIM/203gps/20260731061515_0060.gpx",
                              "DCIM/203gps/tar/0731.git",
                              "DCIM/IPSRecord.txt"])
-        self.assertTrue(guards.import_holds_no_footage(world))
-        self.assertFalse(guards.clean_is_allowed(world).blocked)
+        self.assertTrue(guards.Gates(world).import_holds_no_footage())
+        self.assertFalse(guards.Gates(world).clean_is_allowed().blocked)
 
     def test_one_clip_still_here_is_still_a_refusal(self):
         """The floor is doing its job the moment there is footage to protect,
         and one clip is enough -- this is the only copy, the card is gone."""
         world = self._world(["DCIM/203gps/20260731061515_0060.gpx",
                              "DCIM/200video/front/20260731061515_0060.mp4"])
-        self.assertFalse(guards.import_holds_no_footage(world))
-        self.assertTrue(guards.clean_is_allowed(world).blocked)
+        self.assertFalse(guards.Gates(world).import_holds_no_footage())
+        self.assertTrue(guards.Gates(world).clean_is_allowed().blocked)
 
     def test_the_suffix_is_read_whatever_its_case(self):
         world = self._world(["DCIM/200video/front/20260731061515_0060.MP4"])
-        self.assertFalse(guards.import_holds_no_footage(world))
+        self.assertFalse(guards.Gates(world).import_holds_no_footage())
 
     def test_a_render_on_disk_takes_this_way_out_away(self):
         """Hours of encoding is not sidecars. An empty import is no reason to
         throw a render away, and that is a different question from this one."""
         world = self._world(["DCIM/203gps/20260731061515_0060.gpx"], renders=2)
-        self.assertFalse(guards.import_holds_no_footage(world))
+        self.assertFalse(guards.Gates(world).import_holds_no_footage())
 
     def test_no_import_at_all_is_not_an_empty_import(self):
         """Nothing selected is not the same fact, and must not read as a yes."""
         world = self._world(["DCIM/203gps/x.gpx"], imports=())
-        self.assertFalse(guards.import_holds_no_footage(world))
+        self.assertFalse(guards.Gates(world).import_holds_no_footage())
 
 
 if __name__ == "__main__":

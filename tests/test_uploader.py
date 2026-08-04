@@ -439,7 +439,7 @@ class TestTheEraseSaysWhoseAnswerItActedOn(unittest.TestCase):
     def _printed(self, world):
         out = io.StringIO()
         with redirect_stdout(out):
-            self.P._print_gates(world)
+            self.P._print_gates(self.P.guards.Gates(world))
         return out.getvalue()
 
     def test_the_gate_table_names_no_implementation_either(self):
@@ -473,7 +473,8 @@ class TestTheEraseSaysWhoseAnswerItActedOn(unittest.TestCase):
         once and scrolls.
         """
         lines = self.P._clean_banner(
-            _a_ctx(), self._world(self.target), Path("/w/import"), 1024)
+            _a_ctx(), self.P.guards.Gates(self._world(self.target)),
+            Path("/w/import"), 1024)
         said = "\n".join(lines)
         self.assertNotIn("fortknox", said)
         self.assertNotIn("up.py:Build:FortKnox", said)
@@ -483,7 +484,8 @@ class TestTheEraseSaysWhoseAnswerItActedOn(unittest.TestCase):
         """Nothing was asked, so nothing is attributed — and the sentence that
         replaces it is the stronger one: these renders are the only copy."""
         lines = self.P._clean_banner(
-            _a_ctx(), self._world(W.TargetFacts()), Path("/w/import"), 1024)
+            _a_ctx(), self.P.guards.Gates(self._world(W.TargetFacts())),
+            Path("/w/import"), 1024)
         said = "\n".join(lines)
         self.assertIn("NOT verified", said)
         self.assertNotIn("Proceeding on", said)

@@ -632,7 +632,7 @@ class TestTheLocalEdition(SeamTest):
         world = self.bench().complete().world()
         self.assertFalse(world.target.configured)
         self.assertIs(world.target.complete, NA)
-        self.assertTrue(P.guards.unproven_lines(world))
+        self.assertTrue(P.guards.Gates(world).unproven_lines())
 
 
 # ---------------------------------------------------------------------------
@@ -1384,9 +1384,9 @@ class TestWipingAWorkspaceWhoseSourceIsStillInTheSlot(SeamTest):
             f.mkdir(parents=True, exist_ok=True)
             (f / ("%s_0060.mp4" % st)).write_text("clip")
         w = b.world(M.Scope.LOCAL)
-        self.assertTrue(P.guards.import_is_disposable(w),
+        self.assertTrue(P.guards.Gates(w).import_is_disposable(),
                         "the card holds it, so it is a second copy")
-        self.assertFalse(P.guards.clean_is_allowed(w).blocked)
+        self.assertFalse(P.guards.Gates(w).clean_is_allowed().blocked)
 
     def test_it_files_no_receipt_for_a_trip_that_was_never_published(self):
         """A receipt says "this trip finished". covered_stamps reads them, so
@@ -1423,15 +1423,17 @@ class TestWipingAWorkspaceWhoseSourceIsStillInTheSlot(SeamTest):
         path that says "this is the ORIGINAL footage" before it asks."""
         b = self.bench().imported().sidecars().render()
         w = b.world(M.Scope.LOCAL)
-        self.assertFalse(P.guards.import_is_disposable(w))
-        self.assertIn("ORIGINAL footage", "\n".join(P._what_goes_lines(w)))
+        self.assertFalse(P.guards.Gates(w).import_is_disposable())
+        self.assertIn("ORIGINAL footage",
+                      "\n".join(P._what_goes_lines(P.guards.Gates(w))))
 
     def test_and_the_original_warning_is_not_shown_when_it_is_a_copy(self):
         b = self.bench().imported().sidecars().render()
         f = b.ctx.card / "DCIM" / "200video" / "front"
         f.mkdir(parents=True, exist_ok=True)
         (f / ("%s_0060.mp4" % CLIP)).write_text("clip")
-        said = "\n".join(P._what_goes_lines(b.world(M.Scope.LOCAL)))
+        said = "\n".join(P._what_goes_lines(
+            P.guards.Gates(b.world(M.Scope.LOCAL))))
         self.assertNotIn("ORIGINAL", said)
         self.assertIn("removes 1 trips and the metadata", said)
         self.assertIn("still on the SIM card", said)

@@ -13,6 +13,9 @@ The distinction that decides whether a check survives at all:
     a check about EVIDENCE ("what is on disk right now")   -> kept; the
         operator can delete a sidecar in Finder between the draw and the
         keypress, and a card can be swapped while the prompt is on screen.
+
+The workspace gates are a class over ONE world rather than functions each
+handed a world of their own. See Gates below for why that is not decoration.
 """
 
 from __future__ import annotations
@@ -86,389 +89,398 @@ def card_is_expendable(world) -> Verdict:
 # The workspace — item 8, Clean Workspace. Two gates and one sentence.
 # ---------------------------------------------------------------------------
 
-def rendered_locally(world) -> Evidence:
-    """Did every renderable trip in this import actually get encoded?
+class Gates:
+    """Every gate item 8's sweep passes, asked of ONE world.
 
-    The hard floor: never NA, which is what keeps the rule below it total.
-    UNKNOWN means the grouping could not be read, which is not the same as
-    "the count is fine".
+    A class for one reason, and it is the reason the module docstring above
+    gives: a guard is a pure function of a FROZEN world, and two reads of one
+    world must give one answer. As free functions that was left to discipline
+    -- nothing stopped one screen asking clean_is_allowed about a world
+    captured before the prompt and unproven_lines about one captured after,
+    and the sentence printed over the delete would then be about a different
+    instant from the verdict it explains. Bound once at construction, that
+    cannot be written.
+
+    Holds the world and nothing else. No caching, no state: the answers are
+    re-derived per call as before, because a Gates is cheap and a second
+    capture is the only honest way to get a second answer.
     """
-    if not world.renders_here:
-        return Evidence.NO
-    return _enough_renders(world)
 
+    def __init__(self, world):
+        self.world = world
 
-def _enough_renders(world) -> Evidence:
-    if world.expected_trips is None:
-        return Evidence.UNKNOWN
-    return _at_least(len(world.renders_here), world.expected_trips)
+    def rendered_locally(self) -> Evidence:
+        """Did every renderable trip in this import actually get encoded?
 
+        The hard floor: never NA, which is what keeps the rule below it total.
+        UNKNOWN means the grouping could not be read, which is not the same as
+        "the count is fine".
+        """
+        if not self.world.renders_here:
+            return Evidence.NO
+        return self._enough_renders()
 
-def _at_least(have: int, want: int) -> Evidence:
-    return Evidence.YES if have >= want else Evidence.NO
+    def _enough_renders(self) -> Evidence:
+        if self.world.expected_trips is None:
+            return Evidence.UNKNOWN
+        return self._at_least(len(self.world.renders_here),
+                              self.world.expected_trips)
 
+    def _at_least(self, have: int, want: int) -> Evidence:
+        return Evidence.YES if have >= want else Evidence.NO
 
-def complete_at_the_destination(world) -> Evidence:
-    """Is EVERY trip of this import at the destination — held and served.
+    def complete_at_the_destination(self) -> Evidence:
+        """Is EVERY trip of this import at the destination — held and served.
 
-    The plugin's answer, frozen at capture. It used to be two questions asked
-    per render (is the file there, is it being served) and folded together
-    here; which destination it is, how it was asked and what "complete" means
-    there is the implementation's business, and the one reading it produces is
-    the guard's.
+        The plugin's answer, frozen at capture. It used to be two questions asked
+        per render (is the file there, is it being served) and folded together
+        here; which destination it is, how it was asked and what "complete" means
+        there is the implementation's business, and the one reading it produces is
+        the guard's.
 
-    All or nothing on purpose. This erases the WHOLE working area, so "which
-    trips are there" is a finer answer than anything acts on — and asking about
-    TRIPS rather than renders is what lets a trip that produced no render at
-    all be covered by the question.
-    """
-    return world.target.complete
+        All or nothing on purpose. This erases the WHOLE working area, so "which
+        trips are there" is a finer answer than anything acts on — and asking about
+        TRIPS rather than renders is what lets a trip that produced no render at
+        all be covered by the question.
+        """
+        return self.world.target.complete
 
+    # The two gates, in the order they are asked and printed. Unbound methods:
+    # each entry is called against the Gates iterating it, so the labels and the
+    # readings can never come from two different worlds.
+    WORKSPACE_GATES = (
+        ("rendered locally", rendered_locally),
+        ("complete at the destination", complete_at_the_destination))
 
-WORKSPACE_GATES = (("rendered locally", rendered_locally),
-                   ("complete at the destination", complete_at_the_destination))
+    def nothing_was_rendered_here(self) -> Optional[Verdict]:
+        """The floor under the whole rule: not ONE mp4 from this import exists.
 
+        Zero renders is the absence of the thing every later gate reasons about,
+        and it is the state where a destination's YES is most likely to be about
+        something else: sidecars under <out> outlive every sweep, so a machine that
+        published last month can be asked about trips it published then while THIS
+        import has not been encoded at all.
 
-def nothing_was_rendered_here(world) -> Optional[Verdict]:
-    """The floor under the whole rule: not ONE mp4 from this import exists.
+        So this is asked BEFORE the destination, and no answer overrides it —
+        including an implementation that answers YES to everything, which is
+        requirement A of the trust model and the reason this question is never
+        delegated. The gate table on screen says "rendered locally .... no" one
+        line above the confirmation prompt, and a gate the operator can read must
+        be a gate.
+        """
+        if self.world.renders_here:
+            return None
+        return blocked("%s answered %s — nothing from this import was rendered"
+                       % (self.WORKSPACE_GATES[0][0], Evidence.NO.value))
 
-    Zero renders is the absence of the thing every later gate reasons about,
-    and it is the state where a destination's YES is most likely to be about
-    something else: sidecars under <out> outlive every sweep, so a machine that
-    published last month can be asked about trips it published then while THIS
-    import has not been encoded at all.
+    def workspace_is_expendable(self) -> Verdict:
+        """The floors first, and then the destination's answer decides.
 
-    So this is asked BEFORE the destination, and no answer overrides it —
-    including an implementation that answers YES to everything, which is
-    requirement A of the trust model and the reason this question is never
-    delegated. The gate table on screen says "rendered locally .... no" one
-    line above the confirmation prompt, and a gate the operator can read must
-    be a gate.
-    """
-    if world.renders_here:
-        return None
-    return blocked("%s answered %s — nothing from this import was rendered"
-                   % (WORKSPACE_GATES[0][0], Evidence.NO.value))
+        The floors never leave this machine, and that is the point: an
+        implementation that answers YES to everything still cannot talk this into
+        erasing an import that produced no renders, or one whose local render count
+        is short, because the exporter does not delegate a question it can already
+        answer.
 
+        Below them there is one question left and one answer to it. NA — no plugin
+        configured, or one that genuinely cannot speak about a destination — drops
+        that gate rather than passing it, and the erase then rests on the local
+        render count alone, which unproven_lines says out loud.
+        """
+        return self._floor_refusal() or self._decided_by_the_destination()
 
-def workspace_is_expendable(world) -> Verdict:
-    """The floors first, and then the destination's answer decides.
+    def _floor_refusal(self) -> Optional[Verdict]:
+        """The refusals no answer from a destination can lift, first one wins."""
+        return next(filter(None, map(lambda ask: ask(self), self._FLOORS)), None)
 
-    The floors never leave this machine, and that is the point: an
-    implementation that answers YES to everything still cannot talk this into
-    erasing an import that produced no renders, or one whose local render count
-    is short, because the exporter does not delegate a question it can already
-    answer.
+    def _local_count_unproven(self) -> Optional[Verdict]:
+        """A short or unreadable local render count is a floor too, not one vote.
 
-    Below them there is one question left and one answer to it. NA — no plugin
-    configured, or one that genuinely cannot speak about a destination — drops
-    that gate rather than passing it, and the erase then rests on the local
-    render count alone, which unproven_lines says out loud.
-    """
-    return _floor_refusal(world) or _decided_by_the_destination(world)
+        The destination is now asked about TRIP IDS, including trips that produced
+        no render, so its answer does reach the trips a short count leaves at risk
+        — an honest implementation says NO about a trip it never received. This
+        floor costs nothing in that case and is not there for it.
 
+        It is there for the case no answer from any destination can catch: the trip
+        LIST itself being incomplete. The ids are read off the sidecars, so a trip
+        whose sidecar was never written is in nobody's question, and an unreadable
+        grouping means the count cannot be compared against anything at all. Both
+        are states where the destination can answer YES truthfully while footage
+        exists only in the import this step erases.
 
-def _floor_refusal(world) -> Optional[Verdict]:
-    """The refusals no answer from a destination can lift, first one wins."""
-    return next(filter(None, map(lambda ask: ask(world), _FLOORS)), None)
+        The cost is a refusal when the grouping is not cached this session. That is
+        a step to re-run, not footage to lose.
+        """
+        reading = self.rendered_locally()
+        if reading is Evidence.YES:
+            return None
+        return self._verdict_of(self.WORKSPACE_GATES[0][0], reading)
 
+    def _only_copy_is_here(self) -> Optional[Verdict]:
+        """A clip this sweep would delete that exists nowhere else.
 
-def _local_count_unproven(world) -> Optional[Verdict]:
-    """A short or unreadable local render count is a floor too, not one vote.
+        The third floor, and the one the other two cannot see. They reason about
+        TRIPS: how many were rendered, and whether the destination has them. A trip
+        too short to render gets no sidecar, so it is in no trip_ids and counts
+        toward no expected_trips — the local count is met by the renders that do
+        exist, and the destination answers YES honestly about the trips it was
+        asked about. The fragment's footage then goes with the sweep, having been
+        accounted for by nothing but sitting in the folder about to be erased.
 
-    The destination is now asked about TRIP IDS, including trips that produced
-    no render, so its answer does reach the trips a short count leaves at risk
-    — an honest implementation says NO about a trip it never received. This
-    floor costs nothing in that case and is not there for it.
+        Reachable in the order the graph calls SAFE: erase the card while its clips
+        are provably in the workspace, then clean the workspace once the renders
+        are published. That reasoning is sound for a trip that was rendered and
+        silently false for one that never will be.
 
-    It is there for the case no answer from any destination can catch: the trip
-    LIST itself being incomplete. The ids are read off the sidecars, so a trip
-    whose sidecar was never written is in nobody's question, and an unreadable
-    grouping means the count cannot be compared against anything at all. Both
-    are states where the destination can answer YES truthfully while footage
-    exists only in the import this step erases.
-
-    The cost is a refusal when the grouping is not cached this session. That is
-    a step to re-run, not footage to lose.
-    """
-    reading = rendered_locally(world)
-    if reading is Evidence.YES:
-        return None
-    return _verdict_of(WORKSPACE_GATES[0][0], reading)
-
-
-def _only_copy_is_here(world) -> Optional[Verdict]:
-    """A clip this sweep would delete that exists nowhere else.
-
-    The third floor, and the one the other two cannot see. They reason about
-    TRIPS: how many were rendered, and whether the destination has them. A trip
-    too short to render gets no sidecar, so it is in no trip_ids and counts
-    toward no expected_trips — the local count is met by the renders that do
-    exist, and the destination answers YES honestly about the trips it was
-    asked about. The fragment's footage then goes with the sweep, having been
-    accounted for by nothing but sitting in the folder about to be erased.
-
-    Reachable in the order the graph calls SAFE: erase the card while its clips
-    are provably in the workspace, then clean the workspace once the renders
-    are published. That reasoning is sound for a trip that was rendered and
-    silently false for one that never will be.
-
-    The remedy is named rather than left to be worked out. Excluding is what
-    this tool already calls "this footage never happened, deliberately": it
-    records the decision, every guard honours it afterwards, and the delta
-    import stops offering the clips back every cycle.
-    """
-    if not world.orphan_clips:
-        return None
-    n = len(world.orphan_clips)
-    plural = "" if n == 1 else "s"
-    # Two different facts, and only one of them is about the footage. With no
-    # card in the slot nothing has been ruled out -- the clips may be sitting
-    # safely on a card in the car -- and saying they exist nowhere else would
-    # be asserting something nobody checked.
-    if not world.card.dcim:
+        The remedy is named rather than left to be worked out. Excluding is what
+        this tool already calls "this footage never happened, deliberately": it
+        records the decision, every guard honours it afterwards, and the delta
+        import stops offering the clips back every cycle.
+        """
+        if not self.world.orphan_clips:
+            return None
+        n = len(self.world.orphan_clips)
+        plural = "" if n == 1 else "s"
+        # Two different facts, and only one of them is about the footage. With no
+        # card in the slot nothing has been ruled out -- the clips may be sitting
+        # safely on a card in the car -- and saying they exist nowhere else would
+        # be asserting something nobody checked.
+        if not self.world.card.dcim:
+            return blocked(
+                "%d clip%s here %s in no rendered trip, and there is no card to "
+                "vouch for %s" % (n, plural, "is" if n == 1 else "are",
+                                  "it" if n == 1 else "them"),
+                evidence=self.world.orphan_clips)
         return blocked(
-            "%d clip%s here %s in no rendered trip, and there is no card to "
-            "vouch for %s" % (n, plural, "is" if n == 1 else "are",
-                              "it" if n == 1 else "them"),
-            evidence=world.orphan_clips)
-    return blocked(
-        "%d clip%s here exist%s nowhere else — not on the card, in no rendered "
-        "trip, not excluded" % (n, plural, "s" if n == 1 else ""),
-        evidence=world.orphan_clips)
+            "%d clip%s here exist%s nowhere else — not on the card, in no rendered "
+            "trip, not excluded" % (n, plural, "s" if n == 1 else ""),
+            evidence=self.world.orphan_clips)
 
+    _FLOORS = (nothing_was_rendered_here, _local_count_unproven,
+               _only_copy_is_here)
 
-_FLOORS = (nothing_was_rendered_here, _local_count_unproven, _only_copy_is_here)
+    def _decided_by_the_destination(self) -> Verdict:
+        """NA drops this gate; anything else has to be a YES.
 
+        A dropped gate is not a passed one — it is a gate that was never asked, and
+        what is left standing is said out loud by unproven_lines rather than passed
+        over in silence.
+        """
+        reading = self.complete_at_the_destination()
+        if reading is Evidence.NA:
+            return go()
+        return self._verdict_of(self.WORKSPACE_GATES[1][0], reading)
 
-def _decided_by_the_destination(world) -> Verdict:
-    """NA drops this gate; anything else has to be a YES.
+    def _verdict_of(self, label: str, e: Evidence) -> Verdict:
+        if e is Evidence.YES:
+            return go()
+        return blocked("%s answered %s" % (label, e.value))
 
-    A dropped gate is not a passed one — it is a gate that was never asked, and
-    what is left standing is said out loud by unproven_lines rather than passed
-    over in silence.
-    """
-    reading = complete_at_the_destination(world)
-    if reading is Evidence.NA:
-        return go()
-    return _verdict_of(WORKSPACE_GATES[1][0], reading)
+    def gate_readings(self) -> Tuple[Tuple[str, Evidence], ...]:
+        """(label, evidence) per gate, for the item to print before it asks."""
+        return tuple((label, fn(self)) for label, fn in self.WORKSPACE_GATES)
 
+    def destination_proof(self) -> str:
+        """The answer a go rests on, or "" when the destination gave none.
 
-def _verdict_of(label: str, e: Evidence) -> Verdict:
-    if e is Evidence.YES:
-        return go()
-    return blocked("%s answered %s" % (label, e.value))
-
-
-def gate_readings(world) -> Tuple[Tuple[str, Evidence], ...]:
-    """(label, evidence) per gate, for the item to print before it asks."""
-    return tuple((label, fn(world)) for label, fn in WORKSPACE_GATES)
-
-
-def destination_proof(world) -> str:
-    """The answer a go rests on, or "" when the destination gave none.
-
-    Named rather than assumed, because the banner above the prompt says
-    which answer the erase is proceeding on and a plugin that declined the
-    question never gave one. Attribution to an answer that was not given is
-    worse than none: it is the last sentence before the footage goes, and a
-    reader checking it afterwards is checking a sentence the plugin can
-    truthfully deny.
-    """
-    if complete_at_the_destination(world).applicable:
-        return WORKSPACE_GATES[1][0]
-    return ""
-
-
-def unproven_lines(world) -> Tuple[str, ...]:
-    """What could NOT be checked here, stated rather than passed over.
-
-    Not decoration: with nothing configured to publish to, there is no proof of
-    publication at all, so the renders under <out> are the only copy of that
-    footage in the world. A guard that could not run says so.
-
-    Two conditions, not the two this used to have. "No bucket" and "no site
-    repo" were one operator's two settings for one condition and collapsed
-    correctly. What did NOT exist before the interface is the second condition
-    below: a plugin that IS configured and answers "not applicable" to whether
-    the trips are complete. It leaves exactly the same hole as having no plugin
-    at all — nothing off this machine was checked — and it used to say nothing,
-    which is the one state where silence reads as proof.
-    """
-    return tuple(filter(None, (_no_target_line(world), _declined_line(world))))
-
-
-def _no_target_line(world) -> str:
-    if world.target.configured:
+        Named rather than assumed, because the banner above the prompt says
+        which answer the erase is proceeding on and a plugin that declined the
+        question never gave one. Attribution to an answer that was not given is
+        worse than none: it is the last sentence before the footage goes, and a
+        reader checking it afterwards is checking a sentence the plugin can
+        truthfully deny.
+        """
+        if self.complete_at_the_destination().applicable:
+            return self.WORKSPACE_GATES[1][0]
         return ""
-    return ("no upload_plugin configured, so no copy off this machine was"
-            " checked")
 
+    def unproven_lines(self) -> Tuple[str, ...]:
+        """What could NOT be checked here, stated rather than passed over.
 
-def _declined_line(world) -> str:
-    """A configured plugin that answered NA to the destination question.
+        Not decoration: with nothing configured to publish to, there is no proof of
+        publication at all, so the renders under <out> are the only copy of that
+        footage in the world. A guard that could not run says so.
 
-    Not a complaint about the plugin: declining a question it genuinely cannot
-    answer is what NA is for, and whoever configured it owns that. It is a
-    statement about what this erase then rests on, which is the local render
-    count and nothing else.
-    """
-    if destination_proof(world):
-        return ""
-    return _declined_by(world.target)
+        Two conditions, not the two this used to have. "No bucket" and "no site
+        repo" were one operator's two settings for one condition and collapsed
+        correctly. What did NOT exist before the interface is the second condition
+        below: a plugin that IS configured and answers "not applicable" to whether
+        the trips are complete. It leaves exactly the same hole as having no plugin
+        at all — nothing off this machine was checked — and it used to say nothing,
+        which is the one state where silence reads as proof.
+        """
+        return tuple(filter(None, (self._no_target_line(), self._declined_line())))
 
+    def _no_target_line(self) -> str:
+        if self.world.target.configured:
+            return ""
+        return ("no upload_plugin configured, so no copy off this machine was"
+                " checked")
 
-def _declined_by(target) -> str:
-    if not target.configured:
-        return ""               # already said, by _no_target_line
-    return ("%s answered 'not applicable' to whether these trips are at the"
-            " destination, so no copy off this machine was checked" % target.name)
+    def _declined_line(self) -> str:
+        """A configured plugin that answered NA to the destination question.
+
+        Not a complaint about the plugin: declining a question it genuinely cannot
+        answer is what NA is for, and whoever configured it owns that. It is a
+        statement about what this erase then rests on, which is the local render
+        count and nothing else.
+        """
+        if self.destination_proof():
+            return ""
+        return self._declined_by(self.world.target)
+
+    def _declined_by(self, target) -> str:
+        if not target.configured:
+            return ""               # already said, by _no_target_line
+        return ("%s answered 'not applicable' to whether these trips are at the"
+                " destination, so no copy off this machine was checked"
+                % target.name)
+
+    # -----------------------------------------------------------------------
+    # Evidence the other items ask for. Each is about what is on disk, never
+    # about what ran before.
+    # -----------------------------------------------------------------------
+
+    def _sidecar_debt_settled(self) -> bool:
+        """No import awaiting a look, or the look has happened."""
+        if not self.world.imports:
+            return True
+        return bool(self.world.metas)
+
+    def sidecars_missing(self) -> Optional[str]:
+        """An import is sitting there and nobody has written its sidecars.
+
+        Survives an operator deleting them in Finder, which is why it is not the
+        ordering check it resembles: an empty workspace settles the debt, an
+        import without metas does not.
+        """
+        if self._sidecar_debt_settled():
+            return None
+        return "no sidecars on disk for the import"
+
+    def nothing_to_clean_up(self) -> Optional[str]:
+        """Item 8's cheap half: is there anything here it could be asked about.
+
+        Sidecars are the usual answer -- an import with sidecars is an import the
+        cycle has started on, and the heavy gates below decide whether it may go.
+        But an import with none is not automatically untouchable, and treating it
+        so is what made an interrupted first import a dead end: item 1 refused to
+        import on top of two stray clips and pointed at item 8, and item 8 refused
+        them for having no sidecars. Nothing had been made from those clips and
+        the card still held every one; there was nothing to protect.
+
+        The same is true of an import holding no clips at all, and for the same
+        reason: no sidecars will ever be written for trips that no longer exist,
+        so demanding them is demanding something nobody can supply.
+
+        So an import with nothing to protect passes here, and its own evidence is
+        checked again where it counts, in the plan and after the typed word.
+        """
+        if self.nothing_here_to_protect():
+            return None
+        return self.sidecars_missing()
+
+    def nothing_here_to_protect(self) -> bool:
+        """The two states where item 8 is not guarding anything.
+
+        Either the source still holds every file of this import, or the import
+        holds no footage at all. Both are asked in two places -- the cheap check
+        that decides whether the entry is offered, and the heavy gate behind the
+        typed word -- and they have to agree, or the menu offers a step that then
+        refuses, or worse, hides one that would have been allowed. One predicate,
+        so the two cannot drift apart.
+        """
+        return self.import_is_disposable() or self.import_holds_no_footage()
+
+    def import_is_disposable(self) -> bool:
+        """The source still holds every file of this import.
+
+        That is the whole question, and it is asked per FILE against the card in
+        the slot -- not a count, and never the ledger, which records that a copy
+        was made once and cannot notice the card has since been wiped or swapped.
+
+        It used to require, as well, that nothing had been MADE from the import:
+        no sidecars, no renders, no gathered folder. That was the wrong second
+        half. Sidecars and stills are derived and cost seconds; renders cost hours
+        but are reproducible from the same footage. None of them is what the guard
+        exists to protect, which is footage that exists in one place only. Once a
+        step had run, the workspace could not be cleared at all without publishing
+        first -- a scan of a card that turned out to be fragments left the operator
+        holding a workspace he could neither use nor empty.
+
+        So: the card has it, or it does not. Nothing downstream is weakened,
+        because item 9 asks the same question from the other side -- wipe this
+        workspace and its clips are owed again, so the card cannot be erased until
+        they are somewhere else.
+
+        An empty import is still not disposable by this route: no files means no
+        file is missing from the card, and "all of it is safe" would be a yes
+        about nothing.
+        """
+        return self._every_file_is_on_the_card()
+
+    def _every_file_is_on_the_card(self) -> bool:
+        """A card that IS the import cannot vouch for it, whatever the sets say."""
+        if self.world.card_shares_the_import:
+            return False
+        return bool(self.world.import_files) and not self.world.unsourced_files
+
+    def import_holds_no_footage(self) -> bool:
+        """There is no clip left here, and nothing was made from one either.
+
+        The state item 4 leaves behind when every trip of an import is excluded.
+        Excluding DELETES the trip's clips, so an operator who drops all of them
+        is left with a workspace of sidecars, GPS logs and tar archives, and not
+        one frame of video.
+
+        Every floor below is then asking about something that is not there.
+        "Nothing from this import was rendered" is true and is no longer a reason
+        to keep anything: what it protects is footage that was never encoded, and
+        there is no footage. Same for a short local count and for clips whose only
+        copy is here -- vacuous, both, over an import holding no clips.
+
+        Deliberately BOTH halves. Renders empty is exactly the case the first
+        floor blocks, so this adds a way through only there and nowhere else; and
+        were a render present, the sweep would be throwing away hours of encoding
+        on the strength of an empty import, which is a different question and one
+        this does not answer.
+        """
+        if not self.world.imports:
+            return False
+        if self.world.renders_here:
+            return False
+        return not any(name.lower().endswith(".mp4")
+                       for name in self.world.import_files)
+
+    def clean_is_allowed(self) -> Verdict:
+        """Item 8's heavy gate, three ways in.
+
+        Two acts wear one number. Sweeping a finished cycle erases footage whose
+        renders are published, and is decided by workspace_is_expendable. Throwing
+        away an import nothing was made from erases footage the card still has,
+        and is decided by import_is_disposable. The second is not a weakening of
+        the first: it is available only when every gate the first would ask about
+        has nothing to be asked about, and it refuses the moment one clip of that
+        import is missing from the source.
+
+        The third is neither: an import with no clips in it at all. Exclude every
+        trip and that is what is left, and the operator could then clear nothing —
+        the card had been erased on the strength of the exclusions, so the discard
+        path was shut, and the sweep refused because an import that produced no
+        footage had produced no renders either. A dead end reached by using item 4
+        exactly as intended.
+        """
+        if self.nothing_here_to_protect():
+            return go()
+        return self.workspace_is_expendable()
 
 
 # ---------------------------------------------------------------------------
-# Evidence the other items ask for. Each is about what is on disk, never
-# about what ran before.
+# The questions that stand alone: one read of the world each, called from one
+# place, calling nothing. They take the world directly because there is no
+# second question to keep in step with — bind a world for one read and the
+# binding is ceremony, not a guarantee.
 # ---------------------------------------------------------------------------
-
-def _sidecar_debt_settled(world) -> bool:
-    """No import awaiting a look, or the look has happened."""
-    if not world.imports:
-        return True
-    return bool(world.metas)
-
-
-def sidecars_missing(world) -> Optional[str]:
-    """An import is sitting there and nobody has written its sidecars.
-
-    Survives an operator deleting them in Finder, which is why it is not the
-    ordering check it resembles: an empty workspace settles the debt, an
-    import without metas does not.
-    """
-    if _sidecar_debt_settled(world):
-        return None
-    return "no sidecars on disk for the import"
-
-
-def nothing_to_clean_up(world) -> Optional[str]:
-    """Item 8's cheap half: is there anything here it could be asked about.
-
-    Sidecars are the usual answer -- an import with sidecars is an import the
-    cycle has started on, and the heavy gates below decide whether it may go.
-    But an import with none is not automatically untouchable, and treating it
-    so is what made an interrupted first import a dead end: item 1 refused to
-    import on top of two stray clips and pointed at item 8, and item 8 refused
-    them for having no sidecars. Nothing had been made from those clips and
-    the card still held every one; there was nothing to protect.
-
-    The same is true of an import holding no clips at all, and for the same
-    reason: no sidecars will ever be written for trips that no longer exist,
-    so demanding them is demanding something nobody can supply.
-
-    So an import with nothing to protect passes here, and its own evidence is
-    checked again where it counts, in the plan and after the typed word.
-    """
-    if nothing_here_to_protect(world):
-        return None
-    return sidecars_missing(world)
-
-
-def nothing_here_to_protect(world) -> bool:
-    """The two states where item 8 is not guarding anything.
-
-    Either the source still holds every file of this import, or the import
-    holds no footage at all. Both are asked in two places -- the cheap check
-    that decides whether the entry is offered, and the heavy gate behind the
-    typed word -- and they have to agree, or the menu offers a step that then
-    refuses, or worse, hides one that would have been allowed. One predicate,
-    so the two cannot drift apart.
-    """
-    return import_is_disposable(world) or import_holds_no_footage(world)
-
-
-def import_is_disposable(world) -> bool:
-    """The source still holds every file of this import.
-
-    That is the whole question, and it is asked per FILE against the card in
-    the slot -- not a count, and never the ledger, which records that a copy
-    was made once and cannot notice the card has since been wiped or swapped.
-
-    It used to require, as well, that nothing had been MADE from the import:
-    no sidecars, no renders, no gathered folder. That was the wrong second
-    half. Sidecars and stills are derived and cost seconds; renders cost hours
-    but are reproducible from the same footage. None of them is what the guard
-    exists to protect, which is footage that exists in one place only. Once a
-    step had run, the workspace could not be cleared at all without publishing
-    first -- a scan of a card that turned out to be fragments left the operator
-    holding a workspace he could neither use nor empty.
-
-    So: the card has it, or it does not. Nothing downstream is weakened,
-    because item 9 asks the same question from the other side -- wipe this
-    workspace and its clips are owed again, so the card cannot be erased until
-    they are somewhere else.
-
-    An empty import is still not disposable by this route: no files means no
-    file is missing from the card, and "all of it is safe" would be a yes
-    about nothing.
-    """
-    return _every_file_is_on_the_card(world)
-
-
-def _every_file_is_on_the_card(world) -> bool:
-    """A card that IS the import cannot vouch for it, whatever the sets say."""
-    if world.card_shares_the_import:
-        return False
-    return bool(world.import_files) and not world.unsourced_files
-
-
-def import_holds_no_footage(world) -> bool:
-    """There is no clip left here, and nothing was made from one either.
-
-    The state item 4 leaves behind when every trip of an import is excluded.
-    Excluding DELETES the trip's clips, so an operator who drops all of them
-    is left with a workspace of sidecars, GPS logs and tar archives, and not
-    one frame of video.
-
-    Every floor below is then asking about something that is not there.
-    "Nothing from this import was rendered" is true and is no longer a reason
-    to keep anything: what it protects is footage that was never encoded, and
-    there is no footage. Same for a short local count and for clips whose only
-    copy is here -- vacuous, both, over an import holding no clips.
-
-    Deliberately BOTH halves. Renders empty is exactly the case the first
-    floor blocks, so this adds a way through only there and nowhere else; and
-    were a render present, the sweep would be throwing away hours of encoding
-    on the strength of an empty import, which is a different question and one
-    this does not answer.
-    """
-    if not world.imports:
-        return False
-    if world.renders_here:
-        return False
-    return not any(name.lower().endswith(".mp4") for name in world.import_files)
-
-
-def clean_is_allowed(world) -> Verdict:
-    """Item 8's heavy gate, three ways in.
-
-    Two acts wear one number. Sweeping a finished cycle erases footage whose
-    renders are published, and is decided by workspace_is_expendable. Throwing
-    away an import nothing was made from erases footage the card still has,
-    and is decided by import_is_disposable. The second is not a weakening of
-    the first: it is available only when every gate the first would ask about
-    has nothing to be asked about, and it refuses the moment one clip of that
-    import is missing from the source.
-
-    The third is neither: an import with no clips in it at all. Exclude every
-    trip and that is what is left, and the operator could then clear nothing —
-    the card had been erased on the strength of the exclusions, so the discard
-    path was shut, and the sweep refused because an import that produced no
-    footage had produced no renders either. A dead end reached by using item 4
-    exactly as intended.
-    """
-    if nothing_here_to_protect(world):
-        return go()
-    return workspace_is_expendable(world)
-
 
 def unsourced_lines(world) -> Tuple[str, ...]:
     """Why a discard is refused, per file rather than as a headcount."""
