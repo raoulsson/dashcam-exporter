@@ -18,7 +18,17 @@ PY="python3"
 RC=0
 echo
 echo "=== guards (python) ==="
-"$PY" -m unittest discover -s tests -q 2>&1 | tail -5 || RC=1
+# Captured rather than piped straight into tail: -q prints one line per pass
+# and a whole traceback per failure, and tail -5 threw the tracebacks away —
+# so a red run printed "FAILURES — see above" with nothing above it, and the
+# only way to find out what broke was to run unittest again by hand. Quiet
+# while green, everything while red.
+TESTS="$("$PY" -m unittest discover -s tests -q 2>&1)" || RC=1
+if [ "$RC" -eq 0 ]; then
+    printf '%s\n' "$TESTS" | tail -5
+else
+    printf '%s\n' "$TESTS"
+fi
 
 echo
 echo "=== undefined names and redefinitions (pyflakes) ==="
