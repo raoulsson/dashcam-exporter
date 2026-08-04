@@ -1340,19 +1340,6 @@ def rendered_mp4s(out_dir):
                   if p.is_file() and not any(part.startswith(".") for part in p.relative_to(out_dir).parts))
 
 
-def _target_status(ctx):
-    """One row naming what this install publishes, in the plugin's own words.
-
-    The plugin's describe() and nothing else. It used to be an interface method
-    of its own — status_lines() — which was a fourth kind of question that no
-    decision ever read, and which was allowed to go to the network at launch.
-    describe() is already required to be cheap, because the menu draws it.
-    """
-    if ctx.plugin is None:
-        return ()
-    return ()
-
-
 def _edition_rows(ctx):
     """Which edition this is, and under the uploader one, what is registered.
 
@@ -1681,13 +1668,6 @@ def print_status(ctx):
     # Where all of that has to fit. A status row like the others, because
     # running out of disk stops the render exactly the way a missing card does.
     _print_all(_volume_rows(ctx))
-
-    # The publishing half, in the target's own words. Which rows those are, and
-    # whether asking for them touches the network, is the implementation's
-    # business — this is the one place it is asked, once per launch, never in
-    # the menu loop. Nothing to say is a target with nothing to report, not an
-    # empty row: a permanent "unknown" line is a question mark, not status.
-    _print_all(_target_status(ctx))
 
 
 # ---------------------------------------------------------------------------
