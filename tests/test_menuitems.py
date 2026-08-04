@@ -177,6 +177,17 @@ class FakeWork:
     def render(self, world):
         return self._body("render", world)
 
+    # -- paint, lent to the items ------------------------------------------
+    def yellow(self, text):
+        """The paint items 5 and 7 lend their Handover, for the plugin's name.
+
+        Identity rather than an escape sequence: what a test asserts about a
+        help screen is which words are there and whose they are, and an ANSI
+        code around the name would only be something every such assertion has
+        to spell out.
+        """
+        return text
+
     # -- the collaborators the constructor installs ------------------------
     def builder(self, strategy):
         self.builder_asked.append(strategy)

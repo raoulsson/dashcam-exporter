@@ -96,6 +96,25 @@ def blocked(reason: str, evidence: Tuple[str, ...] = ()) -> Verdict:
     return Verdict(Ruling.BLOCKED, reason, tuple(evidence))
 
 
+def reason(*reasons):
+    """The first reason anything is in the way, or None."""
+    return next(filter(None, reasons), None)
+
+
+def first_block(*reasons) -> Verdict:
+    """The first reason anything is in the way, or GO."""
+    return _blocked_or_go(reason(*reasons))
+
+
+def _blocked_or_go(stop) -> Verdict:
+    """Stays private: only first_block above ever needs it, and a name that
+    crossed the module boundary would have to shed its underscore and read as
+    a second way to build a Verdict beside blocked() and go()."""
+    if stop:
+        return blocked(stop)
+    return go()
+
+
 @dataclass(frozen=True)
 class Outcome:
     """What one run of an item amounted to.
@@ -264,6 +283,46 @@ class StepBack(Neighbours):
 
     def __repr__(self):                       # pragma: no cover - debug aid
         return "step back by 1"
+
+
+# ---------------------------------------------------------------------------
+# Writing the outbound column. Every item declares its neighbours per strategy,
+# and most declare the same set twice; these four say the three shapes that
+# recur, so an outbound row reads as the sentence it is rather than as a dict
+# literal repeated ten times.
+# ---------------------------------------------------------------------------
+
+def e(*numbers) -> Edges:
+    return Edges(frozenset(numbers))
+
+
+def both(neighbours):
+    return {Strategy.UPLOADER: neighbours,
+            Strategy.LOCAL_PAGE: neighbours}
+
+
+def and_upload(*numbers):
+    """These neighbours, plus item 7 wherever item 7 is a real entry.
+
+    Item 7 is offered from everywhere in the cycle, and the graph is
+    deliberately not the thing that decides whether it may run. Publishing
+    needs a built site, which is a FACT about the destination's material and is
+    the publisher's to answer — it says "nothing has been built to upload yet"
+    and means it. Encoded as edges instead, the same fact became an ordering
+    rule that hid the entry, and hiding it is how the operator who just
+    rendered an mp4 is told to go and rebuild an index the encode did not
+    change.
+
+    Under the local edition item 7 exists but publishes nothing, so it stays
+    out of every outbound there, exactly as before.
+    """
+    return {Strategy.UPLOADER: e(*numbers, UPLOAD),
+            Strategy.LOCAL_PAGE: e(*numbers)}
+
+
+def both_sets(*numbers):
+    return {Strategy.UPLOADER: frozenset(numbers),
+            Strategy.LOCAL_PAGE: frozenset(numbers)}
 
 
 class Scope(Enum):

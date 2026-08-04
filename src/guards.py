@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Optional, Tuple
 
-from menu import Evidence, Verdict, blocked, go
+from menu import Evidence, Verdict, blocked, go, satisfied
 
 
 def _is_blocking(verdict) -> bool:
@@ -494,6 +494,61 @@ def no_sidecars_at_all(world) -> Optional[str]:
     if world.metas:
         return None
     return "no sidecars anywhere — publishing them would put an empty index live"
+
+
+def nothing_to_send(world):
+    """Nothing to put online: no render, and no trip in this import either.
+
+    It used to demand a render, which is the thing publishing no longer waits
+    for — the pages of a described trip go up while its video is still hours
+    away. But the floor itself cannot go, and the reason is exact: is_complete
+    answers YES to an EMPTY trip list, deliberately, and that yes is only safe
+    because something refuses before it is ever consulted. Take the refusal
+    away and an import with nothing in it reads as "the destination has
+    everything", which is the one sentence that must never appear in front of
+    someone who has published nothing.
+
+    So the floor moves from renders to trip_ids, and it must be trip_ids
+    rather than metas: metas is the whole output tree, trip_ids is THIS
+    import. A fresh import with no sidecars yet, beside an old import whose
+    sidecars are still on disk, passes a metas test and then asks the
+    destination about no trips at all.
+
+    Evidence, not order, as before: the old wording was "nothing rendered to
+    upload — run Build Website first", and only the second half of that was an
+    ordering claim. The fact survives an operator deleting them in Finder.
+    """
+    if world.renders or world.trip_ids:
+        return None
+    return "nothing on disk to publish"
+
+
+def nothing_left_to_do(world) -> Verdict:
+    """Is there anything for the upload to do, off the frozen answer.
+
+    Asked of the world rather than of the uploader, because the uploader's
+    evaluate() is asked forty times a session and this question goes to the
+    destination. capture_world asks it once per dispatch, at FULL scope, and
+    freezes what came back; at a menu draw it reads UNKNOWN, which is not YES,
+    so the offer stands. That is the same rule the old owes() carried — a
+    failed listing proves nothing, so everything stays outstanding and the
+    UPLOAD is what discovers the destination is down.
+    """
+    if world.target.complete is Evidence.YES:
+        return satisfied("%s has everything" % world.target.name)
+    return go()
+
+
+def no_import(world, reason: str):
+    """`reason` when there is no import, else None.
+
+    The reasons say "no import" rather than "the workspace holds no import".
+    Which container is empty is the machine's framing; the operator is looking
+    at a greyed entry and wants to know what is missing.
+    """
+    if world.imports:
+        return None
+    return reason
 
 
 def track_missing(world) -> Optional[str]:

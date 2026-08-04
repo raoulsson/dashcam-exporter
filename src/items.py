@@ -16,168 +16,13 @@ menu.disagreements diffs the two.
 
 from __future__ import annotations
 
-from menu import (Anywhere, Destructive, Edges, Evidence, MenuItem, Plan, Ruling,
+from menu import (Anywhere, Destructive, Evidence, MenuItem, Plan, Ruling,
                   Scope, StartNode, StepBack, Strategy, Verdict, blocked, go,
-                  satisfied,
+                  satisfied, reason, first_block, e, both, and_upload, both_sets,
                   PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER,
                   BUILD, UPLOAD, CLEAN_WS, ERASE_CARD)
+from handover import Handover
 import guards
-
-
-def _long_description(act):
-    """An act's own long-form help, or "" if it has none. Never raises: this
-    feeds a HELP SCREEN, the one place in the tool nothing should fail.
-
-    Called by name rather than through getattr. The collaborator is one of the
-    exporter's own four and its base declares this, so a missing method is now
-    a construction error rather than something to shrug past here — and the
-    shrug was itself the bug, since getattr with a default is exactly what
-    turns "nobody implemented it" into a crash at the far end. The try stays
-    for what genuinely can fail: a plugin's own answer, reached through the
-    collaborator, is somebody else's code.
-    """
-    try:
-        said = act.get_website_upload_description()
-    except Exception:
-        return ""
-    return said.strip() if isinstance(said, str) else ""
-
-
-def _plugin_name(act):
-    try:
-        return act.plugin_name()
-    except Exception:
-        return None
-
-
-def _tabbed(text):
-    """One tab onto every non-empty line, which is what marks a nested block.
-
-    Blank lines stay blank on purpose: they are what separates paragraphs, and
-    a tab on them would fuse the whole quotation into one.
-    """
-    return "\n".join(("\t" + ln) if ln else ln for ln in text.split("\n"))
-
-
-def _handover(work, opening, act):
-    """The exporter's sentences, then the plugin's own, set in and attributed.
-
-    Two things are always the exporter's to say: what the step is for, and
-    where the local edition puts the result. Everything past that belongs to
-    whoever is actually doing the work, so it is quoted rather than
-    paraphrased, under the name of the thing that said it -- a reader can then
-    tell which sentences this repo is answerable for and which it is not.
-    """
-    said = _long_description(act)
-    if not said:
-        return opening
-    name = _plugin_name(act) or "the plugin"
-    return "%s\n\nFrom the configured plugin %s:\n\n%s" % (
-        opening, work.yellow(name), _tabbed(said))
-
-
-def _reason(*reasons):
-    """The first reason anything is in the way, or None."""
-    return next(filter(None, reasons), None)
-
-
-def _first_block(*reasons) -> Verdict:
-    """The first reason anything is in the way, or GO."""
-    return _blocked_or_go(_reason(*reasons))
-
-
-def _blocked_or_go(reason) -> Verdict:
-    if reason:
-        return blocked(reason)
-    return go()
-
-
-def _nothing_to_send(world):
-    """Nothing to put online: no render, and no trip in this import either.
-
-    It used to demand a render, which is the thing publishing no longer waits
-    for — the pages of a described trip go up while its video is still hours
-    away. But the floor itself cannot go, and the reason is exact: is_complete
-    answers YES to an EMPTY trip list, deliberately, and that yes is only safe
-    because something refuses before it is ever consulted. Take the refusal
-    away and an import with nothing in it reads as "the destination has
-    everything", which is the one sentence that must never appear in front of
-    someone who has published nothing.
-
-    So the floor moves from renders to trip_ids, and it must be trip_ids
-    rather than metas: metas is the whole output tree, trip_ids is THIS
-    import. A fresh import with no sidecars yet, beside an old import whose
-    sidecars are still on disk, passes a metas test and then asks the
-    destination about no trips at all.
-
-    Evidence, not order, as before: the old wording was "nothing rendered to
-    upload — run Build Website first", and only the second half of that was an
-    ordering claim. The fact survives an operator deleting them in Finder.
-    """
-    if world.renders or world.trip_ids:
-        return None
-    return "nothing on disk to publish"
-
-
-def _nothing_left_to_do(world) -> Verdict:
-    """Is there anything for the upload to do, off the frozen answer.
-
-    Asked of the world rather than of the uploader, because the uploader's
-    evaluate() is asked forty times a session and this question goes to the
-    destination. capture_world asks it once per dispatch, at FULL scope, and
-    freezes what came back; at a menu draw it reads UNKNOWN, which is not YES,
-    so the offer stands. That is the same rule the old owes() carried — a
-    failed listing proves nothing, so everything stays outstanding and the
-    UPLOAD is what discovers the destination is down.
-    """
-    if world.target.complete is Evidence.YES:
-        return satisfied("%s has everything" % world.target.name)
-    return go()
-
-
-def _no_import(world, reason: str):
-    """`reason` when there is no import, else None.
-
-    The reasons say "no import" rather than "the workspace holds no import".
-    Which container is empty is the machine's framing; the operator is looking
-    at a greyed entry and wants to know what is missing.
-    """
-    if world.imports:
-        return None
-    return reason
-
-
-def _e(*numbers) -> Edges:
-    return Edges(frozenset(numbers))
-
-
-def _both(neighbours):
-    return {Strategy.UPLOADER: neighbours,
-            Strategy.LOCAL_PAGE: neighbours}
-
-
-def _and_upload(*numbers):
-    """These neighbours, plus item 7 wherever item 7 is a real entry.
-
-    Item 7 is offered from everywhere in the cycle, and the graph is
-    deliberately not the thing that decides whether it may run. Publishing
-    needs a built site, which is a FACT about the destination's material and is
-    the publisher's to answer — it says "nothing has been built to upload yet"
-    and means it. Encoded as edges instead, the same fact became an ordering
-    rule that hid the entry, and hiding it is how the operator who just
-    rendered an mp4 is told to go and rebuild an index the encode did not
-    change.
-
-    Under the local edition item 7 exists but publishes nothing, so it stays
-    out of every outbound there, exactly as before.
-    """
-    return {Strategy.UPLOADER: _e(*numbers, UPLOAD),
-            Strategy.LOCAL_PAGE: _e(*numbers)}
-
-
-def _both_sets(*numbers):
-    return {Strategy.UPLOADER: frozenset(numbers),
-            Strategy.LOCAL_PAGE: frozenset(numbers)}
 
 
 # ---------------------------------------------------------------------------
@@ -207,8 +52,8 @@ class Progress(MenuItem):
         "seconds; the answer is what the later steps are judged against."
     )
     INBOUND_KIND = Anywhere
-    OUT = _both(Anywhere())
-    IN_AUTHORED = _both(None)
+    OUT = both(Anywhere())
+    IN_AUTHORED = both(None)
 
     def evaluate(self, world) -> Verdict:
         return go()
@@ -261,8 +106,8 @@ class ImportSim(MenuItem):
     # the self-edge, orienting onto item 1 with footage in the workspace took
     # item 1 off the menu, and every entry it led to was blocked by its own
     # guard for want of a GPS track.
-    OUT = _both(_e(IMPORT, META, CLEAN_WS, ERASE_CARD))
-    IN_AUTHORED = _both(None)
+    OUT = both(e(IMPORT, META, CLEAN_WS, ERASE_CARD))
+    IN_AUTHORED = both(None)
 
     def evaluate(self, world) -> Verdict:
         if not world.workspace_settled:
@@ -327,8 +172,8 @@ class GenerateMeta(MenuItem):
         "now. It reads clips and writes small text files; a card takes about "
         "a minute, and nothing it does is irreversible."
     )
-    OUT = _and_upload(META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD)
-    IN_AUTHORED = _both_sets(META, IMPORT, EXCLUDE)
+    OUT = and_upload(META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD)
+    IN_AUTHORED = both_sets(META, IMPORT, EXCLUDE)
 
     def evaluate(self, world) -> Verdict:
         """Evidence only.
@@ -340,8 +185,8 @@ class GenerateMeta(MenuItem):
         sidecars are built from the track, and a source without one produces
         nothing however many times it is run.
         """
-        return _first_block(
-            _no_import(world, "no import — nothing to build meta from"),
+        return first_block(
+            guards.no_import(world, "no import — nothing to build meta from"),
             guards.track_missing(world))
 
     def _perform(self, world):
@@ -370,8 +215,8 @@ class BuildPreview(MenuItem):
     # Stills and a contact sheet. It writes no sidecar and sends nothing
     # anywhere, so neither the trip list nor the destination has moved.
     CHANGES_THE_QUESTION = False
-    OUT = _and_upload(PREVIEW, META, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD)
-    IN_AUTHORED = _both_sets(PREVIEW, META, EXCLUDE)
+    OUT = and_upload(PREVIEW, META, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD)
+    IN_AUTHORED = both_sets(PREVIEW, META, EXCLUDE)
 
     def evaluate(self, world) -> Verdict:
         """The sidecars have to be ON DISK, not merely to have been written.
@@ -381,8 +226,8 @@ class BuildPreview(MenuItem):
         and the keypress, and an empty workspace settles the question rather
         than failing it.
         """
-        return _first_block(
-            _no_import(world, "no import — nothing to preview"),
+        return first_block(
+            guards.no_import(world, "no import — nothing to preview"),
             guards.sidecars_missing(world))
 
     def _perform(self, world):
@@ -435,12 +280,12 @@ class ExcludeTrip(Destructive):
     # that names the other act taught the wrong idea of what was happening.
     WORD = "EXCLUDE"
     SCOPE = Scope.FULL          # the only-copy warning has to ask the target
-    OUT = _and_upload(EXCLUDE, META, PREVIEW, CLEAN_WS, ERASE_CARD)
-    IN_AUTHORED = _both_sets(EXCLUDE, META, PREVIEW)
+    OUT = and_upload(EXCLUDE, META, PREVIEW, CLEAN_WS, ERASE_CARD)
+    IN_AUTHORED = both_sets(EXCLUDE, META, PREVIEW)
 
     def evaluate(self, world) -> Verdict:
-        return _first_block(
-            _no_import(world, "no import — nothing to exclude"))
+        return first_block(
+            guards.no_import(world, "no import — nothing to exclude"))
 
     def _plan(self, world) -> Plan:
         return self._work.exclude_plan(world)
@@ -477,7 +322,7 @@ class RenderVideos(MenuItem):
     # all, so the manifest built before it is still correct after it, and
     # sending the videos is the whole of what is left to do. The removed edge
     # bought nothing and cost a rebuild after every render.
-    OUT = _and_upload(RENDER, META, PREVIEW, EXCLUDE, BUILD, CLEAN_WS, ERASE_CARD)
+    OUT = and_upload(RENDER, META, PREVIEW, EXCLUDE, BUILD, CLEAN_WS, ERASE_CARD)
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({RENDER, META, PREVIEW, EXCLUDE, BUILD, UPLOAD}),
         Strategy.LOCAL_PAGE: frozenset({RENDER, META, PREVIEW, EXCLUDE, BUILD}),
@@ -489,8 +334,8 @@ class RenderVideos(MenuItem):
         A mounted card is not a workspace: that distinction is evidence about
         two different directories, not a statement about which step ran first.
         """
-        return _first_block(
-            _no_import(world,
+        return first_block(
+            guards.no_import(world,
                        "nothing to render"),
             guards.sidecars_missing(world))
 
@@ -529,9 +374,9 @@ class BuildWebsite(MenuItem):
     # Upload Website was unreachable by its own natural route. This is the edge
     # that makes publishing work.
     OUT = {
-        Strategy.UPLOADER: _e(BUILD, META, PREVIEW, EXCLUDE, RENDER, UPLOAD,
+        Strategy.UPLOADER: e(BUILD, META, PREVIEW, EXCLUDE, RENDER, UPLOAD,
                                   CLEAN_WS, ERASE_CARD),
-        Strategy.LOCAL_PAGE: _e(BUILD, META, PREVIEW, EXCLUDE, RENDER,
+        Strategy.LOCAL_PAGE: e(BUILD, META, PREVIEW, EXCLUDE, RENDER,
                                            CLEAN_WS, ERASE_CARD),
     }
     IN_AUTHORED = {
@@ -544,6 +389,7 @@ class BuildWebsite(MenuItem):
         # The strategy branch, resolved once. It must not reappear as an `if`
         # in _perform.
         self._builder = work.builder(strategy)
+        self._handover = Handover(work, self._builder)
 
     def description(self) -> str:
         """What THIS installation's build does, asked of the thing that does it.
@@ -567,14 +413,12 @@ class BuildWebsite(MenuItem):
         <dir>: the operator is being told where to go and look.
         """
         where = self._work.site_dir()
-        return _handover(
-            self._work,
+        return self._handover.about(
             "This step builds the website out of the trips that have been "
             "described. In local mode, a simple website gets generated and "
             "placed in:\n\t%s\n\nIf you configured a plugin, the operational "
             "details of the process are delegated to the plugin."
-            % (where or "<export_dir>"),
-            self._builder)
+            % (where or "<export_dir>"))
 
     def evaluate(self, world) -> Verdict:
         """The exporter's own question first, then the builder's own verdict.
@@ -617,9 +461,9 @@ class UploadWebsite(MenuItem):
     # outbound. Deriving the inbound would have silently deleted an edge he
     # authored.
     OUT = {
-        Strategy.UPLOADER: _e(UPLOAD, META, PREVIEW, EXCLUDE, RENDER, BUILD,
+        Strategy.UPLOADER: e(UPLOAD, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                                   CLEAN_WS, ERASE_CARD),
-        Strategy.LOCAL_PAGE: _e(),
+        Strategy.LOCAL_PAGE: e(),
     }
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({UPLOAD, BUILD}),
@@ -629,6 +473,7 @@ class UploadWebsite(MenuItem):
     def __init__(self, strategy, work, inbound):
         super().__init__(strategy, work, inbound)
         self._publish = work.publisher(strategy)
+        self._handover = Handover(work, self._publish)
 
     def description(self) -> str:
         """What THIS installation's upload does, asked of the thing that does it.
@@ -647,14 +492,12 @@ class UploadWebsite(MenuItem):
         thing that speaks to it.
         """
         where = self._work.website_export_dir()
-        return _handover(
-            self._work,
+        return self._handover.about(
             "This step uploads the built website to its destination. In local "
             "mode, the website is copied to the specified directory:\n\t%s\n\n"
             "If you configured a plugin, the operational details of the "
             "process are delegated to the plugin."
-            % (where or "<default_website_export_dir>"),
-            self._publish)
+            % (where or "<default_website_export_dir>"))
 
     def evaluate(self, world) -> Verdict:
         """The exporter's own evidence first, then the uploader, then the
@@ -666,7 +509,7 @@ class UploadWebsite(MenuItem):
         online, and with no sidecar anywhere the deploy pushes an index
         describing no trips.
         """
-        stop = _reason(_nothing_to_send(world), guards.no_sidecars_at_all(world))
+        stop = reason(guards.nothing_to_send(world), guards.no_sidecars_at_all(world))
         if stop:
             return blocked(stop)
         return self._still_owed(world)
@@ -680,7 +523,7 @@ class UploadWebsite(MenuItem):
         verdict = self._publish.evaluate(world)
         if verdict.ruling is not Ruling.GO:
             return verdict
-        return _nothing_left_to_do(world)
+        return guards.nothing_left_to_do(world)
 
     def _perform(self, world):
         return self._publish.execute(world)
@@ -744,7 +587,7 @@ class CleanWorkspace(Destructive):
     # is known to be unwanted. A word typed here would drop the same clips
     # without any of that, and the next import would offer them back.
     SCOPE = Scope.FULL
-    OUT = _both(_e(IMPORT, CLEAN_WS))
+    OUT = both(e(IMPORT, CLEAN_WS))
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({IMPORT, META, PREVIEW, EXCLUDE, RENDER,
                                           BUILD, UPLOAD}),
@@ -762,8 +605,8 @@ class CleanWorkspace(Destructive):
         menu that is not instant stops being recomputed and starts being
         remembered.
         """
-        return _first_block(
-            _no_import(world, "nothing imported — nothing to clean up"),
+        return first_block(
+            guards.no_import(world, "nothing imported — nothing to clean up"),
             guards.nothing_to_clean_up(world))
 
     def _plan(self, world) -> Plan:
@@ -838,7 +681,7 @@ class DeleteSimData(Destructive):
     # card erase on every publishing install and told the operator nothing. A
     # warning that is always on is a warning nobody reads.
     SCOPE = Scope.FULL
-    OUT = _both(StepBack())
+    OUT = both(StepBack())
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({IMPORT, META, PREVIEW, EXCLUDE, RENDER,
                                           BUILD, UPLOAD}),

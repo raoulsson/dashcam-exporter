@@ -239,9 +239,10 @@ COLLABORATOR_CALL_SITES = {
     "evaluate": (A_WORLD,),
     # both items' _perform
     "execute": (A_WORLD,),
-    # items._long_description, from both items' about(), for h 5 and h 7
+    # handover.Handover._long_description, reached from both items' about(),
+    # for h 5 and h 7
     "get_website_upload_description": (),
-    # items._plugin_name, to attribute the paragraph above
+    # handover.Handover._plugin_name, to attribute the paragraph above
     "plugin_name": (),
 }
 
