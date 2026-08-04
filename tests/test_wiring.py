@@ -227,6 +227,92 @@ class TestThePublisherFitsItsCallSite(unittest.TestCase):
         self.assertTrue(a_work().publisher(LOCAL).evaluate(A_WORLD).blocked)
 
 
+# What items 5 and 7 really ask their collaborator, written where it can be
+# checked, exactly as CALL_SITES above does for the plugin-facing interface.
+# The left column is everything the exporter asks its own publishing halves;
+# the right column is all it ever hands over.
+COLLABORATOR_CALL_SITES = {
+    # items.BuildWebsite.description and items.UploadWebsite.description, for
+    # the menu row, on every draw
+    "describe": (),
+    # items.BuildWebsite.evaluate and items.UploadWebsite._still_owed
+    "evaluate": (A_WORLD,),
+    # both items' _perform
+    "execute": (A_WORLD,),
+    # items._long_description, from both items' about(), for h 5 and h 7
+    "get_website_upload_description": (),
+    # items._plugin_name, to attribute the paragraph above
+    "plugin_name": (),
+}
+
+
+def every_collaborator():
+    """All four of them, built the way the item constructors build them."""
+    return ((UPLOADER, "builder", a_work(a_plugin()).builder(UPLOADER)),
+            (LOCAL, "builder", a_work().builder(LOCAL)),
+            (UPLOADER, "publisher", a_work(a_plugin()).publisher(UPLOADER)),
+            (LOCAL, "publisher", a_work().publisher(LOCAL)))
+
+
+class TestEveryCollaboratorIsDeclaredAndNotMerelyShaped(unittest.TestCase):
+    """The seam items 5 and 7 install, declared instead of hoped for.
+
+    This is the file the last one of these got past. A long description was
+    added to what the items ask their collaborator, none of the four real
+    collaborators had it, and both help screens raised AttributeError on every
+    installation -- while a test stub that DID have it kept the suite green.
+    Subclassing is what turns that into a TypeError at construction, and these
+    are the assertions that keep the subclassing there.
+    """
+
+    def test_every_collaborator_is_an_instance_of_the_seam(self):
+        for strategy, half, act in every_collaborator():
+            with self.subTest(strategy=strategy.value, half=half):
+                self.assertIsInstance(act, P.PublishingCollaborator)
+
+    def test_the_seam_declares_nothing_the_items_do_not_call(self):
+        """The table above goes stale loudly. Add a method to the seam and this
+        fails until someone writes down where items.py calls it from, which is
+        the moment to notice whether anything calls it at all."""
+        self.assertEqual(
+            P.PublishingCollaborator.__abstractmethods__
+            - set(COLLABORATOR_CALL_SITES), set(),
+            "the seam grew a method with no call site written down")
+
+    def test_no_entry_in_the_table_is_absent_from_the_seam(self):
+        for name in COLLABORATOR_CALL_SITES:
+            with self.subTest(method=name):
+                self.assertIn(name, P.PublishingCollaborator.__abstractmethods__,
+                              "%s is called but the seam does not declare it" % name)
+
+    def test_every_collaborator_binds_every_call_site(self):
+        for strategy, half, act in every_collaborator():
+            for name, args in COLLABORATOR_CALL_SITES.items():
+                with self.subTest(strategy=strategy.value, half=half, method=name):
+                    inspect.signature(getattr(act, name)).bind(*args)
+
+    def test_a_half_that_misses_a_method_cannot_be_constructed(self):
+        """The guarantee itself, stated once. A future method added to the seam
+        stops the tool where the operator can see it -- at construction, before
+        a menu is drawn -- rather than under the key he pressed."""
+        class Forgetful(P.PublishingCollaborator):
+            def describe(self):
+                return "a half that forgot the rest"
+
+        with self.assertRaises(TypeError) as caught:
+            Forgetful()
+        self.assertIn("evaluate", str(caught.exception))
+
+    def test_a_collaborator_is_not_offered_as_a_plugin_act(self):
+        """The two seams are separate on purpose. An Act is handed a Workspace
+        and a collaborator is handed a World, so a collaborator that also
+        claimed to be a Builder would sail through load_plugin's shape check
+        and then be handed the one argument it cannot read."""
+        for strategy, half, act in every_collaborator():
+            with self.subTest(strategy=strategy.value, half=half):
+                self.assertNotIsInstance(act, U.Act)
+
+
 class TestTheUiHandedOverIsTheRealOne(unittest.TestCase):
     """An implementation is handed pipeline.Console and told it is a Ui. If the
     two ever drift, every target that used the nice output breaks at once."""

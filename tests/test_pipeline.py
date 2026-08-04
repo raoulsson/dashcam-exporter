@@ -1304,13 +1304,25 @@ class TheHelpScreen(unittest.TestCase):
 
     def setUp(self):
         # Items 5 and 7 ask the installed plugin to describe its own job, so
-        # the fake has to answer that rather than hand back None.
-        class FakePlugin:
+        # the fake has to answer that rather than hand back None. It subclasses
+        # the real seam on purpose: the last time these tests used a free-hand
+        # stub, the stub had a method the four real collaborators did not, and
+        # the suite stayed green over both help screens crashing.
+        class FakePlugin(P.PublishingCollaborator):
             def describe(self):
                 return "Build the website from the described trips."
 
             def get_website_upload_description(self):
                 return "What this publisher does, in its own words."
+
+            def plugin_name(self):
+                return None
+
+            def evaluate(self, world):
+                return M.go()
+
+            def execute(self, world):
+                return M.did("nothing")
 
         class FakeWork:
             # site_dir answers a path; everything else hands back the plugin.

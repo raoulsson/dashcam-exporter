@@ -64,6 +64,7 @@ import time
 import traceback
 import urllib.parse
 import urllib.request
+from abc import ABC, abstractmethod
 from pathlib import Path
 
 # The state machine. Ordering is the graph's job, evidence is the guards',
@@ -7479,7 +7480,86 @@ def _handed_over(ctx, world):
         dropped_ids=world.dropped_ids, offline=world.offline, ui=Console(ctx))
 
 
-class LocalPage:
+class PublishingCollaborator(ABC):
+    """What items 5 and 7 install as their body, declared rather than assumed.
+
+    NOT uploader.Act, and the difference is the whole reason this exists. An
+    Act is handed a Workspace — the reduced, plugin-facing view — and knows
+    nothing about this repo. A collaborator is handed the exporter's own
+    World, because two of the four are the exporter doing the job itself and
+    the other two have to translate before an Act ever sees anything. Naming
+    them Acts would let a LocalPage pass load_plugin's shape check while being
+    unable to accept the one argument a plugin is ever given.
+
+    So this is the exporter's INTERNAL seam, and every method on it is
+    abstract. That is safe here in a way it is not in uploader.py: the only
+    implementations are the four below, all in this file, and a method added
+    to the seam should stop the tool at construction rather than at the moment
+    an operator presses a key. It already did the other thing once — a long
+    description was added to the interface, all four collaborators silently
+    lacked it, and `h 5` and `h 7` raised AttributeError on every install.
+    """
+
+    @abstractmethod
+    def describe(self):
+        """One line for the menu row: what THIS installation's step does.
+
+        Read on every draw, so it must be cheap and must not go looking at
+        anything. It is the entry answering for its own job rather than the
+        session restating how the tool was installed, which is why it differs
+        between the two editions instead of being a constant in items.py.
+        """
+
+    @abstractmethod
+    def evaluate(self, world):
+        """May the step run against this World, and would it do anything.
+
+        The exporter's own guards have already had their say by the time this
+        is asked; what comes back is about the collaborator's half of the job.
+        GO, SATISFIED and BLOCKED all mean here what they mean everywhere else
+        in the menu, and the item passes the answer through verbatim.
+
+        Asked on every menu draw, so no network and no subprocess. Anything
+        that has to leave the machine belongs behind capture_world's FULL
+        scope, which asks once per dispatch and freezes what came back.
+        """
+
+    @abstractmethod
+    def execute(self, world):
+        """Do the step, once, and say what happened as an Outcome.
+
+        `completed` is all the runner reads: it decides whether the position
+        advances or the pipeline stays where it was. Whatever this prints is
+        the operator's whole picture of the step, since the menu adds nothing
+        beyond the outcome's note.
+        """
+
+    @abstractmethod
+    def get_website_upload_description(self):
+        """What this step amounts to on this installation, for `h 5` and `h 7`.
+
+        Printed under the exporter's own two sentences and attributed, so a
+        reader can tell which prose this repo is answerable for. Return "" when
+        there is nothing to add — the local edition's collaborators do, because
+        the exporter has already said everything true about them — and the help
+        screen then simply ends where it ended before.
+
+        It must not raise. This is the one screen in the tool that exists to
+        tell an operator who to complain to.
+        """
+
+    @abstractmethod
+    def plugin_name(self):
+        """Whose words those were, or None when they are the exporter's own.
+
+        The help screen attributes a quoted paragraph to the thing that said
+        it. None means there is nothing to attribute — no plugin is configured
+        — and the help screen prints no attribution line rather than crediting
+        an empty quotation to "the plugin".
+        """
+
+
+class LocalPage(PublishingCollaborator):
     """Item 5 under the local edition: write the page, and gather.
 
     Gathering is what makes the local edition's workspace expendable, so the
@@ -7517,7 +7597,7 @@ class LocalPage:
         return _outcome(step_site(self._ctx, gather_into_final))
 
 
-class TargetBuild:
+class TargetBuild(PublishingCollaborator):
     """Item 5 with a plugin configured: whatever its builder builds.
 
     The local page is not written and gather_into_final does not run. Moving
@@ -7557,6 +7637,17 @@ class TargetPublish(TargetBuild):
     The same three calls as item 5's collaborator against a different act,
     which is the whole point of the acts having one shape — the only thing that
     differs is which step the outcome is logged against.
+
+    Subclassing TargetBuild rather than the seam directly, and it stays sound
+    now that TargetBuild has a base: everything inherited — describe,
+    evaluate, the long description, the plugin's name — is a bare delegation to
+    self._act, and self._act here is the uploader. There is nothing about item
+    5 left in any of them to be wrong about item 7.
+
+    It is not an uploader.Uploader either, and deliberately: is_complete() is
+    the destination's answer and the exporter asks the ACT for it, in
+    capture_world at FULL scope. Routing it through here would put a wrapper
+    on the one question the erase gates rest on, for no caller.
     """
 
     def execute(self, world):
@@ -7608,12 +7699,21 @@ def _delta_words(added, total):
     return "%d new trip%s added, %d total" % (added, "" if added == 1 else "s", total)
 
 
-class NoPublisher:
+class NoPublisher(PublishingCollaborator):
     """Item 7 under the local edition: no edges, and nothing to run.
 
     Constructed rather than omitted so that every number means the same thing
     on every installation — a menu that renumbers itself makes every sentence
     anyone writes about "item 6" true only locally.
+
+    A collaborator and NOT an uploader.Uploader, which would demand
+    is_complete(). There is no destination here to be complete at, and the two
+    answers such a stub could give are both wrong: YES and NA each REMOVE the
+    erase gate, and UNKNOWN would put a permanent "could not reach the
+    destination" in front of an operator who never configured one. Nothing
+    asks — the question goes to ctx.plugin.uploader, which under this edition
+    is None, and the local edition's Clean Workspace rests on what is on this
+    machine instead.
     """
 
     def describe(self):

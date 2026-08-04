@@ -26,9 +26,18 @@ import guards
 
 def _long_description(act):
     """An act's own long-form help, or "" if it has none. Never raises: this
-    feeds a HELP SCREEN, the one place in the tool nothing should fail."""
+    feeds a HELP SCREEN, the one place in the tool nothing should fail.
+
+    Called by name rather than through getattr. The collaborator is one of the
+    exporter's own four and its base declares this, so a missing method is now
+    a construction error rather than something to shrug past here — and the
+    shrug was itself the bug, since getattr with a default is exactly what
+    turns "nobody implemented it" into a crash at the far end. The try stays
+    for what genuinely can fail: a plugin's own answer, reached through the
+    collaborator, is somebody else's code.
+    """
     try:
-        said = getattr(act, "get_website_upload_description", lambda: "")()
+        said = act.get_website_upload_description()
     except Exception:
         return ""
     return said.strip() if isinstance(said, str) else ""
@@ -36,7 +45,7 @@ def _long_description(act):
 
 def _plugin_name(act):
     try:
-        return getattr(act, "plugin_name", lambda: None)()
+        return act.plugin_name()
     except Exception:
         return None
 
