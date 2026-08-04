@@ -7660,6 +7660,16 @@ class Work:
     def __init__(self, ctx):
         self.ctx = ctx
 
+    def site_dir(self):
+        """Where the local edition writes its page, for item 5's help to name.
+
+        A real path beats "<dir>" by enough to be worth asking for. Returns
+        None when there is nothing sensible to print, and the help falls back
+        to saying it in words.
+        """
+        out = getattr(self.ctx, "out_dir", None)
+        return tilde(out) if out else None
+
     # -- the bodies --------------------------------------------------------
     def progress(self, world):
         return _outcome(step_progress(self.ctx, world))
@@ -8081,6 +8091,11 @@ def _about_paragraphs(text):
     Clamped rather than wrapped to whatever the window happens to be: a full-
     width paragraph on a wide terminal is a line the eye loses its place in on
     the way back, and the rest of this screen is indented four spaces anyway.
+
+    A single newline inside a paragraph is kept as a line break, and a line
+    that begins with whitespace is emitted exactly as written. That is what
+    lets an entry put a path on its own line: reflowed into the prose it would
+    break across two lines and stop being a thing you can select and paste.
     """
     if not text:
         return ()
@@ -8088,7 +8103,11 @@ def _about_paragraphs(text):
     out = []
     for para in text.split("\n\n"):
         out.append("")
-        out.extend("    " + line for line in textwrap.wrap(para, room))
+        for line in para.split("\n"):
+            if line[:1] in (" ", "\t"):
+                out.append("    " + line.replace("\t", "    ").rstrip())
+            else:
+                out.extend("    " + w for w in textwrap.wrap(line, room))
     return tuple(out)
 
 

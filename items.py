@@ -475,20 +475,6 @@ class BuildWebsite(MenuItem):
     number = BUILD
     NAME = "Build Website"
     DESCRIPTION = "Build the website from the described trips."
-    ABOUT = (
-        "Builds whatever this installation publishes, out of the trips that "
-        "have been described. It comes before rendering on purpose: a trip is "
-        "publishable as soon as item 2 has said where it begins and ends, and "
-        "the pages are seconds of work where the videos are hours. Build and "
-        "put the pages up first, then let the encoding catch up behind them.\n\n"
-        "What it produces depends on how the tool is set up, and the entry "
-        "answers for its own job rather than for the installation. With no "
-        "publisher configured it writes a single local page and gathers the "
-        "renders into one folder per day — that gathering is what makes the "
-        "workspace expendable, so it happens here or nowhere. With a publisher "
-        "configured the page is that publisher's to build, and the local page "
-        "is not written at all."
-    )
     # DEVIATION FROM THE OWNER'S TABLE: 7 added to the outbound under the
     # publishing edition. His inbound column for item 7 says {7,5} — build the
     # site, then put it online — but no outbound set anywhere offered 7, so
@@ -519,6 +505,28 @@ class BuildWebsite(MenuItem):
         which genuinely differs between the two products.
         """
         return self._builder.describe()
+
+    def about(self) -> str:
+        """The two modes, then whatever the installed plugin says about its own.
+
+        The two sentences are fixed, because the CHOICE is the same on every
+        installation. What follows them is not ours to write: where a site ends
+        up, what is public, what a second run does differently — a plugin that
+        publishes somewhere we have never heard of is the only thing that can
+        say, so its answer goes in verbatim.
+
+        The colon at the end of the handover sentence becomes a full stop when
+        nothing answers, so an install with no plugin does not read as a page
+        that lost its last paragraph.
+        """
+        where = self._work.site_dir()
+        placed = ("placed in:\n\t%s" % where) if where else "placed in <dir>."
+        said = (self._builder.get_website_upload_description() or "").strip()
+        handover = ("In \"plugin\" mode the context is handed over to the "
+                    "plugin" + (":" if said else "."))
+        text = ("In \"local\" mode, a simple website gets generated and %s\n\n%s"
+                % (placed, handover))
+        return text + ("\n\n" + said if said else "")
 
     def evaluate(self, world) -> Verdict:
         """The exporter's own question first, then the builder's own verdict.

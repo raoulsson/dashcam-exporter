@@ -1309,7 +1309,14 @@ class TheHelpScreen(unittest.TestCase):
             def describe(self):
                 return "Build the website from the described trips."
 
+            def get_website_upload_description(self):
+                return "What this publisher does, in its own words."
+
         class FakeWork:
+            # site_dir answers a path; everything else hands back the plugin.
+            def site_dir(self):
+                return "~/dashcam-data/export"
+
             def __getattr__(self, name):
                 return lambda *a, **kw: FakePlugin()
         self.items = M.build_menu(M.Strategy.UPLOADER, FakeWork())
@@ -1363,6 +1370,35 @@ class TheHelpScreen(unittest.TestCase):
     def test_the_entry_point_is_reached_from_nothing_not_from_anywhere(self):
         came = next(ln for ln in self._plain(1) if ln.startswith("    reached from"))
         self.assertNotIn("view", came)
+
+    def test_a_path_on_its_own_line_is_not_reflowed(self):
+        """An entry can lay out a line itself by indenting it. Wrapped into
+        the prose a path breaks across two lines and stops being something you
+        can select and paste."""
+        lines = P._about_paragraphs("Written to:\n\t/very/long/path/that/would/"
+                                    "otherwise/be/wrapped/into/the/prose/export")
+        self.assertIn("        /very/long/path/that/would/otherwise/be/"
+                      "wrapped/into/the/prose/export", lines)
+
+    def test_a_single_newline_is_a_line_break_not_a_space(self):
+        out = [ln.strip() for ln in P._about_paragraphs("first\nsecond") if ln.strip()]
+        self.assertEqual(out, ["first", "second"])
+
+    def test_item_five_prints_what_the_publisher_says_verbatim(self):
+        said = "What this publisher does, in its own words."
+        self.assertIn(said, "\n".join(self._plain(5)))
+
+    def test_item_five_names_the_directory_when_it_knows_it(self):
+        self.assertIn("~/dashcam-data/export", "\n".join(self._plain(5)))
+
+    def test_the_handover_sentence_closes_when_nothing_answers(self):
+        """A publisher predating this interface returns "", and a colon with
+        nothing after it reads as a page that lost its last paragraph."""
+        item = self.items[5]
+        with mock.patch.object(item._builder, "get_website_upload_description",
+                               return_value=""):
+            text = item.about()
+        self.assertTrue(text.rstrip().endswith("handed over to the plugin."))
 
     def test_the_view_still_says_it_is_one(self):
         for row in ("    leads to", "    reached from"):
