@@ -562,7 +562,7 @@ class BuildWebsite(MenuItem):
             self._work,
             "This step builds the website out of the trips that have been "
             "described. In local mode, a simple website gets generated and "
-            "placed in:\n\t%s\nIf you configured a plugin, the operational "
+            "placed in:\n\t%s\n\nIf you configured a plugin, the operational "
             "details of the process are delegated to the plugin."
             % (where or "<export_dir>"),
             self._builder)
@@ -641,7 +641,7 @@ class UploadWebsite(MenuItem):
         return _handover(
             self._work,
             "This step uploads the built website to its destination. In local "
-            "mode, the website is copied to the specified directory:\n\t%s\n"
+            "mode, the website is copied to the specified directory:\n\t%s\n\n"
             "If you configured a plugin, the operational details of the "
             "process are delegated to the plugin."
             % (where or "<default_website_export_dir>"),
