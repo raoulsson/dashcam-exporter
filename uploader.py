@@ -44,6 +44,7 @@ what an unreachable destination says, and unreachable is not permission.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -113,6 +114,54 @@ def progress_note(name="", rate="", done=None, total=None, tail="") -> str:
     if tail:
         parts.append(str(tail))
     return "   ".join(parts)
+
+
+_ORDINALS = {1: "st", 2: "nd", 3: "rd"}
+
+
+def last_change(where) -> str:
+    """When a checkout last changed, as "4th of August 2026". "" without git.
+
+    Here rather than in the exporter because a plugin's `i` rows want the same
+    sentence about ITS repository, and a second implementation of "spell the
+    ordinal" is a second thing to get wrong on the 11th, 12th and 13th.
+    """
+    try:
+        p = subprocess.run(["git", "log", "-1", "--format=%cd",
+                            "--date=format:%d %B %Y"],
+                           cwd=str(where), capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return _spelled(p.stdout.strip()) if p.returncode == 0 else ""
+
+
+def checkout_version(where, major: int) -> str:
+    """`major`.hundreds.remainder off the commit count. "" without git.
+
+    The major is a decision and stays yours; the other two are the history, so
+    they cannot drift from what is actually installed the way a hand-kept
+    constant does.
+    """
+    try:
+        p = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=str(where),
+                           capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    count = p.stdout.strip()
+    if p.returncode != 0 or not count.isdigit():
+        return ""
+    return "%d.%d.%d" % (major, int(count) // 100, int(count) % 100)
+
+
+def _spelled(stamp: str) -> str:
+    """"04 August 2026" -> "4th of August 2026"."""
+    parts = stamp.split(" ", 1)
+    if len(parts) != 2 or not parts[0].isdigit():
+        return stamp
+    day = int(parts[0])
+    # 11th, 12th and 13th, the three the last digit gets wrong.
+    suffix = "th" if 11 <= day % 100 <= 13 else _ORDINALS.get(day % 10, "th")
+    return "%d%s of %s" % (day, suffix, parts[1])
 
 
 def _fitted(text, width):
@@ -287,6 +336,27 @@ class Act(ABC):
         sentence ends there.
         """
         return ""
+
+    def get_plugin_info(self) -> "Tuple[Tuple[str, str], ...]":
+        """Label/value rows for the `i` screen, under a section of your own.
+
+        Whatever an operator would need in order to report a bug against you
+        rather than against the exporter: a name, where the file is, who wrote
+        it, a licence, a version, when it last changed. Rows rather than a
+        block of prose because they are printed beside the exporter's own,
+        aligned in the same two columns.
+
+        Order is yours and is preserved. Rows are printed as given, so leave
+        out what you have no answer for rather than filling it in with a dash
+        -- an absent row reads as "not applicable", a dash reads as "broken".
+
+        Asked of the UPLOADER first and the builder only if that says nothing,
+        the same way the plugin's name is taken: they are two halves of one
+        arrangement and describing it twice is two places to go stale.
+
+        Not abstract, for the same reason as everything else here.
+        """
+        return ()
 
 
 class Builder(Act):
@@ -477,6 +547,24 @@ class Plugin:
         the answer he acted on off the tool rather than out of memory.
         """
         return "%s (%s)" % (self.name, self.spec)
+
+    @property
+    def info(self) -> "Tuple[Tuple[str, str], ...]":
+        """The rows this plugin wants on the `i` screen, or empty.
+
+        The uploader answers, and the builder only if it said nothing — one
+        arrangement, described once. Never raises: `i` is a screen that prints
+        who to complain to, and it failing is the one thing that would leave
+        nobody to complain to.
+        """
+        for act in (self.uploader, self.builder):
+            try:
+                rows = tuple(act.get_plugin_info())
+            except Exception:
+                continue
+            if rows:
+                return rows
+        return ()
 
 
 def load_plugin(spec: str, exporter_dir: Path) -> Plugin:

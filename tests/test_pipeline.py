@@ -1482,6 +1482,75 @@ class TheHelpScreen(unittest.TestCase):
             self.assertIn("view", line)
 
 
+class TheInfoScreen(unittest.TestCase):
+    """`i` prints the facts a bug report has to quote."""
+
+    def _plain(self, plugin=None):
+        return [re.sub(r"\x1b\[[0-9;]*m", "", ln) for ln in P._info_lines(plugin)]
+
+    def _row(self, label, plugin=None):
+        return next((ln for ln in self._plain(plugin)
+                     if ln.startswith("    " + label)), None)
+
+    def test_the_version_has_a_row_of_its_own(self):
+        """Beside the title it sat on the one line nobody scans, and it is the
+        first thing anyone reporting a bug is asked for."""
+        self.assertIsNotNone(self._row("Version"))
+        self.assertNotIn(P.version(), self._plain()[1])
+
+    def test_nothing_on_this_screen_is_dimmed(self):
+        for line in P._info_lines():
+            if line.startswith("    "):
+                self.assertNotIn("\x1b[2m", line)
+
+    def test_no_plugin_means_no_plugin_section(self):
+        self.assertNotIn("  plugin", self._plain())
+
+    def test_a_plugins_rows_are_printed_under_its_own_heading(self):
+        plugin = mock.Mock()
+        plugin.info = (("Name", "Goodnight-Drives"), ("Licence", "Private"))
+        lines = self._plain(plugin)
+        self.assertIn("  plugin", lines)
+        self.assertEqual(self._row("Name", plugin),
+                         "    Name             Goodnight-Drives")
+
+    def test_a_plugin_with_nothing_to_say_gets_no_empty_heading(self):
+        plugin = mock.Mock()
+        plugin.info = ()
+        self.assertNotIn("  plugin", self._plain(plugin))
+
+    def test_a_checkout_without_git_simply_has_no_date_row(self):
+        """An invented date is worse than an absent one on a screen whose only
+        job is to be quotable."""
+        with mock.patch.object(P.uploader, "last_change", return_value=""):
+            self.assertIsNone(self._row("Last Update"))
+
+
+class TheDateIsSpelled(unittest.TestCase):
+
+    def test_the_ordinal_follows_the_day(self):
+        cases = {"01 August 2026": "1st of August 2026",
+                 "02 August 2026": "2nd of August 2026",
+                 "03 August 2026": "3rd of August 2026",
+                 "04 August 2026": "4th of August 2026",
+                 "21 August 2026": "21st of August 2026",
+                 "22 August 2026": "22nd of August 2026",
+                 "23 August 2026": "23rd of August 2026"}
+        for stamp, want in cases.items():
+            with self.subTest(stamp=stamp):
+                self.assertEqual(P.uploader._spelled(stamp), want)
+
+    def test_the_teens_are_all_th(self):
+        """11th, 12th and 13th are the three a last-digit rule gets wrong."""
+        for day in (11, 12, 13):
+            with self.subTest(day=day):
+                self.assertEqual(P.uploader._spelled("%d August 2026" % day),
+                                 "%dth of August 2026" % day)
+
+    def test_something_that_is_not_a_date_is_passed_through(self):
+        self.assertEqual(P.uploader._spelled("whenever"), "whenever")
+
+
 class TheVersionIsTheCommitCount(unittest.TestCase):
     """major is set by hand; minor and patch are arithmetic on the history.
 

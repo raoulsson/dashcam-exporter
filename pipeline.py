@@ -8062,27 +8062,58 @@ def _row(ordered, verdicts, offered, cell, cols, rows, r):
                              ordered[i].number in offered, cell), here))
 
 
-def _info_lines():
+def _info_lines(plugin=None):
     """Who made it, what it is, and where the money goes if anyone wants to.
 
     Its own screen rather than a banner, because it is the same every launch
     and nobody needs it twice.
+
+    The version sits in the table rather than beside the title. It is a fact
+    about this checkout, like the licence and the date, and reading it off a
+    heading meant the one line nobody scans held the one number a bug report
+    needs. A configured plugin gets a section of its own, in its own words, so
+    a report says which of the two is at fault.
     """
-    return ("",
-            C.bold("  dashcam-exporter %s" % version()),
-            _info_setting("Designed by", "Raoul Marc Schmidiger"),
-            _info_setting("Implemented by", "Claude"),
-            _info_setting("Repository", REPO_URL),
-            _info_setting("Licence", "MIT"),
-            "",
-            C.bold("  Funding"),
-            _info_setting("Sponsor", SPONSORS_URL),
-            _info_setting("Buy a coffee", COFFEE_URL),
-            "")
+    return (("",
+             C.bold("  dashcam-exporter"),
+             _info_setting("Designed by", "Raoul Marc Schmidiger"),
+             _info_setting("Implemented by", "Claude"),
+             _info_setting("Repository", REPO_URL),
+             _info_setting("Licence", "MIT"),
+             _info_setting("Version", version()))
+            + _dated("Last Update", uploader.last_change(EXPORTER_DIR))
+            + _plugin_info_lines(plugin)
+            + ("",
+               C.bold("  Funding"),
+               _info_setting("Sponsor", SPONSORS_URL),
+               _info_setting("Buy a coffee", COFFEE_URL),
+               ""))
+
+
+def _plugin_info_lines(plugin):
+    """The plugin's own section, printed only when there is one to print.
+
+    An empty heading over nothing says a plugin is configured and has nothing
+    to say, which is a different sentence from the true one.
+    """
+    rows = plugin.info if plugin is not None else ()
+    if not rows:
+        return ()
+    return ("", C.bold("  plugin")) + tuple(
+        _info_setting(str(label), str(value)) for label, value in rows)
+
+
+def _dated(label, when):
+    """The row, or no row. A date nothing could answer is left out rather than
+    printed as "unknown", which is a value nobody can act on."""
+    return (_info_setting(label, when),) if when else ()
 
 
 def _info_setting(label, value):
-    return "    %-16s %s" % (label, C.dim(value))
+    # Not dimmed. Dim is for what the eye may skip, and this screen is nothing
+    # but the facts a bug report has to quote -- the version, the licence, who
+    # wrote which half. There is no filler here to push into the background.
+    return "    %-16s %s" % (label, value)
 
 
 def _help_lines(menu_items, position, args):
@@ -8407,7 +8438,7 @@ class Runner:
         return True
 
     def _info(self):
-        _print_all(_info_lines())
+        _print_all(_info_lines(self.ctx.plugin))
         return True
 
     def _select(self, sel):
