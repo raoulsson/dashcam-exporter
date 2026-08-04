@@ -76,7 +76,12 @@ class ParkingTest(unittest.TestCase):
             self._write_nmea(stamp, speeds)
         clip = M.Clip(timestamp=stamp, epoch_utc=0, duration=CLIP_SECS,
                       front=front, rear=None)
-        M._EGO_FLOW_CACHE[front] = [v for v in flow for _ in range(M.EGO_FPS)]
+        # Through the named seam on the singleton, not into the memo dict: it
+        # is the same store the render's detector reads, which is what makes
+        # this fixture a description of what the camera saw rather than a
+        # description of how the memo happens to be keyed.
+        M.VIDEO_MOTION.seed_flow(clip, [v for v in flow
+                                        for _ in range(M.EGO_FPS)])
         self.clips.append(clip)
         self.at += timedelta(seconds=CLIP_SECS)
         return clip

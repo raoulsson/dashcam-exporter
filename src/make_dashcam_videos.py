@@ -205,8 +205,19 @@ def _speed_unit_label() -> str:
     return "mph" if SPEED_UNIT == "mph" else "km/h"
 
 
-@dataclass
+@dataclass(frozen=True)
 class Clip:
+    """One recorded file pair on the card, and when it was filmed.
+
+    Public: timestamp, epoch_utc, duration, front, rear, dt, end, gap_before.
+
+    Frozen because a Clip is evidence, not state. Its stamp and duration come
+    off the filename during the scan and every later answer — the track window,
+    the parking-run boundaries, the flow memo keyed by `front` — is derived from
+    them. A caller that adjusted a Clip in place would silently invalidate memos
+    already computed from the old values, and there is nothing in the render
+    that wants to: nothing has ever assigned to these fields.
+    """
     timestamp: str           # e.g. "20260511121158"
     epoch_utc: int           # filename time treated as UTC -> for drawtext gmtime
     duration: int            # clip duration in seconds (from filename)
@@ -827,6 +838,14 @@ class Track:
     window out of it and turning that window into per-second speeds are four
     steps of ONE piece of knowledge, and a caller holding only the directories
     could — and did — do any of them by filename instead.
+
+    Public: files, utc_offset, during, endpoints, speeds, is_parked. `dirs`
+    is private: handing the directories back out is exactly how a caller
+    re-acquires the ability to resolve a clip's GPS by filename, the mistake
+    this class exists to make impossible. `files` stays public against that
+    grain because the render's cache key is built from the NMEA listing — a
+    track that gained a file must invalidate the key — and it is a read-only
+    property, so a caller can read the listing but never install its own.
     """
 
     #: (pool, utc offset) per directory set, shared by every Track. Building it
@@ -837,10 +856,10 @@ class Track:
     _POOL: "dict[tuple, tuple[list, timedelta]]" = {}
 
     def __init__(self, gps_dirs: "tuple[Path | None, ...]"):
-        self.dirs = tuple(gps_dirs)
+        self._dirs = tuple(gps_dirs)
 
     def __repr__(self) -> str:
-        return "Track(%s)" % ", ".join(str(d) for d in self.dirs)
+        return "Track(%s)" % ", ".join(str(d) for d in self._dirs)
 
     @property
     def files(self) -> list[Path]:
@@ -851,7 +870,7 @@ class Track:
         be writing now.
         """
         out: list[Path] = []
-        for d in self.dirs:
+        for d in self._dirs:
             if d is not None and d.is_dir():
                 out.extend(sorted(f for f in d.rglob("*.gpx") if f.is_file()))
         return out
@@ -862,7 +881,7 @@ class Track:
         Deduplicated by the second, because the camera writes the same minute
         twice -- once loose and once into the tar archives -- and both are read.
         """
-        key = tuple(str(d) for d in self.dirs if d is not None)
+        key = tuple(str(d) for d in self._dirs if d is not None)
         if key not in Track._POOL:
             files = self.files
             seen: set[datetime] = set()
@@ -1283,7 +1302,11 @@ class Detection:
     The source travels with the second because the caller prints it and, at the
     parking exit, branches on it. Returning a bare float meant every caller
     re-derived "which one answered" from the order it had asked in, and that is
-    how the ladder came to be written out three times."""
+    how the ladder came to be written out three times.
+
+    Public: second, source. Already frozen, and it stays that way: a Detection
+    is a reading, and a caller that edited the second while keeping the source
+    would produce an answer no detector ever gave."""
     second: float
     source: str
 
@@ -1297,7 +1320,11 @@ class MotionDetector(abc.ABC):
     left duck-typed because the composite takes implementations it did not
     write: an implementation that answers only one of the two questions would
     otherwise fail at the moment of the render, on the one clip that needed the
-    other one."""
+    other one.
+
+    Public: source, park_second, drive_away_second, park, drive_away. An
+    implementation's evidence — a flow memo, a Track, a list of rungs — is its
+    own business and stays private."""
 
     #: What Detection.source reports for answers from this detector.
     source = "?"
@@ -1326,14 +1353,28 @@ class VideoMotionDetector(MotionDetector):
     """Ego-motion read off the front camera. The primary detector, because it
     reads the wheels: it sees the car itself move, not a receiver's opinion
     about it. Blind where the scene gives it no features to track — a dark
-    arrival under a roof — and that blindness is what the ladder is for."""
+    arrival under a roof — and that blindness is what the ladder is for.
+
+    Public: the MotionDetector interface, plus seed_flow — a named test seam,
+    see there."""
 
     source = "video"
 
     def __init__(self, cache: "dict[Path, list[float] | None] | None" = None):
         # Shared across instances by default so the whole run decodes each clip
         # once; see _flow.
-        self.cache = _EGO_FLOW_CACHE if cache is None else cache
+        self._cache = _EGO_FLOW_CACHE if cache is None else cache
+
+    def seed_flow(self, clip: Clip, signal: "list[float] | None") -> None:
+        """Put a median-flow signal into the memo as if the clip had been
+        decoded. EXISTS FOR THE TESTS, and is public for that reason alone.
+
+        The parking fixtures describe a card as what the camera saw — a flow
+        signal per clip — and answer the detectors from it without OpenCV and
+        without a real .mp4 on disk. That seam has to exist somewhere; naming it
+        here is what lets the memo itself be private, so no caller can reach
+        past it and come to depend on how the memo is keyed."""
+        self._cache[clip.front] = signal
 
     def _flow(self, clip: Clip) -> "list[float] | None":
         """The median-flow signal for a clip, computed at most once.
@@ -1346,11 +1387,11 @@ class VideoMotionDetector(MotionDetector):
         because a Clip is rebuilt from the scan each time; the file it names
         does not change under us within a run."""
         key = clip.front
-        if key not in self.cache:
+        if key not in self._cache:
             frames = _ego_extract_frames(clip)
-            self.cache[key] = (None if frames is None or len(frames) < 4
-                               else _ego_median_flow(frames))
-        return self.cache[key]
+            self._cache[key] = (None if frames is None or len(frames) < 4
+                                else _ego_median_flow(frames))
+        return self._cache[key]
 
     def park_second(self, clip: Clip) -> "float | None":
         """Video-second within `clip` at which the car parks (drives in, then
@@ -1381,30 +1422,36 @@ class GpsMotionDetector(MotionDetector):
     confirms a sustained standstill through a dark garage roof, and it is poor
     at spotting the START of motion, where passing traffic and a slow creep
     below the speed floor both read as nothing happening. Second on the ladder
-    for that reason, never first."""
+    for that reason, never first.
+
+    Public: the MotionDetector interface. The Track and the two thresholds are
+    settled at construction and private after it — a caller that re-pointed a
+    live detector at another card, or moved its parking floor between the
+    arrival question and the departure one, would cut the two ends of the same
+    run by different rules."""
 
     source = "gps"
 
     def __init__(self, track: "Track",
                  park_threshold_kmh: float = PARKING_SPEED_THRESHOLD_KMH,
                  drive_sustain_secs: int = DRIVE_RESUME_SUSTAIN_SECS):
-        self.track = track
-        self.park_threshold_kmh = park_threshold_kmh
-        self.drive_sustain_secs = drive_sustain_secs
+        self._track = track
+        self._park_threshold_kmh = park_threshold_kmh
+        self._drive_sustain_secs = drive_sustain_secs
 
     def park_second(self, clip: Clip) -> "float | None":
         """The video-second at which speed drops below the parking threshold and
         STAYS there through the end of the clip. Same shape as _ego_park_onset:
         the clip must contain real motion first, then settle."""
-        speeds = self.track.speeds(clip)
+        speeds = self._track.speeds(clip)
         if not speeds:
             return None
         n = len(speeds)
         sustain = max(1, int(round(EGO_SUSTAIN_SECS)))
-        if n < sustain + 1 or max(speeds) <= self.park_threshold_kmh:
+        if n < sustain + 1 or max(speeds) <= self._park_threshold_kmh:
             return None                   # never really drove -> not an arrival
         k = n - 1
-        while k >= 1 and speeds[k] < self.park_threshold_kmh:
+        while k >= 1 and speeds[k] < self._park_threshold_kmh:
             k -= 1
         park = k + 1
         if park >= n or (n - park) < sustain:
@@ -1414,8 +1461,8 @@ class GpsMotionDetector(MotionDetector):
     def drive_away_second(self, clip: Clip) -> "float | None":
         """The first sustained moving window in the clip's speeds — see
         find_drive_resume_second for why the sustain is as long as it is."""
-        got = find_drive_resume_second(clip, self.track,
-                                       sustain_secs=self.drive_sustain_secs)
+        got = find_drive_resume_second(clip, self._track,
+                                       sustain_secs=self._drive_sustain_secs)
         return None if got is None else float(got)
 
 
@@ -1430,22 +1477,34 @@ class FirstAnswerDetector(MotionDetector):
     which is why a fix to the order landed at one of them and not the other
     two, and the arrival cut stayed wrong for months after the end-trim was
     right. Building the ladder from an empty or GPS-only list is how
-    --no-video-drive-detect is honoured; there is no flag to consult in here."""
+    --no-video-drive-detect is honoured; there is no flag to consult in here.
+
+    Public: the MotionDetector interface, plus `detectors` read-only — the rungs
+    ARE the class's answer to "which evidence, in what order", and that is the
+    one thing a caller building a ladder from a flag needs to be able to check.
+    Read-only because a ladder whose order could be edited after construction is
+    the very bug the class was extracted to end."""
 
     source = "ladder"
 
     def __init__(self, *detectors: MotionDetector):
-        self.detectors = tuple(detectors)
+        self._detectors = tuple(detectors)
+
+    @property
+    def detectors(self) -> "tuple[MotionDetector, ...]":
+        """The rungs, in the order they are asked. A tuple, so reading it cannot
+        reorder it."""
+        return self._detectors
 
     def park(self, clip: Clip) -> "Detection | None":
-        for d in self.detectors:
+        for d in self._detectors:
             got = d.park(clip)
             if got is not None:
                 return got
         return None
 
     def drive_away(self, clip: Clip) -> "Detection | None":
-        for d in self.detectors:
+        for d in self._detectors:
             got = d.drive_away(clip)
             if got is not None:
                 return got
@@ -2538,6 +2597,9 @@ class RenderStyle:
     different height or bitrate than the clips it sits between gives the
     concatenated file two incompatible SPS variants, and hardware decoders go
     black around it. One object, passed whole, is how they cannot drift.
+
+    Public: font_path, use_vt, with_timestamp, with_speed, output_height,
+    no_audio, video_encoder. Frozen is the whole point — see above.
     """
     font_path: str
     use_vt: bool
@@ -2569,7 +2631,9 @@ class Cut:
     and trim_seconds are in source-clip seconds; trim_seconds None means run to
     the end of the clip. settled_at is set only where a park onset is KNOWN, so
     the speed overlay cannot caption a stationary car with a decaying fix — see
-    settle_speeds_after."""
+    settle_speeds_after.
+
+    Public: trim_start, trim_seconds, settled_at, duration_of."""
     trim_start: int = 0
     trim_seconds: "int | None" = None
     settled_at: "int | None" = None
