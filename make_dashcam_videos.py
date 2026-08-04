@@ -469,10 +469,21 @@ def group_into_trips(
         return e if e is not None else s
 
     def rollover_before(idx):
+        """Whether this clip opens on the far side of the rollover.
+
+        Compared START to START. It used to compare the previous clip's END to
+        this clip's start, and clips are CONTIGUOUS -- one ends on the second
+        the next begins -- so the interval was empty and the labels were the
+        same value read twice. The rollover could then only fire across a GAP,
+        which is the case it was never needed for: a camera switched off over
+        the boundary already gets an inter-clip slide. Recording straight
+        through 04:00, which is the one thing this exists to bound, it never
+        fired at all, and a drive from dusk to dawn stayed one trip under a
+        single day label.
+        """
         if idx <= 0:
             return False
-        pe = clips[idx - 1].dt + timedelta(seconds=clips[idx - 1].duration)
-        return _crosses_rollover(pe, clips[idx].dt, rollover_h)
+        return _crosses_rollover(clips[idx - 1].dt, clips[idx].dt, rollover_h)
 
     def within_target(idx, anchor):
         for t, r in ((anchor, return_m), (home, home_radius_m)):

@@ -162,5 +162,59 @@ class TestBoundariesFallWhereTheDrivingSays(GroupingTest):
         self.assertEqual(len(self.group()), 1)
 
 
+class TestTheRolloverSplitsRatherThanDiscards(GroupingTest):
+    """A drive running through 04:00 is force-closed there, and what follows
+    is the next trip — not footage that falls off the end.
+
+    The rollover exists to bound a one-way relocation: without it a drive that
+    never returns to the anchor has nothing to close it and grows until the
+    clips run out. Closing a trip and continuing are two different acts,
+    though, and the one that loses footage looks exactly like the one that
+    does not until you count the clips on both sides.
+    """
+
+    def setUp(self):
+        super().setUp()
+        t = datetime(2026, 7, 28, 3, 57, 0)
+        # Driving away and never coming back: nothing but the rollover can
+        # close this.
+        for metres in (0, 600, 1200, 1800, 2400, 3000, 3600):
+            t = self.add(t, _away(metres))
+
+    def group(self, **kw):
+        kw.setdefault("rollover_h", 4)
+        return super().group(**kw)
+
+    def test_it_becomes_two_trips(self):
+        self.assertEqual(len(self.group()), 2)
+
+    def test_not_one_clip_is_dropped(self):
+        kept = sum(len(trip) for trip in self.group())
+        self.assertEqual(kept, len(self.clips),
+                         "clips after the rollover went nowhere")
+
+    def test_the_split_falls_on_the_rollover(self):
+        first, second = self.group()
+        self.assertLess(first[-1].dt.hour, 4)
+        self.assertGreaterEqual(second[0].dt.hour, 4)
+
+    def test_the_two_carry_different_day_labels(self):
+        first, second = self.group()
+        self.assertNotEqual(M.trip_day_label(first[0].dt, 4),
+                            M.trip_day_label(second[0].dt, 4))
+
+    def test_a_drive_that_clears_the_hour_is_left_whole(self):
+        """The same footage an hour later is one trip. The split is the
+        rollover doing its job, not the length of the drive."""
+        self.clips = []
+        self.gps = self.root / "203gps_late"
+        self.gps.mkdir()
+        M._TRACK_POOL.clear()
+        t = datetime(2026, 7, 28, 4, 57, 0)
+        for metres in (0, 600, 1200, 1800, 2400, 3000, 3600):
+            t = self.add(t, _away(metres))
+        self.assertEqual(len(self.group()), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
