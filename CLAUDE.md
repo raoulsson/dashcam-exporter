@@ -40,9 +40,10 @@ car actually PARKING at the anchor, not a radius crossing.
 `home_lon` / `home_radius_m` seed it from config.txt; the gitignored .env WINS
 for the coordinates (SET_HOME_LAT / SET_HOME_LON), which is where a real
 address belongs. config.txt ships a Zurich example.
-- **DEPART → drive → ARRIVE+PARK.** Departure found by `find_drive_away_by_video`
-  (median optical flow rises), arrival by `find_park_second_by_video` (flow
-  falls to baseline and stays). GPS position only gates WHICH clips get the
+- **DEPART → drive → ARRIVE+PARK.** Departure and arrival are found by
+  `VideoMotionDetector` — `drive_away_second` (median optical flow rises) and
+  `park_second` (flow falls to baseline and stays), asked directly rather than
+  through the ladder, because a GPS answer near the anchor splits trips. GPS position only gates WHICH clips get the
   video check (near the anchor). Between trips the car is IDLE at the anchor →
   those clips belong to no trip.
 - Boundaries land on the real pull-out / pull-in. A radius-entry close ends
@@ -90,21 +91,29 @@ update `prev_emitted_clip` so gap detection stays honest, and `gap_pre_pause`
 (precomputed over the emitted sequence) supplies the "before FF" tail for
 inter-clip gaps. It is the fastest way to check that the parking exit slice
 lands on actual drive-away footage rather than still-parked frames (that cut is
-anchored by `find_drive_away_by_video` optical flow; see below).
+anchored by `VideoMotionDetector.drive_away_second` optical flow; see below).
 
 ### A parked run's boundaries come from the frames
 
-`find_parking_runs` walks clips with `clip_is_parked` (GPS), which is the right
+`find_parking_runs` walks clips with `Track.is_parked` (GPS), which is the right
 cheap sweep but wrong at the two ends — and the two ends are the only frames a
 viewer sees, since everything between them is replaced by the slide. In a lot
 the receiver decays instead of dropping to zero (18 km/h reported ten seconds
 after the frame went still) and a car pulling out has no fix at all, which
 reads as "parked". So the run's FIRST and LAST clip get the same ladder the
-end-trim uses: `find_park_second_by_video`, then `find_park_second_by_gps`, then
-the old smoothing detector. `_leads_into_parking` bounds that to the one clip
-per run that can hold the arrival, and the far end is one walk-back per run —
-asking every clip would decode the whole trip. `_ego_flow` caches the
-median-flow signal per clip, so the render re-asking the exit clip is free.
+end-trim uses. That ladder is ONE object now: `MotionDetector` is an ABC with
+`park_second` and `drive_away_second`; `VideoMotionDetector` and
+`GpsMotionDetector` implement it, and `FirstAnswerDetector` asks each in turn
+and keeps the first answer — video first, because it reads the wheels. Build it
+with `motion_ladder(track, use_video=...)`; `--no-video-drive-detect` drops the
+video rung rather than muting it. It used to be open-coded as `if x is None: x =
+other(...)` at three call sites, which is how a fix reached one of them and left
+the other two answering from the receiver. `_leads_into_parking` bounds the
+arrival to the one clip per run that can hold it, and the far end is one
+walk-back per run (VIDEO ONLY there — the clips have no fix, or a stale fast
+one) — asking every clip would decode the whole trip.
+`VideoMotionDetector._flow` caches the median-flow signal per clip, so the
+render re-asking the exit clip is free.
 
 `parking_exit_pad` (default 4, mirroring `parking_entry_pad`'s 3) is live on the
 video path; it used to be ignored there in favour of a 2-second constant. Note
@@ -112,12 +121,13 @@ video path; it used to be ignored there in favour of a 2-second constant. Note
 exceed `parking_exit_pad` for a preview to reach the drive-away at all.
 
 `settle_speeds_after` zeroes the speed overlay from a detected park onset.
-`parse_clip_speeds` fixes alignment lag; a decaying receiver is not an
-alignment problem, and only the frames can settle it.
+`Track.speeds` fixes alignment lag; a decaying receiver is not an alignment
+problem, and only the frames can settle it.
 
 ### Parking-exit drive-away = video ego-motion, not GPS
 
-`find_drive_away_by_video` anchors the parking exit slice. GPS speed is useless
+`VideoMotionDetector.drive_away_second` anchors the parking exit slice, via the
+ladder. GPS speed is useless
 here (parking-mode clips are event snippets full of passing people/cars, and GPS
 is stale/jittery). Instead: sample the front clip at 4 fps (ffmpeg → gray
 640×400 rawvideo), LK optical flow, take the MEDIAN flow magnitude — passing

@@ -59,7 +59,7 @@ class ParkingTest(unittest.TestCase):
         (self.root / "front").mkdir()
         self.clips = []
         self.at = datetime(2026, 8, 3, 16, 0, 0)
-        for cache in (M._TRACK_POOL, M._EGO_FLOW_CACHE):
+        for cache in (M.Track._POOL, M._EGO_FLOW_CACHE):
             cache.clear()
             self.addCleanup(cache.clear)
 
@@ -118,7 +118,7 @@ class ParkingTest(unittest.TestCase):
         return self.add(flow)
 
     def runs(self, min_run_secs=300):
-        return M.find_parking_runs(self.clips, (self.gps, None), min_run_secs)
+        return M.find_parking_runs(self.clips, M.Track((self.gps, None)), min_run_secs)
 
 
 class TestTheRunBeginsWhereTheWheelsStopped(ParkingTest):
@@ -152,7 +152,7 @@ class TestTheRunBeginsWhereTheWheelsStopped(ParkingTest):
         """Naming the lag this fixture encodes: GPS is not merely absent here,
         it is confidently wrong, which is why it cannot be the first answer."""
         self.assertAlmostEqual(
-            M.find_park_second_by_gps(self.clips[1], (self.gps, None)),
+            M.GpsMotionDetector(M.Track((self.gps, None))).park_second(self.clips[1]),
             39, delta=1)
 
     def test_the_slide_is_entry_pad_seconds_after_the_stop(self):
@@ -183,7 +183,8 @@ class TestTheRunEndsBeforeTheCarPullsOut(ParkingTest):
         """The render puts its "exit" action on run_end + 1. That has to be the
         clip the car actually leaves in, or the slice starts too late."""
         _start, _park, end = self.runs()[0]
-        self.assertIsNotNone(M.find_drive_away_by_video(self.clips[end + 1]))
+        self.assertIsNotNone(
+            M.VIDEO_MOTION.drive_away_second(self.clips[end + 1]))
 
     def test_a_run_is_never_walked_back_past_its_own_start(self):
         """A degenerate run — the car stops and leaves inside one clip — must
@@ -227,6 +228,70 @@ class TestTheExitSliceShowsTheRunUp(ParkingTest):
         """Ten seconds of a motionless frame immediately after a slide that
         says "43m skipped" is the dead air the slide exists to remove."""
         self.assertLessEqual(M.DEFAULT_PARKING_EXIT_PAD, 5)
+
+
+class Always(M.MotionDetector):
+    """A detector that answers everything with one second, so a test can watch
+    which rung the ladder takes rather than which evidence exists."""
+
+    def __init__(self, source, second):
+        self.source = source
+        self.second = second
+
+    def park_second(self, clip):
+        return self.second
+
+    def drive_away_second(self, clip):
+        return self.second
+
+
+class Never(Always):
+    """The dark arrival: a detector present and blind."""
+
+    def __init__(self, source):
+        super().__init__(source, None)
+
+
+class TestTheLadderAsksVideoFirst(unittest.TestCase):
+    """The order is the whole content of the ladder, and it used to be written
+    out at three call sites — which is how a fix to it reached one of them and
+    left the other two answering from the receiver."""
+
+    def ladder(self, *rungs):
+        return M.FirstAnswerDetector(*rungs)
+
+    def test_video_wins_when_both_answer(self):
+        got = self.ladder(Always("video", 29.0), Always("gps", 39.0)).park(None)
+        self.assertEqual((got.second, got.source), (29.0, "video"))
+
+    def test_gps_answers_the_arrival_video_could_not_see(self):
+        got = self.ladder(Never("video"), Always("gps", 39.0)).park(None)
+        self.assertEqual((got.second, got.source), (39.0, "gps"))
+
+    def test_no_rung_answering_is_no_answer(self):
+        """The render's third option at the exit is a fixed skip, and it must
+        stay reachable: a ladder that invented a second would trim into a car
+        that has not moved."""
+        self.assertIsNone(self.ladder(Never("video"), Never("gps")).park(None))
+
+    def test_the_same_order_holds_for_the_departure(self):
+        got = self.ladder(Always("video", 38.0), Always("gps", 12.0)).drive_away(None)
+        self.assertEqual((got.second, got.source), (38.0, "video"))
+
+    def test_dropping_the_video_rung_is_how_the_flag_is_honoured(self):
+        """--no-video-drive-detect leaves video out of the ladder rather than
+        muting it inside, so no detector has to know the flag exists."""
+        built = M.motion_ladder(M.Track((None, None)), use_video=False)
+        self.assertEqual([d.source for d in built.detectors], ["gps"])
+
+    def test_a_detector_that_answers_only_one_question_cannot_be_built(self):
+        """Why this is an ABC and not a duck: the missing half surfaces at
+        import, not on the one clip of one card that needed it."""
+        class HalfADetector(M.MotionDetector):
+            def park_second(self, clip):
+                return 1.0
+        with self.assertRaises(TypeError):
+            HalfADetector()
 
 
 class TestAStationaryCarIsNeverCaptionedWithASpeed(ParkingTest):

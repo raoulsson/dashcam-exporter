@@ -56,6 +56,7 @@ config); it's TTL-evicted via --cache-max-age-days.
 
 from __future__ import annotations
 
+import abc
 import argparse
 import calendar
 import hashlib
@@ -215,6 +216,24 @@ class Clip:
     @property
     def dt(self) -> datetime:
         return datetime.strptime(self.timestamp, "%Y%m%d%H%M%S")
+
+    @property
+    def end(self) -> datetime:
+        """When the camera stopped recording this clip.
+
+        Clips are CONTIGUOUS: one ends on the second the next begins, which is
+        what makes the gap to the next clip an engine-off interval rather than a
+        rounding error. Written out at seven call sites before, and the track
+        window is selected with it — a clip's fixes are the ones recorded
+        between dt and end."""
+        return self.dt + timedelta(seconds=self.duration)
+
+    def gap_before(self, previous: "Clip") -> float:
+        """Seconds of wall clock between the end of `previous` and this clip's
+        start — the engine-off interval a 'Fast forwarding…' slide announces.
+        Never negative: overlapping stamps are a camera clock artefact, not
+        time travelling backwards."""
+        return max(0.0, (self.dt - previous.end).total_seconds())
 
 
 def probe_video_size(path: Path) -> "tuple[int, int] | None":
@@ -390,19 +409,9 @@ def _crosses_rollover(a: datetime, b: datetime, rollover_h: int) -> bool:
     return trip_day_label(a, rollover_h) != trip_day_label(b, rollover_h)
 
 
-def _clip_endpoints(clip: Clip, gps_dirs: "tuple[Path | None, ...]"):
-    """(first_fix, last_fix) each as (lat, lon), or (None, None) if the clip has
-    no GPS. Used only for trip boundary detection, so raw first/last valid fixes
-    are precise enough (parse_gpx_track already strips stale cross-drive data)."""
-    pts = gather_track([clip], gps_dirs)
-    if not pts:
-        return None, None
-    return (pts[0][0], pts[0][1]), (pts[-1][0], pts[-1][1])
-
-
 def group_into_trips(
     clips: list[Clip],
-    gps_dirs: "tuple[Path | None, ...]",
+    track: "Track",
     *,
     return_m: float = DEFAULT_TRIP_RETURN_M,
     leave_m: float = DEFAULT_TRIP_LEAVE_M,
@@ -423,8 +432,9 @@ def group_into_trips(
           → drive (interior stops elsewhere stay in the trip as FF slides)
           → ARRIVE+PARK (car returns to the anchor/home and comes to a stop)
 
-    Departure and arrival are found by VIDEO ego-motion (find_drive_away_by_video
-    / find_park_second_by_video), which is why the boundaries land on the real
+    Departure and arrival are found by VIDEO ego-motion (VideoMotionDetector,
+    asked directly rather than through the ladder — a GPS answer near the anchor
+    is the one that split trips), which is why the boundaries land on the real
     pull-away and pull-in rather than 10-15s early (radius entry while still
     rolling) or split by near-home maneuvering. GPS position only gates WHICH
     clips get the (cheap-ish) video check — those near the anchor. ROLLOVER
@@ -454,7 +464,7 @@ def group_into_trips(
         # them separable, and a log wants the history.
         line = f"[scan {i:4d}/{len(clips)}] {c.front.name}"
         print(line + ("\r" if _tty else "\n"), end="", flush=True)
-        eps.append(_clip_endpoints(c, gps_dirs))
+        eps.append(track.endpoints(c))
     if _tty and clips:
         # leave the line clean so the next print does not land on a stale tail
         print(" " * 78 + "\r", end="", flush=True)
@@ -503,17 +513,17 @@ def group_into_trips(
             return False
         if not video:
             return True
-        return find_park_second_by_video(clips[idx]) is not None
+        return VIDEO_MOTION.park_second(clips[idx]) is not None
 
     def departs_here(idx, anchor):
         # Car starts driving away in this clip (ends the IDLE gap between trips)?
         if video:
-            return find_drive_away_by_video(clips[idx]) is not None
+            return VIDEO_MOTION.drive_away_second(clips[idx]) is not None
         d = min_dist(idx, anchor)
         return d is None or d > leave_m
 
     def is_moved(lo, hi, anc):
-        pts = gather_track(clips[lo:hi], gps_dirs)
+        pts = track.during(clips[lo:hi])
         if not pts or anc is None:
             return True
         pruned = [p for seg in segment_track(pts) for p in seg]
@@ -649,7 +659,7 @@ def _nmea_to_decimal(value: str, hemi: str) -> float | None:
 def settle_speeds_after(speeds: list[float], park_sec: int) -> list[float]:
     """Zero the speed overlay from the second the FRAMES say the car stopped.
 
-    parse_clip_speeds below fixes the lag it CAN fix — the clock offset, the
+    Track.speeds fixes the lag it CAN fix — the clock offset, the
     dropouts, the late lock — all of which are alignment problems. This is the
     residual it cannot: a receiver losing lock reports a decaying speed for the
     real fixes it does emit. Rolling into a covered lot on 08-03 it read 18, 17,
@@ -658,77 +668,6 @@ def settle_speeds_after(speeds: list[float], park_sec: int) -> list[float]:
     know. So where a park onset has been detected, the overlay follows it, and
     a stationary car is never captioned with a speed."""
     return [0.0 if s >= park_sec else v for s, v in enumerate(speeds)]
-
-
-def parse_clip_speeds(clip: "Clip", gps_dirs: tuple[Path | None, ...]) -> list[float]:
-    """
-    Per-second km/h aligned to the clip's VIDEO timeline (not the GPS-fix
-    index). Three real-world wrinkles handled here:
-
-    1) GPS-lock-acquisition lag. Dashcam often starts recording a few seconds
-       before GPS reports its first fix. Those leading video seconds get a
-       0 km/h placeholder.
-    2) Mid-clip GPS dropouts. GPS can lose lock briefly (tunnel, urban
-       canyon, parking ceiling). Affected seconds get the previous-known
-       speed forward-filled — collapsing the gap instead would shift every
-       subsequent speed earlier.
-    3) DDPAI dashcam clock drift. The wall-clock burned into the video can
-       be offset from GPS UTC by a non-integer-hour amount, so mod-3600
-       lag detection isn't enough. The `$GPSCAMTIME` header at the top of
-       the GPX file gives the exact LOCAL↔UTC offset for the device.
-
-    Mishandle any of the three and speeds run ~10+ seconds AHEAD of the video —
-    the visible "speed already 14 km/h while the wheels haven't moved yet"
-    symptom. Handled, speeds[i] is the GPS reading at the SAME video-second the
-    user sees burned-in on the timestamp watermark.
-    """
-    # The clip's own fixes, selected by time. Resolving the file by name gave
-    # this the same wrong answer it gave the track: a clip whose receiver
-    # never fixed got a replayed sentence from an earlier drive, and its
-    # speeds with it.
-    points = gather_track([clip], gps_dirs)
-    if not points:
-        return []
-    try:
-        clip_dt = datetime.strptime(clip.timestamp, "%Y%m%d%H%M%S")
-    except ValueError:
-        return [p[2] for p in points]
-
-    # The camera's own LOCAL<->UTC offset, read from $GPSCAMTIME across the
-    # card rather than from one file's header: the file a clip is named for
-    # may have no header at all, and that is exactly the file whose fixes
-    # cannot be trusted to be its own. Zero means no DDPAI header anywhere,
-    # which is the non-DDPAI card the fallback below is for.
-    _pool, utc_off = _pooled_track(gps_dirs)
-    if utc_off:
-        offset = -utc_off                 # local = utc + offset
-        # Place each point at its true clip-second via its UTC timestamp.
-        raw: list[float | None] = [None] * clip.duration
-        for p in points:
-            local_time = p[3] + offset
-            clip_sec = int(round((local_time - clip_dt).total_seconds()))
-            if 0 <= clip_sec < clip.duration:
-                raw[clip_sec] = p[2]
-        # Forward-fill: missing seconds use the previous-known speed (or 0
-        # before the first reading). That way a mid-clip GPS dropout shows
-        # the last sensed speed rather than collapsing time.
-        speeds: list[float] = [0.0] * clip.duration
-        last = 0.0
-        for i in range(clip.duration):
-            if raw[i] is not None:
-                last = raw[i]
-            speeds[i] = last
-        return speeds
-
-    # Fallback for non-DDPAI files (no $GPSCAMTIME header).
-    speeds = [p[2] for p in points]
-    gps_dt = points[0][3]
-    clip_sih = clip_dt.minute * 60 + clip_dt.second
-    gps_sih = gps_dt.minute * 60 + gps_dt.second
-    lag = (gps_sih - clip_sih) % 3600
-    if 0 < lag <= clip.duration:
-        speeds = [0.0] * lag + speeds
-    return speeds
 
 
 # How long (seconds) a single clip's GPX file is expected to span. The DDPAI
@@ -811,11 +750,6 @@ def parse_gpx_track(gpx_path: Path,
     return [p for p in points if (latest - p[3]).total_seconds() <= window_seconds]
 
 
-# The pooled track, built once per set of GPS directories. gather_track is
-# called per clip while boundaries are being found, and re-reading several
-# hundred NMEA files each time would dominate the scan.
-_TRACK_POOL: dict[tuple, tuple[list, timedelta]] = {}
-
 # Real timezones are whole quarter-hours, so the offset is rounded to one.
 # That turns a per-file reading that can be a second or two out into the same
 # exact value for every file, which is what makes the median stable.
@@ -824,7 +758,7 @@ _TZ_QUANTUM = 900
 # NO MARGIN, and the upper bound is exclusive. Clips are CONTIGUOUS: one ends
 # on the second the next begins, so any margin at all hands a clip its
 # neighbours' fixes. At 90 seconds on a 60-second clip it handed over both of
-# them whole, and _clip_endpoints -- which reads the first and last fix to
+# them whole, and Track.endpoints -- which reads the first and last fix to
 # decide where the car was when a clip started and stopped -- then answered
 # with a position from the clip before and one from the clip after. Trip
 # boundaries are found from exactly those two readings.
@@ -877,62 +811,206 @@ def _camera_utc_offset(paths: list[Path]) -> timedelta:
     return timedelta(seconds=sorted(readings)[len(readings) // 2])
 
 
-def _gpx_files(gps_dirs: tuple[Path | None, ...]) -> list[Path]:
-    """Every NMEA file under these directories, at any depth.
-
-    rglob, not listdir. The camera moves older files down into a `tmp`
-    subdirectory as it rolls, so the top level holds only what it happens to
-    be writing now.
-    """
-    out: list[Path] = []
-    for d in gps_dirs:
-        if d is not None and d.is_dir():
-            out.extend(sorted(f for f in d.rglob("*.gpx") if f.is_file()))
-    return out
-
-
-def _pooled_track(gps_dirs: tuple[Path | None, ...]):
-    """(every fix under these dirs sorted by time, the camera's UTC offset).
+class Track:
+    """The card's GPS: one time series, and every question asked of it.
 
     ONE TIME SERIES, NOT A FILE PER CLIP. The camera writes GPS continuously
-    and its writer rolls into a new file whenever it decides to, so a
-    filename says when a file was opened and nothing about whose fixes are
-    inside it. Matching a clip to the file that shares its name was reading a
-    coincidence as a promise, and it fails in both directions: a file can hold
-    a replay from an earlier drive, and a minute's fixes can sit in a file
-    named for a different minute.
+    and its writer rolls into a new file whenever it decides to, so a filename
+    says when a file was opened and nothing about whose fixes are inside it.
+    Matching a clip to the file that shares its name was reading a coincidence
+    as a promise, and it fails in both directions: a file can hold a replay from
+    an earlier drive, and a minute's fixes can sit in a file named for a
+    different minute.
 
-    Deduplicated by the second, because the camera writes the same minute
-    twice -- once loose and once into the tar archives -- and both are read.
+    That is why this is an object rather than a pair of directories passed
+    around: reading the pool, knowing the camera's UTC offset, cutting a clip's
+    window out of it and turning that window into per-second speeds are four
+    steps of ONE piece of knowledge, and a caller holding only the directories
+    could — and did — do any of them by filename instead.
     """
-    key = tuple(str(d) for d in gps_dirs if d is not None)
-    if key not in _TRACK_POOL:
-        files = _gpx_files(gps_dirs)
-        seen: set[datetime] = set()
-        pool: list[tuple[float, float, float, datetime]] = []
-        for f in files:
-            for pt in parse_gpx_track(f):
-                if pt[3] not in seen:
-                    seen.add(pt[3])
-                    pool.append(pt)
-        pool.sort(key=lambda pt: pt[3])
-        _TRACK_POOL[key] = (pool, _camera_utc_offset(files))
-    return _TRACK_POOL[key]
 
+    #: (pool, utc offset) per directory set, shared by every Track. Building it
+    #: reads several hundred NMEA files; gather is called once per clip while
+    #: trip boundaries are found, and re-reading the card each time would
+    #: dominate the scan. Shared rather than per-instance because the render
+    #: builds a Track wherever it needs one and must not decode the card twice.
+    _POOL: "dict[tuple, tuple[list, timedelta]]" = {}
 
-def gather_track(clips: list[Clip], gps_dirs: tuple[Path | None, ...]) -> list[tuple[float, float, float, datetime]]:
-    """The fixes recorded while these clips were being filmed.
+    def __init__(self, gps_dirs: "tuple[Path | None, ...]"):
+        self.dirs = tuple(gps_dirs)
 
-    Selected by TIME rather than by filename. A fix belongs to a clip when the
-    camera recorded it while that clip was rolling; nothing else is evidence
-    of that, and the filename in particular is not.
-    """
-    if not clips:
-        return []
-    pool, offset = _pooled_track(gps_dirs)
-    lo = min(c.dt for c in clips) + offset - _SPAN_MARGIN
-    hi = max(c.dt + timedelta(seconds=c.duration) for c in clips) + offset + _SPAN_MARGIN
-    return [pt for pt in pool if lo <= pt[3] < hi]
+    def __repr__(self) -> str:
+        return "Track(%s)" % ", ".join(str(d) for d in self.dirs)
+
+    @property
+    def files(self) -> list[Path]:
+        """Every NMEA file under these directories, at any depth.
+
+        rglob, not listdir. The camera moves older files down into a `tmp`
+        subdirectory as it rolls, so the top level holds only what it happens to
+        be writing now.
+        """
+        out: list[Path] = []
+        for d in self.dirs:
+            if d is not None and d.is_dir():
+                out.extend(sorted(f for f in d.rglob("*.gpx") if f.is_file()))
+        return out
+
+    def _pooled(self) -> "tuple[list, timedelta]":
+        """(every fix under these dirs sorted by time, the camera's UTC offset).
+
+        Deduplicated by the second, because the camera writes the same minute
+        twice -- once loose and once into the tar archives -- and both are read.
+        """
+        key = tuple(str(d) for d in self.dirs if d is not None)
+        if key not in Track._POOL:
+            files = self.files
+            seen: set[datetime] = set()
+            pool: list[tuple[float, float, float, datetime]] = []
+            for f in files:
+                for pt in parse_gpx_track(f):
+                    if pt[3] not in seen:
+                        seen.add(pt[3])
+                        pool.append(pt)
+            pool.sort(key=lambda pt: pt[3])
+            Track._POOL[key] = (pool, _camera_utc_offset(files))
+        return Track._POOL[key]
+
+    @property
+    def utc_offset(self) -> timedelta:
+        """UTC minus camera-local. Zero means no DDPAI header anywhere."""
+        return self._pooled()[1]
+
+    def during(self, clips: "list[Clip]") -> list[tuple[float, float, float, datetime]]:
+        """The fixes recorded while these clips were being filmed.
+
+        Selected by TIME rather than by filename. A fix belongs to a clip when
+        the camera recorded it while that clip was rolling; nothing else is
+        evidence of that, and the filename in particular is not.
+        """
+        if not clips:
+            return []
+        pool, offset = self._pooled()
+        lo = min(c.dt for c in clips) + offset - _SPAN_MARGIN
+        hi = max(c.end for c in clips) + offset + _SPAN_MARGIN
+        return [pt for pt in pool if lo <= pt[3] < hi]
+
+    def endpoints(self, clip: "Clip"):
+        """(first fix, last fix) of a clip as (lat, lon), or (None, None).
+
+        Trip detection asks where the car was when a clip started and stopped,
+        and every boundary test is built on these two readings — which is why
+        the window they come out of has no margin at all."""
+        pts = self.during([clip])
+        if not pts:
+            return (None, None)
+        return ((pts[0][0], pts[0][1]), (pts[-1][0], pts[-1][1]))
+
+    def speeds(self, clip: "Clip") -> list[float]:
+        """
+        Per-second km/h aligned to the clip's VIDEO timeline (not the GPS-fix
+        index). Three real-world wrinkles handled here:
+
+        1) GPS-lock-acquisition lag. Dashcam often starts recording a few
+           seconds before GPS reports its first fix. Those leading video
+           seconds get a 0 km/h placeholder.
+        2) Mid-clip GPS dropouts. GPS can lose lock briefly (tunnel, urban
+           canyon, parking ceiling). Affected seconds get the previous-known
+           speed forward-filled — collapsing the gap instead would shift every
+           subsequent speed earlier.
+        3) DDPAI dashcam clock drift. The wall-clock burned into the video can
+           be offset from GPS UTC by a non-integer-hour amount, so mod-3600
+           lag detection isn't enough. The `$GPSCAMTIME` header at the top of
+           the GPX file gives the exact LOCAL↔UTC offset for the device.
+
+        Mishandle any of the three and speeds run ~10+ seconds AHEAD of the
+        video — the visible "speed already 14 km/h while the wheels haven't
+        moved yet" symptom. Handled, speeds[i] is the GPS reading at the SAME
+        video-second the user sees burned-in on the timestamp watermark.
+        """
+        # The clip's own fixes, selected by time. Resolving the file by name
+        # gave this the same wrong answer it gave the track: a clip whose
+        # receiver never fixed got a replayed sentence from an earlier drive,
+        # and its speeds with it.
+        points = self.during([clip])
+        if not points:
+            return []
+        try:
+            clip_dt = datetime.strptime(clip.timestamp, "%Y%m%d%H%M%S")
+        except ValueError:
+            return [p[2] for p in points]
+
+        # The camera's own LOCAL<->UTC offset, read from $GPSCAMTIME across the
+        # card rather than from one file's header: the file a clip is named for
+        # may have no header at all, and that is exactly the file whose fixes
+        # cannot be trusted to be its own. Zero means no DDPAI header anywhere,
+        # which is the non-DDPAI card the fallback below is for.
+        utc_off = self.utc_offset
+        if utc_off:
+            offset = -utc_off             # local = utc + offset
+            # Place each point at its true clip-second via its UTC timestamp.
+            raw: list[float | None] = [None] * clip.duration
+            for p in points:
+                local_time = p[3] + offset
+                clip_sec = int(round((local_time - clip_dt).total_seconds()))
+                if 0 <= clip_sec < clip.duration:
+                    raw[clip_sec] = p[2]
+            # Forward-fill: missing seconds use the previous-known speed (or 0
+            # before the first reading). That way a mid-clip GPS dropout shows
+            # the last sensed speed rather than collapsing time.
+            speeds: list[float] = [0.0] * clip.duration
+            last = 0.0
+            for i in range(clip.duration):
+                if raw[i] is not None:
+                    last = raw[i]
+                speeds[i] = last
+            return speeds
+
+        # Fallback for non-DDPAI files (no $GPSCAMTIME header).
+        speeds = [p[2] for p in points]
+        gps_dt = points[0][3]
+        clip_sih = clip_dt.minute * 60 + clip_dt.second
+        gps_sih = gps_dt.minute * 60 + gps_dt.second
+        lag = (gps_sih - clip_sih) % 3600
+        if 0 < lag <= clip.duration:
+            speeds = [0.0] * lag + speeds
+        return speeds
+
+    def is_parked(self, clip: "Clip") -> bool:
+        """
+        Decide whether a clip is stationary. Three signals all count as
+        "parked":
+          1) GPX exists and >=75% of seconds are below 3 km/h (textbook
+             standstill)
+          2) GPX exists but holds no valid fixes (indoor parking, lost lock)
+          3) No GPX file at all for this clip
+        Cases (2) and (3) cover the most common pattern: the dashcam keeps
+        recording while parked in a garage but loses GPS. find_parking_runs
+        only triggers a skip when the *total* run length is long enough, so
+        brief mid-drive GPS dropouts (a few clips through a tunnel) won't trip
+        this.
+        """
+        # By time, not by filename: a clip whose receiver never fixed is named
+        # for a file full of an earlier drive's sentences, and judging whether
+        # THIS clip was parked from THOSE speeds is judging the wrong minute.
+        speeds = [pt[2] for pt in self.during([clip])]
+        if not speeds:
+            return True
+        # Sparse-coverage + fast-speed check: if the GPX file holds far fewer
+        # samples than the clip's duration would suggest (1 Hz nominal) AND
+        # those samples are all at highway-ish speeds, they're stale parking-
+        # buffer data from a previous drive that just happens to be all the
+        # GPS info this clip has. Real cars don't go from a parking-mode wake
+        # to 80 km/h, so this combination is a reliable "parked, GPS missing"
+        # signal. (A clip with SLOW sparse samples — e.g., GPS still acquiring
+        # at the start of a drive — falls through to the normal slow-ratio
+        # check, which handles both directions correctly.)
+        if len(speeds) < clip.duration * 0.2:
+            avg = sum(speeds) / len(speeds)
+            if avg > 40:
+                return True
+        slow = sum(1 for s in speeds if s < PARKING_SPEED_THRESHOLD_KMH)
+        return (slow / len(speeds)) >= PARKING_CLIP_FRACTION
 
 
 DRIVE_RESUME_THRESHOLD_KMH = 5.0   # higher than parking threshold to reject GPS jitter
@@ -940,7 +1018,7 @@ DRIVE_RESUME_SUSTAIN_SECS  = 30    # require N consecutive moving samples = real
 
 def find_drive_resume_in_group(
     head_clips: list[Clip],
-    gps_dirs: tuple[Path | None, ...],
+    track: "Track",
     sustain_secs: int = DRIVE_RESUME_SUSTAIN_SECS,
     threshold_kmh: float = DRIVE_RESUME_THRESHOLD_KMH,
 ) -> tuple[int, int] | None:
@@ -950,7 +1028,7 @@ def find_drive_resume_in_group(
     `threshold_kmh`. Returns (clip_index, offset_within_clip) where the
     sustained motion begins, or None if no such window exists.
 
-    The speeds are sourced via parse_clip_speeds so they're already aligned
+    The speeds are sourced via Track.speeds so they're already aligned
     to each clip's VIDEO timeline (with leading zeros prepended for any
     GPS-acquisition lag at the start of a clip). That means the returned
     offset_within_clip can be used directly as a trim_start for that clip.
@@ -963,7 +1041,7 @@ def find_drive_resume_in_group(
     speeds: list[float] = []
     boundaries: list[int] = [0]    # cumulative speed-count after each clip
     for c in head_clips:
-        clip_speeds = parse_clip_speeds(c, gps_dirs)
+        clip_speeds = track.speeds(c)
         if not clip_speeds:
             # Gap in GPS coverage — can't reliably scan past this point.
             break
@@ -982,7 +1060,7 @@ def find_drive_resume_in_group(
 
 
 def find_drive_resume_second(
-    clip: Clip, gps_dirs: tuple[Path | None, ...],
+    clip: Clip, track: "Track",
     sustain_secs: int = DRIVE_RESUME_SUSTAIN_SECS,
     threshold_kmh: float = DRIVE_RESUME_THRESHOLD_KMH,
     next_clips: list[Clip] | None = None,
@@ -1010,18 +1088,18 @@ def find_drive_resume_second(
     can never satisfy a 30-second-within-one-clip rule and the head-trim
     silently fails open (showing the whole pre-drive pause).
     """
-    # Use parse_clip_speeds so the returned index is already in VIDEO-second
+    # Use Track.speeds so the returned index is already in VIDEO-second
     # space (with leading 0s prepended for any GPS-lock acquisition lag).
     # That way the caller's trim_start = max(0, drive_sec - pad) lands on
     # the correct video frame, not on the GPS-fix index — which would
     # otherwise drop into action ~10 seconds before the wheels actually move.
-    speeds: list[float] = parse_clip_speeds(clip, gps_dirs)
+    speeds: list[float] = track.speeds(clip)
     if not speeds:
         return None
     clip_len = len(speeds)
     if next_clips:
         for nc in next_clips:
-            nspeeds = parse_clip_speeds(nc, gps_dirs)
+            nspeeds = track.speeds(nc)
             if not nspeeds:
                 break  # gap — don't pretend the next-next clip is contiguous
             speeds.extend(nspeeds)
@@ -1132,39 +1210,15 @@ def _ego_drive_onset(med: "list[float]") -> "int | None":
     return onset
 
 
+# The video detector's memo, module-level so the whole run shares one. It is
+# also the seam the parking tests drive the detector through: they seed the
+# signal a clip's frames would have produced and never open OpenCV.
 _EGO_FLOW_CACHE: "dict[Path, list[float] | None]" = {}
 
 
-def _ego_flow(clip: Clip) -> "list[float] | None":
-    """The median-flow signal for a clip, computed at most once.
-
-    Decoding a clip at EGO_FPS and running Lucas-Kanade over it is the whole
-    cost of video ego-motion, and the same clip gets asked more than once: the
-    parking-run boundaries ask whether a clip parks and whether it drives away,
-    and the render then re-asks the exit clip. Answering from the signal makes
-    every question after the first free. Keyed by path because a Clip is
-    rebuilt from the scan each time; the file it names does not change under us
-    within a run."""
-    key = clip.front
-    if key not in _EGO_FLOW_CACHE:
-        frames = _ego_extract_frames(clip)
-        _EGO_FLOW_CACHE[key] = (None if frames is None or len(frames) < 4
-                                else _ego_median_flow(frames))
-    return _EGO_FLOW_CACHE[key]
-
-
-def find_drive_away_by_video(clip: Clip) -> float | None:
-    """Video-second within `clip` at which the car starts driving (ego-motion),
-    robust to passing people/cars; None if unavailable or no motion found."""
-    med = _ego_flow(clip)
-    if med is None:
-        return None
-    onset = _ego_drive_onset(med)
-    return None if onset is None else max(0.0, onset / EGO_FPS)
-
-
 def find_drive_away_in_group_video(clips: "list[Clip]") -> "tuple[int, float] | None":
-    """Like find_drive_away_by_video but across the first few clips of a trip:
+    """Like VideoMotionDetector.drive_away_second but across the first few clips
+    of a trip:
     returns (clip_index, second_within_that_clip) of the departure, so a
     head-trim can drop earlier parked clips and trim into the motion clip.
     Used for the trip START (mirror of the parking-exit case)."""
@@ -1222,45 +1276,209 @@ def _ego_park_onset(med: "list[float]") -> "int | None":
     return park
 
 
-def find_park_second_by_gps(
-    clip: Clip, gps_dirs: "tuple[Path | None, ...]",
-    threshold_kmh: float = PARKING_SPEED_THRESHOLD_KMH,
-) -> float | None:
-    """GPS-speed fallback for park detection: the video-second at which speed
-    drops below `threshold_kmh` and STAYS there through the end of the clip.
+@dataclass(frozen=True)
+class Detection:
+    """A detector's answer, and which detector gave it.
 
-    Video ego-motion is the primary detector, but it needs trackable features —
-    a night scene can be too dark to yield any, so it reports "still moving"
-    for a car that has plainly stopped. GPS has the opposite bias: it is poor at
-    spotting the START of motion (passing traffic, slow creep below the speed
-    floor) but perfectly good at confirming a sustained standstill. Same shape
-    as _ego_park_onset: the clip must contain real motion first, then settle."""
-    speeds = parse_clip_speeds(clip, gps_dirs)
-    if not speeds:
+    The source travels with the second because the caller prints it and, at the
+    parking exit, branches on it. Returning a bare float meant every caller
+    re-derived "which one answered" from the order it had asked in, and that is
+    how the ladder came to be written out three times."""
+    second: float
+    source: str
+
+
+class MotionDetector(abc.ABC):
+    """Whether a clip holds the car coming to rest, or setting off again.
+
+    Two implementations answer these, from different evidence and with opposite
+    weaknesses (see VideoMotionDetector and GpsMotionDetector), and a third
+    composes them into the fallback ladder. Declared as an interface rather than
+    left duck-typed because the composite takes implementations it did not
+    write: an implementation that answers only one of the two questions would
+    otherwise fail at the moment of the render, on the one clip that needed the
+    other one."""
+
+    #: What Detection.source reports for answers from this detector.
+    source = "?"
+
+    @abc.abstractmethod
+    def park_second(self, clip: Clip) -> "float | None":
+        """Video-second within `clip` at which the car comes to rest and STAYS
+        at rest through the end of the clip, or None if it does not park here.
+        Fractional; callers that slice footage with it must round."""
+
+    @abc.abstractmethod
+    def drive_away_second(self, clip: Clip) -> "float | None":
+        """Video-second within `clip` at which the car starts moving for real,
+        or None if it never does. Fractional, as above."""
+
+    def park(self, clip: Clip) -> "Detection | None":
+        got = self.park_second(clip)
+        return None if got is None else Detection(got, self.source)
+
+    def drive_away(self, clip: Clip) -> "Detection | None":
+        got = self.drive_away_second(clip)
+        return None if got is None else Detection(got, self.source)
+
+
+class VideoMotionDetector(MotionDetector):
+    """Ego-motion read off the front camera. The primary detector, because it
+    reads the wheels: it sees the car itself move, not a receiver's opinion
+    about it. Blind where the scene gives it no features to track — a dark
+    arrival under a roof — and that blindness is what the ladder is for."""
+
+    source = "video"
+
+    def __init__(self, cache: "dict[Path, list[float] | None] | None" = None):
+        # Shared across instances by default so the whole run decodes each clip
+        # once; see _flow.
+        self.cache = _EGO_FLOW_CACHE if cache is None else cache
+
+    def _flow(self, clip: Clip) -> "list[float] | None":
+        """The median-flow signal for a clip, computed at most once.
+
+        Decoding a clip at EGO_FPS and running Lucas-Kanade over it is the whole
+        cost of video ego-motion, and the same clip gets asked more than once:
+        the parking-run boundaries ask whether a clip parks and whether it
+        drives away, and the render then re-asks the exit clip. Answering from
+        the signal makes every question after the first free. Keyed by path
+        because a Clip is rebuilt from the scan each time; the file it names
+        does not change under us within a run."""
+        key = clip.front
+        if key not in self.cache:
+            frames = _ego_extract_frames(clip)
+            self.cache[key] = (None if frames is None or len(frames) < 4
+                               else _ego_median_flow(frames))
+        return self.cache[key]
+
+    def park_second(self, clip: Clip) -> "float | None":
+        """Video-second within `clip` at which the car parks (drives in, then
+        comes to a sustained stop through the end of the clip). None if it
+        doesn't park here (still moving) or video is unavailable. Used to close
+        a trip at the real arrival, not merely on entering the anchor radius."""
+        med = self._flow(clip)
+        if med is None:
+            return None
+        onset = _ego_park_onset(med)
+        return None if onset is None else max(0.0, onset / EGO_FPS)
+
+    def drive_away_second(self, clip: Clip) -> "float | None":
+        """Video-second within `clip` at which the car starts driving
+        (ego-motion), robust to passing people/cars; None if unavailable or no
+        motion found."""
+        med = self._flow(clip)
+        if med is None:
+            return None
+        onset = _ego_drive_onset(med)
+        return None if onset is None else max(0.0, onset / EGO_FPS)
+
+
+class GpsMotionDetector(MotionDetector):
+    """The same two questions answered from the receiver's speeds.
+
+    Good at exactly what video is bad at and bad at what video is good at: it
+    confirms a sustained standstill through a dark garage roof, and it is poor
+    at spotting the START of motion, where passing traffic and a slow creep
+    below the speed floor both read as nothing happening. Second on the ladder
+    for that reason, never first."""
+
+    source = "gps"
+
+    def __init__(self, track: "Track",
+                 park_threshold_kmh: float = PARKING_SPEED_THRESHOLD_KMH,
+                 drive_sustain_secs: int = DRIVE_RESUME_SUSTAIN_SECS):
+        self.track = track
+        self.park_threshold_kmh = park_threshold_kmh
+        self.drive_sustain_secs = drive_sustain_secs
+
+    def park_second(self, clip: Clip) -> "float | None":
+        """The video-second at which speed drops below the parking threshold and
+        STAYS there through the end of the clip. Same shape as _ego_park_onset:
+        the clip must contain real motion first, then settle."""
+        speeds = self.track.speeds(clip)
+        if not speeds:
+            return None
+        n = len(speeds)
+        sustain = max(1, int(round(EGO_SUSTAIN_SECS)))
+        if n < sustain + 1 or max(speeds) <= self.park_threshold_kmh:
+            return None                   # never really drove -> not an arrival
+        k = n - 1
+        while k >= 1 and speeds[k] < self.park_threshold_kmh:
+            k -= 1
+        park = k + 1
+        if park >= n or (n - park) < sustain:
+            return None                   # still moving at the end (no park)
+        return float(park)
+
+    def drive_away_second(self, clip: Clip) -> "float | None":
+        """The first sustained moving window in the clip's speeds — see
+        find_drive_resume_second for why the sustain is as long as it is."""
+        got = find_drive_resume_second(clip, self.track,
+                                       sustain_secs=self.drive_sustain_secs)
+        return None if got is None else float(got)
+
+
+class FirstAnswerDetector(MotionDetector):
+    """The fallback ladder, in one place: ask each detector in turn, keep the
+    first answer.
+
+    Order is the whole content of this class. Video comes first because it reads
+    the wheels; GPS answers for the arrival too dark to track. It used to be
+    written out as `if x is None: x = other(...)` at the three sites that needed
+    it — the parking-run arrival, the trip's end-trim and the parking exit —
+    which is why a fix to the order landed at one of them and not the other
+    two, and the arrival cut stayed wrong for months after the end-trim was
+    right. Building the ladder from an empty or GPS-only list is how
+    --no-video-drive-detect is honoured; there is no flag to consult in here."""
+
+    source = "ladder"
+
+    def __init__(self, *detectors: MotionDetector):
+        self.detectors = tuple(detectors)
+
+    def park(self, clip: Clip) -> "Detection | None":
+        for d in self.detectors:
+            got = d.park(clip)
+            if got is not None:
+                return got
         return None
-    n = len(speeds)
-    sustain = max(1, int(round(EGO_SUSTAIN_SECS)))
-    if n < sustain + 1 or max(speeds) <= threshold_kmh:
-        return None                       # never really drove -> not an arrival
-    k = n - 1
-    while k >= 1 and speeds[k] < threshold_kmh:
-        k -= 1
-    park = k + 1
-    if park >= n or (n - park) < sustain:
-        return None                       # still moving at the end (no park)
-    return float(park)
 
-
-def find_park_second_by_video(clip: Clip) -> float | None:
-    """Video-second within `clip` at which the car parks (drives in, then comes
-    to a sustained stop through the end of the clip). None if it doesn't park
-    here (still moving) or video is unavailable. Used to close a trip at the
-    real arrival, not merely on entering the anchor radius."""
-    med = _ego_flow(clip)
-    if med is None:
+    def drive_away(self, clip: Clip) -> "Detection | None":
+        for d in self.detectors:
+            got = d.drive_away(clip)
+            if got is not None:
+                return got
         return None
-    onset = _ego_park_onset(med)
-    return None if onset is None else max(0.0, onset / EGO_FPS)
+
+    def park_second(self, clip: Clip) -> "float | None":
+        got = self.park(clip)
+        return None if got is None else got.second
+
+    def drive_away_second(self, clip: Clip) -> "float | None":
+        got = self.drive_away(clip)
+        return None if got is None else got.second
+
+
+# The one video detector of a run. Module-level because its cache is: every
+# caller must reach the same memo or the render decodes the card twice.
+VIDEO_MOTION = VideoMotionDetector()
+
+
+def motion_ladder(track: "Track",
+                  use_video: bool = True,
+                  drive_sustain_secs: int = DRIVE_RESUME_SUSTAIN_SECS,
+                  ) -> FirstAnswerDetector:
+    """The detector every arrival and departure question goes through.
+
+    `use_video=False` is --no-video-drive-detect: the video rung is left out
+    rather than disabled inside it, so the flag is read once at the edge and the
+    detectors never learn it exists."""
+    rungs: list[MotionDetector] = []
+    if use_video:
+        rungs.append(VIDEO_MOTION)
+    rungs.append(GpsMotionDetector(track, drive_sustain_secs=drive_sustain_secs))
+    return FirstAnswerDetector(*rungs)
 
 
 def exit_trim_start(drive_away_sec: float, exit_pad: int) -> int:
@@ -1268,40 +1486,6 @@ def exit_trim_start(drive_away_sec: float, exit_pad: int) -> int:
     of the drive-away, so the viewer sees the car sitting there and then pull
     out, rather than being dropped into a manoeuvre already under way."""
     return max(0, int(drive_away_sec) - exit_pad)
-
-
-def clip_is_parked(clip: Clip, gps_dirs: tuple[Path | None, ...]) -> bool:
-    """
-    Decide whether a clip is stationary. Three signals all count as "parked":
-      1) GPX exists and >=75% of seconds are below 3 km/h (textbook standstill)
-      2) GPX exists but holds no valid fixes (indoor parking, lost lock)
-      3) No GPX file at all for this clip
-    Cases (2) and (3) cover the most common pattern: the dashcam keeps
-    recording while parked in a garage but loses GPS. find_parking_runs only
-    triggers a skip when the *total* run length is long enough, so brief
-    mid-drive GPS dropouts (a few clips through a tunnel) won't trip this.
-    """
-    # By time, not by filename: a clip whose receiver never fixed is named for
-    # a file full of an earlier drive's sentences, and judging whether THIS
-    # clip was parked from THOSE speeds is judging the wrong minute.
-    speeds = [pt[2] for pt in gather_track([clip], gps_dirs)]
-    if not speeds:
-        return True
-    # Sparse-coverage + fast-speed check: if the GPX file holds far fewer
-    # samples than the clip's duration would suggest (1 Hz nominal) AND
-    # those samples are all at highway-ish speeds, they're stale parking-
-    # buffer data from a previous drive that just happens to be all the
-    # GPS info this clip has. Real cars don't go from a parking-mode wake
-    # to 80 km/h, so this combination is a reliable "parked, GPS missing"
-    # signal. (A clip with SLOW sparse samples — e.g., GPS still acquiring
-    # at the start of a drive — falls through to the normal slow-ratio
-    # check, which handles both directions correctly.)
-    if len(speeds) < clip.duration * 0.2:
-        avg = sum(speeds) / len(speeds)
-        if avg > 40:
-            return True
-    slow = sum(1 for s in speeds if s < PARKING_SPEED_THRESHOLD_KMH)
-    return (slow / len(speeds)) >= PARKING_CLIP_FRACTION
 
 
 def _filter_gps_outliers(speeds: list[float], max_delta_kmh: float = 30.0) -> list[float]:
@@ -1342,7 +1526,7 @@ def _smooth_speeds(speeds: list[float], window: int = 5) -> list[float]:
 
 def find_park_second(
     clip: Clip,
-    gps_dirs: tuple[Path | None, ...],
+    track: "Track",
     sustain_secs: int = 30,
     threshold_kmh: float = PARKING_SPEED_THRESHOLD_KMH,
     next_clips: list[Clip] | None = None,
@@ -1358,13 +1542,13 @@ def find_park_second(
     sustain check, so a single noise spike up to 80 km/h on a parked car
     doesn't push park onset 5 minutes later than it really happened.
     """
-    speeds = parse_clip_speeds(clip, gps_dirs)
+    speeds = track.speeds(clip)
     if not speeds:
         return None
     clip_len = len(speeds)
     if next_clips:
         for nc in next_clips:
-            nspeeds = parse_clip_speeds(nc, gps_dirs)
+            nspeeds = track.speeds(nc)
             if not nspeeds:
                 break
             speeds.extend(nspeeds)
@@ -1381,20 +1565,21 @@ def find_park_second(
 
 
 def _leads_into_parking(
-    group: "list[Clip]", i: int, gps_dirs: "tuple[Path | None, ...]",
+    group: "list[Clip]", i: int, track: "Track",
 ) -> bool:
     """Whether clip `i` is the one the car could have come to rest in: the clip
     after it is parked and this one is not parked already. The arrival lives in
     exactly one clip per run, and this finds it without decoding the rest."""
     return (i + 1 < len(group)
-            and clip_is_parked(group[i + 1], gps_dirs)
-            and not clip_is_parked(group[i], gps_dirs))
+            and track.is_parked(group[i + 1])
+            and not track.is_parked(group[i]))
 
 
 def find_parking_runs(
     group: list[Clip],
-    gps_dirs: tuple[Path | None, ...],
+    track: "Track",
     min_run_secs: int,
+    detector: "MotionDetector | None" = None,
 ) -> list[tuple[int, int, int]]:
     """
     Find runs of parking and return a list of
@@ -1410,7 +1595,12 @@ def find_parking_runs(
     Total stopped duration includes the partial entry-clip tail, the fully
     parked clips, AND the wall-clock engine-off gap to the next moving
     clip. Threshold passed only if `total >= min_run_secs`.
+
+    `detector` answers the arrival; it defaults to the full ladder. The run's
+    END is asked of video alone and deliberately so — see the walk-back below.
     """
+    if detector is None:
+        detector = motion_ladder(track)
     runs: list[tuple[int, int, int]] = []
     verbose = os.environ.get("PARKING_DEBUG") == "1"
     i = 0
@@ -1421,7 +1611,7 @@ def find_parking_runs(
         # the immediately following clip has a few seconds of crawl-creep
         # before settling.)
         park_sec = find_park_second(
-            c, gps_dirs,
+            c, track,
             next_clips=group[i + 1: i + 3],
         )
         # The smoothing detector above misses the arrival that matters most: a
@@ -1433,20 +1623,18 @@ def find_parking_runs(
         # the arrival too dark to give video anything to track. Bounded to the
         # one clip per run that can hold the arrival: asking every clip would
         # decode the whole trip.
-        if park_sec is None and _leads_into_parking(group, i, gps_dirs):
-            park_sec = find_park_second_by_video(c)
-            if park_sec is None:
-                park_sec = find_park_second_by_gps(c, gps_dirs)
-            # Both answer in fractional video-seconds; a run's onset is a whole
-            # clip-second, because the render slices with it.
-            if park_sec is not None:
-                park_sec = int(park_sec)
+        if park_sec is None and _leads_into_parking(group, i, track):
+            arrival = detector.park(c)
+            # Detectors answer in fractional video-seconds; a run's onset is a
+            # whole clip-second, because the render slices with it.
+            if arrival is not None:
+                park_sec = int(arrival.second)
         # Fallback: if smoothing-based detection misses, fall back to the
         # whole-clip parked heuristic. This catches the case where the GPS
         # data is too noisy / sparse for sustained-window detection but
         # >=75% of seconds are still below 3 km/h. Park onset is treated
         # as clip-second 0 in that case (we don't know more precisely).
-        if park_sec is None and clip_is_parked(c, gps_dirs):
+        if park_sec is None and track.is_parked(c):
             park_sec = 0
         if verbose:
             print(f"    [park-debug] clip[{i}] {c.timestamp} "
@@ -1455,20 +1643,24 @@ def find_parking_runs(
             i += 1
             continue
         # Park starts in clip i at second `park_sec`. Now follow the parked
-        # run forward by checking subsequent clips with clip_is_parked.
+        # run forward by checking subsequent clips with Track.is_parked.
         end_idx = i
         for j in range(i + 1, len(group)):
-            if clip_is_parked(group[j], gps_dirs):
+            if track.is_parked(group[j]):
                 end_idx = j
             else:
                 break
-        # clip_is_parked answers YES for a clip with no fix at all, which is
+        # Track.is_parked answers YES for a clip with no fix at all, which is
         # exactly what a car pulling out of a lot produces — the receiver has
         # not reacquired yet. So the run kept growing through the departure and
         # skipped it whole, and the render resumed on the NEXT clip, already
         # driving. A clip the car leaves in is not parked: end the run before
         # it, and it becomes the exit clip the render cuts into.
-        while end_idx > i and find_drive_away_by_video(group[end_idx]) is not None:
+        #
+        # VIDEO ALONE, not the ladder: the clips this walks back over have no
+        # fix at all, or a stale fast one replayed from the last drive, and a
+        # GPS answer here would end the run on the wrong clip in both cases.
+        while end_idx > i and VIDEO_MOTION.drive_away_second(group[end_idx]) is not None:
             end_idx -= 1
         # Total stopped time = partial entry tail + fully-parked clips +
         # wall-clock engine-off gap to next moving clip.
@@ -1477,8 +1669,7 @@ def find_parking_runs(
             group[k].duration for k in range(i + 1, end_idx + 1)
         )
         if end_idx + 1 < len(group):
-            last_end = group[end_idx].dt + timedelta(seconds=group[end_idx].duration)
-            gap = max(0.0, (group[end_idx + 1].dt - last_end).total_seconds())
+            gap = group[end_idx + 1].gap_before(group[end_idx])
         else:
             gap = 0.0
         total = partial_entry + skipped_clips_secs + gap
@@ -2131,17 +2322,19 @@ def render_clip_marker_video(
     base_panel: object,           # PIL.Image
     drive_points: list[tuple[float, float, float, datetime]],
     drive_pixels: list[tuple[int, int]],
-    gps_dirs: tuple[Path | None, ...],
+    track: "Track",
     out_video: Path,
-    trim_start: int = 0,
-    trim_seconds: int | None = None,
+    cut: "Cut | None" = None,
 ) -> tuple[bool, tuple[int, int] | None]:
     """
     For one clip: render PNG frames (base panel + marker at current position)
-    and assemble into a 1-fps MP4. trim_start/trim_seconds restrict to a slice
-    of the clip's duration so the map matches the trimmed video.
+    and assemble into a 1-fps MP4. `cut` is the SAME cut the clip itself is
+    encoded with, so the map cannot drift out of step with the footage under it.
     Returns False if the clip has no GPS coverage.
     """
+    if cut is None:
+        cut = Cut()
+    trim_start = cut.trim_start
     try:
         from PIL import Image, ImageDraw
     except ImportError:
@@ -2149,7 +2342,7 @@ def render_clip_marker_video(
 
     # Per-clip points, selected by time rather than by the filename that
     # happens to match.
-    clip_points = gather_track([clip], gps_dirs)
+    clip_points = track.during([clip])
     if not clip_points:
         return False, None
     # Reject scrambled buffers (parking-mode stale-data dumps)
@@ -2169,7 +2362,8 @@ def render_clip_marker_video(
             lat = clip_points[j][0]; lon = clip_points[j][1]
             per_second_full.append(_nearest_pixel(lat, lon, drive_points, drive_pixels))
 
-    duration = trim_seconds if trim_seconds is not None else (n_full - trim_start)
+    duration = (cut.trim_seconds if cut.trim_seconds is not None
+                else n_full - trim_start)
     per_second = per_second_full[trim_start:trim_start + duration]
     if not per_second:
         return False, None
@@ -2332,10 +2526,63 @@ def fmt_secs(s: float) -> str:
 # Per-clip encode
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class RenderStyle:
+    """How this run renders: the settings decided once and true of every piece
+    of output.
+
+    Every one of these was passed down by hand — encode_clip took thirteen
+    arguments and six of them were these, generate_transition_slide took eight
+    and four were these — and the slide MUST agree with the clips on all of
+    them. It does not merely look wrong otherwise: a slide encoded at a
+    different height or bitrate than the clips it sits between gives the
+    concatenated file two incompatible SPS variants, and hardware decoders go
+    black around it. One object, passed whole, is how they cannot drift.
+    """
+    font_path: str
+    use_vt: bool
+    with_timestamp: bool
+    with_speed: bool
+    output_height: int = 0
+    no_audio: bool = False
+
+    def video_encoder(self) -> list[str]:
+        """The ffmpeg video-codec flags, identical for clips and slides.
+
+        VideoToolbox takes a bitrate, which has to be scaled down with the
+        output height or 540p output gets 8 Mbps for no visible gain. libx264
+        uses CRF, which auto-adjusts with resolution, so nothing to scale."""
+        if self.use_vt:
+            return ["-c:v", "h264_videotoolbox",
+                    "-b:v", _scale_bitrate_string(VT_BITRATE, self.output_height),
+                    "-maxrate", _scale_bitrate_string(VT_MAXRATE, self.output_height),
+                    "-profile:v", "high"]
+        return ["-c:v", "libx264", "-preset", X264_PRESET, "-crf", X264_CRF]
+
+
+@dataclass(frozen=True)
+class Cut:
+    """Which slice of a clip is rendered, and where the car stopped inside it.
+
+    The three travelled together as loose arguments through encode_clip and the
+    marker-panel render, and they are one decision: the parking cut. trim_start
+    and trim_seconds are in source-clip seconds; trim_seconds None means run to
+    the end of the clip. settled_at is set only where a park onset is KNOWN, so
+    the speed overlay cannot caption a stationary car with a decaying fix — see
+    settle_speeds_after."""
+    trim_start: int = 0
+    trim_seconds: "int | None" = None
+    settled_at: "int | None" = None
+
+    def duration_of(self, clip: "Clip") -> int:
+        """How many seconds of `clip` this cut renders."""
+        return (self.trim_seconds if self.trim_seconds is not None
+                else clip.duration - self.trim_start)
+
+
 def build_filter_complex(
-    font_path: str,
+    style: RenderStyle,
     start_epoch: int,
-    with_timestamp: bool,
     speed_srt: Path | None,
     with_map_widget: bool = False,
     with_rear: bool = True,
@@ -2387,8 +2634,8 @@ def build_filter_complex(
     chain = base
     last_label = ""  # currently the output of `base` is unnamed
 
-    if with_timestamp:
-        font_escaped = font_path.replace(":", r"\:")
+    if style.with_timestamp:
+        font_escaped = style.font_path.replace(":", r"\:")
         chain += (
             f",drawtext=fontfile={font_escaped}:"
             f"text='%{{pts\\:gmtime\\:{start_epoch}\\:%Y-%m-%d %T}}':"
@@ -2399,19 +2646,19 @@ def build_filter_complex(
 
     if speed_srt is not None:
         # libass force_style: bottom-right speed readout
-        style = (
+        srt_style = (
             f"Alignment=3,FontName=Courier New,FontSize={SPEED_FONT_SIZE},"
             "PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,"
             "BackColour=&H80000000,BorderStyle=4,Outline=2,Shadow=0,"
             f"MarginV={SPEED_MARGIN_V},MarginR={SPEED_MARGIN_R}"
         )
         # Single-quote the path so colons inside it don't get parsed as option separators
-        chain += f",subtitles=filename='{speed_srt.as_posix()}':force_style='{style}'"
+        chain += f",subtitles=filename='{speed_srt.as_posix()}':force_style='{srt_style}'"
 
     # Watermark — drawn on the main video stream BEFORE the hstack so x/y
     # use the 1920x1080 frame's own coordinate system (no need to know which
     # side the map panel ends up on).
-    font_escaped = font_path.replace(":", r"\:") if font_path else ""
+    font_escaped = style.font_path.replace(":", r"\:") if style.font_path else ""
     if font_escaped and COPYRIGHT_TEXT:
         pos = (COPYRIGHT_POSITION or "bottom-right").lower()
         mh, mv = COPYRIGHT_MARGIN_H, COPYRIGHT_MARGIN_V
@@ -2495,37 +2742,31 @@ def run_ffmpeg(cmd: list[str]) -> None:
 def encode_clip(
     clip: Clip,
     out_path: Path,
-    font_path: str,
-    use_vt: bool,
-    with_timestamp: bool,
-    gps_dirs: tuple[Path | None, ...],
-    with_speed: bool,
+    style: RenderStyle,
+    track: "Track",
+    cut: Cut = Cut(),
     map_video: Path | None = None,
-    trim_start: int = 0,
-    trim_seconds: int | None = None,
-    settled_at: int | None = None,
-    no_audio: bool = False,
-    output_height: int = 0,
 ) -> None:
     """
-    Encode one clip (or one trimmed slice of it) to `out_path`.
-    trim_start / trim_seconds are in source-clip seconds. If trim_seconds is
-    None, encode to the end of the clip.
+    Encode one clip (or one trimmed slice of it) to `out_path`, as `cut` says
+    and in the run's `style`.
     """
-    duration = trim_seconds if trim_seconds is not None else (clip.duration - trim_start)
+    trim_start = cut.trim_start
+    trim_seconds = cut.trim_seconds
+    duration = cut.duration_of(clip)
     actual_epoch = clip.epoch_utc + trim_start
 
     # If GPS data exists for this clip, write a sidecar SRT (sliced to the trim
     # window) and pass it to the filter.
     speed_srt: Path | None = None
-    if with_speed:
-        # parse_clip_speeds aligns the GPS time-series to the clip's VIDEO
+    if style.with_speed:
+        # Track.speeds aligns the GPS time-series to the clip's VIDEO
         # timeline by prepending 0-km/h placeholders if the dashcam started
         # recording before GPS reacquired lock. Without this, the speed
         # overlay can be ~10 seconds AHEAD of what's actually visible.
-        all_speeds = parse_clip_speeds(clip, gps_dirs)
-        if all_speeds and settled_at is not None:
-            all_speeds = settle_speeds_after(all_speeds, settled_at)
+        all_speeds = track.speeds(clip)
+        if all_speeds and cut.settled_at is not None:
+            all_speeds = settle_speeds_after(all_speeds, cut.settled_at)
         if all_speeds:
             window = all_speeds[trim_start:trim_start + duration]
             srt_path = out_path.with_suffix(".speed.srt")
@@ -2534,26 +2775,9 @@ def encode_clip(
 
     with_map_widget = map_video is not None
     with_rear = REAR_PIP_ENABLED and clip.rear is not None
-    filt = build_filter_complex(font_path, actual_epoch, with_timestamp, speed_srt,
+    filt = build_filter_complex(style, actual_epoch, speed_srt,
                                 with_map_widget, with_rear=with_rear)
-    if use_vt:
-        # Scale the hardware bitrate to the downscaled resolution so 540p
-        # output doesn't get 8 Mbps of bitrate (=tiny gain, big file).
-        # libx264 uses CRF, which auto-adjusts with resolution, so no scaling needed there.
-        vt_b = _scale_bitrate_string(VT_BITRATE, output_height)
-        vt_m = _scale_bitrate_string(VT_MAXRATE, output_height)
-        venc = [
-            "-c:v", "h264_videotoolbox",
-            "-b:v", vt_b,
-            "-maxrate", vt_m,
-            "-profile:v", "high",
-        ]
-    else:
-        venc = [
-            "-c:v", "libx264",
-            "-preset", X264_PRESET,
-            "-crf", X264_CRF,
-        ]
+    venc = style.video_encoder()
 
     # When we want audio in the output AND the source clip has no audio
     # stream, we must inject a silent anullsrc input — otherwise the
@@ -2561,8 +2785,8 @@ def encode_clip(
     # demuxer silently drops audio across the WHOLE output for every clip
     # past the first audio-less one.
     use_rear = REAR_PIP_ENABLED and clip.rear is not None
-    source_has_audio = (not no_audio) and file_has_audio(clip.front)
-    need_silent_audio = (not no_audio) and not source_has_audio
+    source_has_audio = (not style.no_audio) and file_has_audio(clip.front)
+    need_silent_audio = (not style.no_audio) and not source_has_audio
 
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning"]
     # -ss before -i seeks to the trim_start; pts is rebased to 0 in the output,
@@ -2583,11 +2807,11 @@ def encode_clip(
     if trim_seconds is not None:
         cmd += ["-t", str(trim_seconds)]
     # Optional final downscale (output_height != 0) and audio strip
-    if output_height and output_height != OUT_H:
+    if style.output_height and style.output_height != OUT_H:
         filt = filt.replace("[out]", "[pre_scaled];[pre_scaled]scale=-2:" +
-                            str(output_height) + "[out]", 1)
+                            str(style.output_height) + "[out]", 1)
     cmd += ["-filter_complex", filt, "-map", "[out]"]
-    if no_audio:
+    if style.no_audio:
         cmd += ["-an"]
     else:
         # Normalize audio to a consistent 48 kHz stereo AAC across every
@@ -2624,12 +2848,9 @@ def _fmt_skip_duration(secs: float) -> str:
 def generate_transition_slide(
     out_video: Path,
     duration: int,
-    font_path: str,
+    style: RenderStyle,
     with_map_widget: bool,
-    use_vt: bool,
     skipped_secs: float | None = None,
-    output_height: int = 0,
-    no_audio: bool = False,
 ) -> None:
     """
     Render a `duration`-second black slide with the 'Fast forwarding...' text
@@ -2649,20 +2870,14 @@ def generate_transition_slide(
     # another — software decoders cope, hardware ones (VideoToolbox: QuickTime,
     # Preview, Safari) blank until the next IDR, which is the black gap around
     # the slide. So mirror ffmpeg: round-half-up to the nearest multiple of 2.
-    if output_height and output_height != OUT_H:
-        scale = output_height / OUT_H
+    if style.output_height and style.output_height != OUT_H:
+        scale = style.output_height / OUT_H
         width = int(round(width * scale / 2)) * 2
-        height = output_height
-    font_escaped = font_path.replace(":", r"\:")
-    if use_vt:
-        # Match the main encode's scaled bitrate so the slide and clips share
-        # comparable encoder parameters (helps concat-demuxer keep the stream).
-        vt_b = _scale_bitrate_string(VT_BITRATE, output_height)
-        vt_m = _scale_bitrate_string(VT_MAXRATE, output_height)
-        venc = ["-c:v", "h264_videotoolbox", "-b:v", vt_b,
-                "-maxrate", vt_m, "-profile:v", "high"]
-    else:
-        venc = ["-c:v", "libx264", "-preset", X264_PRESET, "-crf", X264_CRF]
+        height = style.output_height
+    font_escaped = style.font_path.replace(":", r"\:")
+    # The same encoder flags the clips get, from the same object: a slide coded
+    # differently is the black gap documented below.
+    venc = style.video_encoder()
     # Disable B-frames so there is no frame reordering across the concat splice.
     #
     # Do NOT add "-g 1" here. It was once added to fix "black around the slide",
@@ -2683,7 +2898,7 @@ def generate_transition_slide(
         "-f", "lavfi", "-i",
         f"color=c=black:s={width}x{height}:r={OUT_FPS}:d={duration}",
     ]
-    if not no_audio:
+    if not style.no_audio:
         cmd += ["-f", "lavfi", "-i",
                 f"anullsrc=channel_layout=stereo:sample_rate=48000:d={duration}"]
     cmd += [
@@ -2703,7 +2918,7 @@ def generate_transition_slide(
         ),
         "-map", "0:v",
     ]
-    if not no_audio:
+    if not style.no_audio:
         cmd += ["-map", "1:a", "-c:a", "aac", "-b:a", "96k", "-ar", "48000", "-ac", "2"]
     cmd += [*venc, "-pix_fmt", "yuv420p", "-shortest", str(out_video)]
     run_ffmpeg(cmd)
@@ -2810,7 +3025,7 @@ def _resolve_config_path(argv: list[str]) -> Path:
     return CHECKOUT.config_file()
 
 
-def _scan_cache_key(clips, gps_dirs=(), **params):
+def _scan_cache_key(clips, track: "Track | None" = None, **params):
     """Identity of a scan: everything the grouping depends on.
 
     The clip set, every knob that changes how it is grouped, AND the GPS files —
@@ -2833,16 +3048,15 @@ def _scan_cache_key(clips, gps_dirs=(), **params):
         except OSError:
             size = -1
         h.update(f"{c.front.name}|{c.duration}|{c.timestamp}|{size}\n".encode())
-    for d in gps_dirs:
-        if not d:
-            continue
+    for f in (track.files if track is not None else []):
         try:
-            for f in sorted(Path(d).rglob("*.gpx")):
-                st = f.stat()
-                # name, not path, for the same reason as the clips above
-                h.update(f"{f.name}|{st.st_size}|{int(st.st_mtime)}\n".encode())
+            st = f.stat()
+            # name, not path, for the same reason as the clips above
+            h.update(f"{f.name}|{st.st_size}|{int(st.st_mtime)}\n".encode())
         except OSError:
-            h.update(f"{d}|unreadable\n".encode())
+            # A file that vanished between the listing and the stat still has to
+            # move the key: it is a change to the track like any other.
+            h.update(f"{f.name}|unreadable\n".encode())
     for k in sorted(params):
         h.update(f"{k}={params[k]}\n".encode())
     return h.hexdigest()
@@ -3426,7 +3640,27 @@ def main() -> int:
             print(f"Tarred GPS:  extracted {n_new} new .gpx files from {n_arch} archives "
                   f"into {tar_cache_dir}")
 
-    gps_dirs = (gps_dir, tar_cache_dir)
+    # The card's GPS, as one object. Everything downstream — grouping, parking
+    # runs, the speed overlay, the map — asks it rather than being handed the
+    # directories and deciding for itself how to find a clip's fixes.
+    track = Track((gps_dir, tar_cache_dir))
+    # One ladder for the whole run: every arrival and departure the render asks
+    # about goes through it, so --no-video-drive-detect is read here and nowhere
+    # else. find_parking_runs builds its own from the same track.
+    motion = motion_ladder(track,
+                           use_video=not args.no_video_drive_detect,
+                           drive_sustain_secs=args.drive_resume_sustain_secs)
+
+    # How this run renders, decided once. The clips and the slides between them
+    # are given the same object, which is what keeps them encoded alike.
+    style = RenderStyle(
+        font_path=font_path,
+        use_vt=use_vt,
+        with_timestamp=with_timestamp,
+        with_speed=with_speed,
+        output_height=args.output_height,
+        no_audio=args.no_audio,
+    )
 
     n_gpx_loose = sum(1 for f in os.listdir(gps_dir) if GPX_RE.match(f)) if gps_dir else 0
     n_gpx_tar   = sum(1 for f in os.listdir(tar_cache_dir) if f.endswith(".gpx")) if tar_cache_dir else 0
@@ -3472,13 +3706,13 @@ def main() -> int:
     # produces the same answer every time for the same clips. --scan-cache lets
     # one session compute it once and reuse it across steps; the caller owns the
     # file and deletes it on exit, so a restart always recomputes.
-    _ck = _scan_cache_key(clips, gps_dirs=gps_dirs, **_gparams) if args.scan_cache else None
+    _ck = _scan_cache_key(clips, track=track, **_gparams) if args.scan_cache else None
     _hit = _scan_cache_load(args.scan_cache, _ck, clips) if _ck else None
     if _hit:
         groups, trip_moved = _hit
         print(f"Grouping:    reusing cached boundaries ({len(groups)} trips)")
     else:
-        groups, trip_moved = group_into_trips(clips, gps_dirs, **_gparams)
+        groups, trip_moved = group_into_trips(clips, track, **_gparams)
         if _ck:
             _scan_cache_store(args.scan_cache, _ck, groups, trip_moved)
     group_kind, group_word = "trip", "Trip"
@@ -3489,7 +3723,7 @@ def main() -> int:
     total_secs = 0
     for i, g in enumerate(groups, 1):
         start = g[0].dt
-        end   = g[-1].dt + timedelta(seconds=g[-1].duration)
+        end   = g[-1].end
         secs  = (end - start).total_seconds()
         total_secs += secs
         print(f"  {group_word} {i:2d}  day {day_labels[i-1]}  "
@@ -3578,7 +3812,7 @@ def main() -> int:
         payload = {"root": str(root), "out": str(out_dir), "trips": []}
         for i, g in enumerate(groups, 1):
             start = g[0].dt
-            end = g[-1].dt + timedelta(seconds=g[-1].duration)
+            end = g[-1].end
             renderable = i in wanted
             # Say WHY a trip will not be rendered, in the same terms (and from
             # the same conditions) as the "Auto-skipping …" lines above.
@@ -3670,7 +3904,7 @@ def main() -> int:
             continue
 
         start = group[0].dt
-        end   = group[-1].dt + timedelta(seconds=group[-1].duration)
+        end   = group[-1].end
         secs  = (end - start).total_seconds()
         # Final filename: bake the chosen output height into the name (when
         # downscaling) so re-rendering at a different height doesn't overwrite
@@ -3728,7 +3962,7 @@ def main() -> int:
         # Done unconditionally — even when the final .mp4 already exists — so the
         # user can refresh the sidecars after segmentation/render fixes without
         # re-encoding 1.9 hours of video.
-        group_track_raw = gather_track(group, gps_dirs) if with_speed else []
+        group_track_raw = track.during(group) if with_speed else []
         # Prune GPS noise once, at the top of the pipeline. segment_track
         # drops segments shorter than SEGMENT_MIN_POINTS — those are usually
         # a few isolated phantom fixes that fall outside the gap thresholds
@@ -3914,7 +4148,7 @@ def main() -> int:
         # body is one continuous drive simply yields no parking runs here.)
         parking_runs: list[tuple[int, int, int]] = []
         if not args.no_skip_parking and with_speed:
-            parking_runs = find_parking_runs(group, gps_dirs, args.parking_min_secs)
+            parking_runs = find_parking_runs(group, track, args.parking_min_secs)
 
         # Map clip-index → action.
         #   entry      = first pad seconds of the FIRST parked clip
@@ -3952,7 +4186,7 @@ def main() -> int:
                 src, offset = "video", int(vsec)
             else:
                 resume = find_drive_resume_in_group(
-                    group[:3], gps_dirs,
+                    group[:3], track,
                     sustain_secs=args.drive_resume_sustain_secs,
                 )
                 if resume is not None:
@@ -4042,8 +4276,7 @@ def main() -> int:
             _pk = None
             for k in _emit_idx:
                 if _pk is not None and action_for.get(k) != "exit":
-                    g = (group[k].dt - (group[_pk].dt
-                         + timedelta(seconds=group[_pk].duration))).total_seconds()
+                    g = group[k].gap_before(group[_pk])
                     if g > args.inter_clip_gap_secs:
                         gap_pre_pause.add(_pk)
                 _pk = k
@@ -4077,22 +4310,20 @@ def main() -> int:
             # engine-off gaps of any length (all interior stops stay in the
             # trip), so this fires whenever a within-trip gap is long enough.
             if (prev_emitted_clip is not None and action != "exit"):
-                prev_end = prev_emitted_clip.dt + timedelta(seconds=prev_emitted_clip.duration)
-                gap_secs = (clip.dt - prev_end).total_seconds()
+                gap_secs = clip.gap_before(prev_emitted_clip)
                 if gap_secs > args.inter_clip_gap_secs:
                     gap_trans = work_dir / f"{group_kind}{idx:02d}_clip{ci:03d}_gap_transition.mp4"
                     if not gap_trans.exists():
                         print(f"        + gap transition slide ({TRANSITION_SECS}s, "
                               f"~{_fmt_skip_duration(gap_secs)})")
                         generate_transition_slide(
-                            gap_trans, TRANSITION_SECS, font_path, with_map_widget, use_vt,
+                            gap_trans, TRANSITION_SECS, style, with_map_widget,
                             skipped_secs=gap_secs,
-                            output_height=args.output_height,
-                            no_audio=args.no_audio,
                         )
                     # Record the stop: its FF slide lands at the current output
                     # position; the fix nearest the pre-gap moment gives lat/lon.
-                    _fix = _nearest_track_fix(group_track, prev_end + _gps_time_offset)
+                    _fix = _nearest_track_fix(group_track,
+                                              prev_emitted_clip.end + _gps_time_offset)
                     if _fix is not None:
                         stops.append({
                             "video_secs": round(video_secs, 2),
@@ -4136,32 +4367,26 @@ def main() -> int:
             elif action == "exit":
                 # Prefer VIDEO ego-motion to anchor the drive-away — GPS speed is
                 # unreliable here (parking-mode snippets are full of passing
-                # people/cars). find_drive_away_by_video pinpoints the wheels
-                # turning; keep parking_exit_pad of footage before it. Silently
-                # fall back to GPS drive-resume, then a fixed skip, when video isn't
-                # available (no numpy/opencv) or finds nothing. The user only
-                # cares that the cut is clean, not how it's found; the choice to
-                # KEEP the parking movements instead is --no-skip-parking. The
-                # --no-video-drive-detect knob forces GPS-only (advanced).
-                vid_sec = (None if args.no_video_drive_detect
-                           else find_drive_away_by_video(clip))
-                if vid_sec is not None:
+                # people/cars). The ladder asks video first — it pinpoints the
+                # wheels turning — then GPS drive-resume; a fixed skip is the
+                # last rung, here, because it is not a detection at all. Keep
+                # parking_exit_pad of footage before whichever answers. The user
+                # only cares that the cut is clean, not how it's found; the
+                # choice to KEEP the parking movements instead is
+                # --no-skip-parking. --no-video-drive-detect drops the video
+                # rung when the ladder is built (advanced).
+                away = motion.drive_away(clip)
+                if away is not None:
                     # parking_exit_pad, not EGO_CONTEXT_PAD: the knob config.txt
                     # documents for this cut was being ignored on the video path
                     # — which is the normal path — in favour of a 2-second
                     # constant. Two seconds is too tight to read a reverse-out.
-                    trim_start = exit_trim_start(vid_sec, exit_pad)
-                    print(f"        exit: video drive-away at {vid_sec:.1f}s "
-                          f"→ trim from {trim_start}s")
+                    trim_start = exit_trim_start(away.second, exit_pad)
+                    if away.source == "video":
+                        print(f"        exit: video drive-away at {away.second:.1f}s "
+                              f"→ trim from {trim_start}s")
                 else:
-                    drive_sec = find_drive_resume_second(
-                        clip, gps_dirs,
-                        sustain_secs=args.drive_resume_sustain_secs,
-                    )
-                    if drive_sec is None:
-                        trim_start = min(args.exit_skip_secs, max(0, clip.duration - exit_pad))
-                    else:
-                        trim_start = max(0, drive_sec - exit_pad)
+                    trim_start = min(args.exit_skip_secs, max(0, clip.duration - exit_pad))
                 trim_seconds = None     # run to end of clip
             elif ci0 == head_skip_count and with_speed:
                 # The first NON-SKIPPED clip of the trip = the departure/motion
@@ -4172,25 +4397,19 @@ def main() -> int:
 
             # END-TRIM: the trip's final clip otherwise plays out to the end of
             # its minute, leaving up to ~a minute of already-parked footage after
-            # the car has come to rest. Find the park with the same video
-            # ego-motion detector used for drive-away and stop EGO_END_PAD
-            # seconds after it. (A trailing parking RUN is already handled by
+            # the car has come to rest. Find the park with the same ladder used
+            # for drive-away — video, then GPS for the arrival too dark to give
+            # video anything to track — and stop EGO_END_PAD seconds after it.
+            # (A trailing parking RUN is already handled by
             # `entry_end`; this covers the common case where the trip simply ends
             # with the car pulling in.)
             if action is None and ci0 == last_emit_idx and trim_seconds is None:
-                park_sec = (None if args.no_video_drive_detect
-                            else find_park_second_by_video(clip))
-                how = "video"
-                if park_sec is None:
-                    # Video needs trackable features; a night arrival can be too
-                    # dark to give any. GPS is reliable for a sustained stop.
-                    park_sec = find_park_second_by_gps(clip, gps_dirs)
-                    how = "gps"
-                if park_sec is not None and int(park_sec) >= trim_start:
-                    trim_seconds = max(1, int(park_sec) - trim_start + EGO_END_PAD)
-                    settled_at = int(park_sec)
-                    print(f"        end-trim ({how}): parks at {park_sec:.1f}s → "
-                          f"stop after {trim_seconds}s")
+                arrival = motion.park(clip)
+                if arrival is not None and int(arrival.second) >= trim_start:
+                    trim_seconds = max(1, int(arrival.second) - trim_start + EGO_END_PAD)
+                    settled_at = int(arrival.second)
+                    print(f"        end-trim ({arrival.source}): parks at "
+                          f"{arrival.second:.1f}s → stop after {trim_seconds}s")
 
             # --debug-cuts preview: keep only the transition moments with `N`
             # secs of context each, and drop the driving middles. This runs AFTER
@@ -4224,6 +4443,12 @@ def main() -> int:
                     prev_emitted_clip = clip
                     continue
 
+            # The parking cut, settled. Built here, after --debug-cuts has had
+            # its say, because the map widget and the clip itself must be given
+            # the SAME one — they used to be handed the loose trims separately
+            # and could disagree.
+            cut = Cut(trim_start, trim_seconds, settled_at)
+
             # Per-slice intermediate filename. Suffix the action so re-runs
             # can find / cache them correctly. The requested output_height is
             # also baked into the filename, otherwise switching between
@@ -4245,8 +4470,8 @@ def main() -> int:
             if with_map_widget:
                 map_video = inter.with_suffix(".map.mp4")
                 ok, last_pixel = render_clip_marker_video(
-                    clip, base_panel, group_track, group_pixels, gps_dirs, map_video,
-                    trim_start=trim_start, trim_seconds=trim_seconds,
+                    clip, base_panel, group_track, group_pixels, track, map_video,
+                    cut=cut,
                 )
                 if ok and last_pixel is not None:
                     last_marker_pixel = last_pixel
@@ -4278,13 +4503,7 @@ def main() -> int:
             else:
                 tag = ""
             print(f"  [{ci:>3}/{len(group)}] {clip.timestamp}{tag}  encoding ...")
-            encode_clip(
-                clip, inter, font_path, use_vt, with_timestamp,
-                gps_dirs, with_speed, map_video=map_video,
-                trim_start=trim_start, trim_seconds=trim_seconds,
-                settled_at=settled_at,
-                no_audio=args.no_audio, output_height=args.output_height,
-            )
+            encode_clip(clip, inter, style, track, cut, map_video=map_video)
             intermediates.append(inter)
             # Advance the output-position clock by this clip's played length.
             # Runs for every emitted clip exactly once (skips/head-skips and the
@@ -4312,10 +4531,8 @@ def main() -> int:
                             if skipped else "")
                     print(f"        + transition slide ({TRANSITION_SECS}s{note})")
                     generate_transition_slide(
-                        trans, TRANSITION_SECS, font_path, with_map_widget, use_vt,
+                        trans, TRANSITION_SECS, style, with_map_widget,
                         skipped_secs=skipped,
-                        output_height=args.output_height,
-                        no_audio=args.no_audio,
                     )
                 intermediates.append(trans)
                 video_secs += TRANSITION_SECS

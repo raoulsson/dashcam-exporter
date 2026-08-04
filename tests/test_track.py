@@ -60,7 +60,7 @@ def clip(ts: str, secs: int = 60) -> M.Clip:
 class TrackTest(unittest.TestCase):
     """A card directory built per test, with the pool cache cleared.
 
-    The pool is memoised per directory set — gather_track is called once per
+    The pool is memoised per directory set — Track.during is called once per
     clip while boundaries are found, and re-reading several hundred files each
     time would dominate the scan — so a test that skipped this would read the
     previous test's card.
@@ -70,11 +70,11 @@ class TrackTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.gps = Path(self.tmp.name) / "203gps"
         self.gps.mkdir(parents=True)
-        M._TRACK_POOL.clear()
+        M.Track._POOL.clear()
 
     def tearDown(self):
         self.tmp.cleanup()
-        M._TRACK_POOL.clear()
+        M.Track._POOL.clear()
 
     def write(self, name: str, text: str, sub: str = "") -> Path:
         d = self.gps / sub if sub else self.gps
@@ -84,7 +84,7 @@ class TrackTest(unittest.TestCase):
         return p
 
     def track(self, clips):
-        return M.gather_track(clips, (self.gps, None))
+        return M.Track((self.gps, None)).during(clips)
 
 
 class TestTheOffsetComesFromTheCamera(TrackTest):
@@ -95,7 +95,7 @@ class TestTheOffsetComesFromTheCamera(TrackTest):
     def test_it_reads_the_offset_off_a_healthy_file(self):
         self.write("20260728141441_0060.gpx",
                    nmea("20260728141441", [("061441", 14.42, 121.02)]))
-        _pool, off = M._pooled_track((self.gps, None))
+        off = M.Track((self.gps, None)).utc_offset
         self.assertEqual(off, timedelta(hours=-8))
 
     def test_a_file_whose_gps_never_fixed_cannot_move_it(self):
@@ -106,13 +106,13 @@ class TestTheOffsetComesFromTheCamera(TrackTest):
                        nmea("202607281414%s" % mm, [("06144%d" % i, 14.42, 121.02)]))
         self.write("20260728142342_0045.gpx",                   # the liar
                    nmea("20260728142342", [("055742", 14.5177, 121.0296)]))
-        _pool, off = M._pooled_track((self.gps, None))
+        off = M.Track((self.gps, None)).utc_offset
         self.assertEqual(off, timedelta(hours=-8))
 
     def test_no_camera_time_anywhere_is_zero_rather_than_a_guess(self):
         self.write("20260728141441_0060.gpx",
                    "$GPRMC,061441.000,A,1425.20000,N,12101.20000,E,0.5,0,280726,,,A,V*00\n")
-        _pool, off = M._pooled_track((self.gps, None))
+        off = M.Track((self.gps, None)).utc_offset
         self.assertEqual(off, timedelta(0))
 
 

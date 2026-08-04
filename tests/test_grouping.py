@@ -2,7 +2,7 @@
 """A clip's own fixes are its own, and trip boundaries depend on it.
 
 Trip detection asks where the car was when a clip started and when it stopped —
-`_clip_endpoints` reads the first and last fix of that clip, and every boundary
+`Track.endpoints` reads the first and last fix of that clip, and every boundary
 test (`within_target`, `min_dist`, `parks_here`, `departs_here`) is built on
 those two readings.
 
@@ -62,8 +62,8 @@ class GroupingTest(unittest.TestCase):
         self.gps.mkdir()
         (self.root / "front").mkdir()
         self.clips = []
-        M._TRACK_POOL.clear()
-        self.addCleanup(M._TRACK_POOL.clear)
+        M.Track._POOL.clear()
+        self.addCleanup(M.Track._POOL.clear)
 
     def add(self, at, where, secs=CLIP_SECS, every=10):
         """One clip starting at local `at`, sitting still at `where`."""
@@ -84,13 +84,13 @@ class GroupingTest(unittest.TestCase):
         return at + timedelta(seconds=secs)
 
     def endpoints(self):
-        return [M._clip_endpoints(c, (self.gps, None)) for c in self.clips]
+        return [M.Track((self.gps, None)).endpoints(c) for c in self.clips]
 
     def group(self, **kw):
         opts = dict(home=HOME, home_radius_m=100, return_m=100, leave_m=150,
                     min_trip_m=200, use_video=False)
         opts.update(kw)
-        trips, _moved = M.group_into_trips(self.clips, (self.gps, None), **opts)
+        trips, _moved = M.group_into_trips(self.clips, M.Track((self.gps, None)), **opts)
         return trips
 
 
@@ -123,14 +123,14 @@ class TestAClipsFixesAreItsOwn(GroupingTest):
         """Six fixes per clip, and no clip may hold seven."""
         for i, clip in enumerate(self.clips):
             with self.subTest(clip=i):
-                self.assertEqual(len(M.gather_track([clip], (self.gps, None))),
+                self.assertEqual(len(M.Track((self.gps, None)).during([clip])),
                                  CLIP_SECS // 10)
 
     def test_the_boundary_second_belongs_to_one_clip_only(self):
         """A fix landing exactly where one clip ends and the next begins is
         the next clip's. Inclusive at both ends it was both clips'."""
-        owners = [len(M.gather_track([c], (self.gps, None))) for c in self.clips]
-        pool, _off = M._pooled_track((self.gps, None))
+        owners = [len(M.Track((self.gps, None)).during([c])) for c in self.clips]
+        pool, _off = M.Track((self.gps, None))._pooled()
         self.assertEqual(sum(owners), len(pool), "a fix was counted twice")
 
 
@@ -209,7 +209,7 @@ class TestTheRolloverSplitsRatherThanDiscards(GroupingTest):
         self.clips = []
         self.gps = self.root / "203gps_late"
         self.gps.mkdir()
-        M._TRACK_POOL.clear()
+        M.Track._POOL.clear()
         t = datetime(2026, 7, 28, 4, 57, 0)
         for metres in (0, 600, 1200, 1800, 2400, 3000, 3600):
             t = self.add(t, _away(metres))
