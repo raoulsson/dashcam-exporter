@@ -1,0 +1,297 @@
+"""The terminal progress family: the live output area and the two bars.
+
+Taken out of pipeline whole. One file rather than three because they are not
+independent: Waiting IS a Bar, the wrappers at the bottom exist only to build
+one of the two and render it, and Live and Bar implement the same blank-line
+protocol on the same `opened` field.
+"""
+
+from __future__ import annotations
+
+import sys
+import threading
+import time
+
+from term import C, human_secs, term_width
+
+# ---------------------------------------------------------------------------
+# Live output area: a progress bar (or spinner) plus the raw last line, redrawn
+# in place. Nothing the child prints is ever hidden — the last line is always
+# on screen, and the full stream is buffered so a failure can dump its tail.
+# ---------------------------------------------------------------------------
+
+class Live:
+    def __init__(self, enabled):
+        self.enabled = enabled
+        self.height = 0
+        self.opened = False
+        self.emitted = False
+        if self.enabled:
+            sys.stdout.write("\x1b[?25l")   # hide cursor
+            sys.stdout.flush()
+
+    def _open(self):
+        """A blank line under whatever printed last, once, before the first
+        draw. The bar arrived hard against the line above it -- a status row,
+        a prompt the operator had just answered -- and read as part of it.
+
+        Taken back by close(), unless something was emitted under it. A step
+        that runs two children -- the grouping scan and then the sidecar pass
+        -- opened one each and left both behind, so the line that followed sat
+        two blank lines below the line that introduced it.
+        """
+        if not self.opened:
+            self.opened = True
+            sys.stdout.write("\n")
+
+    def _erase(self):
+        if self.height:
+            sys.stdout.write("\x1b[%dA" % self.height)
+            sys.stdout.write("\x1b[J")
+            self.height = 0
+
+    def draw(self, lines):
+        if not self.enabled:
+            return
+        self._open()
+        self._erase()
+        w = term_width() - 1
+        for ln in lines:
+            # Truncating can cut a colour sequence's trailing reset off, which
+            # would bleed the colour into the rest of the terminal. Re-append it.
+            sys.stdout.write(ln[:w] + "\x1b[0m\n")
+        self.height = len(lines)
+        sys.stdout.flush()
+
+    def emit(self, text):
+        """Print a line that stays on screen, above the live area."""
+        if not self.enabled:
+            print(text)
+            return
+        self.emitted = True
+        self._erase()
+        sys.stdout.write(text[:term_width() - 1] + "\n")
+        sys.stdout.flush()
+
+    def close(self):
+        if self.enabled:
+            self._erase()
+            if self.opened and not self.emitted:
+                # Take the blank line back. It was there to separate a bar
+                # that is now gone, and nothing was left under it.
+                sys.stdout.write("\x1b[1A\x1b[J")
+            sys.stdout.write("\x1b[?25h")   # show cursor
+            sys.stdout.flush()
+            self.enabled = False
+
+
+class Bar:
+    """One line of progress, drawn in place. The shape only -- who redraws it
+    and when is the caller's business.
+
+    Two kinds, because there are two kinds of waiting. When the size of the
+    work is known a filled bar is a promise you can plan around: how far, how
+    long, how much is left. When it is NOT known -- a call into somebody
+    else's code, a network round trip -- a percentage would be a guess dressed
+    as a measurement, so Waiting says only that the tool is alive and how long
+    it has been.
+    """
+
+    FILLED, EMPTY = "#", "."
+
+    def __init__(self, label, width=None):
+        self.label = label
+        self._width = width
+        self.opened = False
+
+    def open_once(self):
+        """A blank line under whatever printed last, before the first draw.
+
+        Every bar in the tool gets one -- the live area opens with it, the
+        indeterminate bar opens with it after its lead-in, and a bar drawn
+        directly through _write_line has to ask for it here. Without it the
+        bar arrives hard against the line above and reads as part of it.
+        """
+        if self.opened:
+            return
+        self.opened = True
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+    def close(self):
+        """Erase the bar and take its blank line back with it.
+
+        The same rule the live area follows: the blank was there to separate a
+        bar that is now gone. Two bars in one step -- the stills pass and then
+        the clip review -- each left one behind, so the sentence after them sat
+        two blank lines below the line that introduced them.
+        """
+        _erase_line()
+        if self.opened and C.enabled:
+            sys.stdout.write("\x1b[1A\x1b[J")
+            sys.stdout.flush()
+        self.opened = False
+
+    def width(self, room_for=60):
+        if self._width:
+            return self._width
+        return max(8, min(24, term_width() - room_for))
+
+    def render(self, fraction, elapsed):
+        """`label [####......]  42%  0:12/0:30`."""
+        return "%s %s %s" % (C.yellow(self.label), self.bracket(fraction),
+                             C.yellow("%3d%% %s/%s"
+                                      % (int(fraction * 100), human_secs(elapsed),
+                                         human_secs(_eta(fraction, elapsed)))))
+
+    def bracket(self, fraction):
+        """`[####......]` -- brackets included, and violet like what is inside.
+
+        They belong to the bar. Left outside the colour they took whatever the
+        line around them had, which after the bar's own reset was nothing at
+        all: the opening bracket came out amber with the text before it and
+        the closing one came out bare.
+        """
+        width = self.width()
+        filled = int(round(width * min(fraction, 1.0)))
+        return C.violet("[%s]" % (self.FILLED * filled
+                                  + self.EMPTY * (width - filled)))
+
+
+def _eta(fraction, elapsed):
+    """None below a fiftieth, where the estimate is noise wearing a number."""
+    if fraction <= 0.02:
+        return None
+    return elapsed * (1 - fraction) / fraction
+
+
+class Waiting(Bar):
+    """A block sliding back and forth, for work whose length nobody can know.
+
+    Used as a context manager, and it runs itself: the work it wraps is a
+    blocking call with nothing to report until it returns, so there is no
+    caller to redraw the line. Silent when stdout is not a terminal, which is
+    every test and every piped run.
+    """
+
+    BLOCK, STEP = "###", 0.12
+    # Nothing on screen until the work has actually taken this long. Most
+    # captures return in a hundredth of a second, and a bar that appears and
+    # vanishes on every one of them is a flicker that says "slow" about work
+    # that was not -- which is the opposite of what it is for.
+    LEAD_IN = 0.4
+
+    def __init__(self, label, width=None):
+        super().__init__(label, width)
+        self._stop = threading.Event()
+        self._thread = None
+        self._drawn = False
+
+    def __enter__(self):
+        if sys.stdout.isatty():
+            self._start()
+        return self
+
+    def _start(self):
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def __exit__(self, *_):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=1.0)
+            self._drawn and _erase_line()
+        return False
+
+    def _run(self):
+        started, i = time.time(), 0
+        if self._stop.wait(self.LEAD_IN):
+            return
+        self.open_once()
+        while not self._stop.wait(self.STEP):
+            self._drawn = True
+            _write_line(self.render_at(i, time.time() - started))
+            i += 1
+
+    def render_at(self, i, elapsed):
+        """`label [.........###....] 0:03`."""
+        width = self.width(room_for=40)
+        at = self._bounce(i, width)
+        bar = self.EMPTY * at + self.BLOCK + self.EMPTY * (width - at - len(self.BLOCK))
+        return "  %s %s %s " % (C.yellow(self.label), C.violet("[%s]" % bar),
+                                C.yellow(human_secs(elapsed)))
+
+    def _bounce(self, i, width):
+        span = max(1, width - len(self.BLOCK))
+        step = i % (2 * span)
+        if step < span:
+            return step
+        return 2 * span - step
+
+
+def _write_line(text):
+    sys.stdout.write("\r" + text)
+    sys.stdout.flush()
+
+
+def _erase_line():
+    sys.stdout.write("\r\x1b[2K")
+    sys.stdout.flush()
+
+
+def waiting(label):
+    """The indeterminate bar, as a context manager. Kept as a function because
+    that is how every call site reads: `with waiting("..."):`."""
+    return Waiting(label)
+
+
+def show_cursor():
+    """Unconditional cursor restore, for the panic paths."""
+    if sys.stdout.isatty():
+        sys.stdout.write("\x1b[?25h")
+        sys.stdout.flush()
+
+
+def _still_bar(bar, i, total, name):
+    """One line, redrawn, for a loop that is countable and short."""
+    if not C.enabled:
+        return
+    bar.open_once()
+    _write_line("  %s %s %s" % (C.yellow(bar.label), bar.bracket(i / float(total)),
+                                C.yellow("%d/%d  %s" % (i, total, name))))
+
+
+def _sweep_line(label, i, elapsed):
+    """`label [.....###....] 0:05` — the bar for work with no denominator.
+
+    Waiting draws exactly this and is where the shape lives; this is the
+    streaming caller's way in. It is deliberately NOT a percentage: run_stream
+    never synthesises one from a guess, and a deploy cannot say how many phases
+    it has until it has run them. What the operator needs from a step whose
+    length nobody knows is that it is alive, and a block that keeps moving says
+    that in the same visual language as the bars around it.
+
+    No leading indent and no trailing space: Waiting.render_at owns a whole
+    line, this one is a head that the child's latest output is appended to.
+    """
+    return Waiting(label).render_at(i, elapsed).strip()
+
+
+def _bar_line(label, frac, elapsed, note, note_first):
+    """Where the bar sits in the line, which is not the same question twice.
+
+    One shape for every step: what is moving on the left, the bar and the
+    percentage on the right. A render, a copy and an upload then read the same
+    way and the eye learns one line rather than three.
+
+    The label leads only when a step has nothing to say about what it is
+    working on -- there is no filename in a boundary scan -- and then the
+    label is the only thing distinguishing one bar from another.
+    """
+    bar = Bar(label)
+    if not (note_first and note):
+        return bar.render(frac, elapsed)
+    # %3d on the percentage: it ends the line, but it is redrawn in place, and
+    # a field that grows from "9%" to "100%" leaves the old tail behind it.
+    return "%s    %s %s" % (C.yellow(note), bar.bracket(frac),
+                            C.yellow("%3d%%" % int(frac * 100)))
