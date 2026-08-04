@@ -76,6 +76,7 @@ import items
 import menu
 import uploader
 import world as W
+from checkout import RealCheckout
 from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                   UPLOAD, CLEAN_WS, ERASE_CARD)
 
@@ -107,8 +108,12 @@ FALLBACK_IMPORT_ROOT = "~/dashcam-data/import"    # import-sd-card.sh DEST_ROOT
 # child process should run in; SRC_DIR is the one directory a plugin needs on
 # sys.path so that `from uploader import ...` resolves. Naming the checkout
 # after the source directory would have put the tool's memory in ~/.src.
-SRC_DIR = Path(__file__).resolve().parent
-EXPORTER_DIR = SRC_DIR.parent
+#
+# Both come off one Checkout now, so the two can no longer drift apart, and a
+# Ctx can be pointed at a different tree without any of this being reassigned.
+CHECKOUT = RealCheckout(__file__)
+SRC_DIR = CHECKOUT.src()
+EXPORTER_DIR = CHECKOUT.root()
 
 
 # ---------------------------------------------------------------------------
@@ -373,14 +378,19 @@ def _loaded_plugin(spec, exporter_dir):
 class Ctx:
     """Everything the steps need: resolved paths, config, and session state."""
 
-    def __init__(self):
-        self.exporter = EXPORTER_DIR
-        self.config_path = self.exporter / "config.txt"
+    def __init__(self, checkout=None):
+        # Defaulted, because a Ctx is built with no arguments in a dozen places
+        # and none of them has an opinion about where the checkout is. Passing
+        # one is how a test gets a Ctx that reads a config.txt it wrote itself
+        # rather than the operator's.
+        self.checkout = checkout or CHECKOUT
+        self.exporter = self.checkout.root()
+        self.config_path = self.checkout.config_file()
         self.cfg = load_config(self.config_path)
         # .env overlays config.txt for the private keys, and a real environment
         # variable beats both — so a one-off run can point somewhere else without
         # editing a file.
-        env = load_env(self.exporter / ".env")
+        env = load_env(self.checkout.env_file())
         for key in PRIVATE_KEYS:
             name = "SET_" + key.upper()
             val = os.environ.get(name) or env.get(name)
@@ -393,9 +403,10 @@ class Ctx:
         # broken stops the tool rather than quietly becoming the local edition,
         # because a menu that silently stops publishing looks exactly like a
         # menu that is publishing fine.
-        # SRC_DIR, not the checkout: this is what goes on sys.path so a
-        # plugin's `from uploader import ...` resolves.
-        self.plugin = _loaded_plugin(self.cfg_opt("upload_plugin"), SRC_DIR)
+        # The source directory, not the checkout: this is what goes on
+        # sys.path so a plugin's `from uploader import ...` resolves.
+        self.plugin = _loaded_plugin(self.cfg_opt("upload_plugin"),
+                                     self.checkout.src())
 
         # The workspace holding the footage to work on. `root` is the old name
         # and still read, because configs carrying it exist; import_dir wins.
@@ -3776,7 +3787,13 @@ def load_groups(ctx, root, refresh=False):
     os.close(fd)
     try:
         rc, _lines = run_stream(
-            [renderer_python(ctx), "-u", "make_dashcam_videos.py", "--print-groups",
+            # The full path under src/, not a bare name against the checkout
+            # cwd: the sources moved and this call did not, so every grouping
+            # died with "can't open file". It also decides the child's
+            # sys.path[0] -- src/, which is what lets that module import its
+            # siblings the way make-trips-rendered.sh already runs it.
+            [renderer_python(ctx), "-u",
+             str(SRC_DIR / "make_dashcam_videos.py"), "--print-groups",
              "--root", str(root), "--out", str(ctx.out_dir)] + ctx.config_args + ctx.scan_args,
             ctx.exporter, "Grouping", stdout_file=tmp, quiet_finish=True,
             env_extra=_renderer_env(ctx))

@@ -71,6 +71,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from checkout import RealCheckout
+
 # ---------------------------------------------------------------------------
 # Configuration defaults
 # ---------------------------------------------------------------------------
@@ -1055,10 +1057,12 @@ EGO_CONTEXT_PAD    = 2       # seconds of "about to move" kept before drive-away
 EGO_END_PAD        = 10      # seconds kept after the car finally comes to rest
 EGO_MAX_ANALYZE_SECS = 120   # cap analysis (a clip is ≤60s, but be safe)
 
-# The checkout root, one level above this module now that sources live under
-# src/. config.txt and .env sit there: they are what the operator edits, and
-# they are not source.
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# Where this installation's files are. config.txt and .env sit at the checkout
+# root, one level above this module now that sources live under src/: they are
+# what the operator edits, and they are not source. Asked of a Checkout rather
+# than walked up to from here, so that the layout is written down in one place
+# and this module cannot come to disagree with pipeline.py about it.
+CHECKOUT = RealCheckout(__file__)
 
 try:
     import numpy as _np
@@ -2803,7 +2807,7 @@ def _resolve_config_path(argv: list[str]) -> Path:
             return Path(a.split("=", 1)[1]).expanduser()
     # Defaults: the shipped template at the checkout root, not beside this
     # module -- config.txt is configuration, and configuration is not source.
-    return PROJECT_ROOT / "config.txt"
+    return CHECKOUT.config_file()
 
 
 def _scan_cache_key(clips, gps_dirs=(), **params):
@@ -2929,7 +2933,7 @@ def main() -> int:
     # Home coordinates identify where you live, so they live in a gitignored
     # .env as SET_HOME_LAT / SET_HOME_LON / SET_HOME_RADIUS_M, loaded here.
     # A real environment variable of the same name wins over the .env file.
-    for env_path in (PROJECT_ROOT / ".env", Path.cwd() / ".env"):
+    for env_path in (CHECKOUT.env_file(), Path.cwd() / ".env"):
         load_dotenv(env_path)
     env_home_lat = _env_float("SET_HOME_LAT")
     env_home_lon = _env_float("SET_HOME_LON")
@@ -3246,7 +3250,7 @@ def main() -> int:
         # a file into a directory path.
         if target.is_dir():
             target = target / "config.txt"
-        source = PROJECT_ROOT / "config.txt"
+        source = CHECKOUT.config_file()
         if not source.is_file():
             print(f"cannot find {source} to copy", file=sys.stderr)
             return 1
