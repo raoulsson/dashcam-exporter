@@ -360,12 +360,29 @@ def nothing_to_clean_up(world) -> Optional[str]:
     them for having no sidecars. Nothing had been made from those clips and
     the card still held every one; there was nothing to protect.
 
-    So a disposable import passes here, and its own evidence is checked again
-    where it counts, in the plan and after the typed word.
+    The same is true of an import holding no clips at all, and for the same
+    reason: no sidecars will ever be written for trips that no longer exist,
+    so demanding them is demanding something nobody can supply.
+
+    So an import with nothing to protect passes here, and its own evidence is
+    checked again where it counts, in the plan and after the typed word.
     """
-    if import_is_disposable(world):
+    if nothing_here_to_protect(world):
         return None
     return sidecars_missing(world)
+
+
+def nothing_here_to_protect(world) -> bool:
+    """The two states where item 8 is not guarding anything.
+
+    Either the source still holds every file of this import, or the import
+    holds no footage at all. Both are asked in two places -- the cheap check
+    that decides whether the entry is offered, and the heavy gate behind the
+    typed word -- and they have to agree, or the menu offers a step that then
+    refuses, or worse, hides one that would have been allowed. One predicate,
+    so the two cannot drift apart.
+    """
+    return import_is_disposable(world) or import_holds_no_footage(world)
 
 
 def import_is_disposable(world) -> bool:
@@ -448,7 +465,7 @@ def clean_is_allowed(world) -> Verdict:
     footage had produced no renders either. A dead end reached by using item 4
     exactly as intended.
     """
-    if import_is_disposable(world) or import_holds_no_footage(world):
+    if nothing_here_to_protect(world):
         return go()
     return workspace_is_expendable(world)
 

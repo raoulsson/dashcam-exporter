@@ -1053,6 +1053,22 @@ class TestAnImportWithNoClipsLeftCanBeCleared(unittest.TestCase):
                        unsourced_files=frozenset(files),
                        renders_here=_renders(renders))
 
+    def test_the_entry_is_offered_and_then_allowed(self):
+        """Two checks stand in front of item 8: the cheap one that decides
+        whether the menu offers it, and the heavy one behind the typed word.
+        An entry that is offered and then refuses is a worse screen than one
+        that was never offered, and an entry hidden from a state it would have
+        allowed is the dead end this whole change is about. They read one
+        predicate so they cannot drift."""
+        world = self._world(["DCIM/203gps/x.gpx"])
+        self.assertIsNone(guards.nothing_to_clean_up(world))
+        self.assertFalse(guards.clean_is_allowed(world).blocked)
+
+    def test_footage_here_shuts_both_of_them(self):
+        world = self._world(["DCIM/200video/front/a.mp4"])
+        self.assertIsNotNone(guards.nothing_to_clean_up(world))
+        self.assertTrue(guards.clean_is_allowed(world).blocked)
+
     def test_the_card_route_is_genuinely_shut_in_these_worlds(self):
         world = self._world(["DCIM/203gps/x.gpx"])
         self.assertFalse(guards.import_is_disposable(world),
