@@ -40,7 +40,7 @@ echo "=== undefined names and redefinitions (pyflakes) ==="
 # The rest of pyflakes is style, and some of it is deliberate (uploader.py
 # re-exports on purpose), so it is not a reason to fail a build.
 if [ -x ".venv/bin/pyflakes" ]; then
-    UNDEF="$(.venv/bin/pyflakes ./*.py tests/*.py 2>&1 \
+    UNDEF="$(.venv/bin/pyflakes src/*.py tests/*.py 2>&1 \
              | grep -E "undefined name|redefinition of unused" || true)"
     if [ -n "$UNDEF" ]; then
         echo "$UNDEF"

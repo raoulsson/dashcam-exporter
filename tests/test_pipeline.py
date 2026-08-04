@@ -44,7 +44,7 @@ from pathlib import Path
 from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "src"))
 
 import items                     # noqa: E402  (registers the ten)
 import menu as M                 # noqa: E402
@@ -57,7 +57,7 @@ def load_pipeline():
     """Import pipeline.py as a module without running its CLI."""
     sys.argv = ["pipeline.py"]
     spec = importlib.util.spec_from_file_location("pipeline_mocked",
-                                                  REPO / "pipeline.py")
+                                                  REPO / "src" / "pipeline.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

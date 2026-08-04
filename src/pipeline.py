@@ -101,7 +101,14 @@ FALLBACK_IMPORT_ROOT = "~/dashcam-data/import"    # import-sd-card.sh DEST_ROOT
 # There is deliberately no default for `upload_plugin`. A default would
 # mean a clone loading and running someone else's code on every launch.
 
-EXPORTER_DIR = Path(__file__).resolve().parent
+# Two facts, not one. They were the same directory until the sources moved
+# under src/, and every use had to pick which it meant: the CHECKOUT is where
+# config.txt, .env, .venv, VERSION and the git history live, and is the cwd a
+# child process should run in; SRC_DIR is the one directory a plugin needs on
+# sys.path so that `from uploader import ...` resolves. Naming the checkout
+# after the source directory would have put the tool's memory in ~/.src.
+SRC_DIR = Path(__file__).resolve().parent
+EXPORTER_DIR = SRC_DIR.parent
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +393,9 @@ class Ctx:
         # broken stops the tool rather than quietly becoming the local edition,
         # because a menu that silently stops publishing looks exactly like a
         # menu that is publishing fine.
-        self.plugin = _loaded_plugin(self.cfg_opt("upload_plugin"), self.exporter)
+        # SRC_DIR, not the checkout: this is what goes on sys.path so a
+        # plugin's `from uploader import ...` resolves.
+        self.plugin = _loaded_plugin(self.cfg_opt("upload_plugin"), SRC_DIR)
 
         # The workspace holding the footage to work on. `root` is the old name
         # and still read, because configs carrying it exist; import_dir wins.

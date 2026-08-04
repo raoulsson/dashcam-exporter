@@ -27,7 +27,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "src"))
 
 import menu as M                    # noqa: E402
 import uploader as U                # noqa: E402

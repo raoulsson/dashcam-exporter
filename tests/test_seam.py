@@ -47,7 +47,7 @@ from pathlib import Path
 from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "src"))
 
 import items                     # noqa: E402,F401  (registers the ten)
 import menu as M                 # noqa: E402
@@ -58,7 +58,7 @@ from menu import (IMPORT, META, PREVIEW, EXCLUDE, BUILD, RENDER, UPLOAD,
 
 def load_pipeline():
     sys.argv = ["pipeline.py"]
-    spec = importlib.util.spec_from_file_location("pipeline_seam", REPO / "pipeline.py")
+    spec = importlib.util.spec_from_file_location("pipeline_seam", REPO / "src" / "pipeline.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

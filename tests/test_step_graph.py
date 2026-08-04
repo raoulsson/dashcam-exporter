@@ -20,7 +20,7 @@ from pathlib import Path
 from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "tests"))
 
 import items                     # noqa: E402,F401  (registers the ten)
@@ -33,7 +33,7 @@ from print_step_graph import NullWork                # noqa: E402
 
 def load_pipeline():
     sys.argv = ["pipeline.py"]
-    spec = importlib.util.spec_from_file_location("pipeline_graph", REPO / "pipeline.py")
+    spec = importlib.util.spec_from_file_location("pipeline_graph", REPO / "src" / "pipeline.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

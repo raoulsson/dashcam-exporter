@@ -103,7 +103,7 @@ echo ">>> logging to $LOG_FILE"
 # into one unreadable line. --log-file puts the logging inside the renderer,
 # which can tell the two apart: carriage returns to the terminal, one line per
 # event to the file. stderr is folded into the log as well.
-"$PY" -u make_dashcam_videos.py --log-file "$LOG_FILE" ${OPTS[@]+"${OPTS[@]}"} "$@"
+"$PY" -u src/make_dashcam_videos.py --log-file "$LOG_FILE" ${OPTS[@]+"${OPTS[@]}"} "$@"
 RC="$?"
 
 # Parse "  ✓ /full/path/to/foo.mp4" lines from the log and drop a copy of

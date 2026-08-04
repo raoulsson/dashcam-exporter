@@ -65,4 +65,4 @@ fi
 
 echo "${DIM}python: $PY${OFF}"
 
-exec "$PY" pipeline.py "$@"
+exec "$PY" src/pipeline.py "$@"

@@ -22,7 +22,7 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "src"))
 
 import items                     # noqa: E402,F401  (registers the ten)
 import menu as M                 # noqa: E402
@@ -31,7 +31,7 @@ import uploader as U             # noqa: E402
 
 def load_pipeline():
     sys.argv = ["pipeline.py"]
-    spec = importlib.util.spec_from_file_location("pipeline_spec", REPO / "pipeline.py")
+    spec = importlib.util.spec_from_file_location("pipeline_spec", REPO / "src" / "pipeline.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -601,7 +601,7 @@ class TestWriteConfigHandsOutTheRealFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "config.new.txt"
             subprocess.run(
-                [sys.executable, str(REPO / "make_dashcam_videos.py"),
+                [sys.executable, str(REPO / "src" / "make_dashcam_videos.py"),
                  "--write-config", str(out)],
                 check=True, capture_output=True, cwd=str(REPO))
             self.assertEqual(out.read_text(encoding="utf-8"),
@@ -610,7 +610,7 @@ class TestWriteConfigHandsOutTheRealFile(unittest.TestCase):
     def test_a_directory_argument_lands_on_config_txt_inside_it(self):
         with tempfile.TemporaryDirectory() as tmp:
             subprocess.run(
-                [sys.executable, str(REPO / "make_dashcam_videos.py"),
+                [sys.executable, str(REPO / "src" / "make_dashcam_videos.py"),
                  "--write-config", tmp],
                 check=True, capture_output=True, cwd=str(REPO))
             self.assertTrue((Path(tmp) / "config.txt").is_file())
