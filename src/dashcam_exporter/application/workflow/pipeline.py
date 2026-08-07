@@ -297,6 +297,14 @@ def _real_dir(path):
     return not path.is_symlink() and path.is_dir()
 
 
+def _safe_iterdir(directory):
+    """Return directory entries without letting an unavailable mount abort UI."""
+    try:
+        return list(directory.iterdir())
+    except OSError:
+        return []
+
+
 def _loaded_plugin(spec, exporter_dir):
     """The configured plugin — both its classes — or None for the local edition.
 
