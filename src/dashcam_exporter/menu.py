@@ -35,39 +35,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
 from typing import Dict, FrozenSet, List, Optional, Tuple
 
-
-class Strategy(Enum):
-    """Which of the two products this installation is."""
-
-    UPLOADER = "uploader"
-    LOCAL_PAGE = "local page"
-
-    @classmethod
-    def of(cls, plugin) -> "Strategy":
-        """Was a publishing plugin supplied. That is the whole question.
-
-        It takes the plugin itself, not the ctx it came from: asked of a ctx
-        this would read config keys, and the keys it read named one operator's
-        arrangement. Which product this is has to be answerable without knowing
-        how anybody publishes.
-        """
-        return cls.UPLOADER if plugin is not None else cls.LOCAL_PAGE
-
-    @classmethod
-    def both(cls, value) -> Dict["Strategy", object]:
-        """One value under every strategy: the row that does not branch.
-
-        Most of the ten items sit in the same place in both products, and the
-        strategy table is read by number for every draw, so the entry has to
-        exist under every member. Written as a dict literal ten times it is a
-        row that can be authored with one key and fail at whichever draw first
-        looks under the other -- which is why _declare refuses a table that
-        does not cover every member. This spells the covering case once.
-        """
-        return {strategy: value for strategy in cls}
+from dashcam_exporter.values import (Evidence, NotRun, Outcome, Ruling, Scope,
+                                     Strategy, Verdict)
 
 
 # Item numbers, named once so the graph reads as sentences rather than integers.
@@ -78,143 +49,6 @@ BUILD, RENDER, UPLOAD, CLEAN_WS, ERASE_CARD = 5, 6, 7, 8, 9
 # ---------------------------------------------------------------------------
 # Answers
 # ---------------------------------------------------------------------------
-
-class Ruling(Enum):
-    GO = "go"
-    SATISFIED = "satisfied"        # the postcondition already holds
-    BLOCKED = "blocked"
-
-
-@dataclass(frozen=True)
-class Verdict:
-    ruling: Ruling
-    reason: str = ""
-    # What the reason is talking about, when naming it is worth more than
-    # counting it. "13 new clips ready for next session" tells the operator
-    # the number; these tell him WHICH, so he can see for himself whether they
-    # are footage he wants or the trash he suspects. Printed under the refusal
-    # and nowhere else.
-    evidence: Tuple[str, ...] = ()
-
-    @property
-    def blocked(self) -> bool:
-        return self.ruling is Ruling.BLOCKED
-
-    @property
-    def selectable(self) -> bool:
-        return not self.blocked
-
-    # -- the four ways one is made ----------------------------------------
-    @classmethod
-    def go(cls) -> "Verdict":
-        return cls(Ruling.GO)
-
-    @classmethod
-    def satisfied(cls, reason: str) -> "Verdict":
-        return cls(Ruling.SATISFIED, reason)
-
-    @classmethod
-    def refuse(cls, reason: str, evidence: Tuple[str, ...] = ()) -> "Verdict":
-        """The BLOCKED constructor, spelled `refuse` because `blocked` is taken.
-
-        Every guard in the tool reads `verdict.blocked` to ask whether it is in
-        the way. A classmethod of that name would replace the property in the
-        class body outright, and `verdict.blocked` would then be a bound method
-        -- truthy always, so every refusal check would pass and nothing would
-        ever be in the way. The module-level `blocked()` below is what callers
-        outside this file still say; this is the same thing under a name that
-        cannot collide.
-        """
-        return cls(Ruling.BLOCKED, reason, tuple(evidence))
-
-    @staticmethod
-    def first_reason(*reasons):
-        """The first reason anything is in the way, or None."""
-        return next(filter(None, reasons), None)
-
-    @classmethod
-    def first_block(cls, *reasons) -> "Verdict":
-        """The first reason anything is in the way, or GO."""
-        stop = cls.first_reason(*reasons)
-        if stop:
-            return cls.refuse(stop)
-        return cls.go()
-
-
-@dataclass(frozen=True)
-class Outcome:
-    """What one run of an item amounted to.
-
-    `completed` is the owner's signal: the item's postcondition holds and the
-    operator did not abort. The pipeline advances the position on true and
-    leaves it where it was on false, which is what "steps back by one" means
-    for a move that did not take effect.
-    """
-
-    completed: bool
-    note: str
-    performed: bool = True      # False when the postcondition already held
-
-    @classmethod
-    def did(cls, note: str) -> "Outcome":
-        return cls(True, note)
-
-    @classmethod
-    def stopped(cls, note: str, performed: bool = False) -> "Outcome":
-        """An item that did not complete, and by default did not DO anything.
-
-        performed drove one thing: whether the plugin is told its input moved.
-        It defaulted to True here, so declining a prompt -- typing anything but
-        the word, answering n, pressing q -- announced a change that had not
-        happened, the plugin dropped whatever it had cached, and the next menu
-        draw paid for a fresh answer. Eight seconds of "Reading the
-        workspace..." for a keypress that touched nothing.
-
-        An abort part-way through a copy or an encode IS a change, so that one
-        passes performed=True from where it knows: Aborted carries mid_run.
-        """
-        return cls(False, note, performed)
-
-    @classmethod
-    def not_doing(cls, verdict: Verdict) -> "Outcome":
-        """The two ways an item does not run, which are not the same answer.
-
-        BLOCKED did not happen and does not complete: the pipeline stays where
-        it was. SATISFIED did not happen either and DOES complete: the
-        postcondition already holds, nothing is owed, and the pipeline may move
-        on. That is the whole reason evaluate() is three-valued while
-        completed() is two-valued.
-
-        This is also what makes execute() idempotent rather than merely
-        re-runnable. A second Delete SIM Data on a card it has just emptied
-        must not reach the ERASE prompt to find out there is nothing behind it.
-        """
-        if verdict.blocked:
-            return cls.stopped(verdict.reason)
-        return cls(True, verdict.reason, performed=False)
-
-
-class NotRun(Exception):
-    """completed() read before execute() ran. Never a default answer."""
-
-
-class Evidence(Enum):
-    """Three-valued, plus 'this check could not apply here at all'.
-
-    Collapsing UNKNOWN into NO or YES is how a guard gets weakened without the
-    diff looking like it: "could not ask the destination" is not "not at the
-    destination", and neither is "there is no destination".
-    """
-
-    YES = "yes"
-    NO = "no"
-    UNKNOWN = "unknown"
-    NA = "not applicable"
-
-    @property
-    def applicable(self) -> bool:
-        return self is not Evidence.NA
-
 
 # ---------------------------------------------------------------------------
 # Neighbours. Three of the ten items name something that is not a set of
@@ -378,20 +212,6 @@ class StepBack(Neighbours):
 # The three shapes an outbound row takes now live on the types that answer for
 # them: Strategy.both for the row that does not branch, Edges.of for the row
 # that names its numbers, and Edges.and_upload for the one branch there is.
-
-
-class Scope(Enum):
-    """How much of the world an item's guard needs to see.
-
-    LOCAL is the filesystem and is what the menu draws on every loop. FULL
-    also asks the configured publishing target what it holds and serves, which
-    may go to the network or shell out — fine once per dispatch, not once per
-    keystroke. At LOCAL scope a configured target reads UNKNOWN everywhere,
-    which every guard already treats as not proven.
-    """
-
-    LOCAL = "local"
-    FULL = "full"
 
 
 # ---------------------------------------------------------------------------

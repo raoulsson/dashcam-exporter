@@ -75,6 +75,11 @@ from pathlib import Path
 from dashcam_exporter.adapters import DdpaiDataAdapter
 from dashcam_exporter.checkout import RealCheckout
 from dashcam_exporter.domain import Clip, Cut, RenderOptions
+from dashcam_exporter.speed_analysis import (
+    find_park_second,
+    filter_gps_outliers as _filter_gps_outliers,
+    smooth_speeds as _smooth_speeds,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration defaults
@@ -1471,82 +1476,6 @@ def exit_trim_start(drive_away_sec: float, exit_pad: int) -> int:
     of the drive-away, so the viewer sees the car sitting there and then pull
     out, rather than being dropped into a manoeuvre already under way."""
     return max(0, int(drive_away_sec) - exit_pad)
-
-
-def _filter_gps_outliers(speeds: list[float], max_delta_kmh: float = 30.0) -> list[float]:
-    """
-    Replace single-sample GPS noise spikes — a sample that differs from BOTH
-    immediate neighbours by more than `max_delta_kmh` — with the mean of its
-    neighbours. Catches the classic "parked car suddenly reports 80 km/h for
-    one second" failure mode that breaks park-onset detection.
-    """
-    if len(speeds) < 3:
-        return list(speeds)
-    out = list(speeds)
-    for i in range(1, len(speeds) - 1):
-        prev, cur, nxt = speeds[i - 1], speeds[i], speeds[i + 1]
-        if abs(cur - prev) > max_delta_kmh and abs(cur - nxt) > max_delta_kmh:
-            out[i] = (prev + nxt) / 2.0
-    return out
-
-
-def _smooth_speeds(speeds: list[float], window: int = 5) -> list[float]:
-    """
-    Centre-aligned moving-average smoothing. Returns a same-length list. At
-    the edges the window is truncated to the available samples (no padding).
-    Used to extract the "middle line" from noisy GPS, so park-onset
-    detection isn't tripped by transient overshoots and undershoots.
-    """
-    n = len(speeds)
-    if n < 2:
-        return list(speeds)
-    half = window // 2
-    out: list[float] = []
-    for i in range(n):
-        lo = max(0, i - half)
-        hi = min(n, i + half + 1)
-        out.append(sum(speeds[lo:hi]) / (hi - lo))
-    return out
-
-
-def find_park_second(
-    clip: Clip,
-    track: "Track",
-    sustain_secs: int = 30,
-    threshold_kmh: float = PARKING_SPEED_THRESHOLD_KMH,
-    next_clips: list[Clip] | None = None,
-) -> int | None:
-    """
-    First clip-second at which the smoothed GPS speed drops below
-    `threshold_kmh` and STAYS below for `sustain_secs` consecutive seconds.
-    Returns the clip-second of the park onset (relative to this clip's
-    video timeline), or None if no sustained drop exists across the clip
-    + any lookahead clips.
-
-    Outliers are filtered and the series is moving-averaged before the
-    sustain check, so a single noise spike up to 80 km/h on a parked car
-    doesn't push park onset 5 minutes later than it really happened.
-    """
-    speeds = track.speeds(clip)
-    if not speeds:
-        return None
-    clip_len = len(speeds)
-    if next_clips:
-        for nc in next_clips:
-            nspeeds = track.speeds(nc)
-            if not nspeeds:
-                break
-            speeds.extend(nspeeds)
-    filtered = _filter_gps_outliers(speeds)
-    smoothed = _smooth_speeds(filtered)
-    if len(smoothed) < sustain_secs:
-        return None
-    for i in range(len(smoothed) - sustain_secs + 1):
-        if all(smoothed[i + j] < threshold_kmh for j in range(sustain_secs)):
-            # Clamp the returned index to THIS clip's timeline — the caller
-            # uses it as a trim_seconds offset within the entry clip's source.
-            return min(i, max(0, clip_len - 1))
-    return None
 
 
 def _leads_into_parking(
