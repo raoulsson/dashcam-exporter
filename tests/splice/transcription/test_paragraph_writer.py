@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from faster_whisper_transcriber import TranscriptSegment
-from paragraph_writer import ParagraphWriter
+from dashcam_exporter.splice.transcription.faster_whisper_transcriber import TranscriptSegment
+from dashcam_exporter.splice.transcription.paragraph_writer import ParagraphWriter
 
 
 class ParagraphWriterTest(unittest.TestCase):

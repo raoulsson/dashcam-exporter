@@ -1,7 +1,7 @@
 import io
 import unittest
 
-from faster_whisper_transcriber import FasterWhisperTranscriber
+from dashcam_exporter.splice.transcription.faster_whisper_transcriber import FasterWhisperTranscriber
 
 
 class FasterWhisperTranscriberTest(unittest.TestCase):

@@ -7,9 +7,9 @@ import argparse
 import os
 from pathlib import Path
 
-from faster_whisper_transcriber import FasterWhisperTranscriber
-from paragraph_writer import ParagraphWriter
-from speaker_diarizer import SpeakerDiarizer, SpeakerLabeler
+from .faster_whisper_transcriber import FasterWhisperTranscriber
+from .paragraph_writer import ParagraphWriter
+from ..diarization.speaker_diarizer import SpeakerDiarizer, SpeakerLabeler
 
 
 def main() -> None:

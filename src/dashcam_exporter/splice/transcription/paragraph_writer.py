@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TextIO
 
-from faster_whisper_transcriber import TranscriptSegment
+from .faster_whisper_transcriber import TranscriptSegment
 
 
 @dataclass(frozen=True)

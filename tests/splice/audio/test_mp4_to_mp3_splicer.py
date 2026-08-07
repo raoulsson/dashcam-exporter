@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from mp4_to_mp3_splicer import Mp4AudioSplicer
+from dashcam_exporter.splice.audio.mp4_to_mp3_splicer import Mp4AudioSplicer
 
 
 class Mp4AudioSplicerTest(unittest.TestCase):

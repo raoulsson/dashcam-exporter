@@ -1,8 +1,8 @@
 import io
 import unittest
 
-from faster_whisper_transcriber import TranscriptSegment
-from speaker_diarizer import SpeakerDiarizer, SpeakerLabeler, SpeakerTurn
+from dashcam_exporter.splice.transcription.faster_whisper_transcriber import TranscriptSegment
+from dashcam_exporter.splice.diarization.speaker_diarizer import SpeakerDiarizer, SpeakerLabeler, SpeakerTurn
 
 
 class SpeakerDiarizerTest(unittest.TestCase):

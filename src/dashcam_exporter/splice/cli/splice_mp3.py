@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from mp4_to_mp3_splicer import Mp4AudioSplicer
+from ..audio.mp4_to_mp3_splicer import Mp4AudioSplicer
 
 
 def main() -> None:

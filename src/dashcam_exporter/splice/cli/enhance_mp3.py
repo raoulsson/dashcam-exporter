@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from mp3_voice_enhancer import Mp3VoiceEnhancer
+from ..audio.mp3_voice_enhancer import Mp3VoiceEnhancer
 
 
 def main() -> None:

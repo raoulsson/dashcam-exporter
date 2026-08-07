@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import BinaryIO, Callable, Iterable, Protocol
 
-from faster_whisper_transcriber import TranscriptSegment
+from ..transcription.faster_whisper_transcriber import TranscriptSegment
 
 
 @dataclass(frozen=True)

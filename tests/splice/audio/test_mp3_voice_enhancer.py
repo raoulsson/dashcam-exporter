@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from mp3_voice_enhancer import Mp3VoiceEnhancer
+from dashcam_exporter.splice.audio.mp3_voice_enhancer import Mp3VoiceEnhancer
 
 
 class Mp3VoiceEnhancerTest(unittest.TestCase):
