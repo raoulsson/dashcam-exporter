@@ -1615,6 +1615,30 @@ class TestPreviewBuildsByDelta(SeamTest):
         self.assertFalse(made, "an existing still must not be rebuilt")
         self.assertEqual(dst.read_text(), "already here")
 
+    def test_clip_review_order_uses_embedded_camera_timestamp(self):
+        clips = [
+            "/card/170_20260807150551_0060.mp4",
+            "/card/12_20260807143000_0060.mp4",
+            "/card/99_20260807145500_0060.mp4",
+        ]
+        self.assertEqual(
+            [Path(p).name for p in P._clip_review_order(clips)],
+            [
+                "12_20260807143000_0060.mp4",
+                "99_20260807145500_0060.mp4",
+                "170_20260807150551_0060.mp4",
+            ],
+        )
+
+    def test_clip_still_index_is_wide_enough_for_lexical_order(self):
+        b = self.bench()
+        folder = b.ctx.out_dir / P.CLIP_REVIEW_DIRNAME / "trip_01"
+        src = Path("/card/20260807150551_0060.mp4")
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "100_20260807150551_0060.jpg").write_text("already here")
+        got, _made = P._one_clip_still(src, folder, 100, 3)
+        self.assertEqual(got.name, "100_20260807150551_0060.jpg")
+
 
 class TestEveryExcludedTripIsCounted(SeamTest):
     """He excluded three trips and the progress block said one.

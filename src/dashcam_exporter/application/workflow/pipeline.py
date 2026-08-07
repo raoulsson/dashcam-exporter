@@ -3346,15 +3346,39 @@ def write_clip_review(ctx, trips):
     bar, n_done, total = Bar("Clips"), 0, sum(len(t.get("front") or []) for t in trips)
     for trip in trips:
         folder = _review_folder(root, trip)
-        for n, clip in enumerate(trip.get("front") or [], 1):
+        clips = _clip_review_order(trip.get("front") or [])
+        index_width = max(2, len(str(len(clips))))
+        for n, clip in enumerate(clips, 1):
             n_done += 1
             _still_bar(bar, n_done, total, Path(clip).name)
-            dst, was_made = _one_clip_still(Path(clip), folder, n)
+            dst, was_made = _one_clip_still(Path(clip), folder, n, index_width)
             seen.add(dst)
             made += was_made
     bar.close()
     dropped = _drop_orphans(root, seen)
     return n_done, root, made, dropped
+
+
+def _clip_review_order(clips):
+    """Return clips in camera-time order, independent of filename prefixes.
+
+    Some camera firmware prefixes a clip with a rolling counter (for example
+    ``170_20260807150551_0060.mp4``). Sorting the complete filename therefore
+    puts the counter ahead of the timestamp and makes a contact review appear
+    to jump backwards in time. The embedded fourteen-digit camera timestamp is
+    the authoritative order; mtime is only a deterministic fallback for files
+    that do not carry one.
+    """
+    def key(value):
+        path = Path(value)
+        stamp = _stamp_of_name(path.name)
+        try:
+            mtime = path.stat().st_mtime_ns
+        except OSError:
+            mtime = 0
+        return (stamp is None, stamp or "", mtime, path.name)
+
+    return tuple(sorted(clips, key=key))
 
 
 def _drop_orphans(folder, keep):
@@ -3392,14 +3416,14 @@ def _review_folder(root, trip):
     return root / "not_renderable" / name
 
 
-def _one_clip_still(src, folder, n):
+def _one_clip_still(src, folder, n, index_width=2):
     """(path, was_made). Skipped when it is already there.
 
     A clip still is named for the clip it came from, so a file that exists is
     a frame of that same clip -- there is nothing about it a second seek would
     change. Only clips with no still yet cost anything.
     """
-    dst = folder / ("%02d_%s.jpg" % (n, src.stem))
+    dst = folder / ("%0*d_%s.jpg" % (index_width, n, src.stem))
     if dst.is_file():
         return dst, False
     folder.mkdir(parents=True, exist_ok=True)
@@ -3628,8 +3652,8 @@ def write_contact_sheet(ctx, root, payload, previews_dir, stills):
                 shot, idx, html.escape(t["day"]), html.escape(t["start"][11:16]),
                 "".join(flags) or '<span class="flag">&nbsp;</span>', dl, route,
                 "".join(links),
-                _clip_list_html("front", [Path(p) for p in t.get("front", [])], previews_dir),
-                _clip_list_html("rear", [Path(p) for p in t.get("rear", [])], previews_dir)))
+                _clip_list_html("front", [Path(p) for p in _clip_review_order(t.get("front", []))], previews_dir),
+                _clip_list_html("rear", [Path(p) for p in _clip_review_order(t.get("rear", []))], previews_dir)))
 
     total_bytes = sum(trip_bytes(t) for t in trips)
     doc = (
