@@ -29,16 +29,13 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-from checkout import Checkout, FakeCheckout, RealCheckout    # noqa: E402
+from dashcam_exporter.checkout import Checkout, FakeCheckout, RealCheckout  # noqa: E402
 
 
 def load_pipeline():
     sys.argv = ["pipeline.py"]
-    spec = importlib.util.spec_from_file_location(
-        "pipeline_checkout", REPO / "src" / "pipeline.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    from dashcam_exporter import pipeline
+    return pipeline
 
 
 P = load_pipeline()
@@ -81,15 +78,15 @@ class TestDerivedPaths(unittest.TestCase):
 class TestRealCheckout(unittest.TestCase):
 
     def test_a_module_under_src_names_the_checkout_above_it(self):
-        c = RealCheckout(REPO / "src" / "pipeline.py")
+        c = RealCheckout(REPO / "src" / "dashcam_exporter" / "pipeline.py")
         self.assertEqual(c.root(), REPO)
         self.assertEqual(c.src(), REPO / "src")
 
     def test_the_files_it_names_are_really_there(self):
-        c = RealCheckout(REPO / "src" / "pipeline.py")
+        c = RealCheckout(REPO / "src" / "dashcam_exporter" / "pipeline.py")
         self.assertTrue(c.config_file().is_file())
         self.assertTrue(c.src().is_dir())
-        self.assertTrue((c.src() / "uploader.py").is_file())
+        self.assertTrue((c.src() / "dashcam_exporter" / "uploader.py").is_file())
 
 
 class TestWhatThePipelineDerives(unittest.TestCase):
@@ -148,28 +145,23 @@ class TestCtxTakesACheckout(unittest.TestCase):
 class TestTheRendererIsWhereThePipelineSaysItIs(unittest.TestCase):
     """A child process launched by a name that does not resolve.
 
-    The src/ move broke `--print-groups`: pipeline launched the renderer as a
-    bare "make_dashcam_videos.py" with the checkout as cwd, which had been true
-    for as long as the file sat at the checkout root and stopped being true the
-    moment it did not. Nothing failed -- no test drives that subprocess -- and
-    the feature was simply dead.
+    The package move must keep `--print-groups` executable from the checkout
+    root. The renderer is launched as a module with src/ on PYTHONPATH.
 
     Asserting the file exists is a poor substitute for running it, and it is
     the part that actually went wrong: not the arguments, the path.
     """
 
-    def test_every_renderer_path_the_pipeline_launches_is_a_real_file(self):
-        launched = re.findall(r'SRC_DIR / "([a-z_]+\.py)"',
-                              (REPO / "src" / "pipeline.py").read_text())
-        self.assertTrue(launched, "no renderer launch found to check")
-        for name in set(launched):
-            with self.subTest(module=name):
-                self.assertTrue((REPO / "src" / name).is_file(),
-                                "%s is launched but is not there" % name)
+    def test_the_renderer_module_the_pipeline_launches_is_importable(self):
+        text = (REPO / "src" / "dashcam_exporter" / "pipeline.py").read_text()
+        launched = re.findall(r'"-m", "([a-z_\.]+)"', text)
+        self.assertIn("dashcam_exporter.renderer", launched)
+        module = REPO / "src" / "dashcam_exporter" / "renderer.py"
+        self.assertTrue(module.is_file(), "the packaged renderer is missing")
 
     def test_no_child_is_launched_by_a_bare_module_name(self):
         """The shape of the bug, not just this instance of it."""
-        text = (REPO / "src" / "pipeline.py").read_text()
+        text = (REPO / "src" / "dashcam_exporter" / "pipeline.py").read_text()
         self.assertNotIn('"-u", "make_dashcam_videos.py"', text)
 
 

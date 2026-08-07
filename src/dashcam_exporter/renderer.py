@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-make_dashcam_videos.py
+dashcam_exporter.renderer
 ----------------------
 DDPAI dashcam SD card -> one polished MP4 per trip (a trip = leave an anchor,
 return to it — or run until a long engine-off gap / the 04:00 day rollover;
@@ -28,13 +28,13 @@ on Windows but should largely work — see the README for caveats.
 
 USAGE
 -----
-    python3 make_dashcam_videos.py                     # encode every trip on the card
-    python3 make_dashcam_videos.py --drives 8          # only trip 8
-    python3 make_dashcam_videos.py --dry-run           # list trips without encoding
-    python3 make_dashcam_videos.py --sidecars-only     # refresh sidecars without encoding
-    python3 make_dashcam_videos.py --print-groups      # same grouping, as JSON on stdout
-    python3 make_dashcam_videos.py --force             # overwrite existing .mp4s
-    python3 make_dashcam_videos.py --write-config .    # dump a fully commented config.txt
+    python3 -m dashcam_exporter.renderer                  # encode every trip
+    python3 -m dashcam_exporter.renderer --drives 8       # only trip 8
+    python3 -m dashcam_exporter.renderer --dry-run        # list trips
+    python3 -m dashcam_exporter.renderer --sidecars-only  # refresh sidecars
+    python3 -m dashcam_exporter.renderer --print-groups   # grouping as JSON
+    python3 -m dashcam_exporter.renderer --force          # overwrite existing
+    python3 -m dashcam_exporter.renderer --write-config . # write config.txt
 
 `config.txt` (next to the script, or at --config PATH) overrides built-in
 defaults; CLI flags override config. Run with --help for the full flag list.
@@ -72,7 +72,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from checkout import RealCheckout
+from dashcam_exporter.adapters import DdpaiDataAdapter
+from dashcam_exporter.checkout import RealCheckout
+from dashcam_exporter.domain import Clip, Cut, RenderOptions
 
 # ---------------------------------------------------------------------------
 # Configuration defaults
@@ -205,48 +207,6 @@ def _speed_unit_label() -> str:
     return "mph" if SPEED_UNIT == "mph" else "km/h"
 
 
-@dataclass(frozen=True)
-class Clip:
-    """One recorded file pair on the card, and when it was filmed.
-
-    Public: timestamp, epoch_utc, duration, front, rear, dt, end, gap_before.
-
-    Frozen because a Clip is evidence, not state. Its stamp and duration come
-    off the filename during the scan and every later answer — the track window,
-    the parking-run boundaries, the flow memo keyed by `front` — is derived from
-    them. A caller that adjusted a Clip in place would silently invalidate memos
-    already computed from the old values, and there is nothing in the render
-    that wants to: nothing has ever assigned to these fields.
-    """
-    timestamp: str           # e.g. "20260511121158"
-    epoch_utc: int           # filename time treated as UTC -> for drawtext gmtime
-    duration: int            # clip duration in seconds (from filename)
-    front: Path
-    rear: Path | None        # None if the dashcam has no rear camera
-
-    @property
-    def dt(self) -> datetime:
-        return datetime.strptime(self.timestamp, "%Y%m%d%H%M%S")
-
-    @property
-    def end(self) -> datetime:
-        """When the camera stopped recording this clip.
-
-        Clips are CONTIGUOUS: one ends on the second the next begins, which is
-        what makes the gap to the next clip an engine-off interval rather than a
-        rounding error. Written out at seven call sites before, and the track
-        window is selected with it — a clip's fixes are the ones recorded
-        between dt and end."""
-        return self.dt + timedelta(seconds=self.duration)
-
-    def gap_before(self, previous: "Clip") -> float:
-        """Seconds of wall clock between the end of `previous` and this clip's
-        start — the engine-off interval a 'Fast forwarding…' slide announces.
-        Never negative: overlapping stamps are a camera clock artefact, not
-        time travelling backwards."""
-        return max(0.0, (self.dt - previous.end).total_seconds())
-
-
 def probe_video_size(path: Path) -> "tuple[int, int] | None":
     """(width, height) of a video's first stream via ffprobe, or None."""
     try:
@@ -329,49 +289,15 @@ def reverse_geocode(lat: float, lon: float, cache_path: Path) -> "str | None":
 
 
 def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
-    front_map: dict[str, tuple[Path, int]] = {}
-    for f in sorted(os.listdir(front_dir)):
-        m = FRONT_RE.match(f)
-        if m:
-            front_map[m.group(1)] = (front_dir / f, int(m.group(2)))
+    """Discover DDPAI clip pairs through the camera adapter.
 
-    rear_map: dict[str, Path] = {}
-    rear_by_epoch: dict[int, Path] = {}
-    if rear_dir is not None and rear_dir.is_dir():
-        for f in sorted(os.listdir(rear_dir)):
-            m = REAR_RE.match(f)
-            if m:
-                rts = m.group(1)
-                rear_map[rts] = rear_dir / f
-                rear_by_epoch[calendar.timegm(
-                    datetime.strptime(rts, "%Y%m%d%H%M%S").timetuple())] = rear_dir / f
-
-    clips: list[Clip] = []
-    n_no_rear = 0
-    for ts in sorted(front_map):
-        path_f, dur = front_map[ts]
-        epoch = calendar.timegm(datetime.strptime(ts, "%Y%m%d%H%M%S").timetuple())
-        rear_path: Path | None = rear_map.get(ts)
-        if rear_path is None and rear_by_epoch:
-            # DDPAI sometimes writes the rear file 1-2s off the front's second
-            # (e.g. front 18:17:55, rear 18:17:56). Exact-timestamp matching then
-            # reads a real rear clip as "missing", dropping its PiP. Pair with the
-            # nearest rear within REAR_PAIR_TOLERANCE_S before giving up. (Clips
-            # are ~60s apart, so this window can't mis-pair adjacent clips.)
-            _best = min(rear_by_epoch, key=lambda e: abs(e - epoch))
-            if abs(_best - epoch) <= REAR_PAIR_TOLERANCE_S:
-                rear_path = rear_by_epoch[_best]
-        if REAR_PIP_ENABLED and rear_dir is not None and rear_path is None:
-            # The rear cam is on for the rest of the card, but THIS clip has no
-            # rear file (rear disconnected, or its file was loop-overwritten).
-            # Keep the clip and render it front-only — dropping it would throw
-            # away real footage (a whole day, on some cards). build_filter_complex
-            # branches on the per-clip `with_rear`, so the PiP is simply omitted.
-            n_no_rear += 1
-        clips.append(Clip(ts, epoch, dur, path_f, rear_path))
+    The renderer keeps the operator-facing warning; filename parsing and rear
+    pairing belong to the DDPAI adapter, so they have exactly one definition.
+    """
+    clips = DdpaiDataAdapter(REAR_PAIR_TOLERANCE_S).discover_clips(front_dir, rear_dir)
+    n_no_rear = sum(clip.rear is None for clip in clips) if REAR_PIP_ENABLED and rear_dir else 0
     if n_no_rear:
-        print(f"  note: {n_no_rear} clips have no rear pair — rendered "
-              f"front-only (no PiP)")
+        print(f"  note: {n_no_rear} clips have no rear pair — rendered front-only (no PiP)")
     return clips
 
 
@@ -2057,7 +1983,7 @@ def write_gpx_export(out_path: Path, points: list[tuple[float, float, float, dat
     if not points:
         return
     lines = ['<?xml version="1.0" encoding="UTF-8"?>',
-             '<gpx version="1.1" creator="make_dashcam_videos.py" '
+             '<gpx version="1.1" creator="dashcam_exporter.renderer" '
              'xmlns="http://www.topografix.com/GPX/1/1">',
              f'  <trk><name>{title}</name>']
     # One <trkseg> per contiguous-driving segment, so consumers like Google Earth
@@ -2585,63 +2511,7 @@ def fmt_secs(s: float) -> str:
 # Per-clip encode
 # ---------------------------------------------------------------------------
 
-@dataclass(frozen=True)
-class RenderStyle:
-    """How this run renders: the settings decided once and true of every piece
-    of output.
-
-    Every one of these was passed down by hand — encode_clip took thirteen
-    arguments and six of them were these, generate_transition_slide took eight
-    and four were these — and the slide MUST agree with the clips on all of
-    them. It does not merely look wrong otherwise: a slide encoded at a
-    different height or bitrate than the clips it sits between gives the
-    concatenated file two incompatible SPS variants, and hardware decoders go
-    black around it. One object, passed whole, is how they cannot drift.
-
-    Public: font_path, use_vt, with_timestamp, with_speed, output_height,
-    no_audio, video_encoder. Frozen is the whole point — see above.
-    """
-    font_path: str
-    use_vt: bool
-    with_timestamp: bool
-    with_speed: bool
-    output_height: int = 0
-    no_audio: bool = False
-
-    def video_encoder(self) -> list[str]:
-        """The ffmpeg video-codec flags, identical for clips and slides.
-
-        VideoToolbox takes a bitrate, which has to be scaled down with the
-        output height or 540p output gets 8 Mbps for no visible gain. libx264
-        uses CRF, which auto-adjusts with resolution, so nothing to scale."""
-        if self.use_vt:
-            return ["-c:v", "h264_videotoolbox",
-                    "-b:v", _scale_bitrate_string(VT_BITRATE, self.output_height),
-                    "-maxrate", _scale_bitrate_string(VT_MAXRATE, self.output_height),
-                    "-profile:v", "high"]
-        return ["-c:v", "libx264", "-preset", X264_PRESET, "-crf", X264_CRF]
-
-
-@dataclass(frozen=True)
-class Cut:
-    """Which slice of a clip is rendered, and where the car stopped inside it.
-
-    The three travelled together as loose arguments through encode_clip and the
-    marker-panel render, and they are one decision: the parking cut. trim_start
-    and trim_seconds are in source-clip seconds; trim_seconds None means run to
-    the end of the clip. settled_at is set only where a park onset is KNOWN, so
-    the speed overlay cannot caption a stationary car with a decaying fix — see
-    settle_speeds_after.
-
-    Public: trim_start, trim_seconds, settled_at, duration_of."""
-    trim_start: int = 0
-    trim_seconds: "int | None" = None
-    settled_at: "int | None" = None
-
-    def duration_of(self, clip: "Clip") -> int:
-        """How many seconds of `clip` this cut renders."""
-        return (self.trim_seconds if self.trim_seconds is not None
-                else clip.duration - self.trim_start)
+RenderStyle = RenderOptions
 
 
 def build_filter_complex(
@@ -3717,13 +3587,17 @@ def main() -> int:
 
     # How this run renders, decided once. The clips and the slides between them
     # are given the same object, which is what keeps them encoded alike.
-    style = RenderStyle(
+    style = RenderOptions(
         font_path=font_path,
-        use_vt=use_vt,
-        with_timestamp=with_timestamp,
-        with_speed=with_speed,
+        use_videotoolbox=use_vt,
+        timestamp=with_timestamp,
+        speed=with_speed,
         output_height=args.output_height,
-        no_audio=args.no_audio,
+        audio=not args.no_audio,
+        vt_bitrate=VT_BITRATE,
+        vt_maxrate=VT_MAXRATE,
+        x264_preset=X264_PRESET,
+        x264_crf=X264_CRF,
     )
 
     n_gpx_loose = sum(1 for f in os.listdir(gps_dir) if GPX_RE.match(f)) if gps_dir else 0

@@ -30,8 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-import items                      # noqa: E402,F401  (registers the ten)
-import menu as M                  # noqa: E402
+from dashcam_exporter import items, menu as M  # noqa: E402,F401
 
 
 class NullWork:

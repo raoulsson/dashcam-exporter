@@ -57,9 +57,9 @@ from typing import Optional, Tuple
 # two names for one thing, which is exactly the mess these are here to avoid —
 # so `from uploader import Verdict, go, blocked, did` gets the exporter's own
 # types, not copies of them.
-from menu import (Evidence, Outcome, Ruling, Verdict, blocked,   # noqa: F401
+from dashcam_exporter.menu import (Evidence, Outcome, Ruling, Verdict, blocked,   # noqa: F401
                   did, go, satisfied, stopped)
-from world import Render, TripMeta                               # noqa: F401
+from dashcam_exporter.world import Render, TripMeta              # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -621,6 +621,11 @@ def _executed(found, exporter_dir: Path):
     tool was started.
     """
     module = importlib.util.module_from_spec(found)
+    # Existing third-party plugins may still spell the public interface as
+    # ``from uploader import ...``. Keep that import working at load time
+    # without maintaining a source-level shim in this project.
+    previous_uploader = sys.modules.get("uploader")
+    sys.modules["uploader"] = sys.modules[__name__]
     sys.path.insert(0, str(exporter_dir))
     try:
         found.loader.exec_module(module)
@@ -628,6 +633,10 @@ def _executed(found, exporter_dir: Path):
         raise UploaderNotLoaded("%s failed to import: %s" % (found.origin, e))
     finally:
         _unshadow(sys.path, str(exporter_dir))
+        if previous_uploader is None:
+            sys.modules.pop("uploader", None)
+        else:
+            sys.modules["uploader"] = previous_uploader
     return module
 
 

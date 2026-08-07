@@ -29,7 +29,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from uploader import (Builder, Evidence, Outcome, Uploader, Verdict, blocked,
+from dashcam_exporter.uploader import (Builder, Evidence, Outcome, Uploader, Verdict, blocked,
                       did, go, satisfied, stopped)
 
 

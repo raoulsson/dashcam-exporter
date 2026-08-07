@@ -23,20 +23,16 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "tests"))
 
-import items                     # noqa: E402,F401  (registers the ten)
-import menu as M                 # noqa: E402
-import uploader as U             # noqa: E402
-from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
+from dashcam_exporter import items, menu as M, uploader as U  # noqa: E402
+from dashcam_exporter.menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                   UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
 from print_step_graph import NullWork                # noqa: E402
 
 
 def load_pipeline():
     sys.argv = ["pipeline.py"]
-    spec = importlib.util.spec_from_file_location("pipeline_graph", REPO / "src" / "pipeline.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    from dashcam_exporter import pipeline
+    return pipeline
 
 
 P = load_pipeline()

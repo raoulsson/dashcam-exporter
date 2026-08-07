@@ -10,8 +10,8 @@ from __future__ import annotations
 import time
 import traceback
 
-import menu
-from term import C, tilde
+from dashcam_exporter import menu
+from dashcam_exporter.term import C, tilde
 
 # ---------------------------------------------------------------------------
 # Step results / summary

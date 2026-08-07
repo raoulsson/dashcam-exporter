@@ -11,6 +11,7 @@
 
 set -uo pipefail
 cd "$(dirname "$0")"
+export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
 
 PY="python3"
 [ -x ".venv/bin/python" ] && PY=".venv/bin/python"

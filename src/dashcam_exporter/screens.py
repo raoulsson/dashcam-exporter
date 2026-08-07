@@ -14,11 +14,10 @@ from __future__ import annotations
 
 import textwrap
 
-import menu
-import uploader
-from edition import COFFEE_URL, EXPORTER_DIR, REPO_URL, SPONSORS_URL, version
-from results import ABORTED, FAILED, RAN, SATISFIED
-from term import C, rule, term_width, tilde
+from dashcam_exporter import menu, uploader
+from dashcam_exporter.edition import COFFEE_URL, EXPORTER_DIR, REPO_URL, SPONSORS_URL, version
+from dashcam_exporter.results import ABORTED, FAILED, RAN, SATISFIED
+from dashcam_exporter.term import C, rule, term_width, tilde
 
 # ---------------------------------------------------------------------------
 # The painter. Everything it draws is derived from the position, the world and

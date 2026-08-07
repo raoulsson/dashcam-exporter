@@ -24,17 +24,13 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-import items                     # noqa: E402,F401  (registers the ten)
-import menu as M                 # noqa: E402
-import uploader as U             # noqa: E402
+from dashcam_exporter import items, menu as M, uploader as U  # noqa: E402,F401
 
 
 def load_pipeline():
     sys.argv = ["pipeline.py"]
-    spec = importlib.util.spec_from_file_location("pipeline_spec", REPO / "src" / "pipeline.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    from dashcam_exporter import pipeline
+    return pipeline
 
 
 P = load_pipeline()
@@ -42,7 +38,7 @@ P = load_pipeline()
 # The numbering is imported, never restated. Written out here it was a second
 # declaration of the same thing, and it would have gone on passing against the
 # old numbers while the tool moved to the new ones.
-from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER,   # noqa: E402
+from dashcam_exporter.menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER,   # noqa: E402
                   BUILD, UPLOAD, CLEAN_WS, ERASE_CARD)
 
 
@@ -601,16 +597,18 @@ class TestWriteConfigHandsOutTheRealFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "config.new.txt"
             subprocess.run(
-                [sys.executable, str(REPO / "src" / "make_dashcam_videos.py"),
+                [sys.executable, "-m", "dashcam_exporter.renderer",
                  "--write-config", str(out)],
-                check=True, capture_output=True, cwd=str(REPO))
+                check=True, capture_output=True, cwd=str(REPO),
+                env={**os.environ, "PYTHONPATH": str(REPO / "src")})
             self.assertEqual(out.read_text(encoding="utf-8"),
                              (REPO / "config.txt").read_text(encoding="utf-8"))
 
     def test_a_directory_argument_lands_on_config_txt_inside_it(self):
         with tempfile.TemporaryDirectory() as tmp:
             subprocess.run(
-                [sys.executable, str(REPO / "src" / "make_dashcam_videos.py"),
+                [sys.executable, "-m", "dashcam_exporter.renderer",
                  "--write-config", tmp],
-                check=True, capture_output=True, cwd=str(REPO))
+                check=True, capture_output=True, cwd=str(REPO),
+                env={**os.environ, "PYTHONPATH": str(REPO / "src")})
             self.assertTrue((Path(tmp) / "config.txt").is_file())

@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from handover import Handover                       # noqa: E402
+from dashcam_exporter.handover import Handover       # noqa: E402
 
 
 OPENING = "This step builds the website.\n\nIn local mode it writes a page."

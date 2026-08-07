@@ -39,11 +39,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-import guards                    # noqa: E402
-import items                     # noqa: E402  (importing registers the ten)
-import menu as M                 # noqa: E402
-import world as W                # noqa: E402
-from menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
+from dashcam_exporter import guards, items, menu as M, world as W  # noqa: E402
+from dashcam_exporter.menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                   UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
 
 UPLOADER = M.Strategy.UPLOADER

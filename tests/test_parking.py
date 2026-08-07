@@ -38,8 +38,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-sys.argv = ["make_dashcam_videos.py"]
-import make_dashcam_videos as M            # noqa: E402
+sys.argv = ["dashcam_exporter.renderer"]
+from dashcam_exporter import renderer as M  # noqa: E402
+from dashcam_exporter.domain import Clip  # noqa: E402
 
 CLIP_SECS = 60
 PARKED_FLOW = 0.01      # a still frame still twitches a hundredth of a pixel
@@ -74,8 +75,8 @@ class ParkingTest(unittest.TestCase):
         front.write_bytes(b"")
         if speeds is not None:
             self._write_nmea(stamp, speeds)
-        clip = M.Clip(timestamp=stamp, epoch_utc=0, duration=CLIP_SECS,
-                      front=front, rear=None)
+        clip = Clip(timestamp=stamp, epoch_utc=0, duration=CLIP_SECS,
+                    front=front, rear=None)
         # Through the named seam on the singleton, not into the memo dict: it
         # is the same store the render's detector reads, which is what makes
         # this fixture a description of what the camera saw rather than a

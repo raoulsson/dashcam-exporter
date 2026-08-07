@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Optional, Tuple
 
-from menu import Evidence, Verdict, blocked, go, satisfied
+from dashcam_exporter.menu import Evidence, Verdict, blocked, go, satisfied
 
 
 def _is_blocking(verdict) -> bool:

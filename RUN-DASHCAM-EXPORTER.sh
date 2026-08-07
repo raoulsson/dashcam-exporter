@@ -65,4 +65,5 @@ fi
 
 echo "${DIM}python: $PY${OFF}"
 
-exec "$PY" src/pipeline.py "$@"
+exec env PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" \
+    "$PY" -m dashcam_exporter.pipeline "$@"

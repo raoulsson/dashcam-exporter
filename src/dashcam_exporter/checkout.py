@@ -37,9 +37,7 @@ class Checkout(ABC):
     def src(self) -> Path:
         """The one directory a plugin needs on sys.path.
 
-        A plugin's `from uploader import ...` resolves against this and
-        nothing else; hand it the checkout instead and the plugin fails to
-        load, which stops the tool at launch.
+        A plugin imports the public interface from `dashcam_exporter.uploader`.
         """
         return self.root() / "src"
 
@@ -65,10 +63,11 @@ class RealCheckout(Checkout):
         self._module_file = Path(module_file)
 
     def root(self) -> Path:
-        # The module lives in src/; the checkout is one level up. Resolved,
-        # because a symlinked entry point otherwise names a directory that has
-        # no config.txt in it.
-        return self._module_file.resolve().parent.parent
+        module = self._module_file.resolve()
+        for parent in module.parents:
+            if (parent / "src").is_dir():
+                return parent
+        raise RuntimeError(f"cannot locate checkout root for {module}")
 
 
 class FakeCheckout(Checkout):

@@ -29,8 +29,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-sys.argv = ["make_dashcam_videos.py"]
-import make_dashcam_videos as M            # noqa: E402
+sys.argv = ["dashcam_exporter.renderer"]
+from dashcam_exporter import renderer as M  # noqa: E402
+from dashcam_exporter.domain import Clip  # noqa: E402
 
 
 def nmea(local: str, fixes) -> str:
@@ -52,9 +53,9 @@ def _ddmm(deg: float, width: int) -> str:
     return "%0*d%08.5f" % (width, d, (deg - d) * 60)
 
 
-def clip(ts: str, secs: int = 60) -> M.Clip:
-    return M.Clip(timestamp=ts, epoch_utc=0, duration=secs,
-                  front=Path("/tmp/%s.mp4" % ts), rear=None)
+def clip(ts: str, secs: int = 60) -> Clip:
+    return Clip(timestamp=ts, epoch_utc=0, duration=secs,
+                front=Path("/tmp/%s.mp4" % ts), rear=None)
 
 
 class TrackTest(unittest.TestCase):

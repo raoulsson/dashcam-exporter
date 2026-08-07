@@ -19,10 +19,10 @@ try:
 except ImportError:      # not a POSIX terminal; typed lines still work
     termios = tty = None
 
-from progress import _erase_line
-from results import Aborted
-from screens import _print_all
-from term import C
+from dashcam_exporter.progress import _erase_line
+from dashcam_exporter.results import Aborted
+from dashcam_exporter.screens import _print_all
+from dashcam_exporter.term import C
 
 def _readline_safe(s):
     """Mark ANSI sequences as zero-width for readline.

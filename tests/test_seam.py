@@ -49,19 +49,15 @@ from unittest import mock
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-import items                     # noqa: E402,F401  (registers the ten)
-import menu as M                 # noqa: E402
-import uploader as U             # noqa: E402
-from menu import (IMPORT, META, PREVIEW, EXCLUDE, BUILD, RENDER, UPLOAD,
+from dashcam_exporter import items, menu as M, uploader as U, guards  # noqa: E402,F401
+from dashcam_exporter.menu import (IMPORT, META, PREVIEW, EXCLUDE, BUILD, RENDER, UPLOAD,
                   CLEAN_WS, ERASE_CARD)                         # noqa: E402
 
 
 def load_pipeline():
     sys.argv = ["pipeline.py"]
-    spec = importlib.util.spec_from_file_location("pipeline_seam", REPO / "src" / "pipeline.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    from dashcam_exporter import pipeline
+    return pipeline
 
 
 P = load_pipeline()
@@ -1486,7 +1482,7 @@ class TestTheBuilderSaysWhatItHolds(unittest.TestCase):
         self.assertIsNone(P._holds(Angry()))
 
     def test_the_interface_answers_none_by_default(self):
-        import uploader as U
+        from dashcam_exporter import uploader as U
 
         class Bare(U.Builder):
             def describe(self):
@@ -1799,7 +1795,8 @@ class TestEveryRendererRunIsToldWhereToLog(SeamTest):
             P.step_generate_meta(b.ctx)
         self.assertTrue(run.called)
         for env in self._envs(run):
-            self.assertEqual(env, {"LOG_DIR": str(b.ctx.log_dir)})
+            self.assertEqual(env["LOG_DIR"], str(b.ctx.log_dir))
+            self.assertIn("src", env["PYTHONPATH"].split(os.pathsep))
 
     def test_and_the_log_dir_is_the_workspace_root(self):
         b = self.bench()
@@ -1984,7 +1981,7 @@ class TestTheWayPastTheCardRefusal(SeamTest):
         """Recording the drop is not permission. Anything else standing in the
         way stops it, with the ledger changed and the card untouched."""
         b, w = self._carded()
-        import guards as G
+        from dashcam_exporter import guards as G
         with quiet(), mock.patch.object(G, "card_is_expendable",
                                         return_value=M.blocked("something else")):
             out = P.drop_unaccounted_then_erase(b.ctx, w)

@@ -30,8 +30,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-sys.argv = ["make_dashcam_videos.py"]
-import make_dashcam_videos as M            # noqa: E402
+sys.argv = ["dashcam_exporter.renderer"]
+from dashcam_exporter import renderer as M  # noqa: E402
+from dashcam_exporter.domain import Clip  # noqa: E402
 
 HOME = (14.4200, 121.0200)
 CLIP_SECS = 60
@@ -79,8 +80,8 @@ class GroupingTest(unittest.TestCase):
                             _ddmm(where[1], 3)))
         (self.gps / ("%s_%04d.gpx" % (stamp, secs))).write_text(
             "\n".join(lines) + "\n", encoding="utf-8")
-        self.clips.append(M.Clip(timestamp=stamp, epoch_utc=0, duration=secs,
-                                 front=front, rear=None))
+        self.clips.append(Clip(timestamp=stamp, epoch_utc=0, duration=secs,
+                               front=front, rear=None))
         return at + timedelta(seconds=secs)
 
     def endpoints(self):

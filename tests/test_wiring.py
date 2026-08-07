@@ -32,10 +32,9 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 sys.argv = ["test_wiring"]
 
-import menu as M                                                   # noqa: E402
-import pipeline as P                                               # noqa: E402
-import uploader as U                                               # noqa: E402
-import world as W                                                  # noqa: E402
+from dashcam_exporter import menu as M                              # noqa: E402
+from dashcam_exporter import pipeline as P                          # noqa: E402
+from dashcam_exporter import uploader as U, world as W               # noqa: E402
 
 UPLOADER, LOCAL = M.Strategy.UPLOADER, M.Strategy.LOCAL_PAGE
 

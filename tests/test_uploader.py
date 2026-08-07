@@ -29,9 +29,7 @@ from tempfile import TemporaryDirectory
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-import menu as M                    # noqa: E402
-import uploader as U                # noqa: E402
-import world as W                   # noqa: E402
+from dashcam_exporter import menu as M, uploader as U, world as W  # noqa: E402
 
 EXAMPLE = REPO / "examples" / "local_website.py"
 EXAMPLE_SPEC = "%s:LocalWebSiteBuilderPlugin:LocalWebSiteUploader" % EXAMPLE
@@ -52,7 +50,7 @@ class TestAnAnswerThatIsNotAnAnswerPermitsNothing(unittest.TestCase):
     """
 
     def setUp(self):
-        import pipeline as P
+        from dashcam_exporter import pipeline as P
 
         self.P = P
 
@@ -134,7 +132,7 @@ class _Raises(_Silent):
 
 
 def _a_ctx(uploader=None):
-    import pipeline as P
+    from dashcam_exporter import pipeline as P
 
     ctx = P.Ctx.__new__(P.Ctx)
     ctx.out_dir = Path("/w/out")
@@ -162,7 +160,7 @@ _A_BUILDER = _Builder()
 # ---------------------------------------------------------------------------
 
 COMPLETE = '''
-from uploader import Builder, Evidence, Uploader, did, go
+from dashcam_exporter.uploader import Builder, Evidence, Uploader, did, go
 
 
 class Site(Builder):
@@ -191,7 +189,7 @@ class Push(Uploader):
 '''
 
 HALF_DONE = '''
-from uploader import Builder, Uploader, did, go
+from dashcam_exporter.uploader import Builder, Uploader, did, go
 
 
 class Site(Builder):
@@ -422,7 +420,7 @@ class TestTheEraseSaysWhoseAnswerItActedOn(unittest.TestCase):
     """
 
     def setUp(self):
-        import pipeline as P
+        from dashcam_exporter import pipeline as P
 
         self.P = P
         self.render = W.Render("trip_A_h1080.mp4", 10)
@@ -514,13 +512,13 @@ class TestTheToolStopsRatherThanDegrading(unittest.TestCase):
     """
 
     def test_ctx_construction_raises_rather_than_returning_no_plugin(self):
-        import pipeline as P
+        from dashcam_exporter import pipeline as P
 
         with self.assertRaises(U.UploaderNotLoaded):
             P._loaded_plugin("/no/such/file.py:Nope:Nope", REPO)
 
     def test_an_unset_setting_is_the_local_edition_on_purpose(self):
-        import pipeline as P
+        from dashcam_exporter import pipeline as P
 
         self.assertIsNone(P._loaded_plugin("", REPO))
         self.assertIsNone(P._loaded_plugin(None, REPO))
