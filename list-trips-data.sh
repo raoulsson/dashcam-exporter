@@ -29,4 +29,4 @@ OPTS=()
 # OPTS+=(--out  "$HOME/dashcam-data/output_test")   # render somewhere scratch
 # OPTS+=(--trip-return-m 120)
 
-PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" "$PY" -m dashcam_exporter.renderer --dry-run ${OPTS[@]+"${OPTS[@]}"} "$@"
+PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" "$PY" -m dashcam_exporter.infrastructure.media.renderer --dry-run ${OPTS[@]+"${OPTS[@]}"} "$@"

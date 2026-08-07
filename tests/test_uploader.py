@@ -160,7 +160,7 @@ _A_BUILDER = _Builder()
 # ---------------------------------------------------------------------------
 
 COMPLETE = '''
-from dashcam_exporter.uploader import Builder, Evidence, Uploader, did, go
+from dashcam_exporter.application.ports.uploader import Builder, Evidence, Uploader, did, go
 
 
 class Site(Builder):
@@ -189,7 +189,7 @@ class Push(Uploader):
 '''
 
 HALF_DONE = '''
-from dashcam_exporter.uploader import Builder, Uploader, did, go
+from dashcam_exporter.application.ports.uploader import Builder, Uploader, did, go
 
 
 class Site(Builder):

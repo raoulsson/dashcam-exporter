@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from .domain import Clip
+from dashcam_exporter.domain import Clip
 
 KNOTS_TO_KMH = 1.852
 CLIP_GPX_WINDOW_SECONDS = 60

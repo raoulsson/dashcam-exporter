@@ -4,7 +4,7 @@ import tarfile
 from pathlib import Path
 
 from dashcam_exporter.domain import Clip
-from dashcam_exporter.repository import DdpaiClipRepository
+from dashcam_exporter.infrastructure.repository import DdpaiClipRepository
 
 from .exporter_adapter import ExporterAdapter
 

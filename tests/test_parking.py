@@ -38,7 +38,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-sys.argv = ["dashcam_exporter.renderer"]
+sys.argv = ["dashcam_exporter.infrastructure.media.renderer"]
 from dashcam_exporter import renderer as M  # noqa: E402
 from dashcam_exporter.domain import Clip  # noqa: E402
 

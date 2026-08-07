@@ -57,9 +57,9 @@ from typing import Optional, Tuple
 # two names for one thing, which is exactly the mess these are here to avoid —
 # so `from uploader import Verdict, go, blocked, did` gets the exporter's own
 # types, not copies of them.
-from dashcam_exporter.menu import (Evidence, Outcome, Ruling, Verdict, blocked,   # noqa: F401
+from dashcam_exporter.domain.menu.menu import (Evidence, Outcome, Ruling, Verdict, blocked,   # noqa: F401
                   did, go, satisfied, stopped)
-from dashcam_exporter.world import Render, TripMeta              # noqa: F401
+from dashcam_exporter.domain.model.world import Render, TripMeta              # noqa: F401
 
 
 # ---------------------------------------------------------------------------

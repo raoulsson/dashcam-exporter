@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import FrozenSet, Optional, Tuple
 
-from dashcam_exporter.menu import Evidence, Scope, Strategy
+from dashcam_exporter.domain.menu.menu import Evidence, Scope, Strategy
 
 
 @dataclass(frozen=True)

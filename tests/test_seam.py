@@ -50,7 +50,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
 from dashcam_exporter import items, menu as M, uploader as U, guards  # noqa: E402,F401
-from dashcam_exporter.menu import (IMPORT, META, PREVIEW, EXCLUDE, BUILD, RENDER, UPLOAD,
+from dashcam_exporter.domain.menu.menu import (IMPORT, META, PREVIEW, EXCLUDE, BUILD, RENDER, UPLOAD,
                   CLEAN_WS, ERASE_CARD)                         # noqa: E402
 
 

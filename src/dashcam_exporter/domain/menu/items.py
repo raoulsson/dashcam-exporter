@@ -16,13 +16,13 @@ MenuGraph.disagreements() diffs the two.
 
 from __future__ import annotations
 
-from dashcam_exporter.menu import (Anywhere, Destructive, Edges, Evidence, MenuItem, Plan,
+from dashcam_exporter.domain.menu.menu import (Anywhere, Destructive, Edges, Evidence, MenuItem, Plan,
                   Ruling, Scope, StartNode, StepBack, Strategy, Verdict,
                   blocked, go, satisfied,
                   PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER,
                   BUILD, UPLOAD, CLEAN_WS, ERASE_CARD)
-from dashcam_exporter.handover import Handover
-from dashcam_exporter import guards
+from dashcam_exporter.domain.menu.handover import Handover
+from dashcam_exporter.domain.menu import guards
 
 
 # ---------------------------------------------------------------------------

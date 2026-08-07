@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from dashcam_exporter.domain import Cut, Clip, RenderOptions
-from dashcam_exporter.media import FilterGraphFactory
+from dashcam_exporter.infrastructure.media import FilterGraphFactory
 
 
 class RenderCommandFactory:

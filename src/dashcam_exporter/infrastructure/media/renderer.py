@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-dashcam_exporter.renderer
+dashcam_exporter.infrastructure.media.renderer
 ----------------------
 DDPAI dashcam SD card -> one polished MP4 per trip (a trip = leave an anchor,
 return to it — or run until a long engine-off gap / the 04:00 day rollover;
@@ -28,13 +28,13 @@ on Windows but should largely work — see the README for caveats.
 
 USAGE
 -----
-    python3 -m dashcam_exporter.renderer                  # encode every trip
-    python3 -m dashcam_exporter.renderer --drives 8       # only trip 8
-    python3 -m dashcam_exporter.renderer --dry-run        # list trips
-    python3 -m dashcam_exporter.renderer --sidecars-only  # refresh sidecars
-    python3 -m dashcam_exporter.renderer --print-groups   # grouping as JSON
-    python3 -m dashcam_exporter.renderer --force          # overwrite existing
-    python3 -m dashcam_exporter.renderer --write-config . # write config.txt
+    python3 -m dashcam_exporter.infrastructure.media.renderer                  # encode every trip
+    python3 -m dashcam_exporter.infrastructure.media.renderer --drives 8       # only trip 8
+    python3 -m dashcam_exporter.infrastructure.media.renderer --dry-run        # list trips
+    python3 -m dashcam_exporter.infrastructure.media.renderer --sidecars-only  # refresh sidecars
+    python3 -m dashcam_exporter.infrastructure.media.renderer --print-groups   # grouping as JSON
+    python3 -m dashcam_exporter.infrastructure.media.renderer --force          # overwrite existing
+    python3 -m dashcam_exporter.infrastructure.media.renderer --write-config . # write config.txt
 
 `config.txt` (next to the script, or at --config PATH) overrides built-in
 defaults; CLI flags override config. Run with --help for the full flag list.
@@ -72,16 +72,16 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from dashcam_exporter.adapters import DdpaiDataAdapter
-from dashcam_exporter.checkout import RealCheckout
+from dashcam_exporter.infrastructure.adapters import DdpaiDataAdapter
+from dashcam_exporter.application.ports.checkout import RealCheckout
 from dashcam_exporter.domain import Clip, Cut, RenderOptions
-from dashcam_exporter.speed_analysis import (
+from dashcam_exporter.infrastructure.media.speed_analysis import (
     find_park_second,
     filter_gps_outliers as _filter_gps_outliers,
     smooth_speeds as _smooth_speeds,
 )
-from dashcam_exporter.tracking import Track, parse_gpx_track
-from dashcam_exporter.motion import (
+from dashcam_exporter.infrastructure.media.tracking import Track, parse_gpx_track
+from dashcam_exporter.infrastructure.media.motion import (
     Detection, MotionDetector, VideoMotionDetector, GpsMotionDetector,
     FirstAnswerDetector, VIDEO_MOTION, motion_ladder,
     find_drive_resume_in_group, find_drive_resume_second,
@@ -1077,7 +1077,7 @@ def write_gpx_export(out_path: Path, points: list[tuple[float, float, float, dat
     if not points:
         return
     lines = ['<?xml version="1.0" encoding="UTF-8"?>',
-             '<gpx version="1.1" creator="dashcam_exporter.renderer" '
+             '<gpx version="1.1" creator="dashcam_exporter.infrastructure.media.renderer" '
              'xmlns="http://www.topografix.com/GPX/1/1">',
              f'  <trk><name>{title}</name>']
     # One <trkseg> per contiguous-driving segment, so consumers like Google Earth

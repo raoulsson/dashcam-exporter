@@ -37,7 +37,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Dict, FrozenSet, List, Optional, Tuple
 
-from dashcam_exporter.values import (Evidence, NotRun, Outcome, Ruling, Scope,
+from dashcam_exporter.domain.model.values import (Evidence, NotRun, Outcome, Ruling, Scope,
                                      Strategy, Verdict)
 
 

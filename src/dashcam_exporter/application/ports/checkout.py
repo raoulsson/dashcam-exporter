@@ -37,7 +37,7 @@ class Checkout(ABC):
     def src(self) -> Path:
         """The one directory a plugin needs on sys.path.
 
-        A plugin imports the public interface from `dashcam_exporter.uploader`.
+        A plugin imports the public interface from `dashcam_exporter.application.ports.uploader`.
         """
         return self.root() / "src"
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import subprocess
 
-from dashcam_exporter.checkout import RealCheckout
+from dashcam_exporter.application.ports.checkout import RealCheckout
 
 # Two facts, not one. They were the same directory until the sources moved
 # under src/, and every use had to pick which it meant: the CHECKOUT is where

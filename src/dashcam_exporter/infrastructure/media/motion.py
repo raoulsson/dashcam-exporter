@@ -5,8 +5,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .domain import Clip
-from .checkout import RealCheckout
+from dashcam_exporter.domain import Clip
+from dashcam_exporter.application.ports.checkout import RealCheckout
 from .tracking import Track
 
 PARKING_SPEED_THRESHOLD_KMH = 3.0

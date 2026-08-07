@@ -38,7 +38,7 @@ P = load_pipeline()
 # The numbering is imported, never restated. Written out here it was a second
 # declaration of the same thing, and it would have gone on passing against the
 # old numbers while the tool moved to the new ones.
-from dashcam_exporter.menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER,   # noqa: E402
+from dashcam_exporter.domain.menu.menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER,   # noqa: E402
                   BUILD, UPLOAD, CLEAN_WS, ERASE_CARD)
 
 
@@ -597,7 +597,7 @@ class TestWriteConfigHandsOutTheRealFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "config.new.txt"
             subprocess.run(
-                [sys.executable, "-m", "dashcam_exporter.renderer",
+                [sys.executable, "-m", "dashcam_exporter.infrastructure.media.renderer",
                  "--write-config", str(out)],
                 check=True, capture_output=True, cwd=str(REPO),
                 env={**os.environ, "PYTHONPATH": str(REPO / "src")})
@@ -607,7 +607,7 @@ class TestWriteConfigHandsOutTheRealFile(unittest.TestCase):
     def test_a_directory_argument_lands_on_config_txt_inside_it(self):
         with tempfile.TemporaryDirectory() as tmp:
             subprocess.run(
-                [sys.executable, "-m", "dashcam_exporter.renderer",
+                [sys.executable, "-m", "dashcam_exporter.infrastructure.media.renderer",
                  "--write-config", tmp],
                 check=True, capture_output=True, cwd=str(REPO),
                 env={**os.environ, "PYTHONPATH": str(REPO / "src")})

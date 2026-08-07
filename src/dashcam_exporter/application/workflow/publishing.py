@@ -10,11 +10,12 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 
-from dashcam_exporter import guards, menu, uploader
+from dashcam_exporter.domain.menu import guards, menu
+from dashcam_exporter.application.ports import uploader
 
-from dashcam_exporter.results import ABORTED, RAN, SATISFIED, record
-from dashcam_exporter.term import C, tilde
-from dashcam_exporter.runtime import Child
+from dashcam_exporter.application.workflow.results import ABORTED, RAN, SATISFIED, record
+from dashcam_exporter.application.ui.term import C, tilde
+from dashcam_exporter.infrastructure.runtime.runtime import Child
 
 def __getattr__(name):
     # Pipeline owns shared orchestration helpers; defer lookup to avoid an
@@ -23,14 +24,14 @@ def __getattr__(name):
                 "_holds", "_long_description", "_with_the_count",
                 "_delta_words", "_logged", "_closed_on", "_status_of",
                 "_did_or_settled", "step_site", "gather_into_final"}:
-        from dashcam_exporter import pipeline
+        from dashcam_exporter.application.workflow import pipeline
         return getattr(pipeline, name)
     raise AttributeError(name)
 
 
 def _pipeline(name):
     """Resolve shared orchestration helpers lazily, avoiding import cycles."""
-    from dashcam_exporter import pipeline
+    from dashcam_exporter.application.workflow import pipeline
     return getattr(pipeline, name)
 
 class Console(uploader.Ui):
@@ -57,7 +58,7 @@ class Console(uploader.Ui):
         # Outcome it returns. Without it every plugin child left the
         # streamer's own "Deploy [####] 100% 0:34  completed" behind, which is
         # this module announcing somebody else's work in its own words.
-        from dashcam_exporter.pipeline import run_stream, Readout
+        from dashcam_exporter.application.workflow.pipeline import run_stream, Readout
         rc, _lines = run_stream(Child(cmd, cwd, env=env),
                                 Readout(label, parser, quiet_finish=True))
         return rc

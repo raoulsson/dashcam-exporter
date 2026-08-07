@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dashcam_exporter.adapters import DdpaiDataAdapter
+from dashcam_exporter.infrastructure.adapters import DdpaiDataAdapter
 
 
 class DdpaiAdapterTest(unittest.TestCase):

@@ -397,8 +397,9 @@ not offer:
 ./make-trips-rendered.sh 8 --output-height 720  # one trip, smaller
 ```
 
-`dashcam_exporter.renderer` is the renderer underneath (run it with
-`python -m dashcam_exporter.renderer`); `--import-dir` (or its alias `--root`)
+`dashcam_exporter.infrastructure.media.renderer` is the renderer underneath
+(run it with `python -m dashcam_exporter.infrastructure.media.renderer`);
+`--import-dir` (or its alias `--root`)
 names the tree to render, and `--help` lists the rest.
 
 Renders are restartable — a finished clip is not re-encoded, so an interrupted

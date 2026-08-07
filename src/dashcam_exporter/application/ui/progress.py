@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 
-from dashcam_exporter.term import C, human_secs, term_width
+from dashcam_exporter.application.ui.term import C, human_secs, term_width
 
 # ---------------------------------------------------------------------------
 # Live output area: a progress bar (or spinner) plus the raw last line, redrawn

@@ -65,20 +65,21 @@ from pathlib import Path
 # and the world is the one snapshot both judge. This module keeps the
 # machinery — the functions that DO the work — and asks the items everything
 # else.
-from dashcam_exporter import guards, items, menu, uploader
-from dashcam_exporter.runtime import Child, FAIL_TAIL_LINES, _reader
-from dashcam_exporter.config import (PRIVATE_KEYS, as_bool, card_root,
+from dashcam_exporter.domain.menu import guards, items, menu
+from dashcam_exporter.application.ports import uploader
+from dashcam_exporter.infrastructure.runtime.runtime import Child, FAIL_TAIL_LINES, _reader
+from dashcam_exporter.infrastructure.config import (PRIVATE_KEYS, as_bool, card_root,
                                      load_config, load_env)
-from dashcam_exporter import world as W
-from dashcam_exporter.checkout import RealCheckout  # noqa: F401
-from dashcam_exporter.menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
+from dashcam_exporter.domain.model import world as W
+from dashcam_exporter.application.ports.checkout import RealCheckout  # noqa: F401
+from dashcam_exporter.domain.menu.menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                   UPLOAD, CLEAN_WS, ERASE_CARD)
 
 # The terminal itself: how things are spelled, how wide it is, the colours,
 # and the progress bars. Moved out whole; imported back under the same names
 # so every call site below still reads the way it always did.
-from dashcam_exporter.term import C, human_age, human_bytes, human_secs, rule, term_width, tilde
-from dashcam_exporter.progress import (Bar, Live, Waiting, _bar_line, _erase_line,  # noqa: F401
+from dashcam_exporter.application.ui.term import C, human_age, human_bytes, human_secs, rule, term_width, tilde
+from dashcam_exporter.application.ui.progress import (Bar, Live, Waiting, _bar_line, _erase_line,  # noqa: F401
                       _eta, _still_bar, _sweep_line, _write_line, show_cursor,
                       waiting)
 
@@ -86,19 +87,19 @@ from dashcam_exporter.progress import (Bar, Live, Waiting, _bar_line, _erase_lin
 # under the same spellings, so no call site anywhere changed: `screens` is
 # every line the operator reads, `results` is what an outcome is called,
 # and `edition` is which install this is and what version it says.
-from dashcam_exporter.edition import (CHECKOUT, COFFEE_URL, EXPORTER_DIR, REPO_URL,  # noqa: F401
+from dashcam_exporter.infrastructure.version.edition import (CHECKOUT, COFFEE_URL, EXPORTER_DIR, REPO_URL,  # noqa: F401
                      SPONSORS_URL, SRC_DIR, VERSION_FALLBACK, VERSION_FILE,
                      VERSION_MAJOR, version, _already_says, _commit_count,
                      _counted, _counted_or_recalled, _countable, _read_version,
                      _recalled, _remembered, _try_write, _version_of,
                      _write_version)
-from dashcam_exporter.results import (ABORTED, Aborted, COMPLETING, FAILED, RAN,  # noqa: F401
+from dashcam_exporter.application.workflow.results import (ABORTED, Aborted, COMPLETING, FAILED, RAN,  # noqa: F401
                      SATISFIED, SKIPPED, StepResult, record,
                      _because, _changed_the_input, _crash_log_line,
                      _did_real_work, _log_crash, _nothing_to_do_lines,
                      _reset_quietly, _stamp_elapsed, _stayed_lines,
                      _tell_the_plugin, _write_crash)
-from dashcam_exporter.screens import (ORPHAN_LIST, SHOWN, TIME_COL, _Grid,  # noqa: F401
+from dashcam_exporter.application.ui.screens import (ORPHAN_LIST, SHOWN, TIME_COL, _Grid,  # noqa: F401
                      _NO_EDGES, _PER_ROW, _LABEL_W, _STATUS_TAGS, _about,
                      _about_paragraphs, _blocked_line, _blocked_lines,
                      _cell_width, _colon, _dated, _destructive_list,
@@ -115,8 +116,8 @@ from dashcam_exporter.screens import (ORPHAN_LIST, SHOWN, TIME_COL, _Grid,  # no
 # Reading the operator's key or line. Imported back under the same names,
 # and the module itself too, so a test can patch the prompt where it lives
 # rather than through this file's re-export.
-from dashcam_exporter import prompt                         # noqa: F401
-from dashcam_exporter.prompt import (_HINTED, _echoed, _from_key, _help_command,  # noqa: F401
+from dashcam_exporter.application.ui import prompt           # noqa: F401
+from dashcam_exporter.application.ui.prompt import (_HINTED, _echoed, _from_key, _help_command,  # noqa: F401
                     _help_key, _hint_lines, _key_or_help, _meaning,
                     _one_char, _one_char_at, _printable, _raw_capable,
                     _raw_read, _read_answer, _readline_safe, _typed_answer,
@@ -3168,7 +3169,7 @@ def load_groups(ctx, root, refresh=False):
                 # the child's sys.path[0] -- src/, which is what lets that
                 # module import its siblings the way make-trips-rendered.sh
                 # already runs it.
-                [renderer_python(ctx), "-u", "-m", "dashcam_exporter.renderer", "--print-groups",
+                [renderer_python(ctx), "-u", "-m", "dashcam_exporter.infrastructure.media.renderer", "--print-groups",
                  "--root", str(root), "--out", str(ctx.out_dir)]
                 + ctx.config_args + ctx.scan_args,
                 ctx.exporter, env=_renderer_env(ctx), stdout_file=tmp),
@@ -3639,7 +3640,7 @@ def write_contact_sheet(ctx, root, payload, previews_dir, stills):
         "import with the pipeline's drop step — the clips listed on a card are exactly "
         "the files that step deletes.</p></header>"
         "<main>%s</main>"
-        "<footer>Generated by pipeline.py from dashcam_exporter.renderer "
+        "<footer>Generated by pipeline.py from dashcam_exporter.infrastructure.media.renderer "
         "--print-groups. Self-contained: no network, no scripts.</footer>"
         "</body></html>" % (
             html.escape(root.name), PREVIEW_CSS, len(trips), html.escape(str(root)),
@@ -6930,7 +6931,7 @@ def _outcome(result):
 
 # Publishing collaborators live in their own cohesive module.  Re-exporting
 # these names keeps the historical pipeline API stable for callers/tests.
-from dashcam_exporter.publishing import (
+from dashcam_exporter.application.workflow.publishing import (
     Console, PublishingCollaborator, LocalPage, TargetBuild, TargetPublish,
     NoPublisher, _handed_over, _holds, _long_description, _with_the_count,
     _delta_words, _logged, _closed_on, _status_of, _did_or_settled,

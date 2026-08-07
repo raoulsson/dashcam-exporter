@@ -29,7 +29,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-from dashcam_exporter.checkout import Checkout, FakeCheckout, RealCheckout  # noqa: E402
+from dashcam_exporter.application.ports.checkout import Checkout, FakeCheckout, RealCheckout  # noqa: E402
 
 
 def load_pipeline():
@@ -78,15 +78,15 @@ class TestDerivedPaths(unittest.TestCase):
 class TestRealCheckout(unittest.TestCase):
 
     def test_a_module_under_src_names_the_checkout_above_it(self):
-        c = RealCheckout(REPO / "src" / "dashcam_exporter" / "pipeline.py")
+        c = RealCheckout(REPO / "src" / "dashcam_exporter" / "application" / "workflow" / "pipeline.py")
         self.assertEqual(c.root(), REPO)
         self.assertEqual(c.src(), REPO / "src")
 
     def test_the_files_it_names_are_really_there(self):
-        c = RealCheckout(REPO / "src" / "dashcam_exporter" / "pipeline.py")
+        c = RealCheckout(REPO / "src" / "dashcam_exporter" / "application" / "workflow" / "pipeline.py")
         self.assertTrue(c.config_file().is_file())
         self.assertTrue(c.src().is_dir())
-        self.assertTrue((c.src() / "dashcam_exporter" / "uploader.py").is_file())
+        self.assertTrue((c.src() / "dashcam_exporter" / "application" / "ports" / "uploader.py").is_file())
 
 
 class TestWhatThePipelineDerives(unittest.TestCase):
@@ -153,15 +153,15 @@ class TestTheRendererIsWhereThePipelineSaysItIs(unittest.TestCase):
     """
 
     def test_the_renderer_module_the_pipeline_launches_is_importable(self):
-        text = (REPO / "src" / "dashcam_exporter" / "pipeline.py").read_text()
+        text = (REPO / "src" / "dashcam_exporter" / "application" / "workflow" / "pipeline.py").read_text()
         launched = re.findall(r'"-m", "([a-z_\.]+)"', text)
-        self.assertIn("dashcam_exporter.renderer", launched)
-        module = REPO / "src" / "dashcam_exporter" / "renderer.py"
+        self.assertIn("dashcam_exporter.infrastructure.media.renderer", launched)
+        module = REPO / "src" / "dashcam_exporter" / "infrastructure" / "media" / "renderer.py"
         self.assertTrue(module.is_file(), "the packaged renderer is missing")
 
     def test_no_child_is_launched_by_a_bare_module_name(self):
         """The shape of the bug, not just this instance of it."""
-        text = (REPO / "src" / "dashcam_exporter" / "pipeline.py").read_text()
+        text = (REPO / "src" / "dashcam_exporter" / "application" / "workflow" / "pipeline.py").read_text()
         self.assertNotIn('"-u", "make_dashcam_videos.py"', text)
 
 
