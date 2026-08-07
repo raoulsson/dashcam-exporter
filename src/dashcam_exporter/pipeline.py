@@ -66,6 +66,9 @@ from pathlib import Path
 # machinery — the functions that DO the work — and asks the items everything
 # else.
 from dashcam_exporter import guards, items, menu, uploader
+from dashcam_exporter.runtime import Child, FAIL_TAIL_LINES, _reader
+from dashcam_exporter.config import (PRIVATE_KEYS, as_bool, card_root,
+                                     load_config, load_env)
 from dashcam_exporter import world as W
 from dashcam_exporter.checkout import RealCheckout  # noqa: F401
 from dashcam_exporter.menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
@@ -148,7 +151,7 @@ FALLBACK_IMPORT_ROOT = "~/dashcam-data/import"    # import-sd-card.sh DEST_ROOT
 # setting means here exactly what it means there.
 # ---------------------------------------------------------------------------
 
-def card_root(configured):
+r'''def card_root(configured):
     """The directory that actually holds DCIM, at or under what was configured.
 
     A card copied off with Finder usually arrives wrapped: SimCard31/this/DCIM
@@ -280,6 +283,7 @@ def load_env(path):
         k, v = line.split("=", 1)
         out[k.strip()] = v.strip().strip('"').strip("'")
     return out
+'''
 
 
 def _loaded_plugin(spec, exporter_dir):
@@ -451,7 +455,7 @@ class Ctx:
 # ---------------------------------------------------------------------------
 
 
-def _reader(stream, q):
+def _legacy_reader(stream, q):
     """Split the child's output on BOTH \\n and \\r.
 
     rsync --info=progress2 and many upload tools draw their progress by rewriting one
@@ -501,7 +505,7 @@ def _renderer_env(ctx):
 FAIL_TAIL_LINES = 40
 
 
-class Child:
+class _LegacyChild:
     """What to run: the command, where, and what it must be told.
 
     Half of what run_stream used to take as loose arguments. Split from
