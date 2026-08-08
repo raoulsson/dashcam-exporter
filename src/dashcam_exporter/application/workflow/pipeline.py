@@ -339,7 +339,7 @@ class Ctx:
         env = load_env(self.checkout.env_file())
         for key in PRIVATE_KEYS:
             name = "SET_" + key.upper()
-            val = os.environ.get(name) or env.get(name)
+            val = os.environ.get(name) or env.get(name) or env.get(key.upper())
             if val:
                 self.cfg[key] = val
 
