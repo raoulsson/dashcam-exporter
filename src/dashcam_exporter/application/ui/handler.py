@@ -48,6 +48,13 @@ class UiHandler(ABC):
     def status(self, facts):
         """The status line under the title."""
 
+    def set_splash(self, lines):
+        """Offer the launch art (the ASCII banner) as a splash. The framed
+        backend shows it centered for a beat and returns True (it consumed it,
+        so the caller need not also print it); the stream backend returns False,
+        and the caller prints the banner into the scroll as it always has."""
+        return False
+
     @abstractmethod
     def block(self, lines):
         """A screen: ready-made lines (help, info, the summary table)."""

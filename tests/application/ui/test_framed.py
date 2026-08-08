@@ -125,6 +125,26 @@ class TheSplashShowsTheInfoCentered(_NoColour):
         self.assertIn("workspace ~/dashcam-data", out)
 
 
+class TheSplashCanCarryLaunchArt(_NoColour):
+    def test_set_splash_makes_the_frame_paint_the_art_centered(self):
+        h = framed.FramedUiHandler(splash_seconds=0.01)
+        h._size = lambda: (24, 80)
+        consumed = h.set_splash(["  __ ART __  ", " the banner "])
+        self.assertTrue(consumed)          # framed consumes the banner
+        cap = io.StringIO()
+        saved = sys.stdout
+        sys.stdout = cap
+        try:
+            h.open()
+            h.close()
+        finally:
+            sys.stdout = saved
+        out = cap.getvalue()
+        self.assertIn("__ ART __", out)
+        self.assertIn("the banner", out)
+        self.assertNotIn("+-", out)        # art, not the fallback card
+
+
 class TheLogIsARingOfTheVisibleHeight(_NoColour):
     def test_it_keeps_only_the_last_screenful(self):
         h = framed.FramedUiHandler(splash_seconds=0)

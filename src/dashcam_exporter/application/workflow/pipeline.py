@@ -8021,9 +8021,15 @@ def _start(ctx):
     ctx.ui.title("dashcam-exporter",
                  tilde(ctx.selected_import) if ctx.selected_import else "")
     ctx.ui.status("workspace %s" % tilde(ctx.workspace))
+    banner = _banner_lines(ctx)
+    # The framed backend shows the banner as the launch splash (and says so);
+    # the stream backend does not, so it prints the banner into the scroll as
+    # it always has.
+    splashed = ctx.ui.set_splash(banner)
     ctx.ui.open()
     try:
-        _print_all(_banner_lines(ctx))
+        if not splashed:
+            _print_all(banner)
         # Checked before the status screen: there is nothing useful to show if
         # the numbers behind it would come from the wrong grouping.
         if not require_ego_motion(ctx):

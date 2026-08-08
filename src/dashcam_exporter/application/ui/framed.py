@@ -187,6 +187,7 @@ class FramedUiHandler(UiHandler):
         self._menu_lines = []
         self._menu_rows = Layout.DEFAULT_MENU_ROWS
         self._splash_seconds = splash_seconds
+        self._splash_art = ()
         self._log = collections.deque()
         self._real_stdout = None
         self._open = False
@@ -215,11 +216,35 @@ class FramedUiHandler(UiHandler):
         self._splash()          # a centered card of the same info, ~1s
         self.repaint()          # then the frame, with that info on top
 
+    def set_splash(self, lines):
+        self._splash_art = tuple(lines or ())
+        return True
+
     def _splash(self):
-        """A centered card -- the same identity the top band then carries -- held
-        for a beat so a launched window announces itself before the menu."""
+        """Held for a beat when a window is launched. Shows the launch art (the
+        ASCII banner) centered when it has been given some; otherwise a small
+        card of the identity."""
         if not self._splash_seconds:
             return
+        if self._splash_art:
+            self._paint_splash_art()
+        else:
+            self._paint_splash_card()
+        if self._real_stdout is not None and self._real_stdout.isatty():
+            time.sleep(self._splash_seconds)
+        self._write(CLEAR)
+
+    def _paint_splash_art(self):
+        L = self.layout
+        art = [ln for ln in self._splash_art if _plain(ln).strip()]
+        top = max(1, (L.rows - len(art)) // 2)
+        buf = ""
+        for i, ln in enumerate(art):
+            left = max(1, (L.cols - len(_plain(ln))) // 2 + 1)
+            buf += _at(top + i, left, ln)
+        self._write(buf)
+
+    def _paint_splash_card(self):
         L = self.layout
         lines = [C.bold(self._title)]
         if self._subtitle:
@@ -237,10 +262,6 @@ class FramedUiHandler(UiHandler):
                        "|" + (" " * lp) + ln + (" " * (pad - lp)) + "|")
         buf += _at(top + 1 + len(lines), left, "+" + "-" * inner + "+")
         self._write(buf)
-        if self._splash_seconds and self._real_stdout is not None \
-                and self._real_stdout.isatty():
-            time.sleep(self._splash_seconds)
-        self._write(CLEAR)
 
     def close(self):
         if not self._open:

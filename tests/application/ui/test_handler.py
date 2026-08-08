@@ -66,6 +66,9 @@ class StreamUiHandlerDrivesTheExistingPainters(unittest.TestCase):
         from dashcam_exporter.application.ui.progress import Waiting
         self.assertIsInstance(H.StreamUiHandler().waiting("Querying..."), Waiting)
 
+    def test_set_splash_is_declined_so_the_banner_prints_to_the_scroll(self):
+        self.assertFalse(H.StreamUiHandler().set_splash(["banner"]))
+
     def test_log_prints_the_line(self):
         out = io.StringIO()
         with redirect_stdout(out):
