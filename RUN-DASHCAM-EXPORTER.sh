@@ -16,6 +16,18 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Keep one complete transcript per launcher invocation.  This is deliberately
+# here, before Python starts, so interpreter selection, startup errors, menu
+# output, plugin callbacks and child-process output all share the same record.
+WORKSPACE_FROM_CONFIG="$(sed -n 's/^workspace[[:space:]]*=[[:space:]]*//p' config.txt 2>/dev/null | head -n 1)"
+WORKSPACE_FROM_CONFIG="${WORKSPACE_FROM_CONFIG:-$HOME/dashcam-data}"
+WORKSPACE_FROM_CONFIG="${WORKSPACE_FROM_CONFIG/#\~/$HOME}"
+RUN_LOG_DIR="$WORKSPACE_FROM_CONFIG/logs"
+mkdir -p "$RUN_LOG_DIR"
+RUN_LOG="$RUN_LOG_DIR/run-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a "$RUN_LOG") 2>&1
+echo "run log: $RUN_LOG"
+
 RED=$'\033[31m'; GRN=$'\033[32m'; DIM=$'\033[2m'; BLD=$'\033[1m'; OFF=$'\033[0m'
 [ -t 1 ] || { RED=""; GRN=""; DIM=""; BLD=""; OFF=""; }
 
