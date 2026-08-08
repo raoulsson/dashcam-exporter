@@ -25,6 +25,7 @@ from abc import ABC, abstractmethod
 
 from dashcam_exporter.application.ui.term import C
 from dashcam_exporter.application.ui import screens
+from dashcam_exporter.application.ui.progress import Live
 
 
 class UiHandler(ABC):
@@ -45,6 +46,17 @@ class UiHandler(ABC):
         """The session log table drawn on the way out (and inside Progress)."""
 
     @abstractmethod
+    def log(self, text=""):
+        """One committed line of output -- it stays where it lands."""
+
+    @abstractmethod
+    def new_live(self):
+        """A live area for a streamed step: an object with draw(lines)/close()
+        and a `height`/`enabled`, redrawn in place. The stream backend hands
+        back the scrolling Live; a framed backend hands back a drawer that
+        paints the pinned progress strip instead."""
+
+    @abstractmethod
     def done(self, what):
         """The one line a step leaves behind when it worked."""
 
@@ -63,6 +75,12 @@ class StreamUiHandler(UiHandler):
 
     def summary(self, ctx, close=True):
         screens.print_summary(ctx, close)
+
+    def log(self, text=""):
+        print(text)
+
+    def new_live(self):
+        return Live(enabled=C.enabled)
 
     def done(self, what):
         print(C.green("  100%% - %s." % what))

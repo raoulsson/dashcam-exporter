@@ -771,7 +771,7 @@ def run_stream(child, readout):
     t = threading.Thread(target=_reader, args=(stream, q), daemon=True)
     t.start()
 
-    live = Live(enabled=C.enabled)
+    live = ui_handler.active().new_live()
     readout.begin()
     lines = []
     done = False
@@ -794,7 +794,7 @@ def run_stream(child, readout):
                 # No live area (piped output or --no-color): print everything
                 # plainly. Suppressing it here would leave a long render
                 # looking like a hung terminal.
-                print(item)
+                ui_handler.active().log(item)
                 continue
             readout.feed(item.rstrip())
             readout.tick()
@@ -808,7 +808,7 @@ def run_stream(child, readout):
         # A finished step should leave a line behind saying so.
         if rc == 0 and live.enabled and not readout.quiet_finish:
             live.draw([readout.finish_line()])
-            print()          # commit that line; the next erase starts below it
+            ui_handler.active().log()   # commit that line; next erase starts below it
         elif rc == 0 and live.enabled:
             live.close()     # the caller has its own sentence for this
             live.height = 0
@@ -819,12 +819,13 @@ def run_stream(child, readout):
         # The command line is this module's business: which flags it composed
         # and where the script lives. What the operator can act on is the tail
         # below, which is what the child said before it gave up.
-        print(C.red("  %s failed (exit %d). Last lines:" % (readout.label, rc)))
+        ui = ui_handler.active()
+        ui.log(C.red("  %s failed (exit %d). Last lines:" % (readout.label, rc)))
         tail = [l for l in lines if l.strip()][-FAIL_TAIL_LINES:]
         if tail:
-            print(C.dim("  --- last %d lines of output ---" % len(tail)))
+            ui.log(C.dim("  --- last %d lines of output ---" % len(tail)))
             for l in tail:
-                print(C.dim("  " + l))
+                ui.log(C.dim("  " + l))
     return rc, lines
 
 

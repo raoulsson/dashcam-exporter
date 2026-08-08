@@ -58,6 +58,17 @@ class StreamUiHandlerDrivesTheExistingPainters(unittest.TestCase):
             H.StreamUiHandler().menu("CTX", "ITEMS", "POS", "WORLD")
         self.assertEqual(seen["args"], ("CTX", "ITEMS", "POS", "WORLD"))
 
+    def test_new_live_hands_back_a_stream_live(self):
+        from dashcam_exporter.application.ui.progress import Live
+        self.assertIsInstance(H.StreamUiHandler().new_live(), Live)
+
+    def test_log_prints_the_line(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            H.StreamUiHandler().log("a streamed line")
+            H.StreamUiHandler().log()
+        self.assertEqual(out.getvalue(), "a streamed line\n\n")
+
     def test_summary_delegates_to_screens_print_summary(self):
         from unittest import mock
         from dashcam_exporter.application.ui import screens
