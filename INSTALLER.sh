@@ -121,10 +121,14 @@ echo "${BLD}verify${OFF}"
 VERIFY_ERR="$(mktemp -t dashcam-exporter-verify.XXXXXX)"
 VERIFY_OK=1
 for module in cv2 numpy staticmap PIL faster_whisper pyannote.audio; do
+    printf "  checking %-18s" "$module"
     if ! "$VPY" -c "import ${module}" >/dev/null 2>"$VERIFY_ERR"; then
+        echo
         bad "import failed: ${module}"
         sed -n '1,4p' "$VERIFY_ERR" | sed 's/^/        /'
         VERIFY_OK=0
+    else
+        echo " ok"
     fi
 done
 rm -f "$VERIFY_ERR"
