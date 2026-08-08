@@ -3583,7 +3583,7 @@ main{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
       overflow:hidden;display:grid;grid-template-columns:minmax(0,420px) minmax(0,1fr)}
 @media (max-width:860px){.card{grid-template-columns:1fr}}
-.shot{background:#000;display:block}.shot-pair{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:#000}
+.shot{background:#000;display:block}.shot-pair{display:grid;grid-template-columns:1fr;gap:4px;background:#000}
 .shot img{display:block;width:100%;height:auto}
 .shot .none{padding:48px 16px;text-align:center;color:var(--faint);font-size:13px}
 .body{padding:16px 18px}
