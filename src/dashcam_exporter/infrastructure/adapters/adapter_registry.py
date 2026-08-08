@@ -54,8 +54,10 @@ class AdapterRegistry:
 def default_registry() -> AdapterRegistry:
     """Every adapter shipped with the tool.
 
-    Imported here rather than at module scope so the registry module stays
-    free of any particular camera.
+    Imported inside the function rather than at module scope so the registry
+    module stays free of any particular camera.
     """
+    from .blackvue.blackvue_adapter import BlackvueAdapter
     from .ddpai.ddpai_adapter import DdpaiAdapter
-    return AdapterRegistry([DdpaiAdapter()])
+    from .viofo.viofo_adapter import ViofoAdapter
+    return AdapterRegistry([DdpaiAdapter(), BlackvueAdapter(), ViofoAdapter()])
