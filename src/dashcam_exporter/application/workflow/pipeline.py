@@ -3356,6 +3356,7 @@ def write_clip_review(ctx, trips):
             made += was_made
     bar.close()
     dropped = _drop_orphans(root, seen)
+    _write_clip_review_overview(root, trips)
     return n_done, root, made, dropped
 
 
@@ -3379,6 +3380,55 @@ def _clip_review_order(clips):
         return (stamp is None, stamp or "", mtime, path.name)
 
     return tuple(sorted(clips, key=key))
+
+
+def _write_clip_review_overview(root, trips):
+    """Write a self-contained chronological grid of every clip still."""
+    groups = []
+    for trip in trips:
+        folder = _review_folder(root, trip)
+        images = sorted(
+            (p for p in folder.glob("*.jpg") if _real_file(p)),
+            key=lambda p: (p.name.split("_", 1)[0].zfill(8), p.name),
+        ) if folder.is_dir() else []
+        if not images:
+            continue
+        cards = []
+        for image in images:
+            rel = html.escape(os.path.relpath(str(image), str(root)))
+            cards.append(
+                '<figure><a href="%s"><img loading="lazy" src="%s" alt="%s">'
+                '</a><figcaption>%s</figcaption></figure>'
+                % (rel, rel, html.escape(image.stem), html.escape(image.name)))
+        label = "Trip %02d — %s %s" % (
+            trip["index"], trip.get("day", ""),
+            str(trip.get("start", ""))[11:16].replace(":", "-"),
+        )
+        groups.append('<section><h2>%s</h2><div class="grid">%s</div></section>'
+                      % (html.escape(label), "".join(cards)))
+
+    document = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clip review</title>
+<style>
+:root{color-scheme:dark;--bg:#08111d;--card:#101d2d;--line:#263b54;--ink:#e8eef6;--dim:#9fb2c9}
+*{box-sizing:border-box}body{margin:0;padding:24px;background:var(--bg);color:var(--ink);
+font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header{max-width:1500px;margin:0 auto 24px}h1{margin:0 0 4px;font-size:24px}
+p{color:var(--dim);margin:0}main{max-width:1500px;margin:auto}section{margin:0 0 28px}
+h2{font-size:17px;font-weight:500;border-bottom:1px solid var(--line);padding-bottom:7px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+figure{margin:0;background:var(--card);border:1px solid var(--line);border-radius:7px;overflow:hidden}
+img{display:block;width:100%%;aspect-ratio:16/9;object-fit:cover;background:#000}
+figcaption{padding:7px 9px;color:var(--dim);font:12px ui-monospace,SFMono-Regular,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+a{color:inherit;text-decoration:none}
+</style></head><body><header><h1>Clip review</h1>
+<p>Chronological stills by trip. Click any frame to open it full size.</p></header>
+<main>%s</main></body></html>""" % "".join(groups)
+    index = root / "index.html"
+    index.write_text(document, encoding="utf-8")
+    return index
 
 
 def _drop_orphans(folder, keep):
@@ -3843,6 +3893,7 @@ def step_preview(ctx):
                  tilde(index)))
     print(C.green("  100%% - %s clip stills to walk the boundaries by, under %s."
                   % (C.yellow("%d" % shots), tilde(review))))
+    print(C.dim("  Clip grid: %s" % tilde(review / "index.html")))
     # ALWAYS, including when it is "0 new". The two lines above are the same on
     # every run, so a pass that rebuilt nothing looks exactly like one that
     # rebuilt everything -- and a step that finishes in half a second reads as

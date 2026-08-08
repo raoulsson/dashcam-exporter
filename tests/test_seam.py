@@ -1639,6 +1639,20 @@ class TestPreviewBuildsByDelta(SeamTest):
         got, _made = P._one_clip_still(src, folder, 100, 3)
         self.assertEqual(got.name, "100_20260807150551_0060.jpg")
 
+    def test_clip_review_writes_a_trip_grid(self):
+        b = self.bench()
+        root = b.ctx.out_dir / P.CLIP_REVIEW_DIRNAME
+        folder = root / "trip_01_2026-08-07_15-05"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "01_20260807150551_0060.jpg").write_text("jpg")
+        index = P._write_clip_review_overview(root, [{
+            "index": 1, "day": "2026-08-07", "start": "2026-08-07T15:05:51",
+        }])
+        self.assertEqual(index, root / "index.html")
+        html = index.read_text()
+        self.assertIn("Clip review", html)
+        self.assertIn("trip_01_2026-08-07_15-05/01_20260807150551_0060.jpg", html)
+
 
 class TestEveryExcludedTripIsCounted(SeamTest):
     """He excluded three trips and the progress block said one.
