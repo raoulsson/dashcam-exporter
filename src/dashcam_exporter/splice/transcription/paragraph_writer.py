@@ -67,7 +67,7 @@ class ParagraphWriter:
         """Write the current paragraph and immediately flush the destination."""
         if not self._fragments:
             return
-        paragraph = " ".join(self._fragments)
+        paragraph = self._dedupe_repetition(" ".join(self._fragments))
         if self._speaker is not None:
             paragraph = f"{self._speaker}: {paragraph}"
         self._destination.write(paragraph + "\n\n")
@@ -132,7 +132,21 @@ class ParagraphWriter:
     def _clean_text(text: str) -> str:
         cleaned = " ".join(text.split())
         cleaned = re.sub(r"\s+([,.!?;:])", r"\1", cleaned)
-        return re.sub(r"([,.!?;:])(?=[A-Za-z])", r"\1 ", cleaned)
+        cleaned = re.sub(r"([,.!?;:])(?=[A-Za-z])", r"\1 ", cleaned)
+        if cleaned.rstrip(".").strip().lower() in {"sd card loaded", "sd card loading"}:
+            return ""
+        return cleaned
+
+    @staticmethod
+    def _dedupe_repetition(text: str) -> str:
+        # Whisper can loop on a refrain or a radio advert. Collapse repeated
+        # short word groups while preserving the first occurrence and timing.
+        pattern = re.compile(r"\b((?:[\w']+\s+){0,5}[\w']+)(?:\s+\1){2,}", re.I)
+        previous = None
+        while previous != text:
+            previous = text
+            text = pattern.sub(r"\1", text)
+        return text
 
     @staticmethod
     def _ends_sentence(text: str) -> bool:

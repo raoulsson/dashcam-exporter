@@ -4978,7 +4978,9 @@ def step_transcribe(ctx, world):
                             show(path, progress_ref[0])
                         def on_segment(segment):
                             latest_text[0] = segment.text
-                            text_queue.append(re.sub(r"\s+", " ", segment.text).strip())
+                            shown = re.sub(r"\s+", " ", segment.text).strip()
+                            if shown.rstrip(".").strip().lower() not in {"sd card loaded", "sd card loading"}:
+                                text_queue.append(shown)
                             show(path, 35 + min(40.0, segment.end_seconds) * .40)
                         transcription = transcriber.transcribeMp3(
                             enhanced,
@@ -5005,7 +5007,9 @@ def step_transcribe(ctx, world):
                             show(path, progress_ref[0])
                         def on_segment(segment):
                             latest_text[0] = segment.text
-                            text_queue.append(re.sub(r"\s+", " ", segment.text).strip())
+                            shown = re.sub(r"\s+", " ", segment.text).strip()
+                            if shown.rstrip(".").strip().lower() not in {"sd card loaded", "sd card loading"}:
+                                text_queue.append(shown)
                             writer.write_segment(segment)
                         transcription = transcriber.transcribeMp3(
                             enhanced,
