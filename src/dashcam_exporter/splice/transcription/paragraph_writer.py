@@ -130,7 +130,9 @@ class ParagraphWriter:
 
     @staticmethod
     def _clean_text(text: str) -> str:
-        return " ".join(text.split())
+        cleaned = " ".join(text.split())
+        cleaned = re.sub(r"\s+([,.!?;:])", r"\1", cleaned)
+        return re.sub(r"([,.!?;:])(?=[A-Za-z])", r"\1 ", cleaned)
 
     @staticmethod
     def _ends_sentence(text: str) -> bool:
