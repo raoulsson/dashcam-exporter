@@ -74,10 +74,10 @@ def _raw_capable():
 def _one_char_at(prompt):
     if not _raw_capable():
         return None
-    # The selector is the golden action accent; the character echoed below is
+    # The selector is the green menu marker; the character echoed below is
     # cyan so the command just entered is visually distinct from the prompt.
     if prompt.endswith("> "):
-        sys.stdout.write(C.bold(prompt[:-2]) + C.gold(">") + " ")
+        sys.stdout.write(C.bold(prompt[:-2]) + C.green(">") + " ")
     else:
         sys.stdout.write(C.bold(prompt))
     sys.stdout.flush()
