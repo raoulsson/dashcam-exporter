@@ -360,7 +360,10 @@ class TranscribeTrips(MenuItem):
              "transcript plus paragraph timeline beside it. You can choose "
              "plain transcription or speaker diarization each run. Existing "
              "and partial renders are both eligible.")
-    OUT = Strategy.both(Edges.of(TRANSCRIBE))
+    # Transcription is repeatable, but it must not become a dead-end: after it
+    # finishes the operator can rebuild, upload, clean, or erase just as after
+    # rendering. The uploader strategy adds Upload Website to the same edge.
+    OUT = Edges.and_upload(TRANSCRIBE, BUILD, CLEAN_WS, ERASE_CARD)
     IN_AUTHORED = Strategy.both(frozenset({META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD}))
 
     def evaluate(self, world) -> Verdict:
@@ -407,8 +410,8 @@ class BuildWebsite(MenuItem):
                                       CLEAN_WS, ERASE_CARD),
     }
     IN_AUTHORED = {
-        Strategy.UPLOADER: frozenset({BUILD, META, PREVIEW, EXCLUDE, RENDER, UPLOAD}),
-        Strategy.LOCAL_PAGE: frozenset({BUILD, META, PREVIEW, EXCLUDE, RENDER}),
+        Strategy.UPLOADER: frozenset({BUILD, META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE, UPLOAD}),
+        Strategy.LOCAL_PAGE: frozenset({BUILD, META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE}),
     }
 
     def __init__(self, strategy, work, inbound):
@@ -500,7 +503,7 @@ class UploadWebsite(MenuItem):
         Strategy.LOCAL_PAGE: Edges.of(),
     }
     IN_AUTHORED = {
-        Strategy.UPLOADER: frozenset({UPLOAD, BUILD}),
+        Strategy.UPLOADER: frozenset({UPLOAD, BUILD, TRANSCRIBE}),
         Strategy.LOCAL_PAGE: frozenset(),
     }
 
@@ -625,9 +628,9 @@ class CleanWorkspace(Destructive):
     OUT = Strategy.both(Edges.of(IMPORT, CLEAN_WS))
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({IMPORT, META, PREVIEW, EXCLUDE, RENDER,
-                                          BUILD, UPLOAD}),
+                                          BUILD, UPLOAD, TRANSCRIBE}),
         Strategy.LOCAL_PAGE: frozenset({IMPORT, META, PREVIEW, EXCLUDE,
-                                                   RENDER, BUILD}),
+                                                   RENDER, BUILD, TRANSCRIBE}),
     }
 
     def evaluate(self, world) -> Verdict:
@@ -719,9 +722,9 @@ class DeleteSimData(Destructive):
     OUT = Strategy.both(StepBack())
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({IMPORT, META, PREVIEW, EXCLUDE, RENDER,
-                                          BUILD, UPLOAD}),
+                                          BUILD, UPLOAD, TRANSCRIBE}),
         Strategy.LOCAL_PAGE: frozenset({IMPORT, META, PREVIEW, EXCLUDE,
-                                                   RENDER, BUILD}),
+                                                   RENDER, BUILD, TRANSCRIBE}),
     }
 
     def evaluate(self, world) -> Verdict:
