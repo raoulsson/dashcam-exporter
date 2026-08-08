@@ -60,9 +60,25 @@ class Console(uploader.Ui):
         # streamer's own "Deploy [####] 100% 0:34  completed" behind, which is
         # this module announcing somebody else's work in its own words.
         from dashcam_exporter.application.workflow.pipeline import run_stream, Readout
-        rc, _lines = run_stream(Child(cmd, cwd, env=env),
-                                Readout(label, parser, quiet_finish=True))
+        rc, lines = run_stream(Child(cmd, cwd, env=env),
+                               Readout(label, parser, quiet_finish=True))
+        self._log_plugin_output(label, cmd, lines, rc)
         return rc
+
+    def _log_plugin_output(self, label, cmd, lines, rc):
+        """Keep the complete child stream, including lines used by parsers."""
+        try:
+            self._ctx.log_dir.mkdir(parents=True, exist_ok=True)
+            path = self._ctx.log_dir / "plugin-output.log"
+            with path.open("a", encoding="utf-8") as log:
+                log.write("\n[%s] %s (exit %d)\n" %
+                          (time.strftime("%Y-%m-%d %H:%M:%S"),
+                           " ".join(map(str, cmd)), rc))
+                for line in lines:
+                    log.write(line.rstrip("\n") + "\n")
+        except OSError:
+            # Logging must never turn a successful deploy into a failed one.
+            pass
 
 
 def _handed_over(ctx, world):
