@@ -64,7 +64,7 @@ class NothingSent(U.Uploader):
     def evaluate(self, workspace):
         return U.go()
 
-    def execute(self, workspace):
+    def execute(self, workspace, includeVideos=False):
         return U.did("nothing")
 
     def is_complete(self, trip_ids):

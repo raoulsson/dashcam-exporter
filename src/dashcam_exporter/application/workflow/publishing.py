@@ -250,7 +250,8 @@ class TargetPublish(TargetBuild):
 
     def execute(self, world):
         return _logged(self._ctx, _pipeline("UPLOAD"),
-                       lambda: self._act.execute(_handed_over(self._ctx, world)))
+                       lambda: self._act.execute(
+                           _handed_over(self._ctx, world), includeVideos=False))
 
 
 def _holds(act):

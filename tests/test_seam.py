@@ -164,7 +164,7 @@ class RecordingUploader(Recording, U.Uploader):
         self.script.calls.append("evaluate_upload")
         return _verdict(self.script.no_upload)
 
-    def execute(self, workspace):
+    def execute(self, workspace, includeVideos=False):
         self.script.saw("upload", workspace)
         return self._uploaded()
 
@@ -1166,7 +1166,7 @@ class RaisesMidBuild(RecordingBuilder):
 
 
 class RaisesMidUpload(RecordingUploader):
-    def execute(self, workspace):
+    def execute(self, workspace, includeVideos=False):
         self.script.calls.append("upload")
         raise RuntimeError("fell over half way through the upload")
 

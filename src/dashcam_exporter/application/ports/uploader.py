@@ -10,7 +10,8 @@ An act answers what a menu item already answers, and nothing more:
 
     describe()            what the menu row says about this act
     evaluate(workspace)   may it run — GO, SATISFIED, or BLOCKED with a reason
-    execute(workspace)    do it, and say what happened
+    execute(workspace, includeVideos=False)
+                          do it, optionally including heavyweight media
 
 The uploader answers one question beyond that, because it is the half that
 owns the connection to the destination:
@@ -421,6 +422,14 @@ class Uploader(Act):
     shut over footage whose only copy is local. Nothing about publishing early
     may soften that answer.
     """
+
+    @abstractmethod
+    def execute(self, workspace: Workspace, includeVideos: bool = False) -> Outcome:
+        """Deploy the website, optionally uploading video media as well.
+
+        ``includeVideos`` defaults to false so a page-only deploy is cheap and
+        safe; callers that explicitly want the media transport pass ``True``.
+        """
 
     @abstractmethod
     def is_complete(self, trip_ids) -> Evidence:

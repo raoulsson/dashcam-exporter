@@ -170,7 +170,7 @@ class LocalWebSiteUploader(Uploader):
             return go()
         return satisfied("%s already has the staged site" % _destination())
 
-    def execute(self, workspace) -> Outcome:
+    def execute(self, workspace, includeVideos: bool = False) -> Outcome:
         dest = _destination()
         workspace.ui.say("  a real uploader runs its transport here, roughly:")
         for line in FTP_SESSION.splitlines():
