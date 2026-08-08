@@ -49,3 +49,13 @@ class AdapterRegistry:
         raise NoAdapterFound(
             "No adapter named %r. Registered: %s"
             % (name, ", ".join(self.names) or "none"))
+
+
+def default_registry() -> AdapterRegistry:
+    """Every adapter shipped with the tool.
+
+    Imported here rather than at module scope so the registry module stays
+    free of any particular camera.
+    """
+    from .ddpai.ddpai_adapter import DdpaiAdapter
+    return AdapterRegistry([DdpaiAdapter()])
