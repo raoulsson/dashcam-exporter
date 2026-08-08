@@ -373,6 +373,10 @@ class Ctx:
                               or FALLBACK_WORKSPACE).expanduser()
         self.render_root = Path(self.cfg.get("import_dir")
                                 or (self.workspace / "import")).expanduser()
+        # `adapter` forces one camera when detection cannot settle it -- two
+        # adapters claiming one card, or a firmware that changed under a name
+        # we already know. Unset means detect, which is the normal case.
+        card_access.use_adapter(self.cfg.get("adapter"))
         # export_dir, because that is what the tool does and what the project
         # is called. `output_dir` and `out` are the names it had before and are
         # still read: a config written last month should not stop working
@@ -2830,9 +2834,26 @@ def step_progress(ctx, world):
 
 def _progress_lines(ctx, world):
     return tuple(filter(None, (
-        _imported_line(world), _excluded_line(world), _meta_line(world),
-        _rendered_line(world), _preview_line(world), _built_line(world),
-        _uploaded_line(world))))
+        _adapter_line(ctx, world), _imported_line(world), _excluded_line(world),
+        _meta_line(world), _rendered_line(world), _preview_line(world),
+        _built_line(world), _uploaded_line(world))))
+
+
+def _adapter_line(ctx, world):
+    """Which camera's grammar is being read, or that none is any more.
+
+    Worth a row of its own because it is the one fact that changes what every
+    other row means. "canonical" says the import has been normalised and no
+    camera is being interpreted at all; a name in brackets says the operator
+    pinned it in config.txt rather than letting detection decide.
+    """
+    source = world.imports[0] if world.imports else ctx.card
+    name = card_access.adapter_name(source)
+    if name is None:
+        return _fact("none", "Camera adapter", False)
+    forced = card_access.forced_adapter()
+    return _fact(name + (" (from config)" if forced == name else ""),
+                 "Camera adapter", True)
 
 
 def _state_line(text, there):

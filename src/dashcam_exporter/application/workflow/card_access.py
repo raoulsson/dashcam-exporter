@@ -17,31 +17,75 @@ from dashcam_exporter.infrastructure.adapters import (
     AmbiguousCard, CardLayout, NoAdapterFound, default_registry)
 
 _LAYOUTS: dict[Path, CardLayout | None] = {}
+_NAMES: dict[Path, str | None] = {}
+_FORCED: str | None = None
 
 
 def forget() -> None:
     """Drop the memoised layouts. For tests, and for a card being swapped."""
     _LAYOUTS.clear()
+    _NAMES.clear()
+
+
+def use_adapter(name: str | None) -> None:
+    """Force one adapter by name, from config.txt's `adapter` key.
+
+    Detection is normally enough. This exists for the case detection cannot
+    settle -- a card whose layout two adapters both recognise, or a camera
+    whose firmware changed under a name we already know -- and for saying
+    plainly in the status which one is at work.
+    """
+    global _FORCED
+    _FORCED = name or None
+    forget()
+
+
+def forced_adapter() -> str | None:
+    return _FORCED
 
 
 def layout_for(root) -> CardLayout | None:
-    """The layout for whatever camera wrote this tree, or None if unknown.
+    """The layout for this tree, or None when nothing recognises it.
 
-    Memoised: clips() parses every filename on the card, and the menu asks
-    these questions on every repaint.
+    A normalised workspace answers for itself and no adapter is consulted:
+    once the names and the track files are ours, there is no camera left in
+    the tree to detect. Otherwise the registry decides, or the operator has
+    already decided for it.
+
+    Memoised: clips() parses every filename, and the menu asks these
+    questions on every repaint.
     """
     if root is None:
         return None
     key = Path(root)
-    if key in _LAYOUTS:
-        return _LAYOUTS[key]
-    layout: CardLayout | None
+    if key not in _LAYOUTS:
+        _LAYOUTS[key], _NAMES[key] = _resolve(key)
+    return _LAYOUTS[key]
+
+
+def _resolve(key: Path):
+    """(layout, adapter name). The name is the adapter's, not the layout's."""
+    from .canonical_card_layout import CANONICAL, CanonicalCardLayout
+    from .canonical_workspace import CanonicalWorkspace
+
+    workspace = CanonicalWorkspace(key)
+    if workspace.is_normalized:
+        return CanonicalCardLayout(workspace), CANONICAL
     try:
-        layout = default_registry().detect(key).layout_for(key)
+        adapter = default_registry().detect(key, forced=_FORCED)
     except (NoAdapterFound, AmbiguousCard):
-        layout = None
-    _LAYOUTS[key] = layout
-    return layout
+        return None, None
+    return adapter.layout_for(key), adapter.name
+
+
+def adapter_name(root) -> str | None:
+    """Which adapter is at work on this tree, for the operator to read.
+
+    "canonical" is an honest answer rather than a missing one: it means the
+    import has been normalised and no camera's grammar is in use at all.
+    """
+    layout_for(root)
+    return _NAMES.get(Path(root)) if root is not None else None
 
 
 def is_card(root) -> bool:
