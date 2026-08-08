@@ -3351,10 +3351,16 @@ def write_clip_review(ctx, trips):
         for n, clip in enumerate(clips, 1):
             n_done += 1
             _still_bar(bar, n_done, total, Path(clip).name)
-            dst, was_made = _one_clip_still(Path(clip), folder, n, index_width,
+            src = Path(clip)
+            dst, was_made = _one_clip_still(src, folder, n, index_width,
                                             force=True)
             seen.add(dst)
             made += was_made
+            mid_dst, mid_was_made = _one_clip_still(
+                src, folder, n, index_width, force=True,
+                suffix="_mid", seconds=_clip_review_midpoint(src))
+            seen.add(mid_dst)
+            made += mid_was_made
     bar.close()
     dropped = _drop_orphans(root, seen)
     _write_clip_review_overview(root, trips)
@@ -3490,23 +3496,42 @@ def _review_folder(root, trip):
     return root / "not_renderable" / name
 
 
-def _one_clip_still(src, folder, n, index_width=2, force=False):
+# A beat in, not frame zero: a dashcam's first frame is often still
+# auto-exposing, and a black square says nothing about where the clip starts.
+CLIP_REVIEW_T = 1.0
+# Dashcam segments are conventionally one minute; this gives the review a
+# useful interior frame without probing every source file with ffprobe.
+CLIP_REVIEW_MID_T = 30.0
+
+
+def _clip_review_midpoint(src):
+    """Return the actual midpoint, with a one-minute camera fallback."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(src)],
+            capture_output=True, text=True, timeout=30)
+        duration = float(result.stdout.strip())
+        if result.returncode == 0 and math.isfinite(duration) and duration > 0:
+            return duration / 2.0
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    return CLIP_REVIEW_MID_T
+
+
+def _one_clip_still(src, folder, n, index_width=2, force=False,
+                    suffix="", seconds=CLIP_REVIEW_T):
     """(path, was_made), optionally rebuilding an existing still.
 
     By default an existing still is reused. Menu 3 passes ``force=True`` so
     the review is a genuine rebuild and reflects changed source/settings.
     """
-    dst = folder / ("%0*d_%s.jpg" % (index_width, n, src.stem))
+    dst = folder / ("%0*d_%s%s.jpg" % (index_width, n, src.stem, suffix))
     if dst.is_file() and not force:
         return dst, False
     folder.mkdir(parents=True, exist_ok=True)
-    extract_still(src, dst, seconds=CLIP_REVIEW_T, width=PREVIEW_STILL_W)
+    extract_still(src, dst, seconds=seconds, width=PREVIEW_STILL_W)
     return dst, True
-
-
-# A beat in, not frame zero: a dashcam's first frame is often still
-# auto-exposing, and a black square says nothing about where the clip starts.
-CLIP_REVIEW_T = 1.0
 
 
 def extract_still(src, dst, seconds=PREVIEW_STILL_T, width=PREVIEW_STILL_W):
@@ -3922,8 +3947,9 @@ def step_preview(ctx):
     done_line("%s preview frames for %s trips, contact sheet at %s"
               % (C.yellow("%d" % (len(stills) + len(mid_stills))),
                  C.yellow("%d" % len(trips)), tilde(index)))
-    print(C.green("  100%% - %s clip frames to walk the boundaries by, under %s."
-                  % (C.yellow("%d" % shots), tilde(review))))
+    print(C.green("  100%% - %s clip frames from %s clips to walk the boundaries by, under %s."
+                  % (C.yellow("%d" % clips_made), C.yellow("%d" % shots),
+                     tilde(review))))
     print(C.dim("  Clip grid: %s" % tilde(review / "index.html")))
     print(C.dim("  %d stills rebuilt, %d no longer wanted"
                 % (made + clips_made, dropped)))
