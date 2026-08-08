@@ -8,3 +8,6 @@ opencv-python-headless>=4.8
 # Menu 7 transcription and speaker diarization.
 faster-whisper>=1.1
 pyannote.audio>=3.3
+# Dev: run-tests.sh greps pyflakes for undefined names / redefinitions -- the two
+# crash classes a green unit suite sails past. Without it the check silently skips.
+pyflakes>=3.0
