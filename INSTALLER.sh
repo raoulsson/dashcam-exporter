@@ -75,7 +75,15 @@ echo
 # ---------------------------------------------------------------------------
 echo "${BLD}virtualenv${OFF}"
 if [ -x ".venv/bin/python" ]; then
-    ok ".venv exists, reusing it  ${DIM}(delete it to start clean)${OFF}"
+    VENV_VERSION="$('./.venv/bin/python' -c 'import sys;print(sys.version.split()[0])' 2>/dev/null || echo unknown)"
+    ok ".venv exists, reusing it  ${DIM}(Python ${VENV_VERSION}; delete it to start clean)${OFF}"
+    BASE_VERSION="$($BASE_PY -c 'import sys;print(sys.version.split()[0])')"
+    VENV_MAJOR_MINOR="$('./.venv/bin/python' -c 'import sys;print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo unknown)"
+    BASE_MAJOR_MINOR="$($BASE_PY -c 'import sys;print("%d.%d" % sys.version_info[:2])')"
+    if [ "$VENV_MAJOR_MINOR" != "$BASE_MAJOR_MINOR" ]; then
+        warn ".venv uses Python ${VENV_VERSION}, while the selected installer Python is ${BASE_VERSION}"
+        echo "        delete .venv and rerun INSTALLER.sh if you want it rebuilt from ${BASE_VERSION}."
+    fi
 else
     echo "  creating .venv ..."
     "$BASE_PY" -m venv .venv || {
@@ -108,23 +116,18 @@ echo
 #    particular can install cleanly and then fail on a missing system library.
 # ---------------------------------------------------------------------------
 echo "${BLD}verify${OFF}"
-if "$VPY" - <<'PY'
-import sys
-mods = ["cv2", "numpy", "staticmap", "PIL", "faster_whisper", "pyannote.audio"]
-bad = []
-for m in mods:
-    try:
-        __import__(m)
-    except Exception as e:
-        bad.append("%s (%s)" % (m, e.__class__.__name__))
-if bad:
-    print("  missing: " + ", ".join(bad)); sys.exit(1)
-import cv2, numpy
-import faster_whisper
-import pyannote.audio
-print("  cv2 %s, numpy %s, faster-whisper and pyannote available" % (cv2.__version__, numpy.__version__))
-PY
-then
+VERIFY_ERR="$(mktemp -t dashcam-exporter-verify.XXXXXX)"
+VERIFY_OK=1
+for module in cv2 numpy staticmap PIL faster_whisper pyannote.audio; do
+    if ! "$VPY" -c "import ${module}" >/dev/null 2>"$VERIFY_ERR"; then
+        bad "import failed: ${module}"
+        sed -n '1,4p' "$VERIFY_ERR" | sed 's/^/        /'
+        VERIFY_OK=0
+    fi
+done
+rm -f "$VERIFY_ERR"
+if [ "$VERIFY_OK" -eq 1 ]; then
+    "$VPY" -c 'import cv2,numpy; print("  cv2 %s, numpy %s, faster-whisper and pyannote available" % (cv2.__version__, numpy.__version__))'
     ok "rendering and transcription dependencies available"
 else
     bad "required imports failed — fix this before running the exporter."
