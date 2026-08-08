@@ -186,6 +186,11 @@ class Waiting(Bar):
         self._stop = threading.Event()
         self._thread = None
         self._drawn = False
+        self._note = ""
+
+    def update(self, note):
+        """Set a live note supplied by a plugin doing the blocking work."""
+        self._note = str(note or "")
 
     def __enter__(self):
         if sys.stdout.isatty():
@@ -218,8 +223,9 @@ class Waiting(Bar):
         width = self.width(room_for=40)
         at = self._bounce(i, width)
         bar = self.EMPTY * at + self.BLOCK + self.EMPTY * (width - at - len(self.BLOCK))
-        return "  %s %s %s " % (C.yellow(self.label), C.violet("[%s]" % bar),
-                                C.yellow(human_secs(elapsed)))
+        text = "  %s %s %s" % (C.yellow(self.label), C.violet("[%s]" % bar),
+                               C.yellow(human_secs(elapsed)))
+        return text + (("  " + self._note) if self._note else "") + " "
 
     def _bounce(self, i, width):
         span = max(1, width - len(self.BLOCK))

@@ -6757,7 +6757,7 @@ def _resolved(path):
 # refresh mechanism to keep in step with the first.
 # ---------------------------------------------------------------------------
 
-def _target_facts(ctx, scope, root, trip_ids):
+def _target_facts(ctx, scope, root, trip_ids, progress=None):
     """What the plugin says about this import's trips, or NA for the local
     edition.
 
@@ -6767,14 +6767,14 @@ def _target_facts(ctx, scope, root, trip_ids):
     """
     if ctx.plugin is None:
         return W.TargetFacts()
-    return _asked(ctx, scope, _namespace_of(root), trip_ids)
+    return _asked(ctx, scope, _namespace_of(root), trip_ids, progress=progress)
 
 
 def _namespace_of(root):
     return root.name if root is not None else ""
 
 
-def _asked(ctx, scope, namespace, trip_ids):
+def _asked(ctx, scope, namespace, trip_ids, progress=None):
     """Ask, every time the world is captured. Scope does not gate this.
 
     It used to: LOCAL skipped the question and reported UNKNOWN, so a menu draw
@@ -6791,7 +6791,7 @@ def _asked(ctx, scope, namespace, trip_ids):
     where it can also invalidate on its own upload — which nothing out here
     could do correctly anyway.
     """
-    return _answered(ctx, namespace, trip_ids)
+    return _answered(ctx, namespace, trip_ids, progress=progress)
 
 
 def _facts(ctx, evidence, namespace, note=""):
@@ -6800,7 +6800,7 @@ def _facts(ctx, evidence, namespace, note=""):
                          namespace=namespace, note=note)
 
 
-def _answered(ctx, namespace, trip_ids):
+def _answered(ctx, namespace, trip_ids, progress=None):
     """Ask, and let a raising implementation read as unreachable.
 
     An implementation is trusted about what it SAYS; an exception is not a
@@ -6808,7 +6808,20 @@ def _answered(ctx, namespace, trip_ids):
     destination that could not be reached produces, and it permits nothing.
     """
     try:
-        return _facts(ctx, _an_evidence(ctx.plugin.uploader.is_complete(trip_ids)),
+        if progress:
+            progress("asking %s about published trips" % ctx.plugin.name)
+        try:
+            answer = ctx.plugin.uploader.is_complete(trip_ids, progress=progress)
+        except TypeError as error:
+            # Keep plugins written against the pre-progress seam usable; only
+            # retry the legacy call for an unsupported keyword, never for a
+            # TypeError raised inside the implementation itself.
+            if "progress" not in str(error):
+                raise
+            answer = ctx.plugin.uploader.is_complete(trip_ids)
+        if progress:
+            progress("published-trip check complete")
+        return _facts(ctx, _an_evidence(answer),
                       namespace)
     except Exception as e:
         return _facts(ctx, menu.Evidence.UNKNOWN, namespace,
@@ -6887,7 +6900,7 @@ def _the_only_one(imports):
     return None
 
 
-def capture_world(ctx, scope=menu.Scope.LOCAL):
+def capture_world(ctx, scope=menu.Scope.LOCAL, progress=None):
     """Read the disk once and freeze what it said.
 
     Called on every menu draw, again at dispatch, and a third time inside a
@@ -6896,7 +6909,7 @@ def capture_world(ctx, scope=menu.Scope.LOCAL):
     wrong, and the world moves under this tool — an operator swaps the card or
     deletes a sidecar in Finder while the prompt is on screen.
     """
-    return _Capture(ctx, scope).world()
+    return _Capture(ctx, scope, progress).world()
 
 
 def looked_at(ctx, scope):
@@ -6909,8 +6922,8 @@ def looked_at(ctx, scope):
     helper so there is one answer to "what does the operator see while it
     happens", rather than four call sites of which three showed nothing.
     """
-    with waiting("Reading the workspace and querying the plugin..."):
-        return capture_world(ctx, scope)
+    with waiting("Reading the workspace and querying the plugin...") as wait:
+        return capture_world(ctx, scope, progress=wait.update)
 
 
 def _meta_paths(metas):
@@ -6933,16 +6946,18 @@ class _Capture:
     got wrong by a caller that reads the arguments left to right.
     """
 
-    def __init__(self, ctx, scope):
+    def __init__(self, ctx, scope, progress=None):
         self.ctx = ctx
         self.scope = scope
+        self.progress = progress
         self.imports = tuple(import_candidates(ctx))
         self.root = _chosen_import(ctx, self.imports)
         self.metas = _metas_of(ctx)
         self.renders = _renders_of_tree(ctx.out_dir)
         self.trip_ids = _trip_ids_here(self.metas, self.root, ctx.out_dir)
         # Before the expendability check. See the class docstring.
-        self.target = _target_facts(ctx, scope, self.root, self.trip_ids)
+        self.target = _target_facts(ctx, scope, self.root, self.trip_ids,
+                                    progress=self.progress)
         self.expendable = working_area_is_expendable(ctx, self.target)
 
     def world(self):

@@ -432,8 +432,12 @@ class Uploader(Act):
         """
 
     @abstractmethod
-    def is_complete(self, trip_ids) -> Evidence:
+    def is_complete(self, trip_ids, progress=None) -> Evidence:
         """Are ALL of these trips at the destination, published and reachable?
+
+        ``progress`` is an optional callback accepting a short status string;
+        call it while doing a slow remote check so the exporter can keep its
+        waiting bar informative. Implementations may ignore it.
 
         ALL OR NOTHING, and that is deliberate. The one thing that acts on this
         answer — Clean Workspace — erases the WHOLE working area, never a
