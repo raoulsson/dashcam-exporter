@@ -92,7 +92,7 @@ echo
 # 4. Requirements. opencv is a ~90 MB wheel, so this is the slow part; say so
 #    rather than looking hung.
 # ---------------------------------------------------------------------------
-echo "${BLD}packages${OFF}  ${DIM}(opencv is a large wheel — this can take a few minutes)${OFF}"
+echo "${BLD}packages${OFF}  ${DIM}(opencv and faster-whisper are large wheels — this can take a few minutes)${OFF}"
 "$VPY" -m pip install --quiet --upgrade pip
 if "$VPY" -m pip install --quiet -r requirements.txt; then
     ok "requirements.txt installed"
@@ -110,7 +110,7 @@ echo
 echo "${BLD}verify${OFF}"
 if "$VPY" - <<'PY'
 import sys
-mods = ["cv2", "numpy", "staticmap", "PIL"]
+mods = ["cv2", "numpy", "staticmap", "PIL", "faster_whisper"]
 bad = []
 for m in mods:
     try:
@@ -120,13 +120,13 @@ for m in mods:
 if bad:
     print("  missing: " + ", ".join(bad)); sys.exit(1)
 import cv2, numpy
-print("  cv2 %s, numpy %s" % (cv2.__version__, numpy.__version__))
+import faster_whisper
+print("  cv2 %s, numpy %s, faster-whisper available" % (cv2.__version__, numpy.__version__))
 PY
 then
-    ok "ego-motion trip detection available"
+    ok "rendering and transcription dependencies available"
 else
-    bad "imports failed — the renderer would fall back to GPS-radius grouping,"
-    echo "        which finds different trips. Fix this before rendering."
+    bad "required imports failed — fix this before running the exporter."
     exit 1
 fi
 echo

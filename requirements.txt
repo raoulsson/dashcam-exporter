@@ -5,3 +5,5 @@ Pillow>=10.0
 # reliable when parked amid passing people / cars. See VideoMotionDetector.
 numpy>=1.24
 opencv-python-headless>=4.8
+# Menu 7 transcription (the diarization mode additionally needs pyannote.audio).
+faster-whisper>=1.1
