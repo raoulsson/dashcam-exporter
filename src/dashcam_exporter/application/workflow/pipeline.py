@@ -6925,6 +6925,16 @@ def _target_facts(ctx, scope, root, trip_ids, progress=None):
     """
     if ctx.plugin is None:
         return W.TargetFacts()
+    if ctx.offline:
+        # `offline=true` is the explicit local-only flag. Keep the plugin's
+        # identity in the world for the menu/info screens, but do not ask its
+        # remote status hook (which may perform SSH, bucket listings, or API
+        # calls). FULL-scope safety gates will consequently remain unknown.
+        return W.TargetFacts(configured=True, name=ctx.plugin.name,
+                             origin=ctx.plugin.origin,
+                             complete=menu.Evidence.NA,
+                             namespace=_namespace_of(root),
+                             note="offline: remote status not checked")
     return _asked(ctx, scope, _namespace_of(root), trip_ids, progress=progress)
 
 
