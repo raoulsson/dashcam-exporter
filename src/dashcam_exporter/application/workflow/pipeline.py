@@ -3389,7 +3389,8 @@ def _write_clip_review_overview(root, trips):
         folder = _review_folder(root, trip)
         images = sorted(
             (p for p in folder.glob("*.jpg") if _real_file(p)),
-            key=lambda p: (p.name.split("_", 1)[0].zfill(8), p.name),
+            key=lambda p: (_stamp_of_name(p.name) is None,
+                           _stamp_of_name(p.name) or "", p.name),
         ) if folder.is_dir() else []
         if not images:
             continue
@@ -3397,7 +3398,7 @@ def _write_clip_review_overview(root, trips):
         for image in images:
             rel = html.escape(os.path.relpath(str(image), str(root)))
             cards.append(
-                '<figure><a href="%s"><img loading="lazy" src="%s" alt="%s">'
+                '<figure><a class="frame" href="%s"><img loading="lazy" src="%s" alt="%s">'
                 '</a><figcaption>%s</figcaption></figure>'
                 % (rel, rel, html.escape(image.stem), html.escape(image.name)))
         label = "Trip %02d — %s %s" % (
@@ -3422,10 +3423,32 @@ h2{font-size:17px;font-weight:500;border-bottom:1px solid var(--line);padding-bo
 figure{margin:0;background:var(--card);border:1px solid var(--line);border-radius:7px;overflow:hidden}
 img{display:block;width:100%%;aspect-ratio:16/9;object-fit:cover;background:#000}
 figcaption{padding:7px 9px;color:var(--dim);font:12px ui-monospace,SFMono-Regular,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-a{color:inherit;text-decoration:none}
+a{color:inherit;text-decoration:none}.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.94);display:none;align-items:center;justify-content:center;z-index:5}
+.lightbox.open{display:flex}.lightbox img{max-width:calc(100vw - 150px);max-height:calc(100vh - 80px);width:auto;aspect-ratio:auto;object-fit:contain}
+.lightbox button{position:fixed;border:0;background:rgba(20,35,52,.85);color:#fff;font-size:42px;line-height:1;width:52px;height:72px;border-radius:7px;cursor:pointer}
+.lightbox .prev{left:22px}.lightbox .next{right:22px}.lightbox .close{top:18px;right:22px;font-size:28px;width:42px;height:42px}
 </style></head><body><header><h1>Clip review</h1>
 <p>Chronological stills by trip. Click any frame to open it full size.</p></header>
+<div class="lightbox" id="lightbox" aria-label="Image viewer">
+<button class="prev" type="button" aria-label="Previous image">&#x2039;</button>
+<img id="lightbox-image" alt="">
+<button class="next" type="button" aria-label="Next image">&#x203a;</button>
+<button class="close" type="button" aria-label="Close">&times;</button></div>
 <main>%s</main></body></html>""" % "".join(groups)
+    document = document.replace(
+        "</body></html>",
+        """<script>
+const frames=[...document.querySelectorAll('.frame')];
+const box=document.getElementById('lightbox'), image=document.getElementById('lightbox-image');
+let current=0;
+function show(n){current=(n+frames.length)%frames.length; image.src=frames[current].href; image.alt=frames[current].querySelector('img').alt; box.classList.add('open');}
+frames.forEach((frame,n)=>frame.addEventListener('click',e=>{e.preventDefault();show(n);}));
+document.querySelector('.prev').addEventListener('click',e=>{e.stopPropagation();show(current-1);});
+document.querySelector('.next').addEventListener('click',e=>{e.stopPropagation();show(current+1);});
+document.querySelector('.close').addEventListener('click',()=>box.classList.remove('open'));
+box.addEventListener('click',e=>{if(e.target===box)box.classList.remove('open');});
+document.addEventListener('keydown',e=>{if(!box.classList.contains('open'))return;if(e.key==='ArrowLeft')show(current-1);if(e.key==='ArrowRight')show(current+1);if(e.key==='Escape')box.classList.remove('open');});
+</script></body></html>""")
     index = root / "index.html"
     index.write_text(document, encoding="utf-8")
     return index

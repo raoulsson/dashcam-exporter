@@ -1652,6 +1652,8 @@ class TestPreviewBuildsByDelta(SeamTest):
         html = index.read_text()
         self.assertIn("Clip review", html)
         self.assertIn("trip_01_2026-08-07_15-05/01_20260807150551_0060.jpg", html)
+        self.assertIn("ArrowLeft", html)
+        self.assertIn("ArrowRight", html)
 
 
 class TestEveryExcludedTripIsCounted(SeamTest):
