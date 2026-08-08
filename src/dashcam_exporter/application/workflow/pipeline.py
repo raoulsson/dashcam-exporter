@@ -43,6 +43,7 @@ import base64
 import html
 import itertools
 import json
+import threading
 import math
 import os
 import platform
@@ -4940,6 +4941,15 @@ def step_transcribe(ctx, world):
                         (C.gold(label), bar.bracket(percent / 100.0),
                          C.gold("%3.0f%%%s" % (percent, tail))))
 
+    def pulse(path, progress_ref):
+        stop = threading.Event()
+        def run():
+            while not stop.wait(.6):
+                show(path, progress_ref[0], "Transcribe")
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        return stop, thread
+
     try:
         for path in renders:
             latest_text[0] = ""
@@ -4959,15 +4969,21 @@ def step_transcribe(ctx, world):
             try:
                 if diarize:
                     with enhanced:
+                        progress_ref = [35.0]
+                        stop, pulse_thread = pulse(path, progress_ref)
+                        def on_progress(value):
+                            progress_ref[0] = 35 + value * .40
+                            show(path, progress_ref[0])
                         def on_segment(segment):
                             latest_text[0] = segment.text
                             transcript_head[0] += " " + segment.text
                             show(path, 35 + min(40.0, segment.end_seconds) * .40)
                         transcription = transcriber.transcribeMp3(
                             enhanced,
-                            progress_callback=lambda p: show(path, 35 + p * .40),
+                            progress_callback=on_progress,
                             segment_callback=on_segment,
                         )
+                        stop.set(); pulse_thread.join(timeout=1)
                         enhanced.seek(0)
                         turns = SpeakerDiarizer(model_name=diarization_model, token=hf_token).diarizeMp3(enhanced)
                         labeler = SpeakerLabeler(turns)
@@ -4980,16 +4996,22 @@ def step_transcribe(ctx, world):
                 else:
                     with enhanced, text_path.open("w", encoding="utf-8") as destination:
                         writer = ParagraphWriter(destination)
+                        progress_ref = [35.0]
+                        stop, pulse_thread = pulse(path, progress_ref)
+                        def on_progress(value):
+                            progress_ref[0] = 35 + value * .65
+                            show(path, progress_ref[0])
                         def on_segment(segment):
                             latest_text[0] = segment.text
                             transcript_head[0] += " " + segment.text
                             writer.write_segment(segment)
                         transcription = transcriber.transcribeMp3(
                             enhanced,
-                            progress_callback=lambda p: show(path, 35 + p * .65),
+                            progress_callback=on_progress,
                             segment_callback=on_segment,
                             retain_segments=False,
                         )
+                        stop.set(); pulse_thread.join(timeout=1)
                         writer.close()
                         writer.write_timeline(timeline_path)
                 made += 1
