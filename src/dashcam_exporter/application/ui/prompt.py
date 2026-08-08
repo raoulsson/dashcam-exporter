@@ -74,7 +74,12 @@ def _raw_capable():
 def _one_char_at(prompt):
     if not _raw_capable():
         return None
-    sys.stdout.write(C.bold(prompt))
+    # The selector is the golden action accent; the character echoed below is
+    # cyan so the command just entered is visually distinct from the prompt.
+    if prompt.endswith("> "):
+        sys.stdout.write(C.bold(prompt[:-2]) + C.gold(">") + " ")
+    else:
+        sys.stdout.write(C.bold(prompt))
     sys.stdout.flush()
     return _one_char()
 
@@ -107,7 +112,7 @@ def _echoed(ch):
 def _key_or_help(ch):
     if ch.lower() == "h":
         return _help_key()
-    print(_printable(ch))
+    print(C.cyan(_printable(ch)))
     return ch.strip().lower()
 
 
@@ -118,10 +123,10 @@ def _printable(ch):
 
 
 def _help_key():
-    sys.stdout.write("h")
+    sys.stdout.write(C.cyan("h"))
     sys.stdout.flush()
     second = _one_char() or ""
-    print(_printable(second))
+    print(C.cyan(_printable(second)))
     return _help_command(second)
 
 
