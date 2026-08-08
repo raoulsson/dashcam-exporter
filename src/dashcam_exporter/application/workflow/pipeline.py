@@ -4920,11 +4920,14 @@ def step_transcribe(ctx, world):
     if C.enabled:
         bar.open_once()
 
+    latest_text = [""]
+
     def show(path, percent):
         if C.enabled:
+            tail = " — " + re.sub(r"\s+", " ", latest_text[0]).strip()[:72] if latest_text[0] else ""
             _write_line("  %s %s %s" %
                         (C.gold(bar.label), bar.bracket(percent / 100.0),
-                         C.gold("%3.0f%%  %s" % (percent, path.name))))
+                         C.gold("%3.0f%%  %s%s" % (percent, path.name, tail))))
 
     try:
         for path in renders:
@@ -4943,9 +4946,13 @@ def step_transcribe(ctx, world):
             try:
                 if diarize:
                     with enhanced:
+                        def on_segment(segment):
+                            latest_text[0] = segment.text
+                            show(path, 35 + min(40.0, segment.end_seconds) * .40)
                         transcription = transcriber.transcribeMp3(
                             enhanced,
                             progress_callback=lambda p: show(path, 35 + p * .40),
+                            segment_callback=on_segment,
                         )
                         enhanced.seek(0)
                         turns = SpeakerDiarizer(model_name=diarization_model, token=hf_token).diarizeMp3(enhanced)
@@ -4959,10 +4966,13 @@ def step_transcribe(ctx, world):
                 else:
                     with enhanced, text_path.open("w", encoding="utf-8") as destination:
                         writer = ParagraphWriter(destination)
+                        def on_segment(segment):
+                            latest_text[0] = segment.text
+                            writer.write_segment(segment)
                         transcription = transcriber.transcribeMp3(
                             enhanced,
                             progress_callback=lambda p: show(path, 35 + p * .65),
-                            segment_callback=writer.write_segment,
+                            segment_callback=on_segment,
                             retain_segments=False,
                         )
                         writer.close()
