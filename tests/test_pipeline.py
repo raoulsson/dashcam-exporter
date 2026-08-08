@@ -48,7 +48,7 @@ sys.path.insert(0, str(REPO / "src"))
 
 from dashcam_exporter import items, menu as M, world as W  # noqa: E402
 from dashcam_exporter.domain.menu.menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
-                  UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
+                  TRANSCRIBE, UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
 
 
 def load_pipeline():
@@ -148,7 +148,7 @@ class Captures:
     def __init__(self):
         self.worlds = []
 
-    def __call__(self, ctx, scope=M.Scope.LOCAL):
+    def __call__(self, ctx, scope=M.Scope.LOCAL, progress=None):
         world = ("world-%d" % len(self.worlds), scope)
         self.worlds.append(world)
         return world
@@ -548,7 +548,7 @@ class ThePluginIsToldWhenItsInputChanged(unittest.TestCase):
         position.current = number
         runner = P.Runner.__new__(P.Runner)
         runner.ctx, runner.menu, runner.position = ctx, {number: item}, position
-        with mock.patch.object(P, "capture_world", lambda c, s=None: object()), \
+        with mock.patch.object(P, "capture_world", lambda c, s=None, progress=None: object()), \
                 redirect_stdout(io.StringIO()):
             runner.run_one(number)
         return ctx.plugin
@@ -600,7 +600,7 @@ class TheClockRunsFromTheMenusSideOfTheCall(unittest.TestCase):
         position.current = UPLOAD
         runner = P.Runner.__new__(P.Runner)
         runner.ctx, runner.menu, runner.position = ctx, {UPLOAD: item}, position
-        with mock.patch.object(P, "capture_world", lambda c, s=None: object()), \
+        with mock.patch.object(P, "capture_world", lambda c, s=None, progress=None: object()), \
                 redirect_stdout(io.StringIO()):
             runner.run_one(UPLOAD)
         return ctx.results
@@ -726,7 +726,7 @@ class Advancing(unittest.TestCase):
         self.assertEqual(position.advance(menu_items[META]), META)
         self.assertEqual(offered(menu_items, position),
                          [PROGRESS, META, PREVIEW, EXCLUDE, BUILD, RENDER,
-                          UPLOAD, CLEAN_WS, ERASE_CARD])
+                          TRANSCRIBE, UPLOAD, CLEAN_WS, ERASE_CARD])
 
     def test_the_pipeline_asks_the_item_itself_whether_it_completed(self):
         """The answer comes from the item that ran, not from a status the
@@ -741,9 +741,9 @@ class Advancing(unittest.TestCase):
 
     def test_the_owners_worked_example(self):
         """His rule 6, run through the position machine: with the preview
-        built, 2,3,4,5,6,8,9 are selectable.
+        built, 2,3,4,5,6,7,8,9,10 are selectable.
 
-        RESTATED: after a drop it was 4,2,8,9 — the meta then described trips
+        RESTATED: after a drop it was 4,2,9,10 — the meta then described trips
         that no longer existed. Item 4 removes those sidecars with the footage
         now, so 3 comes back: what is left can be looked at without writing
         the metadata again first.
@@ -752,10 +752,10 @@ class Advancing(unittest.TestCase):
         position.advance(menu_items[PREVIEW])
         self.assertEqual(offered(menu_items, position),
                          [PROGRESS, META, PREVIEW, EXCLUDE, BUILD, RENDER,
-                          UPLOAD, CLEAN_WS, ERASE_CARD])
+                          TRANSCRIBE, UPLOAD, CLEAN_WS, ERASE_CARD])
         position.advance(menu_items[EXCLUDE])
         self.assertEqual(offered(menu_items, position),
-                         [PROGRESS, META, PREVIEW, EXCLUDE, UPLOAD,
+                         [PROGRESS, META, PREVIEW, EXCLUDE, TRANSCRIBE, UPLOAD,
                           CLEAN_WS, ERASE_CARD])
 
     def test_running_the_same_item_twice_leaves_the_position_alone(self):
@@ -1050,7 +1050,7 @@ class TheGraphRefusesFirst(unittest.TestCase):
         not follow Import."""
         menu_items, position = machine(at=IMPORT)
         menu_items[UPLOAD].evaluate.return_value = M.go()
-        run = drive(menu_items, position, ["7", "q"])
+        run = drive(menu_items, position, ["8", "q"])
         menu_items[UPLOAD].execute.assert_not_called()
         self.assertEqual(run.position.current, IMPORT)
 
@@ -1060,7 +1060,7 @@ class TheGraphRefusesFirst(unittest.TestCase):
         consulted here would be a guard that could wave through an item the
         position never offered."""
         menu_items, position = machine(at=IMPORT)
-        drive(menu_items, position, ["7", "q"])
+        drive(menu_items, position, ["8", "q"])
         menu_items[UPLOAD].evaluate.assert_not_called()
 
     def test_the_refusal_names_the_item_and_says_plainly_it_cannot_run(self):
@@ -1072,7 +1072,7 @@ class TheGraphRefusesFirst(unittest.TestCase):
         refusal answers the question that was asked.
         """
         menu_items, position = machine(at=IMPORT)
-        run = drive(menu_items, position, ["7", "q"])
+        run = drive(menu_items, position, ["8", "q"])
         self.assertIn("Upload Website", run.printed)
         self.assertIn("is not available", run.printed)
 
@@ -1133,7 +1133,7 @@ class TheRunner(unittest.TestCase):
         one session."""
         menu_items, position = machine(at=M.NOWHERE)
         menu_items[CLEAN_WS].completed.return_value = False
-        run = drive(menu_items, position, ["1", "8", "q"])
+        run = drive(menu_items, position, ["1", "9", "q"])
         menu_items[CLEAN_WS].execute.assert_called_once()
         self.assertEqual(run.position.current, IMPORT)
 
@@ -1317,7 +1317,7 @@ class TheHelpScreen(unittest.TestCase):
     """`h <n>` answers what the menu row has no room for."""
 
     def setUp(self):
-        # Items 5 and 7 ask the installed plugin to describe its own job, so
+        # Items 5 and 8 ask the installed plugin to describe its own job, so
         # the fake has to answer that rather than hand back None. It subclasses
         # the real seam on purpose: the last time these tests used a free-hand
         # stub, the stub had a method the four real collaborators did not, and
@@ -1365,7 +1365,7 @@ class TheHelpScreen(unittest.TestCase):
                                 % (n, self.items[n].name()))
 
     def test_the_graph_comes_after_the_prose_not_before_it(self):
-        lines = self._plain(9)
+        lines = self._plain(10)
         prose = next(i for i, ln in enumerate(lines) if "keeps its folder tree" in ln)
         graph = next(i for i, ln in enumerate(lines) if ln.startswith("    leads to"))
         self.assertLess(prose, graph)
@@ -1390,7 +1390,7 @@ class TheHelpScreen(unittest.TestCase):
         """All three edgeless shapes answer edges() with None. Reading them the
         same way told the operator that the entry which erases a card was a
         view of one."""
-        leads = next(ln for ln in self._plain(9) if ln.startswith("    leads to"))
+        leads = next(ln for ln in self._plain(10) if ln.startswith("    leads to"))
         self.assertNotIn("view", leads)
 
     def test_the_entry_point_is_reached_from_nothing_not_from_anywhere(self):
@@ -1421,7 +1421,7 @@ class TheHelpScreen(unittest.TestCase):
         """A publisher predating this interface returns "". An attribution
         line over an empty space reads as a page that lost its last
         paragraph."""
-        for number, act in ((5, "_builder"), (7, "_publish")):
+        for number, act in ((5, "_builder"), (8, "_publish")):
             item = self.items[number]
             with mock.patch.object(getattr(item, act),
                                    "get_website_upload_description",
@@ -1432,7 +1432,7 @@ class TheHelpScreen(unittest.TestCase):
                 self.assertTrue(text.rstrip().endswith("delegated to the plugin."))
 
     def test_help_never_raises_on_the_real_collaborators(self):
-        """The one that was missed. `about()` on items 5 and 7 asks its act for
+        """The one that was missed. `about()` on items 5 and 8 asks its act for
         a long description, and the four REAL collaborators are the exporter's
         own classes rather than plugins -- none of them had the method, so both
         help screens raised AttributeError on a stock install while a test
@@ -1443,7 +1443,7 @@ class TheHelpScreen(unittest.TestCase):
             work = P.Work(Ctx())
             if strategy is M.Strategy.UPLOADER:
                 work.ctx.plugin = mock.Mock()
-            for number in (5, 7):
+            for number in (5, 8):
                 with self.subTest(strategy=strategy, entry=number):
                     item = M.build_menu(strategy, work)[number]
                     self.assertIsInstance(item.about(), str)
@@ -1457,7 +1457,7 @@ class TheHelpScreen(unittest.TestCase):
     def test_the_plugins_words_are_set_in_from_the_exporters(self):
         """Quoted, not merged. A reader has to be able to tell which sentences
         this repo is answerable for and which belong to the plugin."""
-        for n in (5, 7):
+        for n in (5, 8):
             lines = [ln for ln in self._plain(n) if ln.strip()]
             ours = next(ln for ln in lines if "If you configured a plugin" in ln)
             theirs = next(ln for ln in lines
@@ -1467,7 +1467,7 @@ class TheHelpScreen(unittest.TestCase):
                 self.assertEqual(len(theirs) - len(theirs.lstrip()), 8)
 
     def test_the_quotation_is_attributed_to_the_plugin_by_name(self):
-        for n in (5, 7):
+        for n in (5, 8):
             with self.subTest(entry=n):
                 self.assertIn("From the configured plugin",
                               "\n".join(self._plain(n)))

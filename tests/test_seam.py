@@ -1867,7 +1867,8 @@ class TestEveryRendererRunIsToldWhereToLog(SeamTest):
         self.assertTrue(run.called)
         for env in self._envs(run):
             self.assertEqual(env["LOG_DIR"], str(b.ctx.log_dir))
-            self.assertIn("src", env["PYTHONPATH"].split(os.pathsep))
+            self.assertIn("src", [os.path.basename(p)
+                                  for p in env["PYTHONPATH"].split(os.pathsep)])
 
     def test_and_the_log_dir_is_the_workspace_root(self):
         b = self.bench()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The paths through the ten items, walked for real, and the menu they draw.
+"""The paths through the eleven items, walked for real, and the menu they draw.
 
 Two halves, one subject: what the state machine PERMITS, and what the operator
 is SHOWN.
@@ -38,7 +38,7 @@ sys.path.insert(0, str(REPO / "src"))
 
 from dashcam_exporter import guards, items, menu as M, world as W  # noqa: E402
 from dashcam_exporter.domain.menu.menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
-                  UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
+                  TRANSCRIBE, UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
 
 
 def load_pipeline():
@@ -92,7 +92,7 @@ def _target(strategy):
 
 
 def every_item_can_run(strategy, **override):
-    """A world in which all ten items have their evidence.
+    """A world in which all eleven items have their evidence.
 
     The point of these tests is the ORDER, so the evidence is held constant:
     what refuses an item here is the position it is asked from, never a
@@ -101,7 +101,7 @@ def every_item_can_run(strategy, **override):
 
     One pair cannot both be satisfied by a single frozen world, and that is a
     real rule rather than a gap in the fixture: item 1 wants clips accounted
-    for by nothing, item 9 wants every clip accounted for by something. In a
+    for by nothing, item 10 wants every clip accounted for by something. In a
     live run the import itself moves a clip from the first set to the second;
     here the world does not move, so item 1 answers SATISFIED — completing
     without performing, which is what a step with nothing to do means and
@@ -139,7 +139,7 @@ class FakeBuilder:
 
 
 class FakePublisher:
-    """Item 7's collaborator, installed by the constructor and never branched
+    """Item 8's collaborator, installed by the constructor and never branched
     on afterwards. Under the local product it refuses by configuration."""
 
     def __init__(self, strategy, done):
@@ -168,7 +168,7 @@ class FakeWork:
     """Every body an item can reach, replaced by a recorder.
 
     items.py imports nothing but menu and guards, which is what makes this
-    possible: the ten real classes, their real evaluate(), their real edges,
+    possible: the eleven real classes, their real evaluate(), their real edges,
     and no pipeline behind them.
     """
 
@@ -196,6 +196,9 @@ class FakeWork:
 
     def render(self, world):
         return self._ran(RENDER)
+
+    def transcribe(self, world):
+        return self._ran(TRANSCRIBE)
 
     def _ran(self, number):
         self.done.append(number)
@@ -267,7 +270,7 @@ class FakeCtx:
 
 
 # ---------------------------------------------------------------------------
-# The bench: the real ten items, the real Runner, a scripted operator
+# The bench: the real eleven items, the real Runner, a scripted operator
 # ---------------------------------------------------------------------------
 
 class Bench:
@@ -302,7 +305,7 @@ class Bench:
     def _patched(self, pressed):
         return _patches(mock.patch.object(P.prompt, "ask", side_effect=self._ask(pressed)),
                      mock.patch.object(P, "capture_world",
-                                       side_effect=lambda ctx, scope=None: self.world))
+                                       side_effect=lambda ctx, scope=None, progress=None: self.world))
 
     def _ask(self, pressed):
         def answer(prompt, default="", quits=True):
@@ -326,21 +329,24 @@ START = [PROGRESS, IMPORT]                                     # nothing done ye
 # After a clean-up: a new cycle, or cleaning the next import in the sink.
 # 9 is deliberately absent — that is the order the unfold exists to forbid.
 AFTER_CLEAN = [PROGRESS, IMPORT, CLEAN_WS]
-AFTER_IMPORT = [PROGRESS, IMPORT, META, CLEAN_WS, ERASE_CARD]   # item 1's {1,2,8,9}
+AFTER_IMPORT = [PROGRESS, IMPORT, META, CLEAN_WS, ERASE_CARD]   # item 1's {1,2,9,10}
 # RESTATED: 1 is in its own outbound. A card holds more than one session's
 # worth and a copy can be interrupted, so importing again is an ordinary next
 # move -- the delta decides how much. Without it, landing on item 1 with
 # footage in the workspace took item 1 off the menu.
-MID_CYCLE = [PROGRESS, META, PREVIEW, EXCLUDE, BUILD, RENDER, CLEAN_WS, ERASE_CARD]
-# Under the publishing edition item 7 is in EVERY mid-cycle offer, not just
-# Build's. Whether it may run is the publisher's answer about built material;
-# the graph does not spell that as an ordering rule.
+MID_CYCLE = [PROGRESS, META, PREVIEW, EXCLUDE, BUILD, RENDER, TRANSCRIBE,
+             CLEAN_WS, ERASE_CARD]
+# Transcribe (item 7) is in EVERY mid-cycle offer, not just Build's -- it hangs
+# off metadata, preview, exclude, render, build and upload alike. Whether it may
+# run is its own answer about whether any mp4 has been rendered; the graph does
+# not spell that as an ordering rule. Upload (item 8) is added under the
+# publishing edition below.
 MID_CYCLE_PUBLISHING = sorted(MID_CYCLE + [UPLOAD])
-# RESTATED: rule 6's {4,2,8,9} plus 3. After a drop the sidecars described
+# RESTATED: rule 6's {4,2,9,10} plus 3 and 7. After a drop the sidecars described
 # trips that no longer existed, so the only way on was to write them again;
 # item 4 removes those sidecars with the footage now, so looking at what is
 # left needs no regeneration first.
-AFTER_EXCLUDE = [PROGRESS, META, PREVIEW, EXCLUDE, CLEAN_WS, ERASE_CARD]
+AFTER_EXCLUDE = [PROGRESS, META, PREVIEW, EXCLUDE, TRANSCRIBE, CLEAN_WS, ERASE_CARD]
 AFTER_EXCLUDE_PUBLISHING = sorted(AFTER_EXCLUDE + [UPLOAD])
 
 
@@ -366,7 +372,7 @@ class TestTheNormalCycle(unittest.TestCase):
         its outbound is {1}, so what is left is a new import and nothing else.
         """
         b = Bench(UPLOADER)
-        b.type("1", "2", "3", "5", "7", "6", "5", "7", "8")
+        b.type("1", "2", "3", "5", "8", "6", "5", "8", "9")
         # No IMPORT: this world's card is fully accounted for, so item 1
         # completes without performing. It still advances the position, which
         # is what the offer table below is asserting.
@@ -383,7 +389,7 @@ class TestTheNormalCycle(unittest.TestCase):
         the whole of what is left to do. Making the operator rebuild first
         would be the graph asking for work the data does not justify."""
         b = Bench(UPLOADER)
-        b.type("1", "2", "3", "5", "7", "6")
+        b.type("1", "2", "3", "5", "8", "6")
         self.assertIn(UPLOAD, b.offered_at[-1])
 
     def test_the_early_loop_the_owner_works_in(self):
@@ -391,12 +397,12 @@ class TestTheNormalCycle(unittest.TestCase):
 
         The loop that catches a bad trip before the hours of encoding. Two
         things it pins: looking at Progress does not move the pipeline, and
-        the moment a trip is dropped the offer narrows to {4,2,8,9} — the
+        the moment a trip is dropped the offer narrows to {4,2,9,10} — the
         sidecars now describe a trip that no longer exists, so the only way
         forward is to write them again.
         """
         b = Bench(UPLOADER)
-        b.type("1", "2", "5", "7", "0", "4", "2")
+        b.type("1", "2", "5", "8", "0", "4", "2")
         self.assertEqual(b.work.done, [META, BUILD, UPLOAD, PROGRESS,
                                        EXCLUDE, META])
         self.assertEqual(b.offered_at[4], b.offered_at[5],
@@ -435,21 +441,21 @@ class TestThePathsThatMustNotExist(unittest.TestCase):
         exist. The folded step gathered the card's evidence from the
         workspace, erased the workspace, then asked about the card — refusing
         after the irreversible half had run. Clean Workspace's outbound is
-        {1,8} — itself and a new cycle, never 9 — so there is no position from
+        {1,9} — itself and a new cycle, never 10 — so there is no position from
         which that order can be typed.
         """
         b = Bench(UPLOADER)
-        b.type("1", "2", "8", "9")
+        b.type("1", "2", "9", "10")
         self.assertEqual(b.work.done, [META, CLEAN_WS])
         self.assertEqual(b.offered_at[3], AFTER_CLEAN)
         self.assertNotIn(ERASE_CARD, AFTER_CLEAN)
 
     def test_freeing_the_card_first_leaves_the_workspace_still_cleanable(self):
         """The safe order is the permitted one. Erasing the card steps back by
-        one, so wherever we were is where we still are, and 8 is still on
+        one, so wherever we were is where we still are, and 9 is still on
         offer from there."""
         b = Bench(UPLOADER)
-        b.type("1", "2", "9", "8")
+        b.type("1", "2", "10", "9")
         self.assertEqual(b.work.done, [META, ERASE_CARD, CLEAN_WS])
         self.assertEqual(b.offered_at[2], b.offered_at[3],
                          "erasing the card moved the pipeline")
@@ -468,7 +474,7 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
                                                   stamps=frozenset({CLIP}),
                                                   owed_stamps=frozenset({CLIP})))
         b = Bench(UPLOADER, world=stranded, current=RENDER)
-        b.type("9")
+        b.type("10")
         self.assertEqual(b.work.done, [])
         self.assertEqual(b.work.shown, [])
         self.assertEqual(b.work.asked, [])
@@ -494,17 +500,17 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
             UPLOADER, card=W.Card(path=Path("/w/card"), dcim=True, present=True,
                                  stamps=frozenset({"20260729120000"}),
                                  new_stamps=frozenset({"20260729120000"})))
-        b.type("9")
+        b.type("10")
         self.assertEqual(b.work.asked, ["DELETE"], "the word was never asked for")
         self.assertEqual(b.work.done, [], "the card was erased on stale evidence")
         self.assertEqual(len(b.work.refused), 1)
         self.assertIn("new clips", b.work.refused[0])
 
     def test_each_word_on_the_path_names_its_own_act(self):
-        """Item 4 excludes, items 8 and 9 delete. The word names the act, so a
+        """Item 4 excludes, items 9 and 10 delete. The word names the act, so a
         prompt cannot teach the wrong idea of what is about to happen."""
         b = Bench(UPLOADER, current=PREVIEW)
-        b.type("4", "2", "9", "8")
+        b.type("4", "2", "10", "9")
         self.assertEqual(b.work.asked, ["EXCLUDE", "DELETE", "CLEAN"])
 
 
@@ -532,7 +538,7 @@ class TestIdempotence(unittest.TestCase):
         emptied = every_item_can_run(UPLOADER,
                                      card=W.Card(path=Path("/w/card"), dcim=True))
         b = Bench(UPLOADER, world=emptied, current=RENDER)
-        b.type("9")
+        b.type("10")
         self.assertEqual(b.work.asked, [])
         self.assertEqual(b.work.done, [])
         self.assertTrue(b.menu[ERASE_CARD].completed(),
@@ -710,7 +716,7 @@ def _settling_at(built, current, offer):
 class Painted:
     """A menu item as the PAINTER sees it: a number, a name, a flag, an answer.
 
-    Not a MenuItem, and not one of the ten. It is the whole interface the
+    Not a MenuItem, and not one of the eleven. It is the whole interface the
     drawing code is allowed to use, so anything the painter needs that is not
     here is something it went and got from somewhere else.
     """
@@ -817,7 +823,7 @@ class TestTheMenuIsTheMachine(PainterTest):
 
     def test_no_real_step_label_leaks_into_a_menu_that_has_none(self):
         """The negative half of the same claim, and the one that fails loudly
-        if anyone reaches for the ten by name again."""
+        if anyone reaches for the eleven by name again."""
         built = invented_menu()
         out = self.paint(built, invented_position(built))
         for name in items.NAMES.values():
@@ -825,18 +831,18 @@ class TestTheMenuIsTheMachine(PainterTest):
 
     def test_no_real_step_number_leaks_into_a_menu_that_has_none(self):
         """The same, for the numbers. This machine's items are 11 to 14, so a
-        0-9 anywhere in the grid came from the painter and not from an item."""
+        0-10 anywhere in the grid came from the painter and not from an item."""
         built = invented_menu()
         out = self.paint(built, invented_position(built))
-        for number in range(10):
+        for number in range(11):
             self.assertEqual(_entries_for(out, number), [],
                              "a step number the machine never mentioned")
 
     def test_the_invented_items_never_became_part_of_the_machine(self):
         """These four exist to prove the painter asks the interface and
         nothing else. They are not MenuItems and nothing registered them, so
-        the product still ships exactly ten."""
-        self.assertEqual(sorted(M.registry()), list(range(10)))
+        the product still ships exactly eleven."""
+        self.assertEqual(sorted(M.registry()), list(range(11)))
 
     def test_grey_is_exactly_the_entries_that_cannot_be_picked(self):
         """Two gates, one colour: the position not offering it, or its own
@@ -939,11 +945,11 @@ def _entries_for(out, number):
 
 
 class TestThePaintedMenuMatchesTheRealMachine(PainterTest):
-    """The same claim, against the ten items and the world they judge."""
+    """The same claim, against the eleven items and the world they judge."""
 
     def test_every_greyed_entry_is_one_the_machine_refuses(self):
         """Painted grey iff unselectable: the position does not offer it, or
-        its own evaluate() blocks. Asserted for the real ten under both
+        its own evaluate() blocks. Asserted for the real eleven under both
         products, from a position in the middle of the cycle."""
         for strategy in M.Strategy:
             with self.subTest(strategy=strategy.value):
