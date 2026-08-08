@@ -67,6 +67,10 @@ from pathlib import Path
 # else.
 from dashcam_exporter.domain.menu import guards, items, menu
 from dashcam_exporter.application.ports import uploader
+# The only route from here to a camera. What counts as a card, how many clips
+# it holds and which files carry a track are the adapter's answers, not this
+# module's -- nothing below names a directory a camera invented.
+from dashcam_exporter.application.workflow import card_access
 from dashcam_exporter.infrastructure.runtime.runtime import Child, _reader
 from dashcam_exporter.infrastructure.config import (PRIVATE_KEYS, as_bool, card_root,
                                      load_config, load_env)
@@ -1080,11 +1084,12 @@ def tree_size(path):
 
 
 def clip_count(dcim_parent):
-    """Clip pairs in an import folder = files in DCIM/200video/front."""
-    front = dcim_parent / "DCIM" / "200video" / "front"
-    if not front.is_dir():
-        return None
-    return sum(1 for p in front.iterdir() if p.is_file())
+    """Clips in an import folder, or None when it is not a card at all.
+
+    Counted by parsing rather than by listing. On a real card the two
+    disagree: a listing counted files this tool cannot read as clips.
+    """
+    return card_access.clip_count(dcim_parent)
 
 
 def import_candidates(ctx):
@@ -1905,13 +1910,9 @@ def card_split(card, after):
     footage was dropped on purpose, and 'new' here means 'would be copied by
     the next import', which an excluded clip must never be.
     """
-    front = card / "DCIM" / "200video" / "front"
-    if not front.is_dir():
-        return 0, 0
     new = old = 0
-    for f in front.glob("*.mp4"):
-        m = STAMP_RE.search(f.name)
-        if m and ((after and m.group(1) <= after) or m.group(1) in _EXCLUDED):
+    for stamp in card_access.stamps_on(card):
+        if (after and stamp <= after) or stamp in _EXCLUDED:
             old += 1
         else:
             new += 1
@@ -2396,13 +2397,7 @@ def record_import(ctx, card):
     actually offers is to_import(): above the mark OR owed, and owed is the
     per-clip accounting that cannot be lifted by an unrelated render.
     """
-    newest = ""
-    front = card / "DCIM" / "200video" / "front"
-    if front.is_dir():
-        for f in front.glob("*.mp4"):
-            m = STAMP_RE.search(f.name)
-            if m and m.group(1) > newest:
-                newest = m.group(1)
+    newest = max(card_access.stamps_on(card), default="")
     if newest:
         write_ledger(ctx, newest, "imported and verified")
     return newest or None
@@ -2479,6 +2474,15 @@ def _same_file(src, dst):
 # else the camera writes -- 201photo, 202thumb, 207log, 750 MB of it -- is
 # never read by anything here, so it is not copied into a workspace whose
 # whole purpose is to be rendered from and then thrown away.
+#
+# This is the one card-shaped thing left in this module, and it is left on
+# purpose. The rule below is three-way -- a clip is wanted only if asked
+# for, GPS is always wanted, and anything unstamped comes along whatever it
+# is -- and CardLayout cannot express that in five methods: is_track_artifact
+# cannot stand in for "under the GPS root", because a VIOFO clip IS its own
+# track. Routing it through the adapter needs the canonical workspace, which
+# is plan 4's job. Narrowing it to two cases here silently stopped copying
+# the camera's log and started copying every imported clip's photo.
 VIDEO_DIR, GPS_DIR = "200video", "203gps"
 
 
@@ -2842,7 +2846,7 @@ def _state_line(text, there):
 
 
 def _clip_total(n):
-    """A folder with no DCIM/200video/front answers None, not zero -- it is a
+    """A folder no adapter recognises answers None, not zero -- it is a
     directory nobody has looked in, which is a different thing from empty."""
     if n is None:
         return "?"
@@ -3866,14 +3870,8 @@ def build_sidecars(ctx):
     """
     ran = []
     for cand in import_candidates(ctx):
-        front = cand / "DCIM" / "200video" / "front"
-        days = set()
-        if front.is_dir():
-            for f in front.glob("*.mp4"):
-                m = STAMP_RE.search(f.name)
-                if m:
-                    s = m.group(1)
-                    days.add("%s-%s-%s" % (s[0:4], s[4:6], s[6:8]))
+        days = {"%s-%s-%s" % (s[0:4], s[4:6], s[6:8])
+                for s in card_access.stamps_on(cand)}
         ns = ctx.out_dir / cand.name
         missing = []
         for day in sorted(days):
@@ -6448,14 +6446,7 @@ def card_stamps(ctx):
     design, so a card whose own import was lost would be erased on the
     strength of last month's renders.
     """
-    stamps = set()
-    front = ctx.card / "DCIM" / "200video" / "front"
-    if front.is_dir():
-        for f in front.glob("*.mp4"):
-            m = STAMP_RE.search(f.name)
-            if m:
-                stamps.add(m.group(1))
-    return stamps
+    return card_access.stamps_on(ctx.card)
 
 
 def covered_stamps(ctx, stamps):
@@ -6544,11 +6535,7 @@ def _clips_in_a_trip(ctx, root):
 
 
 def _import_clip_stamps(root):
-    front = root / "DCIM" / VIDEO_DIR / "front"
-    if not front.is_dir():
-        return set()
-    return {m.group(1) for f in front.glob("*.mp4")
-            for m in [STAMP_RE.search(f.name)] if m}
+    return card_access.stamps_on(root)
 
 
 def workspace_stamps(ctx, stamps):
@@ -6559,12 +6546,7 @@ def workspace_stamps(ctx, stamps):
     """
     found = set()
     for cand in import_candidates(ctx):
-        cfront = cand / "DCIM" / "200video" / "front"
-        if cfront.is_dir():
-            for f in cfront.glob("*.mp4"):
-                m = STAMP_RE.search(f.name)
-                if m and m.group(1) in stamps:
-                    found.add(m.group(1))
+        found |= card_access.stamps_on(cand) & stamps
     return found
 
 
@@ -6633,7 +6615,7 @@ def wipe_card(ctx):
 
     DCIM is emptied and kept. Everything under it goes, folders included — the
     camera makes the ones it needs again on the next recording, so leaving
-    200video/front and its siblings behind was keeping a shape nothing
+    the video and GPS directories behind was keeping a shape nothing
     depended on. DCIM itself stays because it is how this tool knows a card is
     in the slot at all, and nothing outside it is touched.
 
@@ -6652,9 +6634,9 @@ def _unlink_card_files(ctx, dcim):
     """Every FILE under DCIM. Every FOLDER stays, at every depth.
 
     The camera does not rebuild its own tree. Handed a card with DCIM there but
-    200video/front missing, it sits on "loading card" and records nothing —
-    which is a failure discovered in the car, hours after the erase, with
-    nothing recorded in between.
+    its recording directories missing, a DDPAI sits on "loading card" and
+    records nothing — which is a failure discovered in the car, hours after
+    the erase, with nothing recorded in between.
 
     So the whole structure is left standing and only its contents go. That
     costs a stat and an unlink per file where removing five trees would have
@@ -6778,33 +6760,15 @@ def _final_folders(ctx):
     return tuple(filter(_is_dir, found))
 
 
-def _is_track_file(f):
-    """The track lives in DCIM/<NNN>gps/ as .gpx, or as a '*.git' tar archive
-    the renderer harvests .gpx members from. Either counts."""
-    return f.suffix.lower() in (".gpx", ".git")
-
-
-def _is_gps_dir(path):
-    return path.is_dir() and "gps" in path.name.lower()
-
-
-def _gps_dirs(cands):
-    subs = itertools.chain.from_iterable(map(_dcim_subdirs, cands))
-    return filter(_is_gps_dir, subs)
-
-
-def _dcim_subdirs(cand):
-    return _subdirs(cand / "DCIM")
-
-
-def _subdirs(dcim):
-    if not dcim.is_dir():
-        return []
-    return list(dcim.iterdir())
-
-
 def _has_track(cands):
-    return any(map(lambda d: any(map(_is_track_file, d.iterdir())), _gps_dirs(cands)))
+    """Whether any of these trees carries GPS, however its camera stores it.
+
+    Five helpers used to stand behind this: find the DCIM subdirectories,
+    keep the ones with "gps" in the name, and call a .gpx or .git file a
+    track. Every one of those is a DDPAI fact, and on a camera that keeps
+    telemetry inside the video there is no GPS directory to find at all.
+    """
+    return any(map(card_access.carries_track, cands))
 
 
 def _expected_trips(ctx, root, metas):
@@ -6945,8 +6909,7 @@ def _clips_named(card, stamps):
     "13 new clips" print thirty lines and then say "and 17 more" about the
     same thirteen clips.
     """
-    front = card / "DCIM" / "200video" / "front"
-    return tuple(sorted(str(p) for p in _safe_glob(front, "*.mp4")
+    return tuple(sorted(str(p) for p in card_access.front_videos(card)
                         if _stamp_of_name(p.name) in stamps))
 
 
