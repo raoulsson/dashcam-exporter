@@ -4936,7 +4936,7 @@ def step_transcribe(ctx, world):
                     offset = int((time.monotonic() - started) / .6) % len(stream)
                     tail = "  " + (stream + stream)[offset:offset + 40]
             label = trip_labels[path] + ": " + phase
-            _write_line("  %s %s %s" %
+            _write_line("\x1b[?25l" + "  %s %s %s" %
                         (C.gold(label), bar.bracket(percent / 100.0),
                          C.gold("%3.0f%%%s" % (percent, tail))))
 
