@@ -645,6 +645,12 @@ software = true
 # dashcam clip is often the car rolling to a stop, or a dark garage.
 #site_still_seconds = 2.0
 
+# Speaker diarization (menu 7). Required before choosing "y": accept the
+# pyannote model terms at huggingface.co and put the token in .env, never in
+# this tracked file. The run fails before touching any audio when it is absent.
+#hf_token =
+#diarization_model = pyannote/speaker-diarization-3.1
+
 # Re-encode even when the output already exists. Off by default: a finished mp4
 # is not rebuilt, which is what makes an interrupted render restartable.
 #force = false

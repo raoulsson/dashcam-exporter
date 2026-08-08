@@ -266,7 +266,7 @@ def _expand_refs(value, so_far):
 # and why they resolve from the gitignored .env first. Same rule the home
 # coordinates already followed: config.txt may carry a commented EXAMPLE, the
 # real value lives in .env or not at all.
-PRIVATE_KEYS = ("upload_plugin", "home_lat", "home_lon", "card")
+PRIVATE_KEYS = ("upload_plugin", "home_lat", "home_lon", "card", "hf_token")
 
 
 def as_bool(v, default=False):
@@ -4903,6 +4903,15 @@ def step_transcribe(ctx, world):
         return record(ctx, NAME[TRANSCRIBE], ABORTED, started, "cancelled")
     print()
     diarize = prompt.confirm("\tUse speaker diarization?", default=False)
+    if diarize:
+        hf_token = ctx.cfg_opt("hf_token") or os.environ.get("HF_TOKEN")
+        if not hf_token:
+            return record(ctx, NAME[TRANSCRIBE], ABORTED, started,
+                          "speaker diarization needs hf_token in config.txt (or HF_TOKEN in .env)")
+        diarization_model = ctx.cfg_opt("diarization_model") or "pyannote/speaker-diarization-3.1"
+    else:
+        hf_token = None
+        diarization_model = None
     splicer = Mp4AudioSplicer()
     enhancer = Mp3VoiceEnhancer()
     transcriber = FasterWhisperTranscriber()
@@ -4939,7 +4948,7 @@ def step_transcribe(ctx, world):
                             progress_callback=lambda p: show(path, 35 + p * .40),
                         )
                         enhanced.seek(0)
-                        turns = SpeakerDiarizer().diarizeMp3(enhanced)
+                        turns = SpeakerDiarizer(model_name=diarization_model, token=hf_token).diarizeMp3(enhanced)
                         labeler = SpeakerLabeler(turns)
                         with text_path.open("w", encoding="utf-8") as destination:
                             writer = ParagraphWriter(destination)
