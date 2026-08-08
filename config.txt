@@ -19,8 +19,8 @@
 #   card  ->  import_dir  ->  renders + sidecars in export_dir  ->  published
 #
 # The menu walks that: 1) Import SIM copies the card, 2) Generate Meta writes a
-# sidecar per trip, 5) Build Website makes what gets published, 7) Upload
-# Website puts it online, 6) Render Trips encodes the videos, and 8) Clean
+# sidecar per trip, 5) Build Website makes what gets published, 8) Upload
+# Website puts it online, 6) Render Trips encodes the videos, and 9) Clean
 # Workspace erases the copies once they are safely elsewhere.
 #
 #
@@ -31,11 +31,11 @@
 #                   final_<day>_<import> beside export_dir and writes one
 #                   self-contained .html in there: every still embedded, every
 #                   route drawn from its .gpx, opens with no network.
-#                   7) Upload Website stays greyed and says "not available for
+#                   8) Upload Website stays greyed and says "not available for
 #                   local page". This is the whole tool for most people.
 #
 #   UPLOADER     -- `upload_plugin` names a plugin you supply.
-#                   5) and 7) become that plugin's: it decides what a website
+#                   5) and 8) become that plugin's: it decides what a website
 #                   is and where it goes -- S3, rsync, FTP, a folder on a NAS.
 #                   The tool never learns what your destination is; it asks the
 #                   plugin whether the trips are there before it erases
@@ -44,9 +44,9 @@
 #                   Pages go up before the videos do. A trip is publishable as
 #                   soon as 2) Generate Meta has described it, so the cycle is
 #                   import, meta, preview, exclude, 5) Build Website,
-#                   7) Upload Website -- then 6) Render Trips, then build and
-#                   upload again to bring the videos. Item 7 is offered from
-#                   2, 3, 4, 5, 6 and 7, and answers for itself when there is
+#                   8) Upload Website -- then 6) Render Trips, then build and
+#                   upload again to bring the videos. Item 8 is offered from
+#                   2, 3, 4, 5, 6, 7 and 8, and answers for itself when there is
 #                   nothing built yet.
 #
 # The status screen names which edition you are in at launch.
@@ -84,7 +84,7 @@
 # accept true / false / yes / no / 1 / 0, and a value may name an earlier
 # setting as ${that}. Write a fresh copy of the built-in default config with
 #
-#   python3 make_dashcam_videos.py --write-config ./config.new.txt
+#   python -m dashcam_exporter.infrastructure.media.renderer --write-config ./config.new.txt
 #
 
 
@@ -98,7 +98,7 @@
 # — the tool calls all of them the card and the status screen says `mounted` or
 # `not mounted` for any of them.
 #
-# Read by 1) Import SIM, which copies from here, and by 9) Delete SIM Data,
+# Read by 1) Import SIM, which copies from here, and by 10) Delete SIM Data,
 # which erases it. Nothing renders from here: that is import_dir.
 # Personal, so it resolves from the gitignored .env first, as SET_CARD.
 # config.txt is tracked: a real path here is a path committed.
@@ -130,7 +130,7 @@
 #workspace = ~/dashcam-data
 
 # Where a copy of the card is kept. Change this only to use a bigger disk
-# during import. Its contents are deleted by 8) Clean Workspace, once the trips
+# during import. Its contents are deleted by 9) Clean Workspace, once the trips
 # are confirmed published — nothing else in here is the tool's.
 #
 # Rendering straight off the card is possible: point this at the card. That is
@@ -141,20 +141,20 @@
 # Where the sidecars and the rendered trips are written. They are published
 # from here, or yours to pick up, before you clean the workspace.
 #
-# Two checkouts must not share one: 8) Clean Workspace in either would erase
+# Two checkouts must not share one: 9) Clean Workspace in either would erase
 # the other's working area. The tool writes an owner marker and refuses to
 # sweep a directory another checkout claims, but the setting is the fix.
 #
 # `output_dir` and `out` are read as aliases for this setting. export_dir wins.
 #export_dir = ${workspace}/export
 
-# Where the finished website is placed by 7) Upload Website under the LOCAL
+# Where the finished website is placed by 8) Upload Website under the LOCAL
 # edition, which has no network destination to send it to. The whole directory
 # is replaced on each run, so point this at somewhere the tool owns rather than
 # at a folder that also holds anything of yours.
 #
 # Ignored entirely when an upload plugin is configured: the destination is then
-# the plugin's, and it is the plugin that says where its files go. `h 7` prints
+# the plugin's, and it is the plugin that says where its files go. `h 8` prints
 # whichever of the two applies to this installation.
 #default_website_export_dir = ${workspace}/website
 
@@ -172,14 +172,14 @@
 # them, whether that involves a bucket, a second repo, a rack in a cupboard or
 # a folder on an external disk, is that implementation's business and not this
 # repo's. Set it and 5) Build Website builds what YOUR plugin publishes and
-# 7) Upload Website lights up. Leave it and both stay exactly as a fresh clone
-# has them: item 5 writes the local page, item 7 sits in the menu greyed out,
+# 8) Upload Website lights up. Leave it and both stay exactly as a fresh clone
+# has them: item 5 writes the local page, item 8 sits in the menu greyed out,
 # and p says why. The item NUMBERS never move, so a note saying "run 5" means
 # the same thing on every machine.
 
 # The plugin that publishes, as "<path to a .py>:<Builder>:<Uploader>". One
 # file, two classes: the builder subclasses uploader.Builder and is 5) Build
-# Website, the uploader subclasses uploader.Uploader and is 7) Upload Website.
+# Website, the uploader subclasses uploader.Uploader and is 8) Upload Website.
 # Each answers three questions — describe(), evaluate(workspace),
 # execute(workspace) — and the uploader answers one more, is_complete(trip_ids).
 # Both may also implement reset(), which the exporter calls after any step that
@@ -206,12 +206,12 @@
 # renders stop reaching the world with nothing on screen to say so.
 #upload_plugin =
 
-# THE DELETE GUARD. 8) Clean Workspace erases the original clips and the renders
+# THE DELETE GUARD. 9) Clean Workspace erases the original clips and the renders
 # they produced, and what it can prove first depends on what is set here. (The
-# card is not this item's business — that is 9) Delete SIM Data, with its own
+# card is not this item's business — that is 10) Delete SIM Data, with its own
 # evidence.) Each asks for its own verb before it erases anything: EXCLUDE at
-# item 4, CLEAN at item 8, DELETE at item 9.
-# The one way PAST a refusal — item 9's, when clips exist nowhere else — asks
+# item 4, CLEAN at item 9, DELETE at item 10.
+# The one way PAST a refusal — item 10's, when clips exist nowhere else — asks
 # for ERASE instead, so habit cannot type you through it.
 #
 # THE RULE, in one sentence: the floors that never leave this machine first,

@@ -43,7 +43,6 @@ import base64
 import html
 import itertools
 import json
-import threading
 import math
 import os
 import platform
@@ -68,7 +67,7 @@ from pathlib import Path
 # else.
 from dashcam_exporter.domain.menu import guards, items, menu
 from dashcam_exporter.application.ports import uploader
-from dashcam_exporter.infrastructure.runtime.runtime import Child, FAIL_TAIL_LINES, _reader
+from dashcam_exporter.infrastructure.runtime.runtime import Child, _reader
 from dashcam_exporter.infrastructure.config import (PRIVATE_KEYS, as_bool, card_root,
                                      load_config, load_env)
 from dashcam_exporter.domain.model import world as W

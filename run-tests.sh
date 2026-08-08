@@ -5,7 +5,7 @@
 #
 # What it covers: the graph the menu is built from, and the predicates the
 # destructive items obey. Not the renderer, not the site — the three paths that
-# erase things (4) Exclude Trip, 8) Clean Workspace, 9) Delete SIM Data) and the
+# erase things (4) Exclude Trip, 9) Clean Workspace, 10) Delete SIM Data) and the
 # guards that decide whether they may. It used to be four: importing swept the
 # previous round from inside itself, and that arc is gone.
 
@@ -51,7 +51,9 @@ echo "=== undefined names and redefinitions (pyflakes) ==="
 # The rest of pyflakes is style, and some of it is deliberate (uploader.py
 # re-exports on purpose), so it is not a reason to fail a build.
 if [ -x ".venv/bin/pyflakes" ]; then
-    UNDEF="$(.venv/bin/pyflakes src/*.py tests/*.py 2>&1 \
+    # src/*.py matched nothing once the code moved into src/dashcam_exporter/**;
+    # find recurses the package so the check sees the whole tree again.
+    UNDEF="$(.venv/bin/pyflakes $(find src tests -name '*.py') 2>&1 \
              | grep -E "undefined name|redefinition of unused" || true)"
     if [ -n "$UNDEF" ]; then
         echo "$UNDEF"

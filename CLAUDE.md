@@ -6,25 +6,38 @@ watermark), a moving-marker map widget + stats panel, automatic parking-skip,
 and per-trip HTML / GPX / links / meta sidecars. DDPAI-specific (tested on Mola
 N3 Pro). macOS-first (hardware VideoToolbox); Linux works via libx264.
 
-Two layers, and they do not know much about each other.
+The code lives under `src/dashcam_exporter/` in four layers — `domain/`
+(the menu machine + frozen world), `application/` (the operator workflow + UI +
+ports), `infrastructure/` (the renderer, media, config, adapters), `splice/`
+(audio → transcript). `PYTHONPATH=src`; there is NO top-level `make_dashcam_videos.py`
+any more (it moved to `infrastructure/media/renderer.py`). Two layers, and they
+do not know much about each other.
 
-`make_dashcam_videos.py` (~4200 lines) is the RENDERER: scanning, trip grouping,
-GPS, sidecars, encoding. It has a full command line and is what the rest of this
-file is mostly about.
+`infrastructure/media/renderer.py` (~3600 lines) is the RENDERER: scanning, trip
+grouping, GPS, sidecars, encoding. It has a full command line, is run as
+`python -m dashcam_exporter.infrastructure.media.renderer`, and is what the rest
+of this file is mostly about.
 
-The other modules are the OPERATOR TOOL, a nine-item menu that runs the renderer
+The other modules are the OPERATOR TOOL, an eleven-item menu (entry point
+`python -m dashcam_exporter.application.workflow.pipeline`) that runs the renderer
 as a child process and decides what may run when:
 
 | module | lines | what is in it |
 |---|---|---|
-| `pipeline.py` | ~8300 | the step bodies, the terminal output, the world capture |
-| `menu.py`     | ~700  | the item base classes, the step graph, the position machine |
-| `items.py`    | ~700  | one class per menu item: what it is, where it leads, what blocks it |
-| `guards.py`   | ~440  | pure predicates over a captured world — every refusal lives here |
-| `world.py`    | ~200  | the frozen facts a guard is allowed to look at |
-| `uploader.py` | ~480  | the seam an outside publisher implements |
+| `application/workflow/pipeline.py` | ~8000 | the step bodies, the terminal output, the world capture |
+| `domain/menu/menu.py`   | ~770 | the item base classes, the step graph, the position machine |
+| `domain/menu/items.py`  | ~800 | one class per menu item: what it is, where it leads, what blocks it |
+| `domain/menu/guards.py` | ~600 | pure predicates over a captured world — every refusal lives here |
+| `domain/model/world.py` | ~210 | the frozen facts a guard is allowed to look at |
+| `application/ports/uploader.py` | ~700 | the seam an outside publisher implements |
 
-`./run-tests.sh` runs 561 Python tests and 7 shell tests and prints `all green`;
+The menu items are numbered `0..10`: 0 Progress, 1 Import SIM, 2 Generate Meta,
+3 Build Preview, 4 Exclude Trip, 5 Build Website, 6 Render Trips, 7 Transcribe
+Trips, 8 Upload Website, 9 Clean Workspace, 10 Delete SIM Data. Inserting item 7
+in 2026-07 pushed Upload/Clean/Delete up by one — a renumber is global, and the
+path/gate tests that type item numbers had to move with it.
+
+`./run-tests.sh` runs 677 Python tests and 7 shell tests and prints `all green`;
 it also fails on pyflakes undefined names and redefinitions. Anything touching
 `guards.py`, `items.py` or `menu.py` is expected to come with a test, because
 those decide whether footage may be deleted. The renderer itself stays a
@@ -139,6 +152,34 @@ to pick GPS-vs-video (the user only wants a clean cut); the real alternative —
 keep the parking movements — is `--no-skip-parking`. Same technique could later
 replace the GPS head-trim at trip start. Constants: `EGO_*`.
 
+### Transcription (menu item 7)
+
+`Transcribe Trips` turns rendered MP4s into transcript sidecars. It works ONLY on
+already-rendered MP4s (`world.renders`) — `evaluate` returns `blocked("no rendered
+MP4s to transcribe")` when none exist, so there is no transcript without a render.
+Repeatable, opt-in, never a dead-end (the same edges as after a render). Code is
+under `src/dashcam_exporter/splice/` (`transcription/`, `audio/`, `diarization/`,
+`cli/`); the step body is `step_transcribe` in `pipeline.py`.
+
+Pipeline per trip: splice the MP4's audio to MP3 (ffmpeg `-vn libmp3lame`) →
+voice-enhance (`afftdn` denoise + `highpass=80`/`lowpass=12000` + `loudnorm`) →
+transcribe with **faster-whisper** (`small`, int8, beam 5). Diarization is optional
+and prompted per run (`Use speaker diarization?`, default no): **pyannote.audio**
+`speaker-diarization-3.1`, which needs `hf_token` (config) or `HF_TOKEN` env — a
+diarize run with no token aborts before touching audio. Deps `faster-whisper>=1.1`
++ `pyannote.audio>=3.3` (venv only); missing them silently skips.
+
+Two sidecars land beside the MP4, and a trip counts as transcribed only when BOTH
+exist: `<video>.transcript.txt` (UTF-8, segments grouped into 350–700-char
+paragraphs, speaker-prefixed when diarized) and `<video>.transcript.timeline.json`
+(`{"format":"paragraph-timeline/v1","paragraphs":[…]}` mapping each paragraph to
+media time + character offsets). The sibling `goodnight-drives` site reads these as
+a Map/Transcript tab that follows the video. Noise filtering is ON (drops
+`sd card loaded/loading`); repetition dedup (`_dedupe_repetition`) exists but is
+DELIBERATELY DISABLED — raw repetitions are kept for now while transcripts are
+checked against the recording. Config knobs: `hf_token`, `diarization_model`
+(default `pyannote/speaker-diarization-3.1`); whisper model/device are hardcoded.
+
 ### Env / venv
 
 Homebrew's `python3` is externally-managed (PEP 668), so Pillow/staticmap (map
@@ -161,11 +202,37 @@ be reshaped; break one of these and footage goes.
   parts company with the owner's table, and a hand-edit hides that.
 - **Destructive items ask for a typed word, then capture the world AGAIN** and
   re-ask the same guard callable before acting. Each asks for its own verb —
-  `EXCLUDE` at 4, `CLEAN` at 8, `DELETE` at 9 — and the way past item 9's own
+  `EXCLUDE` at 4, `CLEAN` at 9, `DELETE` at 10 — and the way past item 10's own
   refusal asks `ERASE`, so habit cannot carry anyone through a guard.
 - **`is_complete()` is three-valued and fails closed.** A destination that
   cannot be reached answers UNKNOWN, never NO and never YES, because the next
   thing the operator does is erase the only local copy.
+
+### The uploader plugin (the publishing seam)
+
+Publishing is optional and lives entirely behind ONE seam — the interface in
+`application/ports/uploader.py`. An outside plugin supplies TWO classes in one
+file: a `Builder` (item 5, Build Website — builds what THIS install publishes)
+and an `Uploader` (item 8, Upload Website — puts it there). Wired by a FILE PATH,
+not a module: `SET_UPLOAD_PLUGIN=<path.py>:<BuilderClass>:<UploaderClass>` in the
+`.env` (or `upload_plugin` in config.txt). Unconfigured, item 8 is greyed and
+Build Website writes the local self-contained page instead. A configured plugin
+that will not load stops the tool at startup, loudly — never a silent degrade to
+the local edition, because a render that quietly stops reaching the world looks
+identical to one that is publishing fine.
+
+The exporter asks the plugin only four things — `evaluate` (may this run / would
+it do anything), `execute` (do it), `describe` (one line), and, on the uploader,
+`is_complete(trip_ids)` → YES/NO/UNKNOWN/NA. Everything else it answers itself:
+which trips are in scope (read off the import's sidecars, so a trip that never
+rendered is still on the list), whether they rendered here, whether the operator
+typed the word, and which item may follow which. So a plugin that answers yes to
+everything STILL cannot talk Clean Workspace (9) into erasing an import that
+produced no renders — `is_complete` gates that erase, is all-or-nothing over the
+import's trips, and fails closed. To add one: copy `examples/local_website.py`
+(the suite drives it through the erase gates twice, so it can't rot). The
+method-by-method table is in the README's "Publishing — plugging in your own";
+the why-a-type-not-config-keys reasoning is in `docs/public-edition.md`.
 
 ## Data layout (outside the repo)
 
@@ -201,7 +268,8 @@ skipped clips were verified by an earlier run this script cannot see.
 ## Running
 
 - `./RUN-DASHCAM-EXPORTER.sh` — the operator tool. Picks an interpreter that has
-  cv2, numpy, staticmap and PIL, then execs `pipeline.py`, which takes no
+  cv2, numpy, staticmap and PIL, then execs
+  `python -m dashcam_exporter.application.workflow.pipeline`, which takes no
   arguments at all: every value comes from `config.txt` and the gitignored
   `.env`. A flag would be a second answer to a question `config.txt` already
   answers, and the compiled-in default wins silently when the two disagree.
@@ -213,12 +281,15 @@ skipped clips were verified by an earlier run this script cannot see.
   same `--out` are never touched (rendering the 07-19 import clears 07-15..18,
   leaves an unrelated 05-11 alone). Hidden entries and the root
   `.gpx_cache`/`.geocode_cache.json` are always kept. The reset lives in
-  `make_dashcam_videos.py` (it knows which days it'll write), is skipped for a
-  `--drives` subset and `--sidecars-only`, and is disabled by `--no-clean-days`.
+  `infrastructure/media/renderer.py` (it knows which days it'll write), is skipped
+  for a `--drives` subset and `--sidecars-only`, and is disabled by `--no-clean-days`.
   Logs to `run-<ts>.log` inside `--out/logs/`. Keep the reset in the renderer,
   never the wrapper: a wrapper-level wipe cannot know which days a run writes,
   so it would take other imports' output with it.
-- Direct: `python3 make_dashcam_videos.py --root … --out … [--dry-run|--sidecars-only|--force]`.
+- `./list-trips-data.sh` and `./make-trips-rendered.sh` both exec
+  `python -m dashcam_exporter.infrastructure.media.renderer` (the first with
+  `--dry-run`); flags after the leading trip indices pass straight through.
+- Direct: `python -m dashcam_exporter.infrastructure.media.renderer --root … --out … [--dry-run|--sidecars-only|--force]`.
 - `--write-config PATH` copies `config.txt` itself to PATH, so a config change
   is two places: that file and the argparse defaults.
 

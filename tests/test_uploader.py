@@ -136,6 +136,7 @@ def _a_ctx(uploader=None):
 
     ctx = P.Ctx.__new__(P.Ctx)
     ctx.out_dir = Path("/w/out")
+    ctx.offline = False
     if uploader is not None:
         ctx.plugin = U.Plugin(_A_BUILDER, uploader, "/a/test/plugin.py:B:U")
     return ctx
