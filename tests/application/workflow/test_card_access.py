@@ -90,5 +90,28 @@ class CardAccessTest(unittest.TestCase):
             self.assertTrue(card_access.carries_track(card))
 
 
+    def test_card_root_of_walks_up_from_a_directory_inside_the_card(self):
+        # Any fixed parent count is one camera's count: DCIM/200video/front
+        # is three levels down and BlackVue/Record is two.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ddpai_card(root / "d")
+            blackvue_card(root / "b")
+
+            self.assertEqual(
+                card_access.card_root_of(root / "d/DCIM/200video/front"),
+                root / "d")
+            self.assertEqual(
+                card_access.card_root_of(root / "b/BlackVue/Record"),
+                root / "b")
+
+    def test_card_root_of_answers_none_when_no_ancestor_is_a_card(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            loose = Path(temporary) / "front"
+            loose.mkdir()
+
+            self.assertIsNone(card_access.card_root_of(loose))
+
+
 if __name__ == "__main__":
     unittest.main()

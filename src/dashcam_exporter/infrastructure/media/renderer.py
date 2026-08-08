@@ -73,6 +73,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from dashcam_exporter.infrastructure.adapters import DdpaiDataAdapter
+from dashcam_exporter.application.workflow import card_access
 from dashcam_exporter.application.ports.checkout import RealCheckout
 from dashcam_exporter.domain import Clip, Cut, RenderOptions
 from dashcam_exporter.infrastructure.media.speed_analysis import (
@@ -306,12 +307,24 @@ def reverse_geocode(lat: float, lon: float, cache_path: Path) -> "str | None":
 
 
 def find_clips(front_dir: Path, rear_dir: Path | None) -> list[Clip]:
-    """Discover DDPAI clip pairs through the camera adapter.
+    """Discover clip pairs through whichever adapter recognises the card.
 
-    The renderer keeps the operator-facing warning; filename parsing and rear
-    pairing belong to the DDPAI adapter, so they have exactly one definition.
+    The renderer keeps the operator-facing warning; filename parsing and
+    channel pairing belong to the adapter, so they have exactly one
+    definition.
+
+    The command line hands this a video DIRECTORY, not a card, so the card is
+    found by walking up until an adapter claims an ancestor. When none does --
+    a bare pair of directories with no card structure around them, which is
+    what the tests pass and what --front on an unpacked folder gives -- the
+    pre-contract DDPAI path still answers.
     """
-    clips = DdpaiDataAdapter(REAR_PAIR_TOLERANCE_S).discover_clips(front_dir, rear_dir)
+    card = card_access.card_root_of(front_dir)
+    layout = card_access.layout_for(card) if card is not None else None
+    if layout is not None:
+        clips = layout.clips()
+    else:
+        clips = DdpaiDataAdapter(REAR_PAIR_TOLERANCE_S).discover_clips(front_dir, rear_dir)
     n_no_rear = sum(clip.rear is None for clip in clips) if REAR_PIP_ENABLED and rear_dir else 0
     if n_no_rear:
         print(f"  note: {n_no_rear} clips have no rear pair — rendered front-only (no PiP)")

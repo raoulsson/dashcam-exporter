@@ -48,6 +48,24 @@ def is_card(root) -> bool:
     return layout_for(root) is not None
 
 
+def card_root_of(path):
+    """The nearest ancestor of this path that some adapter recognises.
+
+    For callers handed a directory INSIDE a card -- the renderer is given a
+    video directory on the command line -- rather than the card itself.
+    Walking up beats counting parents: DCIM/200video/front is three levels
+    down and BlackVue/Record is two, so any fixed number is one camera's
+    number.
+    """
+    if path is None:
+        return None
+    start = Path(path)
+    for candidate in [start, *start.parents]:
+        if is_card(candidate):
+            return candidate
+    return None
+
+
 def clip_count(root) -> int | None:
     """How many clips this tree holds, or None if it is not a card at all.
 
