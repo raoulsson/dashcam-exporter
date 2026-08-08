@@ -1226,7 +1226,7 @@ def _card_rows(ctx):
     """Mounted or not, and where. One row, one question answered."""
     if not (ctx.card / "DCIM").is_dir():
         return (_state("SIM Card", C.dim("not mounted"), tilde(ctx.card)),)
-    return (_state("SIM Card", C.green("mounted") + "  " + _card_note(ctx),
+    return (_state("SIM Card", "mounted" + "  " + _card_note(ctx),
                    tilde(ctx.card)),)
 
 
