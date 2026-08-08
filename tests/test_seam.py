@@ -2171,7 +2171,7 @@ class TestATargetThatFallsOverAwayFromTheAskPath(SeamTest):
         with self.assertRaises(RuntimeError):
             built[BUILD].evaluate(world)           # it really does raise
         with quiet():
-            P.print_menu(b.ctx, built, M.position_for(built), world)
+            b.ctx.ui.menu(b.ctx, built, M.position_for(built), world)
         self.assertTrue(P._safe_verdict(built[BUILD], world).blocked,
                         "an item whose plugin raised was still offered")
 

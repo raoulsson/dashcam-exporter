@@ -116,7 +116,7 @@ from dashcam_exporter.application.ui.screens import (ORPHAN_LIST, SHOWN, TIME_CO
                      _off_line, _orphan_file, _paint_body, _plugin_info_lines,
                      _print_all, _safe_verdict, _status_tag, _summary_line,
                      _total_line, _unlink_quietly, _verdicts, _where_lines,
-                     _why_lines, _why_not, print_menu, print_summary)
+                     _why_lines, _why_not, print_summary)
 
 # Reading the operator's key or line. Imported back under the same names,
 # and the module itself too, so a test can patch the prompt where it lives
@@ -7471,7 +7471,7 @@ class Runner:
 
     def _turn(self):
         world = self._look()
-        print_menu(self.ctx, self.menu, self.position, world)
+        self.ctx.ui.menu(self.ctx, self.menu, self.position, world)
         print()
         _HINTED[0] = True                      # no hint on the menu itself
         return self._dispatch(prompt.read_key("Select> "))

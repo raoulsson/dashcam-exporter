@@ -43,6 +43,28 @@ class StreamUiHandlerReproducesTheOldOutput(_NoColour):
         self.assertEqual(out.getvalue(), "  100% - rendered 3 trips.\n")
 
 
+class StreamUiHandlerDrivesTheExistingPainters(unittest.TestCase):
+    """The stream backend renders by calling screens, not by re-implementing it,
+    so the grid the operator sees is the one screens.print_menu has always drawn.
+    Asserting delegation (not bytes) keeps this test from re-pinning the grid
+    format, which screens' own tests already own."""
+
+    def test_menu_delegates_to_screens_print_menu(self):
+        from unittest import mock
+        from dashcam_exporter.application.ui import screens
+        seen = {}
+        with mock.patch.object(screens, "print_menu",
+                               side_effect=lambda *a: seen.setdefault("args", a)):
+            H.StreamUiHandler().menu("CTX", "ITEMS", "POS", "WORLD")
+        self.assertEqual(seen["args"], ("CTX", "ITEMS", "POS", "WORLD"))
+
+    def test_block_delegates_to_the_screens_sink(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            H.StreamUiHandler().block(["one ", "two"])
+        self.assertEqual(out.getvalue(), "one\ntwo\n")
+
+
 class TheActiveHandler(unittest.TestCase):
     def tearDown(self):
         H.set_active(None)   # never leak a backend into another test

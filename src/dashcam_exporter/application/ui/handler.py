@@ -24,6 +24,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from dashcam_exporter.application.ui.term import C
+from dashcam_exporter.application.ui import screens
 
 
 class UiHandler(ABC):
@@ -31,7 +32,13 @@ class UiHandler(ABC):
 
     @abstractmethod
     def block(self, lines):
-        """A screen: ready-made lines (the menu grid, help, the summary table)."""
+        """A screen: ready-made lines (help, info, the summary table)."""
+
+    @abstractmethod
+    def menu(self, ctx, menu_items, position, world):
+        """The menu itself, from its state -- the stream backend paints the grid,
+        a framed backend draws a compact bar. Passed the state, not pre-rendered
+        lines, so each backend renders it its own way."""
 
     @abstractmethod
     def done(self, what):
@@ -39,11 +46,16 @@ class UiHandler(ABC):
 
 
 class StreamUiHandler(UiHandler):
-    """Writes to stdout exactly as the tool always has. The default backend."""
+    """Writes to stdout exactly as the tool always has, by driving the existing
+    painters (`screens`) and colours (`term`). The default backend. The `ui`
+    package stays acyclic: this module depends on the renderers, never the
+    reverse -- `screens` knows nothing about who is calling it."""
 
     def block(self, lines):
-        for line in lines:
-            print(line.rstrip())
+        screens._print_all(lines)
+
+    def menu(self, ctx, menu_items, position, world):
+        screens.print_menu(ctx, menu_items, position, world)
 
     def done(self, what):
         print(C.green("  100%% - %s." % what))

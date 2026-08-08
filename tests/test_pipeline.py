@@ -189,8 +189,11 @@ def drive(menu_items, position, keys, plugin=None):
     runner = P.Runner(ctx, menu_items, position)
     captures = Captures()
     buf = io.StringIO()
+    # The menu is painted through the UI seam now (ctx.ui.menu), not a module
+    # function. ctx is a Mock, so ctx.ui.menu is already a recording mock with
+    # the same call signature the old print_menu patch captured.
+    painter = ctx.ui.menu
     with mock.patch.object(P, "capture_world", side_effect=captures) as captured, \
-            mock.patch.object(P, "print_menu") as painter, \
             mock.patch.object(P.prompt, "ask", side_effect=list(keys)):
         with redirect_stdout(buf):
             runner.loop()

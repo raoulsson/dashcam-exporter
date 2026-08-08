@@ -37,6 +37,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
 from dashcam_exporter import guards, items, menu as M, world as W  # noqa: E402
+from dashcam_exporter.application.ui import handler  # noqa: E402
 from dashcam_exporter.domain.menu.menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
                   TRANSCRIBE, UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
 
@@ -267,6 +268,12 @@ class FakeCtx:
         self.state_dir = self.out_dir / "state"
         self.workspace = self.out_dir
         self.plugin = None
+
+    @property
+    def ui(self):
+        # The runner paints through the UI seam; the stream backend drives the
+        # real screens.print_menu, exactly what the runner called before.
+        return handler.active()
 
 
 # ---------------------------------------------------------------------------
@@ -786,7 +793,7 @@ class PainterTest(unittest.TestCase):
 
     def paint(self, built, position, world=None):
         with quiet() as out:
-            P.print_menu(FakeCtx(), built, position, world or W.World())
+            handler.active().menu(FakeCtx(), built, position, world or W.World())
         return out.getvalue()
 
     def reasons(self, built, position, world=None):
