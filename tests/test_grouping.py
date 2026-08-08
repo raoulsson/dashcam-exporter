@@ -80,8 +80,7 @@ class GroupingTest(unittest.TestCase):
                             _ddmm(where[1], 3)))
         (self.gps / ("%s_%04d.gpx" % (stamp, secs))).write_text(
             "\n".join(lines) + "\n", encoding="utf-8")
-        self.clips.append(Clip(timestamp=stamp, epoch_utc=0, duration=secs,
-                               front=front, rear=None))
+        self.clips.append(Clip.paired(stamp, 0, secs, front, None))
         return at + timedelta(seconds=secs)
 
     def endpoints(self):

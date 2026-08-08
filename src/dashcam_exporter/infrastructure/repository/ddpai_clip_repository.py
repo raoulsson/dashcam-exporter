@@ -42,7 +42,7 @@ class DdpaiClipRepository(ClipRepository):
     def _to_clip(self, timestamp: str, front: Path, duration: int, rear_files: dict[int, Path]) -> Clip:
         epoch = self._epoch(timestamp)
         rear = self._closest_rear(epoch, rear_files)
-        return Clip(timestamp, epoch, duration, front, rear)
+        return Clip.paired(timestamp, epoch, duration, front, rear)
 
     def _closest_rear(self, epoch: int, rear_files: dict[int, Path]) -> Path | None:
         if not rear_files:

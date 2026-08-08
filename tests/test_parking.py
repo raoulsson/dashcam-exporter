@@ -75,8 +75,7 @@ class ParkingTest(unittest.TestCase):
         front.write_bytes(b"")
         if speeds is not None:
             self._write_nmea(stamp, speeds)
-        clip = Clip(timestamp=stamp, epoch_utc=0, duration=CLIP_SECS,
-                    front=front, rear=None)
+        clip = Clip.paired(stamp, 0, CLIP_SECS, front, None)
         # Through the named seam on the singleton, not into the memo dict: it
         # is the same store the render's detector reads, which is what makes
         # this fixture a description of what the camera saw rather than a

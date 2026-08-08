@@ -54,8 +54,7 @@ def _ddmm(deg: float, width: int) -> str:
 
 
 def clip(ts: str, secs: int = 60) -> Clip:
-    return Clip(timestamp=ts, epoch_utc=0, duration=secs,
-                front=Path("/tmp/%s.mp4" % ts), rear=None)
+    return Clip.paired(ts, 0, secs, Path("/tmp/%s.mp4" % ts), None)
 
 
 class TrackTest(unittest.TestCase):
