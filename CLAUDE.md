@@ -208,6 +208,32 @@ be reshaped; break one of these and footage goes.
   cannot be reached answers UNKNOWN, never NO and never YES, because the next
   thing the operator does is erase the only local copy.
 
+### The uploader plugin (the publishing seam)
+
+Publishing is optional and lives entirely behind ONE seam — the interface in
+`application/ports/uploader.py`. An outside plugin supplies TWO classes in one
+file: a `Builder` (item 5, Build Website — builds what THIS install publishes)
+and an `Uploader` (item 8, Upload Website — puts it there). Wired by a FILE PATH,
+not a module: `SET_UPLOAD_PLUGIN=<path.py>:<BuilderClass>:<UploaderClass>` in the
+`.env` (or `upload_plugin` in config.txt). Unconfigured, item 8 is greyed and
+Build Website writes the local self-contained page instead. A configured plugin
+that will not load stops the tool at startup, loudly — never a silent degrade to
+the local edition, because a render that quietly stops reaching the world looks
+identical to one that is publishing fine.
+
+The exporter asks the plugin only four things — `evaluate` (may this run / would
+it do anything), `execute` (do it), `describe` (one line), and, on the uploader,
+`is_complete(trip_ids)` → YES/NO/UNKNOWN/NA. Everything else it answers itself:
+which trips are in scope (read off the import's sidecars, so a trip that never
+rendered is still on the list), whether they rendered here, whether the operator
+typed the word, and which item may follow which. So a plugin that answers yes to
+everything STILL cannot talk Clean Workspace (9) into erasing an import that
+produced no renders — `is_complete` gates that erase, is all-or-nothing over the
+import's trips, and fails closed. To add one: copy `examples/local_website.py`
+(the suite drives it through the erase gates twice, so it can't rot). The
+method-by-method table is in the README's "Publishing — plugging in your own";
+the why-a-type-not-config-keys reasoning is in `docs/public-edition.md`.
+
 ## Data layout (outside the repo)
 
 - Inputs:  `~/dashcam-data/import/<label>/DCIM/{200video/{front,rear},203gps,...}`

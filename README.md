@@ -76,7 +76,7 @@ pipeline is) or the item's own **guard** ("no card at ...", "no GPS track in
 the import"). The numbering never moves, so "run 5" means the same thing on
 every machine.
 
-### The nine steps
+### The ten steps
 
 Plus `p` — progress: which trips exist, what has been done to them, what can
 be done next and why the rest cannot. It is not numbered, because looking at
@@ -95,7 +95,7 @@ the workspace is not a step in working through it.
 | 9 | **Clean Workspace** &#9888; | Erases the imported footage and the renders it produced, once this machine and the publishing target both say they are safe. |
 | 10 | **Delete SIM Data** &#9888; | Erases the card's clips, keeping its folders so the camera can record, once every clip is accounted for elsewhere. |
 
-Items 4, 8 and 9 destroy footage, and each asks for a word to be typed rather
+Items 4, 9 and 10 destroy footage, and each asks for a word to be typed rather
 than an Enter pressed. The word is the entry's own verb: `EXCLUDE` at Exclude
 Trip, `CLEAN` at Clean Workspace, `DELETE` at Delete SIM Data. Each names what
 that entry actually does, so a prompt cannot teach the wrong idea of what is
@@ -301,9 +301,9 @@ one setting:
 | Configured | You get |
 |---|---|
 | nothing | Import, render, and `dashcam_export_data_site.html` — one self-contained page, every still embedded, every route drawn from its GPX. Opens from `file://` with no network. |
-| `upload_plugin` | Item 5 builds what YOUR plugin publishes instead of the local page, and item 7, Upload Website, wakes up. |
+| `upload_plugin` | Item 5 builds what YOUR plugin publishes instead of the local page, and item 8, Upload Website, wakes up. |
 
-Unconfigured, item 7 stays in the menu, greyed out, and `p` gives the reason.
+Unconfigured, item 8 stays in the menu, greyed out, and `p` gives the reason.
 Run the cycle and the result is gathered into `final_<day>_<import>/` — page,
 videos and sidecars together, ready to move wherever you keep things.
 
@@ -436,7 +436,7 @@ If your card came formatted so macOS will not mount it, see
 ## Publishing — plugging in your own
 
 This repo does not know where your videos go, and it is not supposed to. It
-knows one interface — an ACT of publishing work, in [uploader.py](uploader.py) —
+knows one interface — an ACT of publishing work, in [uploader.py](src/dashcam_exporter/application/ports/uploader.py) —
 and it calls whatever classes you point it at.
 
 Set one thing, in the gitignored `.env`:
@@ -446,7 +446,7 @@ SET_UPLOAD_PLUGIN=~/dev/my-site/my_plugin.py:MySiteBuilder:MySiteUploader
 ```
 
 `<path to a .py>:<BuilderClass>:<UploaderClass>`. One plugin, two classes: the
-builder is item 5, the uploader is item 7. A file path rather than a dotted
+builder is item 5, the uploader is item 8. A file path rather than a dotted
 module name, because your implementation lives somewhere that is not installed
 and must not have to be — and when the path is wrong, the error names your file
 instead of Python's search path.
