@@ -168,8 +168,8 @@ class Bar:
 
     def render(self, fraction, elapsed):
         """`label [####......]  42%  0:12/0:30`."""
-        return "%s %s %s" % (C.yellow(self.label), self.bracket(fraction),
-                             C.yellow("%3d%% %s/%s"
+        return "%s %s %s" % (C.gold(self.label), self.bracket(fraction),
+                             C.gold("%3d%% %s/%s"
                                       % (int(fraction * 100), human_secs(elapsed),
                                          human_secs(_eta(fraction, elapsed)))))
 
@@ -183,7 +183,7 @@ class Bar:
         """
         width = self.width()
         filled = int(round(width * min(fraction, 1.0)))
-        return C.violet("[%s]" % (self.FILLED * filled
+        return C.magenta("[%s]" % (self.FILLED * filled
                                   + self.EMPTY * (width - filled)))
 
 
@@ -252,8 +252,8 @@ class Waiting(Bar):
         width = self.width(room_for=40)
         at = self._bounce(i, width)
         bar = self.EMPTY * at + self.BLOCK + self.EMPTY * (width - at - len(self.BLOCK))
-        text = "  %s %s %s" % (C.yellow(self.label), C.violet("[%s]" % bar),
-                               C.yellow(human_secs(elapsed)))
+        text = "  %s %s %s" % (C.gold(self.label), C.magenta("[%s]" % bar),
+                               C.gold(human_secs(elapsed)))
         return text + (("  " + self._note) if self._note else "") + " "
 
     def _bounce(self, i, width):
@@ -296,8 +296,8 @@ def _still_bar(bar, i, total, name):
     if not C.enabled:
         return
     bar.open_once()
-    _write_line("  %s %s %s" % (C.yellow(bar.label), bar.bracket(i / float(total)),
-                                C.yellow("%d/%d  %s" % (i, total, name))))
+    _write_line("  %s %s %s" % (C.gold(bar.label), bar.bracket(i / float(total)),
+                                C.gold("%d/%d  %s" % (i, total, name))))
 
 
 def _sweep_line(label, i, elapsed):

@@ -95,8 +95,18 @@ class C:
         return cls._w("32", s)
 
     @classmethod
+    def muted_green(cls, s):
+        """A positive state that is informational, not a fresh completion."""
+        return cls._w("2;32", s)
+
+    @classmethod
     def yellow(cls, s):
         return cls._w("33", s)
+
+    @classmethod
+    def gold(cls, s):
+        """Attention/action accent, distinct from success green."""
+        return cls.yellow(s)
 
     @classmethod
     def cyan(cls, s):
@@ -107,6 +117,11 @@ class C:
         """The bars, and nothing else. 256-colour, because magenta (35) is the
         same weight as the red that means "this destroys something"."""
         return cls._w("38;5;177", s)
+
+    @classmethod
+    def magenta(cls, s):
+        """Progress accent; reserved for moving bars."""
+        return cls.violet(s)
 
 
 def rule(title="", ch="-"):

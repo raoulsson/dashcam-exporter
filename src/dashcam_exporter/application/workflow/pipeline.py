@@ -5798,9 +5798,9 @@ def _cleaning_block(rows, files, size):
     the way past -- this screen is about to delete everything either way. They
     still get their line in the REFUSAL, where they are the reason.
     """
-    lines = [C.green("  Cleaning:"),
-             C.green("    Total:   %s files (%s)" % (files, human_bytes(size))),
-             C.green("    %d trip%s:" % (len(rows), "" if len(rows) == 1 else "s"))]
+    lines = [C.gold("  Cleaning:"),
+             C.gold("    Total:   %s files (%s)" % (files, human_bytes(size))),
+             C.gold("    %d trip%s:" % (len(rows), "" if len(rows) == 1 else "s"))]
     lines.extend(_trip_line(r) for r in rows)
     return tuple(lines) + ("",)
 
@@ -6049,13 +6049,13 @@ def _clean_workspace_commit(ctx, fresh, doomed, started):
     try:
         shutil.rmtree(str(target))
     except OSError as e:
-        print(C.red("  Delete failed: %s" % e))
+        print(C.red("  Clean failed: %s" % e))
         return _outcome(record(ctx, NAME[CLEAN_WS], FAILED, started, str(e)))
     if ctx.selected_import == root:
         ctx.selected_import = None
     ctx.last_scan = None
     ctx.last_groups = None
-    done_line("deleted %s files (%s) from %s"
+    done_line("cleaned %s files (%s) from %s"
               % (C.yellow("%d" % doomed.files), human_bytes(doomed.size),
                  tilde(target)))
     if discarding:
@@ -6242,7 +6242,7 @@ def drop_unaccounted_then_erase(ctx, world):
 def _erase_card_commit(ctx, started):
     gone, freed, reason = wipe_card(ctx)
     if reason:
-        print(C.red("  Card NOT cleaned: %s." % reason))
+        print(C.red("  Card NOT deleted: %s." % reason))
         return _outcome(record(ctx, NAME[ERASE_CARD], SKIPPED, started,
                                "refused: %s" % reason))
     return _outcome(record(ctx, NAME[ERASE_CARD], RAN, started,
@@ -6477,7 +6477,7 @@ def _unlink_card_files(ctx, dcim):
     # screen sat on the typed word for a minute or more with nothing between
     # the word and the closing line.
     failed = ""
-    with waiting("Erasing"):
+    with waiting("Deleting SIM data"):
         gone = freed = 0
         for f in sorted(dcim.rglob("*")):
             if not _real_file(f):
@@ -6490,11 +6490,11 @@ def _unlink_card_files(ctx, dcim):
             except OSError as e:
                 failed = str(e)
     if failed:
-        print(C.red("  Could not erase everything under %s: %s"
+        print(C.red("  Could not delete everything under %s: %s"
                     % (tilde(dcim), failed)))
         return gone, freed, failed
     _unlink_quietly(ctx.workspace / ORPHAN_LIST)
-    done_line("erased %s files from the card, %s freed"
+    done_line("deleted %s files from the card, %s freed"
               % (C.yellow("%d" % gone), human_bytes(freed)))
     return gone, freed, ""
 

@@ -96,7 +96,7 @@ def _nothing_to_do_lines(outcome):
     """
     if outcome.performed or not outcome.completed:
         return []
-    return [C.green("  Nothing to do: %s." % (outcome.note or "already done"))]
+    return [C.muted_green("  Nothing to do: %s." % (outcome.note or "already done"))]
 
 
 def _tell_the_plugin(ctx, item, outcome):

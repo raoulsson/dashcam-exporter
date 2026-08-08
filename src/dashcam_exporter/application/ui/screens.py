@@ -471,7 +471,7 @@ def _next_steps(menu_items, verdicts, offered):
                    and not menu.is_view(menu_items[n]))
     if not ready:
         return ()
-    return ("", C.bold("  Next available steps:")) + tuple(
+    return ("", C.cyan("  Next available steps:")) + tuple(
         "     %d - %s" % (n, menu_items[n].description()) for n in ready) + ("",)
 
 
@@ -558,8 +558,8 @@ def _hms(seconds):
 
 # "ran" is what the machine did; "processed" is what happened to the footage,
 # which is the sentence the operator is reading the summary for.
-_STATUS_TAGS = {RAN: lambda: C.green("processed"),
-                SATISFIED: lambda: C.green("satisfied"),
+_STATUS_TAGS = {RAN: lambda: C.muted_green("processed"),
+                SATISFIED: lambda: C.muted_green("satisfied"),
                 ABORTED: lambda: C.yellow("aborted  "),
                 FAILED: lambda: C.red("FAILED   ")}
 
