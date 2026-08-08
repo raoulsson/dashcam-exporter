@@ -265,7 +265,11 @@ class Waiting(Bar):
 
 
 def _write_line(text):
-    sys.stdout.write("\r" + text)
+    # Waiting is drawn directly, outside Live.draw. Keep it to one terminal
+    # row so _erase_line() can remove the complete bar when the wrapped call
+    # returns; a long plugin note otherwise wraps and leaves its first row
+    # behind after Website built/lookup completes.
+    sys.stdout.write("\r" + _clip(text, term_width() - 1))
     sys.stdout.flush()
 
 

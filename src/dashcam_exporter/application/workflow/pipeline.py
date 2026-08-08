@@ -79,7 +79,7 @@ from dashcam_exporter.domain.menu.menu import (PROGRESS, IMPORT, META, PREVIEW, 
 # and the progress bars. Moved out whole; imported back under the same names
 # so every call site below still reads the way it always did.
 from dashcam_exporter.application.ui.term import C, human_age, human_bytes, human_secs, rule, term_width, tilde
-from dashcam_exporter.application.ui.progress import (Bar, Live, Waiting, _bar_line, _erase_line,  # noqa: F401
+from dashcam_exporter.application.ui.progress import (Bar, Live, Waiting, _bar_line, _clip, _erase_line,  # noqa: F401
                       _eta, _still_bar, _sweep_line, _write_line, show_cursor,
                       waiting)
 

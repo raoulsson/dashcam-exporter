@@ -410,6 +410,15 @@ class TheLiveProgressLineIsActuallyDrawn(unittest.TestCase):
         _rc, out = self._sweep("echo '=== rsync ==='; sleep 0.3")
         self.assertNotIn("%", out)
 
+    def test_a_long_waiting_note_is_clipped_to_one_terminal_row(self):
+        line = P.Waiting("Reading the workspace and querying the plugin...")
+        line.update("checking deployed trips, maps and videos " + "x" * 200)
+        with mock.patch.object(P.C, "enabled", True), \
+                mock.patch.object(P, "term_width", return_value=80):
+            rendered = line.render_at(0, 20)
+            self.assertGreater(P._visible_len(rendered), 80)
+            self.assertLessEqual(P._visible_len(P._clip(rendered, 79)), 79)
+
 
 class TheChildsLineKeepsBothEnds(unittest.TestCase):
     """What is happening, and what it is happening to.
