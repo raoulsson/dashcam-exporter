@@ -1633,6 +1633,19 @@ class TestPreviewBuildsByDelta(SeamTest):
         self.assertFalse(made, "an existing still must not be rebuilt")
         self.assertEqual(dst.read_text(), "already here")
 
+    def test_menu3_clip_review_force_rebuilds_an_existing_still(self):
+        b = self.bench()
+        folder = b.ctx.out_dir / P.CLIP_REVIEW_DIRNAME / "trip_01"
+        folder.mkdir(parents=True, exist_ok=True)
+        src = Path("/tmp/20260712174654_0060.mp4")
+        dst = folder / "01_20260712174654_0060.jpg"
+        dst.write_text("old")
+        with mock.patch.object(P, "extract_still", return_value=True) as extract:
+            got, made = P._one_clip_still(src, folder, 1, force=True)
+        self.assertEqual(got, dst)
+        self.assertTrue(made)
+        extract.assert_called_once()
+
     def test_clip_review_order_uses_embedded_camera_timestamp(self):
         clips = [
             "/card/170_20260807150551_0060.mp4",

@@ -3351,7 +3351,8 @@ def write_clip_review(ctx, trips):
         for n, clip in enumerate(clips, 1):
             n_done += 1
             _still_bar(bar, n_done, total, Path(clip).name)
-            dst, was_made = _one_clip_still(Path(clip), folder, n, index_width)
+            dst, was_made = _one_clip_still(Path(clip), folder, n, index_width,
+                                            force=True)
             seen.add(dst)
             made += was_made
     bar.close()
@@ -3489,15 +3490,14 @@ def _review_folder(root, trip):
     return root / "not_renderable" / name
 
 
-def _one_clip_still(src, folder, n, index_width=2):
-    """(path, was_made). Skipped when it is already there.
+def _one_clip_still(src, folder, n, index_width=2, force=False):
+    """(path, was_made), optionally rebuilding an existing still.
 
-    A clip still is named for the clip it came from, so a file that exists is
-    a frame of that same clip -- there is nothing about it a second seek would
-    change. Only clips with no still yet cost anything.
+    By default an existing still is reused. Menu 3 passes ``force=True`` so
+    the review is a genuine rebuild and reflects changed source/settings.
     """
     dst = folder / ("%0*d_%s.jpg" % (index_width, n, src.stem))
-    if dst.is_file():
+    if dst.is_file() and not force:
         return dst, False
     folder.mkdir(parents=True, exist_ok=True)
     extract_still(src, dst, seconds=CLIP_REVIEW_T, width=PREVIEW_STILL_W)
@@ -3866,16 +3866,10 @@ def step_preview(ctx):
     # Stills. Every trip gets one, including the auto-skipped fragments — he
     # is deciding what to keep, and a trip he cannot see is one he cannot judge.
     #
-    # BY DELTA, not by rebuilding. A still is named for the trip or the clip it
-    # shows, so one that is already there is a frame of that same thing and a
-    # second seek would produce the same picture. Only what is missing costs
-    # anything, which on a thousand-clip card is the difference between
-    # minutes and nothing at all.
-    #
-    # What makes that safe is the sweep at the end rather than a wipe at the
-    # start: a still whose name nothing asks for any more is a picture of
-    # something gone — an excluded trip, or a boundary that moved and
-    # renumbered the trips after it — and it goes then.
+    # Menu 3 is an explicit review rebuild. Re-seek every first and middle
+    # frame, even when the destination filename already exists: the operator
+    # may have changed the grouping, the source clip, or the still settings.
+    # The sweep at the end still removes files that no current trip asks for.
     previews_dir.mkdir(parents=True, exist_ok=True)
     stills, mid_stills, failed, made = {}, {}, [], 0
     # A bar rather than a line per trip. Forty trips was forty lines of scroll
@@ -3891,24 +3885,18 @@ def step_preview(ctx):
         if not front:
             failed.append(t["index"])
             continue
-        if dst.is_file():
-            stills[t["index"]] = dst
-        else:
-            ordered_front = _clip_review_order(front)
-            src = Path(ordered_front[0])
-            if extract_still(src, dst,
-                             seconds=ctx.still_seconds, width=ctx.still_width):
-                stills[t["index"]] = dst
-                made += 1
-            else:
-                failed.append(t["index"])
         ordered_front = _clip_review_order(front)
+        src = Path(ordered_front[0])
+        if extract_still(src, dst,
+                         seconds=ctx.still_seconds, width=ctx.still_width):
+            stills[t["index"]] = dst
+            made += 1
+        else:
+            failed.append(t["index"])
         mid_src = Path(ordered_front[len(ordered_front) // 2])
         mid_dst = previews_dir / (name[:-4] + "_mid.jpg")
-        if mid_dst.is_file():
-            mid_stills[t["index"]] = mid_dst
-        elif extract_still(mid_src, mid_dst,
-                           seconds=ctx.still_seconds, width=ctx.still_width):
+        if extract_still(mid_src, mid_dst,
+                         seconds=ctx.still_seconds, width=ctx.still_width):
             mid_stills[t["index"]] = mid_dst
             made += 1
     bar.close()
@@ -3937,14 +3925,8 @@ def step_preview(ctx):
     print(C.green("  100%% - %s clip stills to walk the boundaries by, under %s."
                   % (C.yellow("%d" % shots), tilde(review))))
     print(C.dim("  Clip grid: %s" % tilde(review / "index.html")))
-    # ALWAYS, including when it is "0 new". The two lines above are the same on
-    # every run, so a pass that rebuilt nothing looks exactly like one that
-    # rebuilt everything -- and a step that finishes in half a second reads as
-    # a step that did not run. The reassurance is wanted most precisely when
-    # there is nothing to report.
-    print(C.dim("  %d new, %d already there, %d no longer wanted"
-                % (made + clips_made,
-                   len(stills) + shots - made - clips_made, dropped)))
+    print(C.dim("  %d stills rebuilt, %d no longer wanted"
+                % (made + clips_made, dropped)))
     return record(ctx, NAME[PREVIEW], RAN, started,
                   "%d trips, %d stills in %s" % (len(trips), len(stills), previews_dir))
 
