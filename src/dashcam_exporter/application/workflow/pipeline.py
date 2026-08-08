@@ -122,6 +122,7 @@ from dashcam_exporter.application.ui.screens import (ORPHAN_LIST, SHOWN, TIME_CO
 # and the module itself too, so a test can patch the prompt where it lives
 # rather than through this file's re-export.
 from dashcam_exporter.application.ui import prompt           # noqa: F401
+from dashcam_exporter.application.ui import handler as ui_handler
 from dashcam_exporter.application.ui.prompt import (_HINTED, _echoed, _from_key, _help_command,  # noqa: F401
                     _help_key, _hint_lines, _key_or_help, _meaning,
                     _one_char, _one_char_at, _printable, _raw_capable,
@@ -323,6 +324,13 @@ def _loaded_plugin(spec, exporter_dir):
 
 class Ctx:
     """Everything the steps need: resolved paths, config, and session state."""
+
+    @property
+    def ui(self):
+        """The active UI backend. A property, not a stored attribute, so every
+        ctx already in flight sees a backend swapped mid-session rather than a
+        handler frozen at construction time."""
+        return ui_handler.active()
 
     def __init__(self, checkout=None):
         # Defaulted, because a Ctx is built with no arguments in a dozen places
@@ -915,7 +923,7 @@ def done_line(what):
     finished, in the streamer's words rather than the step's. This is the
     step's own sentence, and there is exactly one of it.
     """
-    print(C.green("  100%% - %s." % what))
+    ui_handler.active().done(what)
 
 
 def _fit(text, room):

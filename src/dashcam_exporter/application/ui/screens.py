@@ -19,6 +19,7 @@ from dashcam_exporter.application.ports import uploader
 from dashcam_exporter.infrastructure.version.edition import COFFEE_URL, EXPORTER_DIR, REPO_URL, SPONSORS_URL, version
 from dashcam_exporter.application.workflow.results import ABORTED, FAILED, RAN, SATISFIED
 from dashcam_exporter.application.ui.term import C, rule, term_width, tilde
+from dashcam_exporter.application.ui import handler
 
 # ---------------------------------------------------------------------------
 # The painter. Everything it draws is derived from the position, the world and
@@ -177,8 +178,7 @@ def _verdicts(menu_items, world):
 
 
 def _print_all(lines):
-    for line in lines:
-        print(line.rstrip())
+    handler.active().block(lines)
 
 
 ORPHAN_LIST = "orphaned_clips_on_sim_card.txt"

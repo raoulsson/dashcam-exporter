@@ -1,0 +1,68 @@
+"""The output seam every component writes through instead of stdout.
+
+The point is one interface, two backends. `StreamUiHandler` reproduces the exact
+bytes the tool printed before this seam existed -- it is the default and what
+every test exercises, which is what keeps "the output did not change" a checkable
+claim while the direct prints are rerouted through here. A framed backend
+(added later) implements the same methods and paints regions instead; the
+workflow driving them does not know or care which is installed.
+
+The interface grows one method per output category as call sites move onto it.
+Today it carries the two sinks that were already centralized in the code -- the
+screen painter's `_print_all` and a step's closing `done_line` -- so this first
+step changes no output, only who emits it.
+
+The active handler is module-level, matching the pattern the codebase already
+uses for cross-cutting output state (the run-log tee, the hint flag): a
+component deep in a step body has no `ctx` in hand, and threading one purely to
+reach the UI would touch far more than it buys. `Ctx.ui` exposes the same
+handler for the call sites that do hold a ctx.
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+
+from dashcam_exporter.application.ui.term import C
+
+
+class UiHandler(ABC):
+    """The seam. One method per output category; both backends implement all."""
+
+    @abstractmethod
+    def block(self, lines):
+        """A screen: ready-made lines (the menu grid, help, the summary table)."""
+
+    @abstractmethod
+    def done(self, what):
+        """The one line a step leaves behind when it worked."""
+
+
+class StreamUiHandler(UiHandler):
+    """Writes to stdout exactly as the tool always has. The default backend."""
+
+    def block(self, lines):
+        for line in lines:
+            print(line.rstrip())
+
+    def done(self, what):
+        print(C.green("  100%% - %s." % what))
+
+
+_active = None
+
+
+def active():
+    """The handler in force. Defaults to the stream backend, so a component that
+    asks before anyone has installed one behaves exactly as it did before the
+    seam existed."""
+    global _active
+    if _active is None:
+        _active = StreamUiHandler()
+    return _active
+
+
+def set_active(handler):
+    """Install a backend (or None to fall back to the default on next `active()`)."""
+    global _active
+    _active = handler
