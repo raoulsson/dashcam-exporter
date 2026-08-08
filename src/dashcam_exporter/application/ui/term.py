@@ -113,6 +113,10 @@ class C:
         return cls._w("36", s)
 
     @classmethod
+    def bright_cyan(cls, s):
+        return cls._w("96", s)
+
+    @classmethod
     def violet(cls, s):
         """The bars, and nothing else. 256-colour, because magenta (35) is the
         same weight as the red that means "this destroys something"."""

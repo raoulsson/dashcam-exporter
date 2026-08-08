@@ -112,7 +112,7 @@ def _echoed(ch):
 def _key_or_help(ch):
     if ch.lower() == "h":
         return _help_key()
-    print(C.cyan(_printable(ch)))
+    print(C.bold(C.bright_cyan(_printable(ch))))
     return ch.strip().lower()
 
 
@@ -123,10 +123,10 @@ def _printable(ch):
 
 
 def _help_key():
-    sys.stdout.write(C.cyan("h"))
+    sys.stdout.write(C.bold(C.bright_cyan("h")))
     sys.stdout.flush()
     second = _one_char() or ""
-    print(C.cyan(_printable(second)))
+    print(C.bold(C.bright_cyan(_printable(second))))
     return _help_command(second)
 
 

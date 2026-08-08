@@ -7555,7 +7555,8 @@ def _banner_lines(ctx):
     it says what the program is called and gets out of the way.
     """
     if term_width() < BANNER_WIDTH + 2:
-        return (C.cyan("  Dashcam-Exporter") + C.dim("   " + _chain(ctx)),)
+        return (C.bold(C.bright_cyan("  Dashcam-Exporter"))
+                + C.dim("   " + _chain(ctx)),)
     return _big_banner()
 
 
@@ -7600,7 +7601,7 @@ def _paint_banner_line(line):
     """Apply the banner palette without disturbing its fixed-width art."""
     if " v" in line and line.rstrip().endswith(version()):
         art, suffix = line.rsplit(" v", 1)
-        return C.cyan(art) + C.magenta(" v" + suffix)
+        return C.bold(C.bright_cyan(art)) + C.magenta(" v" + suffix)
     if DESIGNED_BY in line and IMPLEMENTED_BY in line:
         d, i = line.index(DESIGNED_BY), line.index(IMPLEMENTED_BY)
         sep = line.index("|_|", d)
@@ -7610,9 +7611,10 @@ def _paint_banner_line(line):
         d_name = raw_name.rstrip()
         gap = raw_name[len(d_name):] + line[sep:i]
         i_name = line[i + len(i_label):].strip()
-        return (C.cyan(line[:d]) + C.green(d_label) + C.gold(d_name)
-                + C.cyan(gap) + C.green(i_label) + C.gold(i_name))
-    return C.cyan(line)
+        return (C.bold(C.bright_cyan(line[:d])) + C.green(d_label)
+                + C.gold(d_name) + C.bold(C.bright_cyan(gap))
+                + C.green(i_label) + C.gold(i_name))
+    return C.bold(C.bright_cyan(line))
 
 
 def _edition_line(ctx):
