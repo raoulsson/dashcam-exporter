@@ -4926,18 +4926,19 @@ def step_transcribe(ctx, world):
 
     def show(path, percent, phase="Transcribe"):
         if C.enabled:
-            stream = re.sub(r"\s+", " ", transcript_head[0]).strip() or latest_text[0]
-            stream = re.sub(r"\s+([,.!?;:])", r"\1", stream)
-            stream = re.sub(r"([,.!?;:])(?=[A-Za-z])", r"\1 ", stream)
-            if stream:
-                stream += "   "
-                offset = int((time.monotonic() - started) / .6) % len(stream)
-                tail = (stream + stream)[offset:offset + 40]
-            else:
-                tail = "transcribing"
+            tail = ""
+            if phase == "Transcribe":
+                stream = re.sub(r"\s+", " ", transcript_head[0]).strip() or latest_text[0]
+                stream = re.sub(r"\s+([,.!?;:])", r"\1", stream)
+                stream = re.sub(r"([,.!?;:])(?=[A-Za-z])", r"\1 ", stream)
+                if stream:
+                    stream += "   "
+                    offset = int((time.monotonic() - started) / .6) % len(stream)
+                    tail = "  " + (stream + stream)[offset:offset + 40]
+            label = trip_labels[path] + ": " + phase
             _write_line("  %s %s %s" %
-                        (C.gold(phase), bar.bracket(percent / 100.0),
-                         C.gold("%3.0f%%  %-40s  %s" % (percent, tail, trip_labels[path]))))
+                        (C.gold(label), bar.bracket(percent / 100.0),
+                         C.gold("%3.0f%%%s" % (percent, tail))))
 
     try:
         for path in renders:
