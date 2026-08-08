@@ -363,7 +363,8 @@ class TranscribeTrips(MenuItem):
     # Transcription is repeatable, but it must not become a dead-end: after it
     # finishes the operator can rebuild, upload, clean, or erase just as after
     # rendering. The uploader strategy adds Upload Website to the same edge.
-    OUT = Edges.and_upload(TRANSCRIBE, BUILD, CLEAN_WS, ERASE_CARD)
+    OUT = Edges.and_upload(IMPORT, META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE,
+                           BUILD, CLEAN_WS, ERASE_CARD)
     IN_AUTHORED = Strategy.both(frozenset({META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD}))
 
     def evaluate(self, world) -> Verdict:
