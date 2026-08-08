@@ -105,5 +105,48 @@ class DdpaiTrackSourceTest(unittest.TestCase):
         self.assertFalse(source.is_track_artifact(Path("a/20260806_0060.mp4")))
 
 
+
+class DdpaiExtractionTest(unittest.TestCase):
+    """The file-shaped cache the renderer still keeps, filled from one place."""
+
+    def test_writes_members_out_once_and_skips_what_is_already_there(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tar_directory = root / "tar"
+            cache = root / "cache"
+            write_archive(tar_directory, "20260806170529_0540.git",
+                          {"nested/20260806170529_0060.gpx": NMEA.encode()})
+
+            first = DdpaiTrackSource(tar_directory).extract_members_into(cache)
+            second = DdpaiTrackSource(tar_directory).extract_members_into(cache)
+            written = (cache / "20260806170529_0060.gpx").read_bytes()
+
+        self.assertEqual(first, (1, 1))
+        self.assertEqual(second, (1, 0))
+        self.assertEqual(written, NMEA.encode())
+
+    def test_placeholder_archives_are_never_opened_or_counted(self):
+        # The renderer's own copy of this walk opened all 73 of them on a
+        # real card and logged a failure for each.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tar_directory = root / "tar"
+            tar_directory.mkdir(parents=True)
+            (tar_directory / "19700101004510_0100_T.git").write_bytes(b"\x00" * 64)
+
+            result = DdpaiTrackSource(tar_directory).extract_members_into(
+                root / "cache")
+
+        self.assertEqual(result, (0, 0))
+
+    def test_a_missing_tar_directory_is_not_an_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+
+            result = DdpaiTrackSource(root / "absent").extract_members_into(
+                root / "cache")
+
+        self.assertEqual(result, (0, 0))
+
 if __name__ == "__main__":
     unittest.main()

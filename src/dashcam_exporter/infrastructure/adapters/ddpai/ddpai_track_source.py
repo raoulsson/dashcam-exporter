@@ -50,6 +50,43 @@ class DdpaiTrackSource:
         points = self._points_in(archive, member)
         return Track(points=tuple(sorted(points, key=lambda p: p.at_utc)))
 
+    def extract_members_into(self, cache_directory: Path) -> tuple[int, int]:
+        """Write every .gpx member out to a cache, skipping what is there.
+
+        The renderer keeps a cache of .gpx FILES rather than Track objects,
+        and converting that is a later job. Until then this exists so the
+        walk over DDPAI's archives has one definition instead of two. The
+        renderer's private copy predates the adapter and had already fallen
+        behind: it did not know that 19700101 archives are pre-allocated
+        placeholders, so it opened all 73 of them on a real card and logged
+        a failure for each.
+
+        Returns (archives read, members newly written).
+        """
+        archives = extracted = 0
+        for archive in self._archives():
+            try:
+                with tarfile.open(archive, "r") as handle:
+                    archives += 1
+                    for member in handle.getmembers():
+                        name = os.path.basename(member.name)
+                        if not name.lower().endswith(".gpx") or name.startswith("._"):
+                            continue
+                        destination = cache_directory / name
+                        if (destination.exists()
+                                and destination.stat().st_size == member.size):
+                            continue
+                        stream = handle.extractfile(member)
+                        if stream is None:
+                            continue
+                        cache_directory.mkdir(parents=True, exist_ok=True)
+                        destination.write_bytes(stream.read())
+                        extracted += 1
+            except (tarfile.TarError, OSError) as error:
+                self._logger.warning("Cannot read DDPAI GPS archive %s: %s",
+                                     archive, error)
+        return archives, extracted
+
     def _member_index(self) -> dict[str, tuple[Path, str]]:
         """Clip stamp to the archive and member holding its fixes.
 

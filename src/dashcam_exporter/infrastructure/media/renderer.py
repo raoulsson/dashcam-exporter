@@ -762,48 +762,19 @@ import tarfile  # noqa: E402  (kept near use site for clarity)
 
 
 def harvest_tarred_gpx(tar_dir: Path, cache_dir: Path) -> tuple[int, int]:
-    """
-    Extract every *.gpx member from every '*.git' tar archive in tar_dir into cache_dir.
-    The dashcam mis-labels these archives with a .git extension but they're standard
-    POSIX tar files containing the same NMEA-style .gpx logs.
+    """Extract the camera's GPS archives into cache_dir.
+
+    Delegates. Where a DDPAI keeps its archives, that they are tars the
+    firmware labels '.git', that recent ones sit at the top and older ones a
+    directory below, and that the 19700101 ones are pre-allocated
+    placeholders rather than damage -- all of that belongs to the adapter and
+    now lives there once. This function is the renderer's cache contract and
+    stays until the cache itself becomes ours.
+
     Returns (n_archives_processed, n_gpx_extracted).
     """
-    if not tar_dir.is_dir():
-        return (0, 0)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    n_arch = 0
-    n_gpx = 0
-    # rglob, not listdir. The camera keeps recent archives in 203gps/tar and
-    # moves older ones down into 203gps/tar/tmp -- on this card, 43 files for
-    # the last three days at the top and 57 files for 2026-07-11 to 07-14 in
-    # tmp. Reading only the top level meant every trip older than a few days
-    # was described with gps_points 0 and drawn with no route, from a track
-    # sitting one directory below the one being read.
-    for path in sorted(tar_dir.rglob("*")):
-        name = path.name
-        if not name.endswith(".git") or name.startswith("._"):
-            continue
-        try:
-            with tarfile.open(path, "r") as tf:
-                n_arch += 1
-                for member in tf.getmembers():
-                    base = os.path.basename(member.name)
-                    if not base.endswith(".gpx") or base.startswith("._"):
-                        continue
-                    dest = cache_dir / base
-                    if dest.exists() and dest.stat().st_size == member.size:
-                        continue  # already extracted
-                    try:
-                        f = tf.extractfile(member)
-                        if f is None:
-                            continue
-                        dest.write_bytes(f.read())
-                        n_gpx += 1
-                    except Exception:
-                        pass
-        except (tarfile.TarError, OSError):
-            continue
-    return (n_arch, n_gpx)
+    from dashcam_exporter.infrastructure.adapters.ddpai import DdpaiTrackSource
+    return DdpaiTrackSource(tar_dir).extract_members_into(cache_dir)
 
 
 def write_speed_srt(speeds: list[float], srt_path: Path) -> bool:
