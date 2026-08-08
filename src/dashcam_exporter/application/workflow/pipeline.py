@@ -3558,7 +3558,7 @@ main{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
       overflow:hidden;display:grid;grid-template-columns:minmax(0,420px) minmax(0,1fr)}
 @media (max-width:860px){.card{grid-template-columns:1fr}}
-.shot{background:#000;display:block}
+.shot{background:#000;display:block}.shot-pair{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:#000}
 .shot img{display:block;width:100%;height:auto}
 .shot .none{padding:48px 16px;text-align:center;color:var(--faint);font-size:13px}
 .body{padding:16px 18px}
@@ -3621,7 +3621,7 @@ def _clip_list_html(label, paths, previews_dir):
             html.escape("\n".join(str(p) for p in paths))))
 
 
-def write_contact_sheet(ctx, root, payload, previews_dir, stills):
+def write_contact_sheet(ctx, root, payload, previews_dir, stills, mid_stills=None):
     """One self-contained page, openable from file://, one card per trip.
 
     No external CSS, fonts, scripts or images and only relative hrefs, because
@@ -3632,16 +3632,25 @@ def write_contact_sheet(ctx, root, payload, previews_dir, stills):
     # driven — a card review reads as a day, so the page should too. The trip
     # INDEX on each card stays what it was, because that is what Exclude Trip
     # takes and renumbering it here would be a trap.
+    mid_stills = mid_stills or {}
     trips = sorted(payload.get("trips", []), key=lambda x: (x.get("start") or "", x["index"]))
     cards = []
     for t in trips:
         idx = t["index"]
         meta = trip_meta(t)
         still = stills.get(idx)
+        mid_still = mid_stills.get(idx)
         if still is not None:
             rel = html.escape(os.path.relpath(str(still), str(previews_dir)))
-            shot = ('<a class="shot" href="%s"><img src="%s" alt="Trip %d first frame"></a>'
-                    % (rel, rel, idx))
+            first = ('<a class="shot" href="%s"><img src="%s" alt="Trip %d first clip"></a>'
+                     % (rel, rel, idx))
+            if mid_still is not None:
+                mid_rel = html.escape(os.path.relpath(str(mid_still), str(previews_dir)))
+                middle = ('<a class="shot" href="%s"><img src="%s" alt="Trip %d middle clip"></a>'
+                          % (mid_rel, mid_rel, idx))
+                shot = '<div class="shot-pair">%s%s</div>' % (first, middle)
+            else:
+                shot = first
         else:
             shot = '<div class="shot"><div class="none">no still<br>(ffmpeg could not read the first clip)</div></div>'
 
@@ -3868,7 +3877,7 @@ def step_preview(ctx):
     # something gone — an excluded trip, or a boundary that moved and
     # renumbered the trips after it — and it goes then.
     previews_dir.mkdir(parents=True, exist_ok=True)
-    stills, failed, made = {}, [], 0
+    stills, mid_stills, failed, made = {}, {}, [], 0
     # A bar rather than a line per trip. Forty trips was forty lines of scroll
     # for a countable loop, and the two shapes it printed -- one for a still
     # that was made and one for a trip with no front clip at all -- were the
@@ -3884,14 +3893,24 @@ def step_preview(ctx):
             continue
         if dst.is_file():
             stills[t["index"]] = dst
-            continue
-        src = Path(front[0])
-        if extract_still(src, dst,
-                         seconds=ctx.still_seconds, width=ctx.still_width):
-            stills[t["index"]] = dst
-            made += 1
         else:
-            failed.append(t["index"])
+            ordered_front = _clip_review_order(front)
+            src = Path(ordered_front[0])
+            if extract_still(src, dst,
+                             seconds=ctx.still_seconds, width=ctx.still_width):
+                stills[t["index"]] = dst
+                made += 1
+            else:
+                failed.append(t["index"])
+        ordered_front = _clip_review_order(front)
+        mid_src = Path(ordered_front[len(ordered_front) // 2])
+        mid_dst = previews_dir / (name[:-4] + "_mid.jpg")
+        if mid_dst.is_file():
+            mid_stills[t["index"]] = mid_dst
+        elif extract_still(mid_src, mid_dst,
+                           seconds=ctx.still_seconds, width=ctx.still_width):
+            mid_stills[t["index"]] = mid_dst
+            made += 1
     bar.close()
     if failed:
         # Not "ffmpeg could not read it": one of these two reasons is that the
@@ -3899,10 +3918,11 @@ def step_preview(ctx):
         print(C.yellow("  No still for %d trips: %s."
                        % (len(failed), ", ".join(str(i) for i in failed))))
 
-    index = write_contact_sheet(ctx, root, payload, previews_dir, stills)
+    index = write_contact_sheet(ctx, root, payload, previews_dir, stills, mid_stills)
     # The contact sheet is rewritten every run and belongs to this folder, so
     # it is kept alongside the stills it links to.
-    dropped = _drop_orphans(previews_dir, set(stills.values()) | {index})
+    dropped = _drop_orphans(previews_dir, set(stills.values()) |
+                            set(mid_stills.values()) | {index})
     shots, review, clips_made, clips_dropped = write_clip_review(ctx, trips)
     dropped += clips_dropped
 

@@ -1359,6 +1359,24 @@ class TestThePreviewBoxTicksWhenThereIsAPreview(SeamTest):
         self.assertTrue(written.is_file())
         self.assertTrue(P._stills_current(b.ctx))
 
+    def test_contact_sheet_can_show_a_middle_clip_still(self):
+        b = self.bench().imported().sidecars()
+        payload = {"trips": [{"index": 1, "day": "2026-07-31",
+                              "start": "2026-07-31 06:05:00",
+                              "end": "2026-07-31 06:16:00", "front": []}]}
+        previews = b.ctx.out_dir / P.PREVIEW_DIRNAME
+        previews.mkdir(parents=True, exist_ok=True)
+        first = previews / "trip_01_2026-07-31_06-05.jpg"
+        middle = previews / "trip_01_2026-07-31_06-05_mid.jpg"
+        first.write_text("first")
+        middle.write_text("middle")
+        with quiet():
+            written = P.write_contact_sheet(b.ctx, b.ctx.render_root, payload,
+                                            previews, {1: first}, {1: middle})
+        html = written.read_text()
+        self.assertIn("trip_01_2026-07-31_06-05_mid.jpg", html)
+        self.assertIn("middle clip", html)
+
 
 class TestWipingAWorkspaceWhoseSourceIsStillInTheSlot(SeamTest):
     """"If the original data is still around I have to be able to wipe it."
