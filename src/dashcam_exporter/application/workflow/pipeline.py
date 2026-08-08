@@ -4922,10 +4922,13 @@ def step_transcribe(ctx, world):
 
     latest_text = [""]
     transcript_head = [""]
+    trip_labels = {path: "Trip %d" % number for number, path in enumerate(renders, 1)}
 
     def show(path, percent, phase="Transcribe"):
         if C.enabled:
             stream = re.sub(r"\s+", " ", transcript_head[0]).strip() or latest_text[0]
+            stream = re.sub(r"\s+([,.!?;:])", r"\1", stream)
+            stream = re.sub(r"([,.!?;:])(?=[A-Za-z])", r"\1 ", stream)
             if stream:
                 stream += "   "
                 offset = int((time.monotonic() - started) / .6) % len(stream)
@@ -4934,7 +4937,7 @@ def step_transcribe(ctx, world):
                 tail = "transcribing"
             _write_line("  %s %s %s" %
                         (C.gold(phase), bar.bracket(percent / 100.0),
-                         C.gold("%3.0f%%  %-72s  %s" % (percent, tail, path.name))))
+                         C.gold("%3.0f%%  %-40s  %s" % (percent, tail, trip_labels[path]))))
 
     try:
         for path in renders:
