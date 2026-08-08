@@ -4922,11 +4922,11 @@ def step_transcribe(ctx, world):
 
     latest_text = [""]
 
-    def show(path, percent):
+    def show(path, percent, phase="Transcribe"):
         if C.enabled:
             tail = re.sub(r"\s+", " ", latest_text[0]).strip()[:72] if latest_text[0] else "transcribing"
             _write_line("  %s %s %s" %
-                        (C.gold(bar.label), bar.bracket(percent / 100.0),
+                        (C.gold(phase), bar.bracket(percent / 100.0),
                          C.gold("%3.0f%%  %-72s  %s" % (percent, tail, path.name))))
 
     try:
@@ -4936,11 +4936,11 @@ def step_transcribe(ctx, world):
             timeline_path = path.with_suffix(".transcript.timeline.json")
             with path.open("rb") as source:
                 extracted = splicer.spliceMp3OffMp4(
-                    source, progress_callback=lambda p: show(path, p * .15)
+                    source, progress_callback=lambda p: show(path, p * .15, "Splice")
                 )
             try:
                 enhanced = enhancer.enhanceMp3(
-                    extracted, progress_callback=lambda p: show(path, 15 + p * .20)
+                    extracted, progress_callback=lambda p: show(path, 15 + p * .20, "Enhance")
                 )
             finally:
                 extracted.close()
