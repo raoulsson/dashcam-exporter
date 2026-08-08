@@ -92,7 +92,7 @@ echo
 # 4. Requirements. opencv is a ~90 MB wheel, so this is the slow part; say so
 #    rather than looking hung.
 # ---------------------------------------------------------------------------
-echo "${BLD}packages${OFF}  ${DIM}(opencv and faster-whisper are large wheels — this can take a few minutes)${OFF}"
+echo "${BLD}packages${OFF}  ${DIM}(opencv, faster-whisper and pyannote are large wheels — this can take a few minutes)${OFF}"
 "$VPY" -m pip install --quiet --upgrade pip
 if "$VPY" -m pip install --quiet -r requirements.txt; then
     ok "requirements.txt installed"
@@ -110,7 +110,7 @@ echo
 echo "${BLD}verify${OFF}"
 if "$VPY" - <<'PY'
 import sys
-mods = ["cv2", "numpy", "staticmap", "PIL", "faster_whisper"]
+mods = ["cv2", "numpy", "staticmap", "PIL", "faster_whisper", "pyannote.audio"]
 bad = []
 for m in mods:
     try:
@@ -121,7 +121,8 @@ if bad:
     print("  missing: " + ", ".join(bad)); sys.exit(1)
 import cv2, numpy
 import faster_whisper
-print("  cv2 %s, numpy %s, faster-whisper available" % (cv2.__version__, numpy.__version__))
+import pyannote.audio
+print("  cv2 %s, numpy %s, faster-whisper and pyannote available" % (cv2.__version__, numpy.__version__))
 PY
 then
     ok "rendering and transcription dependencies available"
