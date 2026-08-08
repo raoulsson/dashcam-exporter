@@ -4931,6 +4931,7 @@ def step_transcribe(ctx, world):
 
     try:
         for path in renders:
+            latest_text[0] = ""
             text_path = path.with_suffix(".transcript.txt")
             timeline_path = path.with_suffix(".transcript.timeline.json")
             with path.open("rb") as source:
