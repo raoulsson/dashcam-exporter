@@ -58,6 +58,15 @@ class StreamUiHandlerDrivesTheExistingPainters(unittest.TestCase):
             H.StreamUiHandler().menu("CTX", "ITEMS", "POS", "WORLD")
         self.assertEqual(seen["args"], ("CTX", "ITEMS", "POS", "WORLD"))
 
+    def test_summary_delegates_to_screens_print_summary(self):
+        from unittest import mock
+        from dashcam_exporter.application.ui import screens
+        seen = {}
+        with mock.patch.object(screens, "print_summary",
+                               side_effect=lambda *a: seen.setdefault("args", a)):
+            H.StreamUiHandler().summary("CTX", close=False)
+        self.assertEqual(seen["args"], ("CTX", False))
+
     def test_block_delegates_to_the_screens_sink(self):
         out = io.StringIO()
         with redirect_stdout(out):

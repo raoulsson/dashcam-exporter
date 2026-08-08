@@ -41,6 +41,10 @@ class UiHandler(ABC):
         lines, so each backend renders it its own way."""
 
     @abstractmethod
+    def summary(self, ctx, close=True):
+        """The session log table drawn on the way out (and inside Progress)."""
+
+    @abstractmethod
     def done(self, what):
         """The one line a step leaves behind when it worked."""
 
@@ -56,6 +60,9 @@ class StreamUiHandler(UiHandler):
 
     def menu(self, ctx, menu_items, position, world):
         screens.print_menu(ctx, menu_items, position, world)
+
+    def summary(self, ctx, close=True):
+        screens.print_summary(ctx, close)
 
     def done(self, what):
         print(C.green("  100%% - %s." % what))

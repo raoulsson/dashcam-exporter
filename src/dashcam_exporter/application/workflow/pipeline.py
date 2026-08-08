@@ -116,7 +116,7 @@ from dashcam_exporter.application.ui.screens import (ORPHAN_LIST, SHOWN, TIME_CO
                      _off_line, _orphan_file, _paint_body, _plugin_info_lines,
                      _print_all, _safe_verdict, _status_tag, _summary_line,
                      _total_line, _unlink_quietly, _verdicts, _where_lines,
-                     _why_lines, _why_not, print_summary)
+                     _why_lines, _why_not)
 
 # Reading the operator's key or line. Imported back under the same names,
 # and the module itself too, so a test can patch the prompt where it lives
@@ -7912,7 +7912,7 @@ def _run_menu(ctx):
     finally:
         show_cursor()
         release_single_instance_lock(ctx)
-        print_summary(ctx)
+        ctx.ui.summary(ctx)
         print("Bye!")
 
 
