@@ -123,6 +123,7 @@ from dashcam_exporter.application.ui.screens import (ORPHAN_LIST, SHOWN, TIME_CO
 # rather than through this file's re-export.
 from dashcam_exporter.application.ui import prompt           # noqa: F401
 from dashcam_exporter.application.ui import handler as ui_handler
+from dashcam_exporter.application.ui.framed import FramedUiHandler
 from dashcam_exporter.application.ui.prompt import (_HINTED, _echoed, _from_key, _help_command,  # noqa: F401
                     _help_key, _hint_lines, _key_or_help, _meaning,
                     _one_char, _one_char_at, _printable, _raw_capable,
@@ -7911,6 +7912,11 @@ def _run_menu(ctx):
         print()
         print(C.yellow("  Interrupted."))
     finally:
+        # Leave the frame FIRST, so the summary and "Bye!" land on the normal
+        # screen the operator returns to, not the alternate one being torn down.
+        # close() is idempotent; _start's finally covers the paths that never
+        # reached here.
+        ctx.ui.close()
         show_cursor()
         release_single_instance_lock(ctx)
         ctx.ui.summary(ctx)
@@ -7997,16 +8003,37 @@ def _uploader_broken(error):
     return 4
 
 
+def _install_ui(ctx):
+    """Pick the UI backend. Framed only when explicitly asked AND on a real
+    terminal, so a fresh clone, a piped run and every test get the stream backend
+    they always had. `ui_style = framed` in config or SET_UI_STYLE in the env."""
+    style = (os.environ.get("SET_UI_STYLE") or ctx.cfg_opt("ui_style")
+             or "stream").strip().lower()
+    if style == "framed" and sys.stdout.isatty():
+        label = tilde(ctx.selected_import) if ctx.selected_import else ""
+        ui_handler.set_active(FramedUiHandler(subtitle=label))
+    else:
+        ui_handler.set_active(None)          # the default StreamUiHandler
+
+
 def _start(ctx):
-    _print_all(_banner_lines(ctx))
-    # Checked before the status screen: there is nothing useful to show if the
-    # numbers behind it would come from the wrong grouping.
-    if not require_ego_motion(ctx):
-        return 3
-    print_configuration(ctx)
-    print_status(ctx)
-    _run_menu(ctx)
-    return _exit_code(ctx)
+    _install_ui(ctx)
+    ctx.ui.title("dashcam-exporter",
+                 tilde(ctx.selected_import) if ctx.selected_import else "")
+    ctx.ui.status("workspace %s" % tilde(ctx.workspace))
+    ctx.ui.open()
+    try:
+        _print_all(_banner_lines(ctx))
+        # Checked before the status screen: there is nothing useful to show if
+        # the numbers behind it would come from the wrong grouping.
+        if not require_ego_motion(ctx):
+            return 3
+        print_configuration(ctx)
+        print_status(ctx)
+        _run_menu(ctx)
+        return _exit_code(ctx)
+    finally:
+        ctx.ui.close()
 
 
 if __name__ == "__main__":

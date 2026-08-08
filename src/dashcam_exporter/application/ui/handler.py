@@ -32,6 +32,22 @@ from dashcam_exporter.application.ui.progress import Live
 class UiHandler(ABC):
     """The seam. One method per output category; both backends implement all."""
 
+    # -- lifecycle and chrome. No-ops for the stream backend (it has no frame to
+    #    open or title bar to paint); the framed backend overrides them. Concrete
+    #    so the runner can call them without asking which backend is installed. --
+
+    def open(self):
+        """Take the screen (framed: enter the alternate screen)."""
+
+    def close(self):
+        """Give it back (framed: leave the alternate screen, restore the cursor)."""
+
+    def title(self, app, subtitle=""):
+        """The identity line at the top of the frame."""
+
+    def status(self, facts):
+        """The status line under the title."""
+
     @abstractmethod
     def block(self, lines):
         """A screen: ready-made lines (help, info, the summary table)."""
