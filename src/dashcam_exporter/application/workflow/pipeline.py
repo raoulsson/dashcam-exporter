@@ -4921,10 +4921,17 @@ def step_transcribe(ctx, world):
         bar.open_once()
 
     latest_text = [""]
+    transcript_head = [""]
 
     def show(path, percent, phase="Transcribe"):
         if C.enabled:
-            tail = re.sub(r"\s+", " ", latest_text[0]).strip()[:72] if latest_text[0] else "transcribing"
+            stream = re.sub(r"\s+", " ", transcript_head[0]).strip() or latest_text[0]
+            if stream:
+                stream += "   "
+                offset = int((time.monotonic() - started) / .6) % len(stream)
+                tail = (stream + stream)[offset:offset + 40]
+            else:
+                tail = "transcribing"
             _write_line("  %s %s %s" %
                         (C.gold(phase), bar.bracket(percent / 100.0),
                          C.gold("%3.0f%%  %-72s  %s" % (percent, tail, path.name))))
@@ -4932,6 +4939,7 @@ def step_transcribe(ctx, world):
     try:
         for path in renders:
             latest_text[0] = ""
+            transcript_head[0] = ""
             text_path = path.with_suffix(".transcript.txt")
             timeline_path = path.with_suffix(".transcript.timeline.json")
             with path.open("rb") as source:
@@ -4949,6 +4957,7 @@ def step_transcribe(ctx, world):
                     with enhanced:
                         def on_segment(segment):
                             latest_text[0] = segment.text
+                            transcript_head[0] += " " + segment.text
                             show(path, 35 + min(40.0, segment.end_seconds) * .40)
                         transcription = transcriber.transcribeMp3(
                             enhanced,
@@ -4969,6 +4978,7 @@ def step_transcribe(ctx, world):
                         writer = ParagraphWriter(destination)
                         def on_segment(segment):
                             latest_text[0] = segment.text
+                            transcript_head[0] += " " + segment.text
                             writer.write_segment(segment)
                         transcription = transcriber.transcribeMp3(
                             enhanced,
