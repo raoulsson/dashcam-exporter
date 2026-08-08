@@ -50,18 +50,13 @@ class ThePlainHelperStripsColour(unittest.TestCase):
         self.assertEqual(framed._plain("\x1b[32mgo\x1b[0m"), "go")
 
 
-class TheMenuGridLaysItemsInColumns(unittest.TestCase):
-    def test_ten_items_fill_a_four_by_three_grid(self):
-        cells = ["%2d) Item" % n for n in range(1, 11)]
-        rows = framed._grid_rows(cells, 80, framed.Layout.MENU_COLS,
-                                 framed.Layout.GRID_ROWS)
-        self.assertLessEqual(len(rows), framed.Layout.GRID_ROWS)
-        for line in rows:
-            self.assertLessEqual(len(framed._plain(line)), 80)
-        # first row holds the first four items, in order
-        self.assertIn("1) Item", rows[0])
-        self.assertIn("4) Item", rows[0])
-        self.assertIn("5) Item", rows[1])
+class TheMenuRegionSizesToItsContent(unittest.TestCase):
+    def test_the_layout_reserves_the_rows_it_is_told_to(self):
+        L = framed.Layout(40, 140, menu_rows=6)
+        self.assertEqual(len(L.menu_rows), 6)
+        self.assertEqual(L.menu_top, 40 - 6)
+        self.assertEqual(L.bottom_rule_row, L.menu_top - 1)
+        self.assertGreaterEqual(L.log_height, 1)
 
 
 class TheFrameRendersIntoRegions(_NoColour):
@@ -70,7 +65,7 @@ class TheFrameRendersIntoRegions(_NoColour):
     back out of the escape sequences."""
 
     def _render(self):
-        h = framed.FramedUiHandler(title="dashcam-exporter", subtitle="import 2026-07-19")
+        h = framed.FramedUiHandler(title="dashcam-exporter", subtitle="import 2026-07-19", splash_seconds=0)
         h._size = lambda: (24, 80)
         cap = io.StringIO()
         saved = sys.stdout
@@ -109,9 +104,30 @@ class TheFrameRendersIntoRegions(_NoColour):
         self.assertEqual(self._row_of(out, "clip 6/20"), 9)
 
 
+class TheSplashShowsTheInfoCentered(_NoColour):
+    def test_open_paints_a_bordered_card_with_the_same_info(self):
+        h = framed.FramedUiHandler(title="dashcam-exporter",
+                                   subtitle="import 2026-07-19", splash_seconds=0.01)
+        h._size = lambda: (24, 80)
+        cap = io.StringIO()
+        saved = sys.stdout
+        sys.stdout = cap
+        try:
+            h.status("workspace ~/dashcam-data")
+            h.open()          # StringIO is not a tty, so it paints without the pause
+            h.close()
+        finally:
+            sys.stdout = saved
+        out = cap.getvalue()
+        self.assertIn("+-", out)                      # a bordered card
+        self.assertIn("dashcam-exporter", out)
+        self.assertIn("import 2026-07-19", out)
+        self.assertIn("workspace ~/dashcam-data", out)
+
+
 class TheLogIsARingOfTheVisibleHeight(_NoColour):
     def test_it_keeps_only_the_last_screenful(self):
-        h = framed.FramedUiHandler()
+        h = framed.FramedUiHandler(splash_seconds=0)
         h._size = lambda: (24, 80)
         cap = io.StringIO()
         saved = sys.stdout
@@ -134,7 +150,7 @@ class TheWaitingSpinnerUsesThePinnedBar(_NoColour):
 
     def test_it_paints_the_label_and_note_then_clears(self):
         import time
-        h = framed.FramedUiHandler()
+        h = framed.FramedUiHandler(splash_seconds=0)
         h._size = lambda: (24, 80)
         cap = io.StringIO()
         saved = sys.stdout
@@ -155,7 +171,7 @@ class TheWaitingSpinnerUsesThePinnedBar(_NoColour):
 
 class TheStdoutTeeCatchesStrayPrints(_NoColour):
     def test_a_bare_print_lands_in_the_log_while_open(self):
-        h = framed.FramedUiHandler()
+        h = framed.FramedUiHandler(splash_seconds=0)
         h._size = lambda: (24, 80)
         cap = io.StringIO()
         saved = sys.stdout

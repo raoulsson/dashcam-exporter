@@ -39,7 +39,6 @@ from dashcam_exporter.application.ui.term import C, term_width
 from dashcam_exporter.application.ui import screens
 from dashcam_exporter.application.ui import prompt as prompt_mod
 from dashcam_exporter.application.ui.handler import UiHandler
-from dashcam_exporter.domain.menu.menu import PROGRESS
 
 CSI = "\x1b["
 ALT_ON = CSI + "?1049h"
@@ -66,23 +65,24 @@ class Layout:
     needs to be tested without a real screen.
     """
 
-    # One row for the p/h/i/q hints, then a 4-column grid of the numbered items
-    # (10 of them -> 3 rows). See _menu_bar.
-    MENU_COLS = 4
-    GRID_ROWS = 3
-    MENU_ROWS = 1 + GRID_ROWS
+    # The menu region holds the original grid (screens._Grid) plus a hint line.
+    # Its height is not fixed -- the grid's row count depends on the width -- so
+    # the frame passes it in and recomputes when it changes. DEFAULT_MENU_ROWS is
+    # the initial guess before the first real menu is drawn.
+    DEFAULT_MENU_ROWS = 4
     MIN_ROWS = 14
     MIN_COLS = 48
 
-    def __init__(self, rows, cols):
+    def __init__(self, rows, cols, menu_rows=DEFAULT_MENU_ROWS):
         self.rows = max(rows, self.MIN_ROWS)
         self.cols = max(cols, self.MIN_COLS)
+        self.menu_rows_count = max(2, menu_rows)
         self.title_row = 1
         self.status_row = 2
         self.top_rule_row = 3
         self.select_row = self.rows
         self.menu_bottom = self.rows - 1
-        self.menu_top = self.rows - self.MENU_ROWS
+        self.menu_top = self.rows - self.menu_rows_count
         self.bottom_rule_row = self.menu_top - 1
         self.bar_row = self.bottom_rule_row - 1
         self.divider_row = self.bar_row - 1
@@ -179,16 +179,19 @@ def _fixed_size():
 
 
 class FramedUiHandler(UiHandler):
-    def __init__(self, title="dashcam-exporter", subtitle=""):
+    def __init__(self, title="dashcam-exporter", subtitle="", splash_seconds=1.0):
         self._title = title
         self._subtitle = subtitle
         self._status = ""
         self._bar = ""
         self._menu_lines = []
+        self._menu_rows = Layout.DEFAULT_MENU_ROWS
+        self._splash_seconds = splash_seconds
         self._log = collections.deque()
         self._real_stdout = None
         self._open = False
-        self.layout = Layout(*self._size())
+        rows, cols = self._size()
+        self.layout = Layout(rows, cols, self._menu_rows)
 
     # -- lifecycle --------------------------------------------------------
     def _size(self):
@@ -203,12 +206,41 @@ class FramedUiHandler(UiHandler):
         return sz.lines, sz.columns
 
     def open(self):
-        self.layout = Layout(*self._size())
+        rows, cols = self._size()
+        self.layout = Layout(rows, cols, self._menu_rows)
         self._real_stdout = sys.stdout
         sys.stdout = _LogTee(self, self._real_stdout)
         self._open = True
         self._write(ALT_ON + HIDE + CLEAR)
-        self.repaint()
+        self._splash()          # a centered card of the same info, ~1s
+        self.repaint()          # then the frame, with that info on top
+
+    def _splash(self):
+        """A centered card -- the same identity the top band then carries -- held
+        for a beat so a launched window announces itself before the menu."""
+        if not self._splash_seconds:
+            return
+        L = self.layout
+        lines = [C.bold(self._title)]
+        if self._subtitle:
+            lines.append(self._subtitle)
+        if self._status:
+            lines.append(C.dim(self._status))
+        inner = min(max(len(_plain(x)) for x in lines) + 8, L.cols - 4)
+        top = max(1, (L.rows - (len(lines) + 2)) // 2)
+        left = max(1, (L.cols - inner - 2) // 2)
+        buf = _at(top, left, "+" + "-" * inner + "+")
+        for i, ln in enumerate(lines):
+            pad = inner - len(_plain(ln))
+            lp = pad // 2
+            buf += _at(top + 1 + i, left,
+                       "|" + (" " * lp) + ln + (" " * (pad - lp)) + "|")
+        buf += _at(top + 1 + len(lines), left, "+" + "-" * inner + "+")
+        self._write(buf)
+        if self._splash_seconds and self._real_stdout is not None \
+                and self._real_stdout.isatty():
+            time.sleep(self._splash_seconds)
+        self._write(CLEAR)
 
     def close(self):
         if not self._open:
@@ -229,8 +261,17 @@ class FramedUiHandler(UiHandler):
         self._paint_chrome()
 
     def menu(self, ctx, menu_items, position, world):
-        self._menu_lines = _menu_bar(menu_items, position, world, self.layout.cols)
-        self._paint_menu()
+        lines = _menu_lines_original(menu_items, position, world, self.layout.cols)
+        self._menu_lines = lines
+        if len(lines) != self._menu_rows:
+            # The grid's height changed (a resize); move the region and repaint
+            # the whole frame so the bands above it follow.
+            self._menu_rows = len(lines)
+            rows, cols = self._size()
+            self.layout = Layout(rows, cols, self._menu_rows)
+            self.repaint()
+        else:
+            self._paint_menu()
 
     def summary(self, ctx, close=True):
         # Its prints land in the log through the tee, so the exit summary reads
@@ -372,40 +413,13 @@ class _LogTee:
         return self._real.isatty()
 
 
-def _menu_bar(menu_items, position, world, cols):
-    """The menu as a p/h/i/q hint line followed by a 4-column grid of the
-    numbered entries, greyed the same way the scrolling grid greys them (an
-    entry the position does not offer is dim)."""
+def _menu_lines_original(menu_items, position, world, cols):
+    """The exact grid the scrolling UI draws -- screens._Grid, in the same
+    columns, coloured and greyed and red the same way -- followed by the p/h/i/q
+    hint line. This is what "same as the original menu" means: one renderer, so
+    the frame and the scroll cannot drift."""
+    verdicts = screens._verdicts(menu_items, world)
     offered = position.selectable(menu_items)
+    grid = screens._Grid(screens._in_the_grid(menu_items), verdicts, offered, cols)
     hint = C.dim("  p) progress   h) help   i) info   q) quit")
-    cells = []
-    for n, item in sorted(menu_items.items()):
-        if n == PROGRESS:          # reached by the p) hint above, not a work step
-            continue
-        cells.append(_grid_cell(n, item.name(), n in offered))
-    return [hint] + _grid_rows(cells, cols, Layout.MENU_COLS, Layout.GRID_ROWS)
-
-
-def _grid_cell(number, name, offered):
-    label = "%2d) %s" % (number, name)
-    return label if offered else C.dim(label)
-
-
-def _grid_rows(cells, cols, ncols, nrows):
-    """Lay the cells into an ncols-wide grid, each cell padded to a share of the
-    width, at most nrows rows. Padding is on the plain text so colour does not
-    throw the columns off."""
-    col_w = max(8, cols // ncols)
-    rows = []
-    for r in range(nrows):
-        line = ""
-        for c in range(ncols):
-            idx = r * ncols + c
-            if idx >= len(cells):
-                break
-            cell = cells[idx]
-            pad = col_w - len(_plain(cell))
-            line += cell + (" " * pad if pad > 0 else "")
-        if line.strip():
-            rows.append(" " + line.rstrip())
-    return rows
+    return grid.lines() + [hint]
