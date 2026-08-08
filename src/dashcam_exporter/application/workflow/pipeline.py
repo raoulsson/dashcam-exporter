@@ -6951,7 +6951,7 @@ def looked_at(ctx, scope):
     helper so there is one answer to "what does the operator see while it
     happens", rather than four call sites of which three showed nothing.
     """
-    with waiting("Reading the workspace and querying the plugin...") as wait:
+    with waiting("Querying the plugin...") as wait:
         return capture_world(ctx, scope, progress=wait.update)
 
 

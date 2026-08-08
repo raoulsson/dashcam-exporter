@@ -411,7 +411,7 @@ class TheLiveProgressLineIsActuallyDrawn(unittest.TestCase):
         self.assertNotIn("%", out)
 
     def test_a_long_waiting_note_is_clipped_to_one_terminal_row(self):
-        line = P.Waiting("Reading the workspace and querying the plugin...")
+        line = P.Waiting("Querying the plugin...")
         line.update("checking deployed trips, maps and videos " + "x" * 200)
         with mock.patch.object(P.C, "enabled", True), \
                 mock.patch.object(P, "term_width", return_value=80):
