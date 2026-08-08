@@ -5798,9 +5798,9 @@ def _cleaning_block(rows, files, size):
     the way past -- this screen is about to delete everything either way. They
     still get their line in the REFUSAL, where they are the reason.
     """
-    lines = [C.gold("  Cleaning:"),
-             C.gold("    Total:   %s files (%s)" % (files, human_bytes(size))),
-             C.gold("    %d trip%s:" % (len(rows), "" if len(rows) == 1 else "s"))]
+    lines = [C.red("  Cleaning:"),
+             C.red("    Total:   %s files (%s)" % (files, human_bytes(size))),
+             C.red("    %d trip%s:" % (len(rows), "" if len(rows) == 1 else "s"))]
     lines.extend(_trip_line(r) for r in rows)
     return tuple(lines) + ("",)
 
