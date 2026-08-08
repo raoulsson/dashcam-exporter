@@ -23,12 +23,12 @@ class _NoColour(unittest.TestCase):
 class TheLayoutIsPureArithmetic(unittest.TestCase):
     def test_the_bands_stack_in_order_on_an_80x24(self):
         L = framed.Layout(24, 80)
-        self.assertEqual((L.title_row, L.status_row, L.top_rule_row), (1, 2, 3))
-        self.assertEqual((L.log_top, L.log_bottom), (4, 16))
+        self.assertEqual((L.title_row, L.top_rule_row), (1, 2))   # title+status share row 1
+        self.assertEqual((L.log_top, L.log_bottom), (3, 16))
         self.assertEqual((L.divider_row, L.bar_row, L.bottom_rule_row), (17, 18, 19))
-        self.assertEqual(L.menu_rows, [20, 21, 22, 23])   # hint + 4x3 grid
+        self.assertEqual(L.menu_rows, [20, 21, 22, 23])   # grid + hint
         self.assertEqual(L.select_row, 24)
-        self.assertEqual(L.log_height, 13)
+        self.assertEqual(L.log_height, 14)
 
     def test_the_bar_sits_just_above_the_menu_at_any_height(self):
         for rows in (18, 24, 40, 60):
@@ -97,11 +97,11 @@ class TheFrameRendersIntoRegions(_NoColour):
     def test_the_bands_land_on_their_rows(self):
         out = self._render()
         self.assertEqual(self._row_of(out, "dashcam-exporter"), 1)
-        self.assertEqual(self._row_of(out, "3 trips"), 2)
+        self.assertEqual(self._row_of(out, "3 trips"), 1)        # status shares the title row
         self.assertEqual(self._row_of(out, "Render ####"), 18)   # the pinned bar
-        # the six log lines fill the top of the log region (rows 4..)
-        self.assertEqual(self._row_of(out, "clip 1/20"), 4)
-        self.assertEqual(self._row_of(out, "clip 6/20"), 9)
+        # the six log lines fill the top of the log region (rows 3..)
+        self.assertEqual(self._row_of(out, "clip 1/20"), 3)
+        self.assertEqual(self._row_of(out, "clip 6/20"), 8)
 
 
 class TheSplashShowsTheInfoCentered(_NoColour):

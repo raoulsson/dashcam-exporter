@@ -77,9 +77,10 @@ class Layout:
         self.rows = max(rows, self.MIN_ROWS)
         self.cols = max(cols, self.MIN_COLS)
         self.menu_rows_count = max(2, menu_rows)
+        # One restricted line up top: the title and the status share it, so the
+        # fixed chrome costs a row less and the log gets it.
         self.title_row = 1
-        self.status_row = 2
-        self.top_rule_row = 3
+        self.top_rule_row = 2
         self.select_row = self.rows
         self.menu_bottom = self.rows - 1
         self.menu_top = self.rows - self.menu_rows_count
@@ -367,12 +368,11 @@ class FramedUiHandler(UiHandler):
         if not self._open:
             return
         L, cols = self.layout, self.layout.cols
-        head = " %s " % self._title
-        if self._subtitle:
-            tail = "%s " % self._subtitle
-            head = head + "-" * max(1, cols - len(head) - len(tail)) + tail
-        buf = _clear_row(L.title_row, cols) + _at(L.title_row, 1, C.bold(_fit(head, cols)))
-        buf += _clear_row(L.status_row, cols) + _at(L.status_row, 1, C.dim(_fit(" " + self._status, cols)))
+        left = self._title + (("  " + self._subtitle) if self._subtitle else "")
+        right = self._status or ""
+        gap = max(2, cols - len(_plain(left)) - len(_plain(right)) - 2)
+        line = " " + C.bold(left) + (" " * gap) + C.dim(right) + " "
+        buf = _clear_row(L.title_row, cols) + _at(L.title_row, 1, _fit(line, cols))
         buf += _at(L.top_rule_row, 1, C.dim("-" * cols))
         self._write(buf)
 
