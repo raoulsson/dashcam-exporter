@@ -23,13 +23,7 @@ WORKSPACE_FROM_CONFIG="$(sed -n 's/^workspace[[:space:]]*=[[:space:]]*//p' confi
 WORKSPACE_FROM_CONFIG="${WORKSPACE_FROM_CONFIG:-$HOME/dashcam-data}"
 WORKSPACE_FROM_CONFIG="${WORKSPACE_FROM_CONFIG/#\~/$HOME}"
 RUN_LOG_DIR="$WORKSPACE_FROM_CONFIG/logs"
-mkdir -p "$RUN_LOG_DIR"
 RUN_LOG="$RUN_LOG_DIR/run-$(date +%Y%m%d-%H%M%S).log"
-# Keep ANSI redraws on the terminal, but write a plain transcript.  Live bars
-# use carriage returns and cursor movement; retaining those bytes makes a log
-# appear as diagonally scattered text when opened later.
-exec > >(tee >(perl -pe 's/\e\[[0-9;]*[A-Za-z]//g; s/\r/\n/g' >> "$RUN_LOG")) 2>&1
-echo "run log: $RUN_LOG"
 
 RED=$'\033[31m'; GRN=$'\033[32m'; DIM=$'\033[2m'; BLD=$'\033[1m'; OFF=$'\033[0m'
 [ -t 1 ] || { RED=""; GRN=""; DIM=""; BLD=""; OFF=""; }
@@ -80,5 +74,5 @@ fi
 
 echo "${DIM}python: $PY${OFF}"
 
-exec env PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" \
+exec env DASHCAM_RUN_LOG="$RUN_LOG" PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" \
     "$PY" -m dashcam_exporter.application.workflow.pipeline "$@"

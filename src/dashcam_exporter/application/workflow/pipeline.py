@@ -7654,7 +7654,48 @@ def _run_menu(ctx):
         print("Bye!")
 
 
+class _RunLogTee:
+    """Mirror Python's terminal output into a readable per-run transcript."""
+
+    _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+    def __init__(self, terminal, path):
+        self._terminal = terminal
+        self._file = open(path, "a", encoding="utf-8")
+
+    def write(self, text):
+        self._terminal.write(text)
+        self._file.write(self._ANSI.sub("", text).replace("\r", "\n"))
+
+    def flush(self):
+        self._terminal.flush()
+        self._file.flush()
+
+    def isatty(self):
+        return self._terminal.isatty()
+
+    def __getattr__(self, name):
+        return getattr(self._terminal, name)
+
+
+def _install_run_log():
+    path = os.environ.get("DASHCAM_RUN_LOG")
+    if not path:
+        return None
+    try:
+        log_path = Path(path).expanduser()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        out = _RunLogTee(sys.stdout, log_path)
+        err = _RunLogTee(sys.stderr, log_path)
+        sys.stdout, sys.stderr = out, err
+        print("run log: %s" % log_path)
+        return (out, err)
+    except OSError:
+        return None
+
+
 def main(argv=None):
+    _install_run_log()
     """No command line. Everything this needs is in config.txt.
 
     A flag with a config equivalent means the same question has two answers
