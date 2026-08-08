@@ -2475,14 +2475,13 @@ def _same_file(src, dst):
 # never read by anything here, so it is not copied into a workspace whose
 # whole purpose is to be rendered from and then thrown away.
 #
-# This is the one card-shaped thing left in this module, and it is left on
-# purpose. The rule below is three-way -- a clip is wanted only if asked
-# for, GPS is always wanted, and anything unstamped comes along whatever it
-# is -- and CardLayout cannot express that in five methods: is_track_artifact
-# cannot stand in for "under the GPS root", because a VIOFO clip IS its own
-# track. Routing it through the adapter needs the canonical workspace, which
-# is plan 4's job. Narrowing it to two cases here silently stopped copying
-# the camera's log and started copying every imported clip's photo.
+# This stays card-shaped on purpose, and it is the one place that should.
+# Importing is a verbatim copy: card in, rsync onto import_dir, card out.
+# No adapter is consulted, because the footage is still only on the card
+# while this runs and the safe thing to do with the only copy is take it
+# unchanged. Undoing the camera's filing system happens afterwards, on the
+# local copy, where a mistake costs a re-run rather than the drive -- see
+# the Normalizer.
 VIDEO_DIR, GPS_DIR = "200video", "203gps"
 
 

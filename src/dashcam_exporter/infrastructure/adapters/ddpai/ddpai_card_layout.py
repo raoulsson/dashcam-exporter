@@ -11,7 +11,9 @@ from .ddpai_track_source import DdpaiTrackSource
 VIDEO_ROOT = "DCIM/200video"
 GPS_ROOT = "DCIM/203gps"
 
-_STAMP = re.compile(r"^[SQ]?_?(\d{14})_\d+(_\d+|_A)?\.mp4$", re.IGNORECASE)
+# Any suffix, not just .mp4: normalisation renames the camera's photos and
+# thumbnails too, and they carry the same stamp as the clip they belong to.
+_STAMP = re.compile(r"^[SQ]?_?(\d{14})(_\d+)*(_A)?\.[A-Za-z0-9]+$")
 
 
 class DdpaiCardLayout(CardLayout):
