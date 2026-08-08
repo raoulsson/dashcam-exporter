@@ -4849,11 +4849,46 @@ def _render_status(new):
 # Transcripts: admin-only sidecars beside rendered videos
 # ---------------------------------------------------------------------------
 
+def _transcription_candidates(renders):
+    """Number rendered videos so transcription can target selected trips."""
+    rows = []
+    for index, path in enumerate(sorted(renders, key=lambda p: str(p)), 1):
+        text = path.with_suffix(".transcript.txt")
+        timeline = path.with_suffix(".transcript.timeline.json")
+        rows.append((index, path, text.is_file() and timeline.is_file()))
+    return rows
+
+
+def _ask_transcription_renders(renders):
+    """Return the selected rendered videos; blank means all of them."""
+    rows = _transcription_candidates(renders)
+    print()
+    for index, path, complete in rows:
+        status = C.dim("  [already transcribed]") if complete else ""
+        print("  %2d) %-58s%s" % (index, tilde(path), status))
+    print()
+    answer = prompt.ask("  Trip indices to transcribe (space separated, blank = all): ")
+    if not answer.strip():
+        return [path for _index, path, _complete in rows]
+    selected = []
+    valid = {index: path for index, path, _complete in rows}
+    for token in answer.split():
+        if not token.isdigit() or int(token) not in valid:
+            print(C.red("  %r is not one of the listed trip indices." % token))
+            return None
+        if valid[int(token)] not in selected:
+            selected.append(valid[int(token)])
+    return selected
+
+
 def step_transcribe(ctx, world):
     started = time.time()
     renders = tuple(r.path for r in world.renders if r.path and r.path.is_file())
     if not renders:
         return record(ctx, NAME[TRANSCRIBE], SKIPPED, started, "no rendered MP4s")
+    renders = tuple(_ask_transcription_renders(renders) or ())
+    if not renders:
+        return record(ctx, NAME[TRANSCRIBE], ABORTED, started, "cancelled")
     diarize = prompt.confirm("Use speaker diarization?", default=False)
     splicer = Mp4AudioSplicer()
     transcriber = FasterWhisperTranscriber()
