@@ -1251,6 +1251,15 @@ def _render_state(mp4s, size):
     return "%d videos, %s" % (len(mp4s), human_bytes(size))
 
 
+def _transcribed_count(mp4s):
+    """Count renders with both transcript sidecars complete."""
+    return sum(
+        1 for path in mp4s
+        if path.with_suffix(".transcript.txt").is_file()
+        and path.with_suffix(".transcript.timeline.json").is_file()
+    )
+
+
 def _volume_rows(ctx):
     """One row per volume in play, not one per directory and not one "disk".
 
@@ -1453,6 +1462,8 @@ def print_status(ctx):
     mp4s = rendered_mp4s(ctx.out_dir)
     size = sum(p.stat().st_size for p in mp4s) if mp4s else 0
     print(_state("Rendered", _render_state(mp4s, size), tilde(ctx.out_dir)))
+    print(_state("Transcribed", "%d trips" % _transcribed_count(mp4s),
+                 tilde(ctx.out_dir)))
 
     # Where all of that has to fit. A status row like the others, because
     # running out of disk stops the render exactly the way a missing card does.
