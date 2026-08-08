@@ -15,6 +15,7 @@ from dashcam_exporter.application.ports import uploader
 
 from dashcam_exporter.application.workflow.results import ABORTED, RAN, SATISFIED, record
 from dashcam_exporter.application.ui.term import C, tilde
+from dashcam_exporter.application.ui import prompt
 from dashcam_exporter.infrastructure.runtime.runtime import Child
 
 def __getattr__(name):
@@ -249,9 +250,12 @@ class TargetPublish(TargetBuild):
     """
 
     def execute(self, world):
+        workspace = _handed_over(self._ctx, world)
+        includeVideos = bool(workspace.renders) and prompt.confirm(
+            "  Include videos in this website upload?", False)
         return _logged(self._ctx, _pipeline("UPLOAD"),
-                       lambda: self._act.execute(
-                           _handed_over(self._ctx, world), includeVideos=False))
+                       lambda: self._act.execute(workspace,
+                                                 includeVideos=includeVideos))
 
 
 def _holds(act):

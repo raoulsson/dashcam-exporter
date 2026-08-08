@@ -2189,7 +2189,8 @@ class TestATargetThatFallsOverAwayFromTheAskPath(SeamTest):
         b = self.bench(_plugin_with(uploader=RaisesMidUpload,
                                     complete=NO)).complete()
         runner = P.build_runner(b.ctx)
-        with quiet():
+        with mock.patch("dashcam_exporter.application.workflow.publishing.prompt.confirm",
+                        return_value=False), quiet():
             outcome = runner._execute(runner.menu[UPLOAD],
                                        P.capture_world(b.ctx, M.Scope.FULL))
         self.assertFalse(outcome.completed)
