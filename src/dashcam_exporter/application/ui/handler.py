@@ -26,7 +26,7 @@ from abc import ABC, abstractmethod
 from dashcam_exporter.application.ui.term import C
 from dashcam_exporter.application.ui import screens
 from dashcam_exporter.application.ui import prompt as prompt_mod
-from dashcam_exporter.application.ui.progress import Live
+from dashcam_exporter.application.ui.progress import Live, waiting as _stream_waiting
 
 
 class UiHandler(ABC):
@@ -74,6 +74,13 @@ class UiHandler(ABC):
         paints the pinned progress strip instead."""
 
     @abstractmethod
+    def waiting(self, label):
+        """An indeterminate spinner for a blocking call with nothing to report
+        until it returns (the plugin query, a delete). A context manager with an
+        update(note) the blocking work can call. The stream backend animates a
+        line; a framed backend animates the pinned bar."""
+
+    @abstractmethod
     def done(self, what):
         """The one line a step leaves behind when it worked."""
 
@@ -114,6 +121,9 @@ class StreamUiHandler(UiHandler):
 
     def new_live(self):
         return Live(enabled=C.enabled)
+
+    def waiting(self, label):
+        return _stream_waiting(label)
 
     def done(self, what):
         print(C.green("  100%% - %s." % what))

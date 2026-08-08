@@ -6677,7 +6677,7 @@ def _unlink_card_files(ctx, dcim):
     # screen sat on the typed word for a minute or more with nothing between
     # the word and the closing line.
     failed = ""
-    with waiting("Deleting SIM data"):
+    with ui_handler.active().waiting("Deleting SIM data"):
         gone = freed = 0
         for f in sorted(dcim.rglob("*")):
             if not _real_file(f):
@@ -7161,7 +7161,7 @@ def looked_at(ctx, scope):
     helper so there is one answer to "what does the operator see while it
     happens", rather than four call sites of which three showed nothing.
     """
-    with waiting("Querying the plugin...") as wait:
+    with ui_handler.active().waiting("Querying the plugin...") as wait:
         return capture_world(ctx, scope, progress=wait.update)
 
 

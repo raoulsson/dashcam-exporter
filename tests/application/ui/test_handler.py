@@ -62,6 +62,10 @@ class StreamUiHandlerDrivesTheExistingPainters(unittest.TestCase):
         from dashcam_exporter.application.ui.progress import Live
         self.assertIsInstance(H.StreamUiHandler().new_live(), Live)
 
+    def test_waiting_hands_back_the_stream_spinner(self):
+        from dashcam_exporter.application.ui.progress import Waiting
+        self.assertIsInstance(H.StreamUiHandler().waiting("Querying..."), Waiting)
+
     def test_log_prints_the_line(self):
         out = io.StringIO()
         with redirect_stdout(out):

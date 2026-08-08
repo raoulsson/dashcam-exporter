@@ -21,9 +21,12 @@ backends "format and write" is what lets the stream backend stay byte-identical.
 from __future__ import annotations
 
 import collections
+import os
 import re
 import shutil
 import sys
+import threading
+import time
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -36,6 +39,7 @@ from dashcam_exporter.application.ui.term import C, term_width
 from dashcam_exporter.application.ui import screens
 from dashcam_exporter.application.ui import prompt as prompt_mod
 from dashcam_exporter.application.ui.handler import UiHandler
+from dashcam_exporter.domain.menu.menu import PROGRESS
 
 CSI = "\x1b["
 ALT_ON = CSI + "?1049h"
@@ -62,8 +66,12 @@ class Layout:
     needs to be tested without a real screen.
     """
 
-    MENU_ROWS = 2
-    MIN_ROWS = 12
+    # One row for the p/h/i/q hints, then a 4-column grid of the numbered items
+    # (10 of them -> 3 rows). See _menu_bar.
+    MENU_COLS = 4
+    GRID_ROWS = 3
+    MENU_ROWS = 1 + GRID_ROWS
+    MIN_ROWS = 14
     MIN_COLS = 48
 
     def __init__(self, rows, cols):
@@ -118,6 +126,58 @@ class FrameLive:
         pass
 
 
+class FrameWaiting:
+    """The framed answer to `waiting(...)`: an indeterminate spinner painted into
+    the pinned bar. The stream version writes carriage-return redraws to stdout,
+    which the frame's tee cannot render (it flushes on newline) -- so a blocking
+    call like the plugin query looked frozen. Here a daemon thread animates the
+    bar, and a note from the plugin (`update`) rides along beside the label."""
+
+    def __init__(self, frame, label):
+        self._frame = frame
+        self._label = label
+        self._note = ""
+        self._stop = threading.Event()
+        self._thread = None
+
+    def update(self, note):
+        self._note = str(note or "")
+
+    def __enter__(self):
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=1.0)
+        self._frame.set_bar("")
+        return False
+
+    def _run(self):
+        width, i = 14, 0
+        while not self._stop.wait(0.12):
+            pos = i % (2 * (width - 3))
+            pos = pos if pos < width - 2 else 2 * (width - 3) - pos
+            track = "." * pos + "###" + "." * (width - 3 - pos)
+            note = ("  " + self._note) if self._note else ""
+            self._frame.set_bar("%s [%s]%s" % (self._label, track, note))
+            i += 1
+
+
+def _fixed_size():
+    """(rows, cols) from FRAME_ROWS/FRAME_COLS, or None to follow the terminal."""
+    try:
+        rows = int(os.environ.get("FRAME_ROWS", ""))
+        cols = int(os.environ.get("FRAME_COLS", ""))
+    except ValueError:
+        return None
+    if rows > 0 and cols > 0:
+        return rows, cols
+    return None
+
+
 class FramedUiHandler(UiHandler):
     def __init__(self, title="dashcam-exporter", subtitle=""):
         self._title = title
@@ -132,6 +192,13 @@ class FramedUiHandler(UiHandler):
 
     # -- lifecycle --------------------------------------------------------
     def _size(self):
+        """The frame size. FRAME_ROWS/FRAME_COLS pin it to a fixed geometry (the
+        DOS-UI launcher sets them and resizes the window to match), so a
+        double-clicked run looks the same every time; otherwise it follows the
+        terminal."""
+        fixed = _fixed_size()
+        if fixed:
+            return fixed
         sz = shutil.get_terminal_size(fallback=(term_width(), 24))
         return sz.lines, sz.columns
 
@@ -184,6 +251,9 @@ class FramedUiHandler(UiHandler):
 
     def new_live(self):
         return FrameLive(self)
+
+    def waiting(self, label):
+        return FrameWaiting(self, label)
 
     def set_bar(self, text):
         self._bar = text
@@ -303,27 +373,39 @@ class _LogTee:
 
 
 def _menu_bar(menu_items, position, world, cols):
-    """The numbered entries, wrapped to at most Layout.MENU_ROWS lines, greyed
-    the same way the grid greys them, plus the p/h/i/q hints on the first line."""
-    verdicts = screens._verdicts(menu_items, world)
+    """The menu as a p/h/i/q hint line followed by a 4-column grid of the
+    numbered entries, greyed the same way the scrolling grid greys them (an
+    entry the position does not offer is dim)."""
     offered = position.selectable(menu_items)
+    hint = C.dim("  p) progress   h) help   i) info   q) quit")
     cells = []
     for n, item in sorted(menu_items.items()):
-        label = "%d)%s" % (n, item.name())
-        cells.append(label if n in offered else C.dim(label))
-    hint = C.dim("p h i q")
-    return _wrap_cells([hint] + cells, cols, Layout.MENU_ROWS)
+        if n == PROGRESS:          # reached by the p) hint above, not a work step
+            continue
+        cells.append(_grid_cell(n, item.name(), n in offered))
+    return [hint] + _grid_rows(cells, cols, Layout.MENU_COLS, Layout.GRID_ROWS)
 
 
-def _wrap_cells(cells, cols, max_rows):
-    lines, cur = [], ""
-    for cell in cells:
-        add = ("  " if cur else "") + cell
-        if len(_plain(cur + add)) > cols and cur:
-            lines.append(cur)
-            cur = cell
-        else:
-            cur += add
-    if cur:
-        lines.append(cur)
-    return lines[:max_rows]
+def _grid_cell(number, name, offered):
+    label = "%2d) %s" % (number, name)
+    return label if offered else C.dim(label)
+
+
+def _grid_rows(cells, cols, ncols, nrows):
+    """Lay the cells into an ncols-wide grid, each cell padded to a share of the
+    width, at most nrows rows. Padding is on the plain text so colour does not
+    throw the columns off."""
+    col_w = max(8, cols // ncols)
+    rows = []
+    for r in range(nrows):
+        line = ""
+        for c in range(ncols):
+            idx = r * ncols + c
+            if idx >= len(cells):
+                break
+            cell = cells[idx]
+            pad = col_w - len(_plain(cell))
+            line += cell + (" " * pad if pad > 0 else "")
+        if line.strip():
+            rows.append(" " + line.rstrip())
+    return rows

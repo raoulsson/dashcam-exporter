@@ -24,11 +24,11 @@ class TheLayoutIsPureArithmetic(unittest.TestCase):
     def test_the_bands_stack_in_order_on_an_80x24(self):
         L = framed.Layout(24, 80)
         self.assertEqual((L.title_row, L.status_row, L.top_rule_row), (1, 2, 3))
-        self.assertEqual((L.log_top, L.log_bottom), (4, 18))
-        self.assertEqual((L.divider_row, L.bar_row, L.bottom_rule_row), (19, 20, 21))
-        self.assertEqual(L.menu_rows, [22, 23])
+        self.assertEqual((L.log_top, L.log_bottom), (4, 16))
+        self.assertEqual((L.divider_row, L.bar_row, L.bottom_rule_row), (17, 18, 19))
+        self.assertEqual(L.menu_rows, [20, 21, 22, 23])   # hint + 4x3 grid
         self.assertEqual(L.select_row, 24)
-        self.assertEqual(L.log_height, 15)
+        self.assertEqual(L.log_height, 13)
 
     def test_the_bar_sits_just_above_the_menu_at_any_height(self):
         for rows in (18, 24, 40, 60):
@@ -50,13 +50,18 @@ class ThePlainHelperStripsColour(unittest.TestCase):
         self.assertEqual(framed._plain("\x1b[32mgo\x1b[0m"), "go")
 
 
-class TheMenuBarWrapsToItsRows(unittest.TestCase):
-    def test_wrap_never_exceeds_the_row_budget(self):
-        cells = ["%d)Item" % n for n in range(1, 11)]
-        lines = framed._wrap_cells(cells, 40, framed.Layout.MENU_ROWS)
-        self.assertLessEqual(len(lines), framed.Layout.MENU_ROWS)
-        for line in lines:
-            self.assertLessEqual(len(framed._plain(line)), 40)
+class TheMenuGridLaysItemsInColumns(unittest.TestCase):
+    def test_ten_items_fill_a_four_by_three_grid(self):
+        cells = ["%2d) Item" % n for n in range(1, 11)]
+        rows = framed._grid_rows(cells, 80, framed.Layout.MENU_COLS,
+                                 framed.Layout.GRID_ROWS)
+        self.assertLessEqual(len(rows), framed.Layout.GRID_ROWS)
+        for line in rows:
+            self.assertLessEqual(len(framed._plain(line)), 80)
+        # first row holds the first four items, in order
+        self.assertIn("1) Item", rows[0])
+        self.assertIn("4) Item", rows[0])
+        self.assertIn("5) Item", rows[1])
 
 
 class TheFrameRendersIntoRegions(_NoColour):
@@ -98,7 +103,7 @@ class TheFrameRendersIntoRegions(_NoColour):
         out = self._render()
         self.assertEqual(self._row_of(out, "dashcam-exporter"), 1)
         self.assertEqual(self._row_of(out, "3 trips"), 2)
-        self.assertEqual(self._row_of(out, "Render ####"), 20)   # the pinned bar
+        self.assertEqual(self._row_of(out, "Render ####"), 18)   # the pinned bar
         # the six log lines fill the top of the log region (rows 4..)
         self.assertEqual(self._row_of(out, "clip 1/20"), 4)
         self.assertEqual(self._row_of(out, "clip 6/20"), 9)
@@ -120,6 +125,32 @@ class TheLogIsARingOfTheVisibleHeight(_NoColour):
             sys.stdout = saved
         self.assertEqual(len(h._log), h.layout.log_height)
         self.assertEqual(h._log[-1], "line 99")
+
+
+class TheWaitingSpinnerUsesThePinnedBar(_NoColour):
+    """The stream spinner writes carriage-return redraws the frame's tee cannot
+    show; the framed one paints the pinned bar, with the plugin's note beside it,
+    and clears it on exit. This is the 'blocked at querying plugin' fix."""
+
+    def test_it_paints_the_label_and_note_then_clears(self):
+        import time
+        h = framed.FramedUiHandler()
+        h._size = lambda: (24, 80)
+        cap = io.StringIO()
+        saved = sys.stdout
+        sys.stdout = cap
+        try:
+            h.open()
+            with h.waiting("Querying the plugin...") as w:
+                w.update("asking the plugin")
+                time.sleep(0.3)          # let the animator draw at least once
+            cleared = h._bar
+            h.close()
+        finally:
+            sys.stdout = saved
+        self.assertIn("Querying the plugin", cap.getvalue())
+        self.assertIn("asking the plugin", cap.getvalue())
+        self.assertEqual(cleared, "")    # bar emptied when the wait ends
 
 
 class TheStdoutTeeCatchesStrayPrints(_NoColour):
