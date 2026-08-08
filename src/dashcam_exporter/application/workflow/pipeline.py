@@ -82,6 +82,7 @@ from dashcam_exporter.application.ui.term import C, human_age, human_bytes, huma
 from dashcam_exporter.application.ui.progress import (Bar, Live, Waiting, _bar_line, _clip, _erase_line,  # noqa: F401
                       _eta, _still_bar, _sweep_line, _write_line, show_cursor,
                       waiting)
+from dashcam_exporter.splice.audio.mp3_voice_enhancer import Mp3VoiceEnhancer
 from dashcam_exporter.splice.audio.mp4_to_mp3_splicer import Mp4AudioSplicer
 from dashcam_exporter.splice.transcription.faster_whisper_transcriber import FasterWhisperTranscriber
 from dashcam_exporter.splice.transcription.paragraph_writer import ParagraphWriter
@@ -4892,6 +4893,7 @@ def step_transcribe(ctx, world):
     print()
     diarize = prompt.confirm("\tUse speaker diarization?", default=False)
     splicer = Mp4AudioSplicer()
+    enhancer = Mp3VoiceEnhancer()
     transcriber = FasterWhisperTranscriber()
     made = 0
     bar = Bar("Transcribe")
@@ -4909,18 +4911,24 @@ def step_transcribe(ctx, world):
             text_path = path.with_suffix(".transcript.txt")
             timeline_path = path.with_suffix(".transcript.timeline.json")
             with path.open("rb") as source:
-                mp3 = splicer.spliceMp3OffMp4(source,
-                                               progress_callback=lambda p: show(path, p * .2))
+                extracted = splicer.spliceMp3OffMp4(
+                    source, progress_callback=lambda p: show(path, p * .15)
+                )
+            try:
+                enhanced = enhancer.enhanceMp3(
+                    extracted, progress_callback=lambda p: show(path, 15 + p * .20)
+                )
+            finally:
+                extracted.close()
             try:
                 if diarize:
-                    with mp3:
+                    with enhanced:
                         transcription = transcriber.transcribeMp3(
-                            mp3, progress_callback=lambda p: show(path, 20 + p * .6))
-                    with path.open("rb") as source:
-                        diarization_audio = splicer.spliceMp3OffMp4(source)
-                    try:
-                        with diarization_audio:
-                            turns = SpeakerDiarizer().diarizeMp3(diarization_audio)
+                            enhanced,
+                            progress_callback=lambda p: show(path, 35 + p * .40),
+                        )
+                        enhanced.seek(0)
+                        turns = SpeakerDiarizer().diarizeMp3(enhanced)
                         labeler = SpeakerLabeler(turns)
                         with text_path.open("w", encoding="utf-8") as destination:
                             writer = ParagraphWriter(destination)
@@ -4928,14 +4936,12 @@ def step_transcribe(ctx, world):
                                 writer.write_segment(labeler.label(segment))
                             writer.close()
                             writer.write_timeline(timeline_path)
-                    finally:
-                        diarization_audio.close()
                 else:
-                    with mp3, text_path.open("w", encoding="utf-8") as destination:
+                    with enhanced, text_path.open("w", encoding="utf-8") as destination:
                         writer = ParagraphWriter(destination)
                         transcription = transcriber.transcribeMp3(
-                            mp3,
-                            progress_callback=lambda p: show(path, 20 + p * .8),
+                            enhanced,
+                            progress_callback=lambda p: show(path, 35 + p * .65),
                             segment_callback=writer.write_segment,
                             retain_segments=False,
                         )
@@ -4944,7 +4950,7 @@ def step_transcribe(ctx, world):
                 made += 1
                 show(path, 100.0)
             finally:
-                mp3.close()
+                enhanced.close()
     finally:
         if C.enabled:
             bar.close()
