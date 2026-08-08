@@ -4889,7 +4889,8 @@ def step_transcribe(ctx, world):
     renders = tuple(_ask_transcription_renders(renders) or ())
     if not renders:
         return record(ctx, NAME[TRANSCRIBE], ABORTED, started, "cancelled")
-    diarize = prompt.confirm("Use speaker diarization?", default=False)
+    print()
+    diarize = prompt.confirm("\tUse speaker diarization?", default=False)
     splicer = Mp4AudioSplicer()
     transcriber = FasterWhisperTranscriber()
     made = 0
