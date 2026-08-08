@@ -43,7 +43,7 @@ from dashcam_exporter.domain.model.values import (Evidence, NotRun, Outcome, Rul
 
 # Item numbers, named once so the graph reads as sentences rather than integers.
 PROGRESS, IMPORT, META, PREVIEW, EXCLUDE = 0, 1, 2, 3, 4
-BUILD, RENDER, UPLOAD, CLEAN_WS, ERASE_CARD = 5, 6, 7, 8, 9
+BUILD, RENDER, TRANSCRIBE, UPLOAD, CLEAN_WS, ERASE_CARD = 5, 6, 7, 8, 9, 10
 
 
 # ---------------------------------------------------------------------------
@@ -227,8 +227,8 @@ class Registry:
     would be found by the first menu draw that indexed its table under the
     strategy it forgot, which is the wrong end of the session to find it.
 
-    Declaration order is insertion order and is preserved: the menu is printed
-    in it.
+    The numeric order is canonical: the menu is printed in item-number order,
+    even when a new item is declared beside the step it follows.
     """
 
     def __init__(self):
@@ -246,7 +246,7 @@ class Registry:
 
     def classes(self) -> Dict[int, type]:
         """A copy: what the caller does with it is not the registry's problem."""
-        return dict(self._classes)
+        return dict(sorted(self._classes.items()))
 
     @staticmethod
     def _require(ok: bool, message: str) -> None:

@@ -41,7 +41,7 @@ sys.path.insert(0, str(REPO / "src"))
 
 from dashcam_exporter import guards, items, menu as M, world as W  # noqa: E402
 from dashcam_exporter.domain.menu.menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
-                  UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
+                  TRANSCRIBE, UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
 
 UPLOADER = M.Strategy.UPLOADER
 LOCAL = M.Strategy.LOCAL_PAGE
@@ -173,6 +173,9 @@ class FakeWork:
 
     def render(self, world):
         return self._body("render", world)
+
+    def transcribe(self, world):
+        return self._body("transcribe", world)
 
     # -- paint, lent to the items ------------------------------------------
     def yellow(self, text):
@@ -340,6 +343,7 @@ OWNERS_TABLE = {
     PREVIEW:    ("Build Preview",   False, False, False),
     EXCLUDE:    ("Exclude Trip",    False, False, True),
     RENDER:     ("Render Trips",   False, False, False),
+    TRANSCRIBE: ("Transcribe Trips", False, False, False),
     BUILD:      ("Build Website",   False, False, False),
     UPLOAD:     ("Upload Website",  False, False, False),
     CLEAN_WS:   ("Clean Workspace", False, True,  True),
@@ -363,7 +367,7 @@ class TestWhatEachItemDeclares(unittest.TestCase):
     def test_the_ten_numbers_are_0_through_9(self):
         """Ten items, numbered 0-9 with no gaps. A missing number is an item
         that failed to register at import and would be silently absent."""
-        self.assertEqual(sorted(self.menu), list(range(10)))
+        self.assertEqual(sorted(self.menu), list(range(11)))
 
     def test_start_end_and_destr_are_the_flags_the_table_declares(self):
         """Import is the only entry point; Clean Workspace and Delete SIM Data
@@ -431,26 +435,26 @@ OUTBOUND = {
         # wherever you are, and whether it MAY run is the publisher's answer
         # about built material, not an ordering rule spelled as edges.
         IMPORT:   {IMPORT, META, CLEAN_WS, ERASE_CARD},
-        META:     {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD, CLEAN_WS,
+        META:     {META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE, BUILD, UPLOAD, CLEAN_WS,
                    ERASE_CARD},
-        PREVIEW:  {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD, CLEAN_WS,
+        PREVIEW:  {META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE, BUILD, UPLOAD, CLEAN_WS,
                    ERASE_CARD},
-        EXCLUDE:  {META, PREVIEW, EXCLUDE, UPLOAD, CLEAN_WS, ERASE_CARD},
-        RENDER:   {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD, CLEAN_WS,
+        EXCLUDE:  {META, PREVIEW, EXCLUDE, TRANSCRIBE, UPLOAD, CLEAN_WS, ERASE_CARD},
+        RENDER:   {META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE, BUILD, UPLOAD, CLEAN_WS,
                    ERASE_CARD},
-        BUILD:    {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD, CLEAN_WS,
+        BUILD:    {META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE, BUILD, UPLOAD, CLEAN_WS,
                    ERASE_CARD},
-        UPLOAD:   {META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD, CLEAN_WS,
+        UPLOAD:   {META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE, BUILD, UPLOAD, CLEAN_WS,
                    ERASE_CARD},
         CLEAN_WS: {IMPORT, CLEAN_WS},
     },
     LOCAL: {
         IMPORT:   {IMPORT, META, CLEAN_WS, ERASE_CARD},
-        META:     {META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD},
-        PREVIEW:  {META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD},
-        EXCLUDE:  {META, PREVIEW, EXCLUDE, CLEAN_WS, ERASE_CARD},
-        RENDER:   {META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD},
-        BUILD:    {META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS, ERASE_CARD},
+        META:     {META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE, BUILD, CLEAN_WS, ERASE_CARD},
+        PREVIEW:  {META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE, BUILD, CLEAN_WS, ERASE_CARD},
+        EXCLUDE:  {META, PREVIEW, EXCLUDE, TRANSCRIBE, CLEAN_WS, ERASE_CARD},
+        RENDER:   {META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE, BUILD, CLEAN_WS, ERASE_CARD},
+        BUILD:    {META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE, BUILD, CLEAN_WS, ERASE_CARD},
         UPLOAD:   set(),
         CLEAN_WS: {IMPORT, CLEAN_WS},
     },
@@ -510,7 +514,7 @@ class TestWhereEachItemSits(unittest.TestCase):
         """A view is an observation of a transition, not one. Looking must not
         move the pipeline, so it settles wherever the pipeline already was."""
         item = item_for(PROGRESS)
-        universe = frozenset(range(10))
+        universe = frozenset(range(11))
         self.assertEqual(item.outbound().offers(universe), universe)
         self.assertIsNone(item.outbound().edges())
         self.assertEqual(item.settles_at(RENDER), RENDER)
@@ -531,7 +535,7 @@ class TestWhereEachItemSits(unittest.TestCase):
         item = item_for(ERASE_CARD)
         self.assertIsInstance(item.outbound(), M.StepBack)
         self.assertEqual(item.settles_at(RENDER), RENDER)
-        self.assertEqual(item.outbound().offers(frozenset(range(10))),
+        self.assertEqual(item.outbound().offers(frozenset(range(11))),
                          frozenset())
 
     def test_cleaning_the_workspace_offers_only_a_new_cycle(self):

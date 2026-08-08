@@ -25,7 +25,7 @@ sys.path.insert(0, str(REPO / "tests"))
 
 from dashcam_exporter import items, menu as M, uploader as U  # noqa: E402
 from dashcam_exporter.domain.menu.menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
-                  UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
+                  TRANSCRIBE, UPLOAD, CLEAN_WS, ERASE_CARD)      # noqa: E402
 from print_step_graph import NullWork                # noqa: E402
 
 
@@ -361,10 +361,10 @@ class TestTheOwnersWorkedExample(GraphTest):
         position.current = PREVIEW
         self.assertEqual(sorted(position.selectable(built)),
                          [PROGRESS, META, PREVIEW, EXCLUDE, BUILD, RENDER,
-                          UPLOAD, CLEAN_WS, ERASE_CARD])
+                         TRANSCRIBE, UPLOAD, CLEAN_WS, ERASE_CARD])
         position.current = EXCLUDE
         self.assertEqual(sorted(position.selectable(built)),
-                         [PROGRESS, META, PREVIEW, EXCLUDE, UPLOAD,
+                         [PROGRESS, META, PREVIEW, EXCLUDE, TRANSCRIBE, UPLOAD,
                           CLEAN_WS, ERASE_CARD])
 
 

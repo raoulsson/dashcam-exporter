@@ -20,7 +20,7 @@ from dashcam_exporter.domain.menu.menu import (Anywhere, Destructive, Edges, Evi
                   Ruling, Scope, StartNode, StepBack, Strategy, Verdict,
                   blocked, go, satisfied,
                   PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER,
-                  BUILD, UPLOAD, CLEAN_WS, ERASE_CARD)
+                  BUILD, TRANSCRIBE, UPLOAD, CLEAN_WS, ERASE_CARD)
 from dashcam_exporter.domain.menu.handover import Handover
 from dashcam_exporter.domain.menu import guards
 
@@ -172,7 +172,7 @@ class GenerateMeta(MenuItem):
         "now. It reads clips and writes small text files; a card takes about "
         "a minute, and nothing it does is irreversible."
     )
-    OUT = Edges.and_upload(META, PREVIEW, EXCLUDE, RENDER, BUILD, CLEAN_WS,
+    OUT = Edges.and_upload(META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE, BUILD, CLEAN_WS,
                            ERASE_CARD)
     IN_AUTHORED = Strategy.both(frozenset((META, IMPORT, EXCLUDE)))
 
@@ -216,7 +216,7 @@ class BuildPreview(MenuItem):
     # Stills and a contact sheet. It writes no sidecar and sends nothing
     # anywhere, so neither the trip list nor the destination has moved.
     CHANGES_THE_QUESTION = False
-    OUT = Edges.and_upload(PREVIEW, META, EXCLUDE, RENDER, BUILD, CLEAN_WS,
+    OUT = Edges.and_upload(PREVIEW, META, EXCLUDE, RENDER, TRANSCRIBE, BUILD, CLEAN_WS,
                            ERASE_CARD)
     IN_AUTHORED = Strategy.both(frozenset((PREVIEW, META, EXCLUDE)))
 
@@ -282,7 +282,7 @@ class ExcludeTrip(Destructive):
     # that names the other act taught the wrong idea of what was happening.
     WORD = "EXCLUDE"
     SCOPE = Scope.FULL          # the only-copy warning has to ask the target
-    OUT = Edges.and_upload(EXCLUDE, META, PREVIEW, CLEAN_WS, ERASE_CARD)
+    OUT = Edges.and_upload(EXCLUDE, META, PREVIEW, TRANSCRIBE, CLEAN_WS, ERASE_CARD)
     IN_AUTHORED = Strategy.both(frozenset((EXCLUDE, META, PREVIEW)))
 
     def evaluate(self, world) -> Verdict:
@@ -324,7 +324,7 @@ class RenderVideos(MenuItem):
     # all, so the manifest built before it is still correct after it, and
     # sending the videos is the whole of what is left to do. The removed edge
     # bought nothing and cost a rebuild after every render.
-    OUT = Edges.and_upload(RENDER, META, PREVIEW, EXCLUDE, BUILD, CLEAN_WS,
+    OUT = Edges.and_upload(RENDER, META, PREVIEW, EXCLUDE, TRANSCRIBE, BUILD, CLEAN_WS,
                            ERASE_CARD)
     IN_AUTHORED = {
         Strategy.UPLOADER: frozenset({RENDER, META, PREVIEW, EXCLUDE, BUILD, UPLOAD}),
@@ -344,6 +344,30 @@ class RenderVideos(MenuItem):
 
     def _perform(self, world):
         return self._work.render(world)
+
+
+# ---------------------------------------------------------------------------
+# 7 — Transcribe Trips
+# ---------------------------------------------------------------------------
+
+class TranscribeTrips(MenuItem):
+    """Generate admin transcript sidecars from whatever rendered MP4s exist."""
+
+    number = TRANSCRIBE
+    NAME = "Transcribe Trips"
+    DESCRIPTION = "Generate a transcript from the rendered videos."
+    ABOUT = ("Extracts the audio from every rendered MP4 and writes a text "
+             "transcript plus paragraph timeline beside it. You can choose "
+             "plain transcription or speaker diarization each run. Existing "
+             "and partial renders are both eligible.")
+    OUT = Strategy.both(Edges.of(TRANSCRIBE))
+    IN_AUTHORED = Strategy.both(frozenset({META, PREVIEW, EXCLUDE, RENDER, BUILD, UPLOAD}))
+
+    def evaluate(self, world) -> Verdict:
+        return go() if world.renders else blocked("no rendered MP4s to transcribe")
+
+    def _perform(self, world):
+        return self._work.transcribe(world)
 
 
 # ---------------------------------------------------------------------------
@@ -377,9 +401,9 @@ class BuildWebsite(MenuItem):
     # Upload Website was unreachable by its own natural route. This is the edge
     # that makes publishing work.
     OUT = {
-        Strategy.UPLOADER: Edges.of(BUILD, META, PREVIEW, EXCLUDE, RENDER,
+        Strategy.UPLOADER: Edges.of(BUILD, META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE,
                                     UPLOAD, CLEAN_WS, ERASE_CARD),
-        Strategy.LOCAL_PAGE: Edges.of(BUILD, META, PREVIEW, EXCLUDE, RENDER,
+        Strategy.LOCAL_PAGE: Edges.of(BUILD, META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE,
                                       CLEAN_WS, ERASE_CARD),
     }
     IN_AUTHORED = {
@@ -471,7 +495,7 @@ class UploadWebsite(MenuItem):
     # outbound. Deriving the inbound would have silently deleted an edge he
     # authored.
     OUT = {
-        Strategy.UPLOADER: Edges.of(UPLOAD, META, PREVIEW, EXCLUDE, RENDER,
+        Strategy.UPLOADER: Edges.of(UPLOAD, META, PREVIEW, EXCLUDE, RENDER, TRANSCRIBE,
                                     BUILD, CLEAN_WS, ERASE_CARD),
         Strategy.LOCAL_PAGE: Edges.of(),
     }
@@ -771,7 +795,7 @@ COLD_START_RULES = (
 )
 
 ALL_ITEMS = (Progress, ImportSim, GenerateMeta, BuildPreview, ExcludeTrip,
-             RenderVideos, BuildWebsite, UploadWebsite, CleanWorkspace,
-             DeleteSimData)
+             RenderVideos, TranscribeTrips, BuildWebsite, UploadWebsite,
+             CleanWorkspace, DeleteSimData)
 
 NAMES = {cls.number: cls.NAME for cls in ALL_ITEMS}

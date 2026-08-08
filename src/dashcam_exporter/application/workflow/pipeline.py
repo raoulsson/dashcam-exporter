@@ -73,7 +73,7 @@ from dashcam_exporter.infrastructure.config import (PRIVATE_KEYS, as_bool, card_
 from dashcam_exporter.domain.model import world as W
 from dashcam_exporter.application.ports.checkout import RealCheckout  # noqa: F401
 from dashcam_exporter.domain.menu.menu import (PROGRESS, IMPORT, META, PREVIEW, EXCLUDE, RENDER, BUILD,
-                  UPLOAD, CLEAN_WS, ERASE_CARD)
+                  TRANSCRIBE, UPLOAD, CLEAN_WS, ERASE_CARD)
 
 # The terminal itself: how things are spelled, how wide it is, the colours,
 # and the progress bars. Moved out whole; imported back under the same names
@@ -82,6 +82,10 @@ from dashcam_exporter.application.ui.term import C, human_age, human_bytes, huma
 from dashcam_exporter.application.ui.progress import (Bar, Live, Waiting, _bar_line, _clip, _erase_line,  # noqa: F401
                       _eta, _still_bar, _sweep_line, _write_line, show_cursor,
                       waiting)
+from dashcam_exporter.splice.audio.mp4_to_mp3_splicer import Mp4AudioSplicer
+from dashcam_exporter.splice.transcription.faster_whisper_transcriber import FasterWhisperTranscriber
+from dashcam_exporter.splice.transcription.paragraph_writer import ParagraphWriter
+from dashcam_exporter.splice.diarization.speaker_diarizer import SpeakerDiarizer, SpeakerLabeler
 
 # Three layers that were in this file and are now under it. Imported back
 # under the same spellings, so no call site anywhere changed: `screens` is
@@ -4842,6 +4846,78 @@ def _render_status(new):
 
 
 # ---------------------------------------------------------------------------
+# Transcripts: admin-only sidecars beside rendered videos
+# ---------------------------------------------------------------------------
+
+def step_transcribe(ctx, world):
+    started = time.time()
+    renders = tuple(r.path for r in world.renders if r.path and r.path.is_file())
+    if not renders:
+        return record(ctx, NAME[TRANSCRIBE], SKIPPED, started, "no rendered MP4s")
+    diarize = prompt.confirm("Use speaker diarization?", default=False)
+    splicer = Mp4AudioSplicer()
+    transcriber = FasterWhisperTranscriber()
+    made = 0
+    bar = Bar("Transcribe")
+    if C.enabled:
+        bar.open_once()
+
+    def show(path, percent):
+        if C.enabled:
+            _write_line("  %s %s %s" %
+                        (C.gold(bar.label), bar.bracket(percent / 100.0),
+                         C.gold("%3.0f%%  %s" % (percent, path.name))))
+
+    try:
+        for path in renders:
+            text_path = path.with_suffix(".transcript.txt")
+            timeline_path = path.with_suffix(".transcript.timeline.json")
+            with path.open("rb") as source:
+                mp3 = splicer.spliceMp3OffMp4(source,
+                                               progress_callback=lambda p: show(path, p * .2))
+            try:
+                if diarize:
+                    with mp3:
+                        transcription = transcriber.transcribeMp3(
+                            mp3, progress_callback=lambda p: show(path, 20 + p * .6))
+                    with path.open("rb") as source:
+                        diarization_audio = splicer.spliceMp3OffMp4(source)
+                    try:
+                        with diarization_audio:
+                            turns = SpeakerDiarizer().diarizeMp3(diarization_audio)
+                        labeler = SpeakerLabeler(turns)
+                        with text_path.open("w", encoding="utf-8") as destination:
+                            writer = ParagraphWriter(destination)
+                            for segment in transcription.segments:
+                                writer.write_segment(labeler.label(segment))
+                            writer.close()
+                            writer.write_timeline(timeline_path)
+                    finally:
+                        diarization_audio.close()
+                else:
+                    with mp3, text_path.open("w", encoding="utf-8") as destination:
+                        writer = ParagraphWriter(destination)
+                        transcription = transcriber.transcribeMp3(
+                            mp3,
+                            progress_callback=lambda p: show(path, 20 + p * .8),
+                            segment_callback=writer.write_segment,
+                            retain_segments=False,
+                        )
+                        writer.close()
+                        writer.write_timeline(timeline_path)
+                made += 1
+                show(path, 100.0)
+            finally:
+                mp3.close()
+    finally:
+        if C.enabled:
+            bar.close()
+    done_line("transcribed %s rendered videos" % C.yellow(str(made)))
+    return record(ctx, NAME[TRANSCRIBE], RAN if made else SATISFIED,
+                  started, "%d transcript sidecars" % made)
+
+
+# ---------------------------------------------------------------------------
 # Site: a browsable static site built from what the render already produced
 # ---------------------------------------------------------------------------
 #
@@ -7156,6 +7232,9 @@ class Work:
 
     def render(self, world):
         return _outcome(step_render(self.ctx))
+
+    def transcribe(self, world):
+        return _outcome(step_transcribe(self.ctx, world))
 
     # -- the collaborators the constructor installs ------------------------
     def builder(self, strategy):
