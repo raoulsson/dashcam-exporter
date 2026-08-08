@@ -4902,7 +4902,7 @@ def step_transcribe(ctx, world):
     if not renders:
         return record(ctx, NAME[TRANSCRIBE], ABORTED, started, "cancelled")
     print()
-    diarize = prompt.confirm("\tUse speaker diarization?", default=False)
+    diarize = prompt.confirm("  Use speaker diarization?", default=False)
     if diarize:
         hf_token = ctx.cfg_opt("hf_token") or os.environ.get("HF_TOKEN")
         if not hf_token:
