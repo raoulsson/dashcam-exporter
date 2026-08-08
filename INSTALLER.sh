@@ -101,8 +101,10 @@ echo
 #    rather than looking hung.
 # ---------------------------------------------------------------------------
 echo "${BLD}packages${OFF}  ${DIM}(opencv, faster-whisper and pyannote are large wheels — this can take a few minutes)${OFF}"
-"$VPY" -m pip install --quiet --upgrade pip
-if "$VPY" -m pip install --quiet -r requirements.txt; then
+echo "  upgrading pip ..."
+"$VPY" -m pip install --disable-pip-version-check --upgrade pip
+echo "  installing requirements.txt ..."
+if "$VPY" -m pip install --disable-pip-version-check --progress-bar on -r requirements.txt; then
     ok "requirements.txt installed"
 else
     bad "pip install failed — the output above says why"
