@@ -61,9 +61,9 @@ deliberate — see [One source of truth](#one-source-of-truth).
     Disk         238.8 GB free of 917.0 GB (/Volumes/Macintosh HD)
 --------------------------------------------------------------------------------
 ================================================================================
-  1) Import SIM           4) Exclude Trip         7) Upload Website
-  2) Generate Meta        5) Build Website        8) Clean Workspace
-  3) Build Preview        6) Render Trips         9) Delete SIM Data
+  1) Import SIM           4) Exclude Trip         7) Transcribe Trips      10) Delete SIM Data
+  2) Generate Meta        5) Build Website        8) Upload Website
+  3) Build Preview        6) Render Trips         9) Clean Workspace
   p = progress   h = help   i = info   q = quit
 
 Select>
@@ -90,9 +90,10 @@ the workspace is not a step in working through it.
 | 4 | **Exclude Trip** &#9888; | Deletes the chosen trips' source clips, their renders and their sidecars. Deleting locally does not unpublish: a trip already at the publishing target stays there. |
 | 5 | **Build Website** | Builds what this installation publishes, from the trips that have been described. With nothing configured: one self-contained HTML page from the renders, and nothing leaves the machine. |
 | 6 | **Render Trips** | Encodes the chosen trips. The slow step — hours for a full card. |
-| 7 | **Upload Website** | Puts it online, through whatever you configured. One job — how many transports it takes is the implementation's business, not the menu's. |
-| 8 | **Clean Workspace** &#9888; | Erases the imported footage and the renders it produced, once this machine and the publishing target both say they are safe. |
-| 9 | **Delete SIM Data** &#9888; | Erases the card's clips, keeping its folders so the camera can record, once every clip is accounted for elsewhere. |
+| 7 | **Transcribe Trips** | Runs audio extraction, voice enhancement and transcription for selected rendered MP4s. Optional speaker diarization requires `HF_TOKEN`. Writes `.transcript.txt` and `.transcript.timeline.json` sidecars. |
+| 8 | **Upload Website** | Puts it online, through whatever you configured. |
+| 9 | **Clean Workspace** &#9888; | Erases the imported footage and the renders it produced, once this machine and the publishing target both say they are safe. |
+| 10 | **Delete SIM Data** &#9888; | Erases the card's clips, keeping its folders so the camera can record, once every clip is accounted for elsewhere. |
 
 Items 4, 8 and 9 destroy footage, and each asks for a word to be typed rather
 than an Enter pressed. The word is the entry's own verb: `EXCLUDE` at Exclude
@@ -121,17 +122,19 @@ cancelled leaves the pipeline exactly where it was.
 4   exclude trip      drop the ones not worth keeping          (optional)
 5   build website     what your target publishes; a local page if there is none
 6   render videos     the long one
-7   upload website    put it online, through whatever you configured
-8   clean workspace   erase the footage and the renders — the cycle is closed
-9   delete sim data   free the card, at any point once its clips are safe
+7   transcribe trips  audio enhance + transcription sidecars
+8   upload website    put it online, through whatever you configured
+9   clean workspace   erase the footage and the renders — the cycle is closed
+10  delete sim data   free the card, at any point once its clips are safe
 ```
 
 With a publishing target configured the cycle does not run straight down. A trip
 is publishable as soon as it is described: its route, its distance, its places
 and its map all come out of the sidecars item 2 writes, and only playback waits
-on the encode. So the usual pass is 1, 2, 3, 4, then 5 and 7 — the site is up in
+on the encode. Transcription is item 7 and can run whenever rendered MP4s exist.
+The usual pass is 1, 2, 3, 4, then 5 and 8 — the site is up in
 a minute, with each drive reading "This drive isn't available to play yet" —
-then 6 for the long encode, then 5 and 7 again to bring the videos. Item 7 is
+then 6 for the long encode, optionally 7 for transcripts, then 5 and 8 again to bring the videos. Item 8 is
 offered from every step in the cycle; nothing in the graph makes you build
 first, because the publisher answers for itself when there is nothing built.
 
