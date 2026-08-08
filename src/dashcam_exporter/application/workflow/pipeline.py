@@ -681,9 +681,10 @@ class Readout:
             # below, which is the part that says it is still alive.
             head = _bar_line(self.label, self.frac, self.elapsed, self.note,
                              self.note_first)
-            # note_first has already put the note in the line; appending it
-            # again below would print it twice.
-            used = self.note_first and bool(self.note)
+            # Notes are always appended after the stable bar head. Keeping
+            # them out of the head means a changing filename/phase cannot move
+            # the bar sideways between redraws.
+            used = False
         else:
             # The indeterminate bar, not a spinner. Both say "still working",
             # but only one of them looks like the rest of the tool: a step with
@@ -707,7 +708,7 @@ class Readout:
         room = term_width() - _visible_len(head) - 4
         if not (self.last_raw and room > 12):
             return ""
-        t = self.last_raw.strip()
+        t = _compact_paths(self.last_raw.strip())
         # The note already carries the counter, so a tail that starts with
         # "[scan  17/ 239]" spends its width repeating it. Strip the bracket
         # and show what it identifies — the file being worked on.
@@ -935,6 +936,34 @@ def _fit(text, room):
     tail = min(room - 2, max(12, room // 2))
     head = room - tail - 1
     return text[:head] + "…" + text[-tail:]
+
+
+def _compact_paths(text):
+    """Shorten paths in a streamed line before the width cap is applied.
+
+    A raw child line often contains an absolute checkout path. Keeping the
+    beginning of that path meant the useful filename was the part that got
+    clipped. Home-relative paths retain their familiar ``~/...`` prefix;
+    other absolute paths keep their final three components behind an ellipsis.
+    """
+    home = str(Path.home())
+    token = re.compile(r"(?<![\w])(?:~|/)[^\s]+")
+
+    def shorten(match):
+        raw = match.group(0)
+        end = ""
+        while raw and raw[-1] in ",.;:)]}":
+            end, raw = raw[-1] + end, raw[:-1]
+        if raw.startswith(home + "/"):
+            short = "~" + raw[len(home):]
+        elif raw.startswith("/"):
+            parts = [part for part in raw.split("/") if part]
+            short = "…/" + "/".join(parts[-3:]) if len(parts) > 3 else raw
+        else:
+            short = raw
+        return short + end
+
+    return token.sub(shorten, text)
 
 
 def make_scan_parser():

@@ -9,10 +9,39 @@ protocol on the same `opened` field.
 from __future__ import annotations
 
 import sys
+import re
 import threading
 import time
 
 from dashcam_exporter.application.ui.term import C, human_secs, term_width
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _clip(text, width):
+    """Clip by terminal columns, never by raw string bytes.
+
+    Colour escapes are invisible but used to count toward ``width`` by the
+    old slice in ``Live.draw``. That cut the useful filename off the right
+    edge even when there was visible room left, and made redraws appear to
+    change shape. Keep complete escapes and clip only printable characters.
+    """
+    if width <= 0:
+        return ""
+    out, used, pos = [], 0, 0
+    for match in _ANSI.finditer(text):
+        plain = text[pos:match.start()]
+        take = min(len(plain), width - used)
+        if take:
+            out.append(plain[:take])
+            used += take
+        out.append(match.group(0))
+        pos = match.end()
+        if used >= width:
+            break
+    if used < width and pos < len(text):
+        out.append(text[pos:pos + width - used])
+    return "".join(out)
 
 # ---------------------------------------------------------------------------
 # Live output area: a progress bar (or spinner) plus the raw last line, redrawn
@@ -59,7 +88,7 @@ class Live:
         for ln in lines:
             # Truncating can cut a colour sequence's trailing reset off, which
             # would bleed the colour into the rest of the terminal. Re-append it.
-            sys.stdout.write(ln[:w] + "\x1b[0m\n")
+            sys.stdout.write(_clip(ln, w) + "\x1b[0m\n")
         self.height = len(lines)
         sys.stdout.flush()
 
@@ -70,7 +99,7 @@ class Live:
             return
         self.emitted = True
         self._erase()
-        sys.stdout.write(text[:term_width() - 1] + "\n")
+        sys.stdout.write(_clip(text, term_width() - 1) + "\n")
         sys.stdout.flush()
 
     def close(self):
@@ -283,21 +312,14 @@ def _sweep_line(label, i, elapsed):
     return Waiting(label).render_at(i, elapsed).strip()
 
 
-def _bar_line(label, frac, elapsed, note, note_first):
-    """Where the bar sits in the line, which is not the same question twice.
+def _bar_line(label, frac, elapsed, note, note_first=False):
+    """The stable head shared by every determinate progress line.
 
-    One shape for every step: what is moving on the left, the bar and the
-    percentage on the right. A render, a copy and an upload then read the same
-    way and the eye learns one line rather than three.
-
-    The label leads only when a step has nothing to say about what it is
-    working on -- there is no filename in a boundary scan -- and then the
-    label is the only thing distinguishing one bar from another.
+    ``note_first`` remains in the signature for plugins/tests written against
+    the old helper, but notes now always follow the bar. Putting a filename or
+    phase description before it made the bar jump horizontally whenever that
+    text changed length. The bar, percentage and elapsed time are the stable
+    landmarks; the changing detail belongs in the tail.
     """
     bar = Bar(label)
-    if not (note_first and note):
-        return bar.render(frac, elapsed)
-    # %3d on the percentage: it ends the line, but it is redrawn in place, and
-    # a field that grows from "9%" to "100%" leaves the old tail behind it.
-    return "%s    %s %s" % (C.yellow(note), bar.bracket(frac),
-                            C.yellow("%3d%%" % int(frac * 100)))
+    return bar.render(frac, elapsed)

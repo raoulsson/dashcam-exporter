@@ -356,7 +356,7 @@ class TheLiveProgressLineIsActuallyDrawn(unittest.TestCase):
                               note_first=note_first))
         return rc, buf.getvalue()
 
-    def test_the_note_goes_in_front_of_the_bar(self):
+    def test_the_note_stays_after_the_stable_bar_head(self):
         rc, out = self._run(True)
         self.assertEqual(rc, 0)
         self.assertIn("one.mp4", out)
@@ -366,6 +366,8 @@ class TheLiveProgressLineIsActuallyDrawn(unittest.TestCase):
         for line in drawn:
             self.assertEqual(line.count("9MB/s"), 1,
                              "the note was appended a second time after the bar")
+        positions = {line.index("[") for line in drawn}
+        self.assertEqual(len(positions), 1, "the bar moved when the note changed")
 
     def test_the_label_leads_when_the_note_does_not(self):
         rc, out = self._run(False)
@@ -436,6 +438,11 @@ class TheChildsLineKeepsBothEnds(unittest.TestCase):
 
     def test_no_room_at_all_still_returns_something_printable(self):
         self.assertEqual(len(P._fit(self.LINE, 5)), 5)
+
+    def test_absolute_paths_keep_a_useful_prefix_and_filename(self):
+        line = "/Users/raoulsson/dev/dashcam-exporter/src/dashcam_exporter/config.txt"
+        got = P._compact_paths(line)
+        self.assertEqual(got, "~/dev/dashcam-exporter/src/dashcam_exporter/config.txt")
 
 
 class DiscardingAnImportUnclaimsIt(unittest.TestCase):
