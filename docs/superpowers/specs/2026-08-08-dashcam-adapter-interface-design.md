@@ -77,14 +77,48 @@ class Track:
     points: tuple[TrackPoint, ...]
 
 class ClipMode(Enum):
-    NORMAL, EVENT, PARKING, MANUAL, OTHER
+    NORMAL, EVENT, PARKING, MANUAL, TIMELAPSE, OTHER
+
+class Channel(Enum):
+    FRONT, REAR, INTERIOR, TELEPHOTO
+
+@dataclass(frozen=True, slots=True)
+class Clip:
+    timestamp: str                    # canonical YYYYMMDDHHMMSS
+    epoch_utc: int
+    playback_seconds: float           # what ffmpeg will play
+    wall_seconds: float               # real-world span the footage covers
+    videos: Mapping[Channel, Path]
+    mode: ClipMode
+    source_mode: str                  # the vendor's own token, verbatim
+    protected: bool                   # locked/event-protected on the card
 ```
 
-`Clip` gains `mode: ClipMode` and `source_mode: str`. The enum is what code
-decides on; the raw vendor token is retained because BlackVue defines sixteen
-mode letters and collapsing them to five discards evidence a future grouping
-rule may want. Carrying both follows the house rule about deciding on the
-evidence rather than on a flag derived from it.
+`front`, `rear` and `duration` remain as compatibility properties so the
+migration is incremental; `Clip` already carries `dt` and `end` aliases for
+the same reason.
+
+Three changes, each forced by a specific camera rather than anticipated:
+
+**Channel map instead of front/rear.** The VIOFO A139 Pro is three-channel and
+the A329 adds a telephoto, so two fields cannot hold a clip. The manual's own
+example shows three channels sharing one timestamp and consuming three
+consecutive sequence numbers.
+
+**Two durations.** Thinkware's timelapse modes record ten minutes of real time
+at 2 fps and store a two-minute file. `ended_at = started_at + duration` is
+wall-clock semantics and drives trip grouping; ffmpeg needs playback length.
+For every clip handled so far these were the same number, which is precisely
+why one implementation hid it.
+
+**Mode enum plus raw token plus a protected flag.** BlackVue defines sixteen
+mode letters and collapsing them to six discards evidence a future grouping
+rule may want, so the vendor token is retained alongside the decision the code
+acts on. Protection is orthogonal to mode: VIOFO encodes it *only* by placing
+the file in `DCIM/Movie/RO/`, with no filename marker, so it is unrecoverable
+once files are copied off the card. That is an argument for transforming at
+import rather than copying verbatim — today's `import-sd-card.sh` would
+silently destroy it.
 
 ## Interface
 
@@ -195,10 +229,68 @@ the `GN` talker ID. Under this design that is moot — the adapter returns
 Unverified and deliberately not asserted: whether DR750X/DR970 write sidecars;
 `.3gf` axis order and G-scale.
 
-### VIOFO / Thinkware
+### VIOFO — from manuals and open-source extractors, not from a card
 
-Research outstanding. To be folded in before implementation, specifically to
-test whether a third camera breaks the five-method contract.
+Layout: `DCIM/Movie/` for loop recording, `DCIM/Movie/RO/` for locked/event,
+`DCIM/Movie/Parking/` for parking, `DCIM/Photo/` for snapshots. Older A129
+Plus has no `Parking` subfolder; A119 V3 puts `RO` as a sibling of `Movie`;
+some A119-era units use a `CARDV/` root instead of `DCIM/`. A parser should
+accept both roots.
+
+Filenames: `YYYY_MMDD_HHMMSS_<seq>[P|E]?[F|R|I|T].MP4`, sequence width
+varying 3–8 digits by firmware. `P` parking, `E` impact/event, absent normal.
+A119 V3 uses a different grammar entirely, `YYYYMMDDHHMMSS_NNNNNN.MP4`, with
+no channel letter. Same brand, incompatible grammars.
+
+Front and rear pairing is **fuzzy**: timestamps skew by a second or more and
+sequence numbers drift independently when one camera is unplugged. The
+commercial reference player searches ±6 seconds and ±4 file numbers. Never
+require equality; never reconstruct the sibling filename from the stem.
+
+GPS: no sidecar. A non-standard `gps ` table inside `moov` points at `free`
+boxes beginning with the ASCII magic `GPS `, holding little-endian binary
+records with coordinates in `DDDmm.mmmm` hybrid degrees-minutes. **The payload
+offset within the box varies by model and firmware** — extractors discriminate
+on a uint32 at offset 12 (`0x58` implies unpack at `0x30`; `0x3F0` and `0x2C`
+imply `0x10`). This is the strongest argument for holding a GPS source rather
+than being one: the same reader serves many chipset-sibling brands, with
+firmware quirks isolated in one place.
+
+Duration is a menu setting (1/2/3/5/10 minutes), invisible to any parser.
+
+### Thinkware — from manuals and ExifTool's parser, not from a card
+
+Layout: no `DCIM` at all. Mode folders sit at the card root — `cont_rec`,
+`evt_rec`, `manual_rec`, `motion_timelapse_rec`, `parking_rec`. The F770
+differs again: `motion_rec` and no `parking_rec`. A hidden `.TWSYS` folder
+holds pre-allocated `.TMP` files and must be skipped when scanning.
+
+Filenames: `REC_YYYY_MM_DD_HH_MM_SS_<CH>.MP4` with underscore-separated date
+parts, channel `F`/`R`. **Mode appears nowhere in the name** — every file is
+`REC_...` and the containing folder is the only encoding. This is the
+structural opposite of VIOFO, where the marker is in the name.
+
+GPS: NMEA RMC inside a timed-text track at roughly 1 Hz, each sample carrying
+a G-sensor prefix, an RMC sentence and a `CAR,...` telemetry suffix. ExifTool
+has an explicit Thinkware branch with a captured sample.
+
+Duration is fixed per mode, not per camera: `cont_rec` 1 minute, `evt_rec` 20
+seconds, `manual_rec` 1 minute, and the timelapse modes record ten minutes of
+real time at 2 fps compressed into a two-minute file.
+
+### What the third and fourth cameras broke
+
+The five-method contract survived unchanged. The model did not, in two places:
+the channel map (VIOFO three- and four-channel models) and the split between
+playback and wall-clock duration (Thinkware timelapse). Both are recorded
+above. This is the result the exercise was for — one implementation had hidden
+both.
+
+Unverified and deliberately not asserted: the VIOFO A139 Pro manual examples
+were decoded from subset-font glyph IDs with no `/ToUnicode` map, so the exact
+digits are inference, though they independently reproduce the manual's own
+prose; which firmware ships the `CARDV/` root; the meaning of Thinkware's
+`_GS` suffix; whether Thinkware's timed-text handler is literally `sbtl`.
 
 ### There is no dashcam standard
 
@@ -227,11 +319,24 @@ and rebuild on first run.
 and members-extracted. `track_for(clip)` gives per-clip granularity, a better
 signal, but the screen printing those two numbers needs rewording.
 
+## Duration source
+
+Measured with ffprobe, with a layout free to shortcut when it genuinely knows.
+DDPAI is the only camera of the four that publishes duration in the filename.
+VIOFO's is a menu setting no parser can see, Thinkware's varies per mode, and
+BlackVue's is a fixed minute with rear files trimmed to about 59 seconds.
+Wall-clock span equals playback length except for timelapse modes, where the
+layout supplies the ratio it knows from the mode.
+
 ## Open items
 
-- VIOFO and Thinkware findings, and whether either breaks the contract.
 - Whether `tracking.parse_gpx_track` also serves the per-trip `.gpx` sidecars
   we write as output. The output side is our own format and stays unchanged;
   this needs checking rather than assuming.
-- Duration source for cameras that omit it from the filename: constant from
-  the layout, or ffprobe. Decide when VIOFO's convention is known.
+- Which adapters ship in the first pass. BlackVue and VIOFO exercise the
+  contract hardest (single-directory pairing, fuzzy pairing, embedded GPS,
+  multi-channel); Thinkware is documented here because it broke the duration
+  model, but implementing it is optional.
+- Detection ambiguity rules once more than one adapter is registered — VIOFO
+  and DDPAI both live under `DCIM/`, so detection must inspect subdirectory
+  names rather than the presence of `DCIM` alone.
