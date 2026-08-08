@@ -46,7 +46,20 @@ class Clip:
 
     @property
     def front(self) -> Path:
-        return self.videos[Channel.FRONT]
+        """The main camera's file, or the only one there is.
+
+        A clip usually has a front video and the answer is obvious. It does
+        not always: a card can carry a rear file whose front partner never
+        finished writing, and a clip that exists only as rear footage is
+        still a clip. Raising here would make one missing file end an
+        import, so the fallback is the first channel this clip does have.
+        """
+        if Channel.FRONT in self.videos:
+            return self.videos[Channel.FRONT]
+        for channel in Channel:
+            if channel in self.videos:
+                return self.videos[channel]
+        raise ValueError("clip %s has no video at all" % self.timestamp)
 
     @property
     def rear(self) -> Path | None:
