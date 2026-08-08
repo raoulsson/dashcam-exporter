@@ -4934,7 +4934,7 @@ def step_transcribe(ctx, world):
                 stream = re.sub(r"([,.!?;:])(?=[A-Za-z])", r"\1 ", stream)
                 if stream:
                     stream += "   "
-                    offset = int((time.monotonic() - started) / .6) % len(stream)
+                    offset = int((time.monotonic() - started) / .3) % len(stream)
                     tail = "  " + (stream + stream)[offset:offset + 40]
             label = trip_labels[path] + ": " + phase
             _write_line("\x1b[?25l" + "  %s %s %s" %
@@ -4944,7 +4944,7 @@ def step_transcribe(ctx, world):
     def pulse(path, progress_ref):
         stop = threading.Event()
         def run():
-            while not stop.wait(.6):
+            while not stop.wait(.3):
                 show(path, progress_ref[0], "Transcribe")
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
