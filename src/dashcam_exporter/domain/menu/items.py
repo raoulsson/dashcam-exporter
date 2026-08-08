@@ -434,7 +434,14 @@ class BuildWebsite(MenuItem):
         stop = guards.nothing_to_build_from(world)
         if stop:
             return blocked(stop)
-        return self._builder.evaluate(world)
+        verdict = self._builder.evaluate(world)
+        # Build Website is an explicit command, not an idempotent
+        # postcondition.  A plugin may reasonably report SATISFIED when its
+        # manifest already matches the workspace, but pressing menu 5 still
+        # means “rebuild it now” (for example after changing a template or
+        # curation on the plugin side).  Preserve refusals, while making a
+        # satisfied builder selectable so execute() is reached every time.
+        return go() if verdict.ruling is Ruling.SATISFIED else verdict
 
     def _perform(self, world):
         return self._builder.execute(world)

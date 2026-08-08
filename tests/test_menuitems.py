@@ -902,6 +902,20 @@ class TestBuildWebsite(unittest.TestCase):
         self.assertIn("not reachable",
                       evaluate(item, imported(renders=(MP4,))).reason)
 
+    def test_a_satisfied_builder_is_still_rebuilt_when_menu_five_is_pressed(self):
+        """Build Website is a command: unchanged inputs must not turn it into
+        a disabled menu row.  A plugin may use SATISFIED to report that its
+        current manifest matches, but the operator explicitly asked for a
+        fresh build and the builder must run again."""
+        work = FakeWork()
+        item = menu_for(UPLOADER, work)[BUILD]
+        item._builder.evaluate = lambda world: M.satisfied("already current")
+        world = imported(renders=(MP4,))
+
+        self.assertIs(ruling(item, world), M.Ruling.GO)
+        item.execute(world)
+        self.assertTrue(work.builders[0].ran)
+
 
 # ---------------------------------------------------------------------------
 # 7 — Upload Website
