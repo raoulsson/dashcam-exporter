@@ -192,6 +192,14 @@ class Ui(ABC):
     def warn(self, line: str) -> None:
         """One line the operator should not skim past."""
 
+    def info(self, line: str) -> None:
+        """An informational callback, recorded without requiring a print."""
+        self.say(line)
+
+    def debug(self, line: str) -> None:
+        """A detailed progress callback, normally kept out of the display."""
+        return None
+
     @abstractmethod
     def run(self, cmd, cwd, label: str, env=None, parser=None) -> int:
         """Run a child process with a live progress line. Returns its exit code.

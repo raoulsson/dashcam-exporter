@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import time
 import traceback
+import json
+from pathlib import Path
 
 from dashcam_exporter.domain.menu import menu
 from dashcam_exporter.application.ui.term import C, tilde
@@ -48,6 +50,19 @@ def record(ctx, name, status, started, detail=""):
     """
     result = StepResult(name, status, time.time() - started, detail)
     ctx.results.append(result)
+    try:
+        log_dir = getattr(ctx, "log_dir", None)
+        if not isinstance(log_dir, Path):
+            return result
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with (log_dir / "activity.jsonl").open("a", encoding="utf-8") as log:
+            log.write(json.dumps({"at": time.time(), "source": "exporter",
+                                  "level": "info", "event": "step",
+                                  "name": name, "status": status,
+                                  "seconds": result.seconds,
+                                  "detail": detail}) + "\n")
+    except OSError:
+        pass
     return result
 
 

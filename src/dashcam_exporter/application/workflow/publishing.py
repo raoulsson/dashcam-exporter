@@ -8,6 +8,7 @@ interactive pipeline.
 from __future__ import annotations
 
 import time
+import json
 from abc import ABC, abstractmethod
 
 from dashcam_exporter.domain.menu import guards, menu
@@ -49,10 +50,19 @@ class Console(uploader.Ui):
         self._ctx = ctx
 
     def say(self, line):
+        self._log_event("say", line)
         print(C.dim(line))
 
     def warn(self, line):
+        self._log_event("warn", line)
         print(C.yellow(line))
+
+    def info(self, line):
+        self._log_event("info", line)
+        print(C.dim(line))
+
+    def debug(self, line):
+        self._log_event("debug", line)
 
     def run(self, cmd, cwd, label, env=None, parser=None):
         # quiet_finish: the plugin says what its act achieved through the
@@ -68,8 +78,11 @@ class Console(uploader.Ui):
     def _log_plugin_output(self, label, cmd, lines, rc):
         """Keep the complete child stream, including lines used by parsers."""
         try:
-            self._ctx.log_dir.mkdir(parents=True, exist_ok=True)
-            path = self._ctx.log_dir / "plugin-output.log"
+            log_dir = getattr(self._ctx, "log_dir", None)
+            if not hasattr(log_dir, "mkdir"):
+                return
+            log_dir.mkdir(parents=True, exist_ok=True)
+            path = log_dir / "plugin-output.log"
             with path.open("a", encoding="utf-8") as log:
                 log.write("\n[%s] %s (exit %d)\n" %
                           (time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -78,6 +91,18 @@ class Console(uploader.Ui):
                     log.write(line.rstrip("\n") + "\n")
         except OSError:
             # Logging must never turn a successful deploy into a failed one.
+            pass
+
+    def _log_event(self, level, message):
+        try:
+            log_dir = getattr(self._ctx, "log_dir", None)
+            if not hasattr(log_dir, "mkdir"):
+                return
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with (log_dir / "activity.jsonl").open("a", encoding="utf-8") as log:
+                log.write(json.dumps({"at": time.time(), "source": "plugin",
+                                      "level": level, "message": str(message)}) + "\n")
+        except OSError:
             pass
 
 
