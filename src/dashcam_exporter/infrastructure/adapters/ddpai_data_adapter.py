@@ -6,10 +6,7 @@ from pathlib import Path
 from dashcam_exporter.domain import Clip
 from dashcam_exporter.infrastructure.repository import DdpaiClipRepository
 
-from .exporter_adapter import ExporterAdapter
-
-
-class DdpaiDataAdapter(ExporterAdapter):
+class DdpaiDataAdapter:
     """DDPAI source adapter; no video rendering belongs here."""
 
     def __init__(self, rear_pair_tolerance_seconds: int = 2,

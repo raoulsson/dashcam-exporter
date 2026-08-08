@@ -1,21 +1,31 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from dashcam_exporter.domain import Clip
+from .card_layout import CardLayout
 
 
 class ExporterAdapter(ABC):
-    """Camera-data adapter contract; renderers remain outside this interface."""
+    """Support for one camera's way of filing footage.
+
+    An adapter is keyed to a layout, not to a company. BlackVue changed GPS
+    regimes between model generations and VIOFO's A119 V3 uses a different
+    filename grammar from the rest of the range, so two adapters for one
+    brand is a normal outcome rather than a design failure.
+    """
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Stable adapter name used in logs and configuration."""
+        """Stable identifier used in logs, configuration and the override."""
 
     @abstractmethod
-    def discover_clips(self, front_directory: Path, rear_directory: Path | None) -> list[Clip]:
-        """Discover and pair source video clips."""
+    def detect(self, card_root: Path) -> bool:
+        """Whether this adapter recognises the tree at card_root.
+
+        Inspect structure rather than a single marker: DDPAI and VIOFO both
+        live under DCIM, so the presence of DCIM decides nothing.
+        """
 
     @abstractmethod
-    def prepare_gps(self, tar_directory: Path, cache_directory: Path) -> tuple[int, int]:
-        """Extract camera-specific GPS archives into the generic cache."""
+    def layout_for(self, card_root: Path) -> CardLayout:
+        """The layout answering questions about this particular card."""
