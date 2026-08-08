@@ -169,7 +169,7 @@ def print_menu(ctx, menu_items, position, world):
     # The destructive entries are already red, and every one of them asks for
     # a typed word before it does anything. A line naming them under every
     # draw was a third telling of the same fact.
-    print("\tp = progress   h = help   i = info   q = quit")
+    print(C.dim("\tp = progress   h = help   i = info   q = quit"))
 
 
 def _verdicts(menu_items, world):
