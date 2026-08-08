@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-ROWS=60
+ROWS=40
 COLS=140
 
 # Ask the terminal to size itself to the fixed geometry. Only when stdout is a
