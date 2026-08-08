@@ -4928,11 +4928,18 @@ def step_transcribe(ctx, world):
 
     def show(path, percent, phase="Transcribe"):
         if C.enabled:
-            tail = "  " + display_text[0][:80] if phase == "Transcribe" and display_text[0] else ""
             label = trip_labels[path] + ": " + phase
-            _write_line("\x1b[2K\x1b[?25l" + "  %s %s %s" %
-                        (C.gold(label), bar.bracket(percent / 100.0),
-                         C.gold("%3.0f%%%s" % (percent, tail))))
+            prefix = "  %s %s %3.0f%%" % (label, bar.bracket(percent / 100.0), percent)
+            tail = ""
+            if phase == "Transcribe" and display_text[0]:
+                room = max(0, term_width() - _visible_len(prefix) - 2)
+                words=[]; used=0
+                for word in display_text[0].split():
+                    extra=len(word)+(1 if words else 0)
+                    if used+extra > room: break
+                    words.append(word); used+=extra
+                tail = "  " + " ".join(words) if words else ""
+            _write_line("\x1b[2K\x1b[?25l" + C.gold(prefix) + C.gold(tail))
 
     def pulse(path, progress_ref):
         stop = threading.Event()
