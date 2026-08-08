@@ -1530,6 +1530,13 @@ class TheCleanScreenSaysWhatActuallyGoes(unittest.TestCase):
                       " ".join(P._what_goes_lines(P.guards.Gates(world))))
 
 
+class TheBannerPalette(unittest.TestCase):
+    def test_credit_line_preserves_art_padding(self):
+        with mock.patch.object(P.C, "enabled", False):
+            line = P._big_banner()[-1]
+        self.assertIn("Schmidiger                     |_|   --- implemented", line)
+
+
 class TheInfoScreen(unittest.TestCase):
     """`i` prints the facts a bug report has to quote."""
 

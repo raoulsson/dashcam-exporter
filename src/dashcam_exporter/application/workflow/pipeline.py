@@ -7555,7 +7555,7 @@ def _banner_lines(ctx):
     it says what the program is called and gets out of the way.
     """
     if term_width() < BANNER_WIDTH + 2:
-        return (C.bold("  Dashcam-Exporter") + C.dim("   " + _chain(ctx)),)
+        return (C.cyan("  Dashcam-Exporter") + C.dim("   " + _chain(ctx)),)
     return _big_banner()
 
 
@@ -7569,7 +7569,8 @@ def _big_banner():
     one of ours as well made two. The blank below comes from the status block,
     which has always printed its own.
     """
-    return tuple(map(C.bold, _with_version(BANNER.strip("\n").splitlines())))
+    return tuple(_paint_banner_line(line)
+                 for line in _with_version(BANNER.strip("\n").splitlines()))
 
 
 DESIGNED_BY = "--- designed by Raoul Marc Schmidiger"
@@ -7593,6 +7594,25 @@ def _with_version(lines):
     tagged[at] = "%s v%s" % (tagged[at].rstrip(), version())
     tagged[-1] = _credited(tagged[-1])
     return tagged
+
+
+def _paint_banner_line(line):
+    """Apply the banner palette without disturbing its fixed-width art."""
+    if " v" in line and line.rstrip().endswith(version()):
+        art, suffix = line.rsplit(" v", 1)
+        return C.cyan(art) + C.magenta(" v" + suffix)
+    if DESIGNED_BY in line and IMPLEMENTED_BY in line:
+        d, i = line.index(DESIGNED_BY), line.index(IMPLEMENTED_BY)
+        sep = line.index("|_|", d)
+        d_label = "--- designed by "
+        i_label = "--- implemented by "
+        raw_name = line[d + len(d_label):sep]
+        d_name = raw_name.rstrip()
+        gap = raw_name[len(d_name):] + line[sep:i]
+        i_name = line[i + len(i_label):].strip()
+        return (C.cyan(line[:d]) + C.green(d_label) + C.gold(d_name)
+                + C.cyan(gap) + C.green(i_label) + C.gold(i_name))
+    return C.cyan(line)
 
 
 def _edition_line(ctx):
