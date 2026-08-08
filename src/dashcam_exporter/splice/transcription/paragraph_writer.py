@@ -67,7 +67,9 @@ class ParagraphWriter:
         """Write the current paragraph and immediately flush the destination."""
         if not self._fragments:
             return
-        paragraph = self._dedupe_repetition(" ".join(self._fragments))
+        # Keep the raw repetition for now while the transcript is compared
+        # against the recording; re-enable _dedupe_repetition once validated.
+        paragraph = " ".join(self._fragments)
         if self._speaker is not None:
             paragraph = f"{self._speaker}: {paragraph}"
         self._destination.write(paragraph + "\n\n")
