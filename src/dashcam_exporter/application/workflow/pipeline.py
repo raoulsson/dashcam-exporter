@@ -1490,7 +1490,7 @@ def pick_import(ctx, purpose):
         ctx.selected_import = cands[0]
         return cands[0]
     if ctx.selected_import in cands:
-        keep = prompt.confirm("  Use %s for %s?" % (tilde(ctx.selected_import), purpose), True)
+        keep = ui_handler.active().confirm("  Use %s for %s?" % (tilde(ctx.selected_import), purpose), True)
         if keep:
             return ctx.selected_import
     print("  Import folders:")
@@ -1498,7 +1498,7 @@ def pick_import(ctx, purpose):
         n = clip_count(p)
         print("    %d) %-40s %s" % (i, tilde(p),
                                    C.dim("%s clips" % (n if n is not None else "?"))))
-    s = prompt.ask("  Which one? [1] ", "1")
+    s = ui_handler.active().ask("  Which one? [1] ", "1")
     try:
         ctx.selected_import = cands[int(s) - 1]
     except (ValueError, IndexError):
@@ -2677,7 +2677,7 @@ def step_import(ctx):
             print(C.yellow("    %s  %s clips, %s"
                            % (tilde(src), clip_count(src), human_bytes(tree_size(src / "DCIM")))))
         _print_all(_leftover_lines())
-        if not prompt.confirm("  Import anyway, on top of what is there?", False):
+        if not ui_handler.active().confirm("  Import anyway, on top of what is there?", False):
             return record(ctx, NAME[IMPORT], ABORTED, started,
                           "Aborted by user pre-run.")
 
@@ -2704,7 +2704,7 @@ def step_import(ctx):
         print(C.green("  Nothing new at the source — it is already all imported."))
         return record(ctx, NAME[IMPORT], SATISFIED, started, "no new clips")
     _print_all(_delta_lines(delta))
-    if not prompt.confirm("  Run delta import", True):
+    if not ui_handler.active().confirm("  Run delta import", True):
         return record(ctx, NAME[IMPORT], ABORTED, started,
                       "Aborted by user pre-run.")
 
@@ -2734,7 +2734,7 @@ def step_import(ctx):
     else:
         print(C.dim("  The source is NOT erased by default; import-sd-card.sh only deletes"))
         print(C.dim("  its files after the copy verifies file-for-file."))
-        erase = prompt.confirm("  Erase the source's files after a verified copy?", False)
+        erase = ui_handler.active().confirm("  Erase the source's files after a verified copy?", False)
 
     env = {"DASHCAM_IMPORT_ROOT": str(ctx.import_root)}
     listing = _write_import_list(wanted)
@@ -4095,7 +4095,7 @@ class Picked:
 def _ask_trip_indices(by_index):
     """The indices to drop, or None when the answer was not one."""
     _print_all(_never_renders(by_index))
-    sel = prompt.ask("  Enter Trip indices to exclude: ")
+    sel = ui_handler.active().ask("  Enter Trip indices to exclude: ")
     if not sel.strip():
         return None
     return _parse_indices(sel, by_index)
@@ -4722,7 +4722,7 @@ def step_render(ctx):
             print("  Not yet rendered: %s"
                   % C.yellow(", ".join(str(i) for i in todo_idx)))
 
-    idx = prompt.ask("  Trip indices to render (space separated, blank = %s): "
+    idx = ui_handler.active().ask("  Trip indices to render (space separated, blank = %s): "
               % ("the %d not yet rendered" % len(todo_idx) if done_idx and todo_idx
                  else "nothing to do" if done_idx else "all renderable"))
     if not idx.strip() and done_idx:
@@ -4759,7 +4759,7 @@ def step_render(ctx):
     if vid_secs:
         print(C.dim("        estimates for %s of video, at the current crf" % human_secs(vid_secs)))
     print(C.dim("        or type any height"))
-    height = prompt.ask("  Height [%d]: " % ctx.output_height, str(ctx.output_height))
+    height = ui_handler.active().ask("  Height [%d]: " % ctx.output_height, str(ctx.output_height))
     try:
         height = int(height)
     except ValueError:
@@ -4802,7 +4802,7 @@ def step_render(ctx):
         print()
         print("  Replacing %s: %s files (%s). Only video goes."
               % (what, C.yellow("%d" % len(doomed)), C.yellow(human_bytes(size))))
-        if not prompt.confirm("  Delete and re-render?", True):
+        if not ui_handler.active().confirm("  Delete and re-render?", True):
             return record(ctx, NAME[RENDER], ABORTED, started,
                           "Aborted by user pre-run.")
         for f in doomed:
@@ -4888,7 +4888,7 @@ def _ask_transcription_renders(renders):
         status = C.dim("  [already transcribed]") if complete else ""
         print("  %2d) %-58s%s" % (index, tilde(path), status))
     print()
-    answer = prompt.ask("  Trip indices to transcribe (space separated, blank = all): ")
+    answer = ui_handler.active().ask("  Trip indices to transcribe (space separated, blank = all): ")
     if not answer.strip():
         return [path for _index, path, _complete in rows]
     selected = []
@@ -4911,7 +4911,7 @@ def step_transcribe(ctx, world):
     if not renders:
         return record(ctx, NAME[TRANSCRIBE], ABORTED, started, "cancelled")
     print()
-    diarize = prompt.confirm("  Use speaker diarization?", default=False)
+    diarize = ui_handler.active().confirm("  Use speaker diarization?", default=False)
     if diarize:
         hf_token = ctx.cfg_opt("hf_token") or os.environ.get("HF_TOKEN")
         if not hf_token:
@@ -7416,7 +7416,7 @@ class Work:
 
     def ask_word(self, word):
         print()
-        return prompt.ask("  Type %s to confirm: " % word)
+        return ui_handler.active().ask("  Type %s to confirm: " % word)
 
     def recapture(self, scope):
         """The refresh point. Called after the word and before the act.
@@ -7475,7 +7475,7 @@ class Runner:
         self.ctx.ui.menu(self.ctx, self.menu, self.position, world)
         print()
         _HINTED[0] = True                      # no hint on the menu itself
-        return self._dispatch(prompt.read_key("Select> "))
+        return self._dispatch(ui_handler.active().read_key("Select> "))
 
     def _look(self):
         """The capture behind every menu draw, and it is not always cheap.
@@ -7599,7 +7599,7 @@ class Runner:
         if not (item.OVERRIDE_WORD and getattr(verdict, "evidence", ())):
             return
         print()
-        if prompt.ask("  Type %s to drop anyway: " % item.OVERRIDE_WORD) \
+        if ui_handler.active().ask("  Type %s to drop anyway: " % item.OVERRIDE_WORD) \
                 != item.OVERRIDE_WORD:
             print(C.dim("  Aborted by user pre-run."))
             return

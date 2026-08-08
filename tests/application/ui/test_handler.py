@@ -85,6 +85,25 @@ class StreamUiHandlerDrivesTheExistingPainters(unittest.TestCase):
         self.assertEqual(out.getvalue(), "one\ntwo\n")
 
 
+class StreamUiHandlerInputDelegatesToPrompt(unittest.TestCase):
+    """Input routes through the seam but the raw reads still live in prompt --
+    which is the module the tests patch, so routing did not move their point."""
+
+    def test_read_key_ask_confirm_forward_to_prompt(self):
+        from unittest import mock
+        from dashcam_exporter.application.ui import prompt
+        with mock.patch.object(prompt, "read_key", return_value="7") as rk, \
+                mock.patch.object(prompt, "ask", return_value="line") as ak, \
+                mock.patch.object(prompt, "confirm", return_value=True) as cf:
+            h = H.StreamUiHandler()
+            self.assertEqual(h.read_key("Select> "), "7")
+            self.assertEqual(h.ask("Q?", "def", False), "line")
+            self.assertTrue(h.confirm("Y?", True))
+        rk.assert_called_once_with("Select> ")
+        ak.assert_called_once_with("Q?", "def", False)
+        cf.assert_called_once_with("Y?", True)
+
+
 class TheActiveHandler(unittest.TestCase):
     def tearDown(self):
         H.set_active(None)   # never leak a backend into another test

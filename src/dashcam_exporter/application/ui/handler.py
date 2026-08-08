@@ -25,6 +25,7 @@ from abc import ABC, abstractmethod
 
 from dashcam_exporter.application.ui.term import C
 from dashcam_exporter.application.ui import screens
+from dashcam_exporter.application.ui import prompt as prompt_mod
 from dashcam_exporter.application.ui.progress import Live
 
 
@@ -60,6 +61,22 @@ class UiHandler(ABC):
     def done(self, what):
         """The one line a step leaves behind when it worked."""
 
+    # -- input. The frame reads keys in-frame; the stream backend keeps the
+    #    terminal's raw/cooked reads. Tests patch the prompt module underneath,
+    #    so routing through here does not move their seam. --
+
+    @abstractmethod
+    def read_key(self, prompt):
+        """One keypress at the menu (a digit, p/h/i/q)."""
+
+    @abstractmethod
+    def ask(self, prompt, default="", quits=True):
+        """A line of input; q/quit raises Aborted when `quits`."""
+
+    @abstractmethod
+    def confirm(self, prompt, default=False):
+        """A single-key y/n."""
+
 
 class StreamUiHandler(UiHandler):
     """Writes to stdout exactly as the tool always has, by driving the existing
@@ -84,6 +101,15 @@ class StreamUiHandler(UiHandler):
 
     def done(self, what):
         print(C.green("  100%% - %s." % what))
+
+    def read_key(self, prompt):
+        return prompt_mod.read_key(prompt)
+
+    def ask(self, prompt, default="", quits=True):
+        return prompt_mod.ask(prompt, default, quits)
+
+    def confirm(self, prompt, default=False):
+        return prompt_mod.confirm(prompt, default)
 
 
 _active = None
