@@ -2,87 +2,106 @@ import logging
 import os
 import re
 import tarfile
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from dashcam_exporter.domain import Track, TrackPoint
 
 KNOTS_TO_KMH = 1.852
 
-_ARCHIVE_NAME = re.compile(r"^(\d{14})_(\d+)\.git$", re.IGNORECASE)
+# The optional _T is real. A card carried 73 archives named 19700101...._T.git
+# -- the camera booted with no clock -- and not one of them is a readable tar.
+_ARCHIVE_NAME = re.compile(r"^(\d{14})_(\d+)(_T)?\.git$", re.IGNORECASE)
+_MEMBER_STAMP = re.compile(r"^(\d{14})_\d+\.gpx$", re.IGNORECASE)
+
+# A stamp before this is the camera's uninitialised clock, not a recording.
+_CLOCK_EPOCH = datetime(2000, 1, 1)
 
 
 class DdpaiTrackSource:
     """DDPAI's GPS: NMEA inside tar archives the camera calls '.git'.
 
-    Archives are named with their OWN start and a span, not with a clip's
-    stamp, so they are selected by time overlap. Matching them by stamp once
-    took two files off a card that held thirty for that day and produced a
-    drive with no route at all, from footage whose track was sitting right
-    there.
+    Selection is by member name, not by archive name and not by time. The
+    archive is stamped with its own start and a span, which is why matching
+    archives to clips by stamp once lost a whole drive's route -- but the
+    .gpx MEMBERS inside are named for the clips they belong to, exactly.
+
+    That distinction matters more than it looks: the clip stamp is the
+    camera's local wall clock and the NMEA inside is UTC, eight hours apart
+    on the card this was calibrated against. Anything that compares the two
+    finds nothing, silently. Matching names never asks the question.
     """
 
     def __init__(self, tar_directory: Path,
                  logger: logging.Logger | None = None) -> None:
         self._tar_directory = tar_directory
         self._logger = logger or logging.getLogger(__name__)
+        self._index: dict[str, tuple[Path, str]] | None = None
 
     def is_track_artifact(self, path: Path) -> bool:
         return path.suffix.lower() in (".gpx", ".git")
 
-    def track_covering(self, started_at: datetime,
-                       ended_at: datetime) -> Track:
-        points: list[TrackPoint] = []
-        for archive in self._archives_overlapping(started_at, ended_at):
-            points.extend(self._points_in(archive))
-        inside = [p for p in points if started_at <= p.at_utc <= ended_at]
-        return Track(points=tuple(sorted(inside, key=lambda p: p.at_utc)))
+    def track_for_stamp(self, stamp: str) -> Track:
+        """The fixes recorded during the clip with this canonical stamp."""
+        located = self._member_index().get(stamp)
+        if located is None:
+            return Track(points=())
+        archive, member = located
+        points = self._points_in(archive, member)
+        return Track(points=tuple(sorted(points, key=lambda p: p.at_utc)))
 
-    def _archives_overlapping(self, started_at: datetime,
-                              ended_at: datetime) -> list[Path]:
+    def _member_index(self) -> dict[str, tuple[Path, str]]:
+        """Clip stamp to the archive and member holding its fixes.
+
+        Built once: a card holds a hundred archives and several hundred
+        clips, and re-opening every archive per clip would read the same
+        indexes hundreds of times over.
+        """
+        if self._index is not None:
+            return self._index
+        index: dict[str, tuple[Path, str]] = {}
+        for archive in self._archives():
+            try:
+                with tarfile.open(archive, "r") as handle:
+                    for member in handle.getnames():
+                        match = _MEMBER_STAMP.match(os.path.basename(member))
+                        if match:
+                            index.setdefault(match.group(1), (archive, member))
+            except (tarfile.TarError, OSError) as error:
+                self._logger.warning("Cannot read DDPAI GPS archive %s: %s",
+                                     archive, error)
+        self._index = index
+        return index
+
+    def _archives(self) -> list[Path]:
         # rglob, not iterdir: the camera keeps recent archives directly under
         # tar and moves older ones into tar/tmp.
-        found = []
         if not self._tar_directory.is_dir():
-            return found
-        for archive in sorted(self._tar_directory.rglob("*.git")):
-            if archive.name.startswith("._"):
-                continue
-            span = self._span_of(archive)
-            if span is None:
-                found.append(archive)      # unreadable name: read it anyway
-                continue
-            archive_start, archive_end = span
-            if archive_start <= ended_at and archive_end >= started_at:
-                found.append(archive)
-        return found
+            return []
+        return [archive for archive in sorted(self._tar_directory.rglob("*.git"))
+                if not archive.name.startswith("._")
+                and not self._is_uninitialised_clock(archive)]
 
-    def _span_of(self, archive: Path) -> tuple[datetime, datetime] | None:
+    def _is_uninitialised_clock(self, archive: Path) -> bool:
         match = _ARCHIVE_NAME.match(archive.name)
         if not match:
-            return None
+            return False
         try:
-            start = datetime.strptime(match.group(1), "%Y%m%d%H%M%S")
+            return datetime.strptime(match.group(1), "%Y%m%d%H%M%S") < _CLOCK_EPOCH
         except ValueError:
-            return None
-        return start, start + timedelta(seconds=int(match.group(2)))
+            return False
 
-    def _points_in(self, archive: Path) -> list[TrackPoint]:
-        points: list[TrackPoint] = []
+    def _points_in(self, archive: Path, member: str) -> list[TrackPoint]:
         try:
             with tarfile.open(archive, "r") as handle:
-                for member in handle.getmembers():
-                    name = os.path.basename(member.name)
-                    if not name.lower().endswith(".gpx") or name.startswith("._"):
-                        continue
-                    stream = handle.extractfile(member)
-                    if stream is None:
-                        continue
-                    points.extend(self._parse(stream.read()))
+                stream = handle.extractfile(member)
+                if stream is None:
+                    return []
+                return self._parse(stream.read())
         except (tarfile.TarError, OSError) as error:
             self._logger.warning("Cannot read DDPAI GPS archive %s: %s",
                                  archive, error)
-        return points
+            return []
 
     def _parse(self, payload: bytes) -> list[TrackPoint]:
         points = []

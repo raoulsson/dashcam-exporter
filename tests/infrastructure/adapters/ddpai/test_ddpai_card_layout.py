@@ -53,6 +53,25 @@ class DdpaiCardLayoutTest(unittest.TestCase):
         self.assertEqual([c.timestamp for c in clips],
                          ["20260806170529", "20260806170629", "20260806170729"])
 
+    def test_the_s_and_q_prefixed_pair_is_a_clip_like_any_other(self):
+        # Four files on a real card used this grammar and nothing in the tool
+        # could see them. What S and Q mean is still unknown, so the mode is
+        # OTHER with the letter kept rather than a guess called EVENT.
+        with tempfile.TemporaryDirectory() as temporary:
+            card = build_card(Path(temporary))
+            (card / "DCIM/200video/front/S_20260807142001_0870_0030.mp4").touch()
+            (card / "DCIM/200video/rear/Q_20260807142001_0870_0030.mp4").touch()
+
+            clips = DdpaiCardLayout(card).clips()
+
+        self.assertEqual(len(clips), 1)
+        self.assertEqual(clips[0].timestamp, "20260807142001")
+        self.assertEqual(clips[0].duration, 30)
+        self.assertEqual(clips[0].mode, ClipMode.OTHER)
+        self.assertEqual(clips[0].source_mode, "S")
+        self.assertEqual(clips[0].videos[Channel.REAR].name,
+                         "Q_20260807142001_0870_0030.mp4")
+
     def test_stamp_of_reads_the_canonical_form_from_either_camera(self):
         layout = DdpaiCardLayout(Path("/nowhere"))
 

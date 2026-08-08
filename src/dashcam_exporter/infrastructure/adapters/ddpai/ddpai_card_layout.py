@@ -11,7 +11,7 @@ from .ddpai_track_source import DdpaiTrackSource
 VIDEO_ROOT = "DCIM/200video"
 GPS_ROOT = "DCIM/203gps"
 
-_STAMP = re.compile(r"^(\d{14})_\d+(_A)?\.mp4$", re.IGNORECASE)
+_STAMP = re.compile(r"^[SQ]?_?(\d{14})_\d+(_\d+|_A)?\.mp4$", re.IGNORECASE)
 
 
 class DdpaiCardLayout(CardLayout):
@@ -40,7 +40,7 @@ class DdpaiCardLayout(CardLayout):
         return match.group(1) if match else None
 
     def track_for(self, clip: Clip) -> Track | None:
-        track = self._tracks.track_covering(clip.started_at, clip.ended_at)
+        track = self._tracks.track_for_stamp(clip.timestamp)
         return None if track.is_empty else track
 
     def import_roots(self) -> tuple[Path, ...]:
