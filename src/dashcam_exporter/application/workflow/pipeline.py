@@ -4924,10 +4924,10 @@ def step_transcribe(ctx, world):
 
     def show(path, percent):
         if C.enabled:
-            tail = " — " + re.sub(r"\s+", " ", latest_text[0]).strip()[:72] if latest_text[0] else ""
+            tail = re.sub(r"\s+", " ", latest_text[0]).strip()[:72] if latest_text[0] else "transcribing"
             _write_line("  %s %s %s" %
                         (C.gold(bar.label), bar.bracket(percent / 100.0),
-                         C.gold("%3.0f%%  %s%s" % (percent, path.name, tail))))
+                         C.gold("%3.0f%%  %-72s  %s" % (percent, tail, path.name))))
 
     try:
         for path in renders:
