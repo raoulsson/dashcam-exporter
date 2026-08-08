@@ -20,8 +20,8 @@
 
 set -euo pipefail
 
-ROWS=30
-COLS=100
+ROWS=60
+COLS=140
 
 # Ask the terminal to size itself to the fixed geometry. Only when stdout is a
 # real terminal, so a piped run does not get the escape as garbage.
