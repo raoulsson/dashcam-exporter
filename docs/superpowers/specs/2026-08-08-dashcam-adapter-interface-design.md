@@ -190,14 +190,33 @@ archives):
 203gps/tar      20260806170529_0540.git        own start + span, tar mislabeled .git
 ```
 
-Two facts only real bytes gave us:
+Facts only real bytes gave us. The first two were established by listing
+directories, and both were wrong in ways only parsing revealed — recorded here
+with their corrections rather than quietly replaced.
 
-- 235 front against 234 rear. One clip has no partner. Asymmetric pairing is
-  the normal case, not an edge case.
-- The comment at pipeline.py:2492 cites `20260712191931_0120_T.git` with a
-  trailing `_T`. No file on this card carries it. The comment teaches a
-  grammar the camera no longer writes; recognition is by suffix so nothing is
-  broken, but the example should be corrected.
+- 235 front files against 234 rear. One clip has no partner: asymmetric
+  pairing is the normal case, not an edge case. **That much holds, but 233 of
+  those files use the grammar above.** The remaining four are a second
+  grammar, `S_20260807142001_0870_0030.mp4` paired with
+  `Q_20260807142001_0870_0030.mp4`, which nothing in this tool could see. The
+  last field is the duration — ffprobe measures 29.97 s against a declared
+  `0030` — and the `0870` is unexplained. What `S` and `Q` mean is unknown, so
+  the adapter classifies them `ClipMode.OTHER` carrying the letter verbatim.
+- **The `_T` archive suffix is current, not historical.** An earlier draft of
+  this spec claimed no file on the card carries it, from a listing of
+  `203gps/tar` alone. `203gps/tar/tmp` holds 73 of them. They are not
+  recordings and not damaged: identical 2,560,000-byte size, one shared mtime
+  at the first drive after a card format, and stamps stepping by 100 seconds
+  from `19700101004510`. They are placeholders the camera pre-allocates before
+  GPS has given it a clock — the same strategy as Thinkware's `.TWSYS/PRE_*.TMP`.
+  The adapter skips any archive stamped before 2000 without opening it.
+- **Clip stamps are camera-local; the NMEA inside is UTC.** Eight hours apart
+  on this card. Anything that compares the two finds nothing and reports a
+  drive with no route. The `.gpx` members inside each archive are named for
+  their clips exactly, so the adapter matches by name and never asks what time
+  zone anything is in. The pipeline.py:2492 warning that archives cannot be
+  matched to clips by stamp is true of the archive filename and was read as
+  true of its contents, which it never was.
 
 ### BlackVue — from manuals and open-source parsers, not from a card
 
