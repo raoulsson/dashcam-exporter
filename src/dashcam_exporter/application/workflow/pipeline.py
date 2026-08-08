@@ -4922,20 +4922,13 @@ def step_transcribe(ctx, world):
         bar.open_once()
 
     latest_text = [""]
-    transcript_head = [""]
+    text_queue = collections.deque()
+    display_text = [""]
     trip_labels = {path: "Trip %d" % number for number, path in enumerate(renders, 1)}
 
     def show(path, percent, phase="Transcribe"):
         if C.enabled:
-            tail = ""
-            if phase == "Transcribe":
-                stream = re.sub(r"\s+", " ", transcript_head[0]).strip() or latest_text[0]
-                stream = re.sub(r"\s+([,.!?;:])", r"\1", stream)
-                stream = re.sub(r"([,.!?;:])(?=[A-Za-z])", r"\1 ", stream)
-                if stream:
-                    stream += "   "
-                    offset = int((time.monotonic() - started) / .1) % len(stream)
-                    tail = "  " + (stream + stream)[offset:offset + 80]
+            tail = "  " + display_text[0][:80] if phase == "Transcribe" and display_text[0] else ""
             label = trip_labels[path] + ": " + phase
             _write_line("\x1b[2K\x1b[?25l" + "  %s %s %s" %
                         (C.gold(label), bar.bracket(percent / 100.0),
@@ -4944,7 +4937,9 @@ def step_transcribe(ctx, world):
     def pulse(path, progress_ref):
         stop = threading.Event()
         def run():
-            while not stop.wait(.1):
+            while not stop.wait(.5):
+                if text_queue:
+                    display_text[0] = text_queue.popleft()
                 show(path, progress_ref[0], "Transcribe")
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
@@ -4953,7 +4948,7 @@ def step_transcribe(ctx, world):
     try:
         for path in renders:
             latest_text[0] = ""
-            transcript_head[0] = ""
+            text_queue.clear(); display_text[0] = ""
             text_path = path.with_suffix(".transcript.txt")
             timeline_path = path.with_suffix(".transcript.timeline.json")
             with path.open("rb") as source:
@@ -4976,7 +4971,7 @@ def step_transcribe(ctx, world):
                             show(path, progress_ref[0])
                         def on_segment(segment):
                             latest_text[0] = segment.text
-                            transcript_head[0] += " " + segment.text
+                            text_queue.append(re.sub(r"\s+", " ", segment.text).strip())
                             show(path, 35 + min(40.0, segment.end_seconds) * .40)
                         transcription = transcriber.transcribeMp3(
                             enhanced,
@@ -5003,7 +4998,7 @@ def step_transcribe(ctx, world):
                             show(path, progress_ref[0])
                         def on_segment(segment):
                             latest_text[0] = segment.text
-                            transcript_head[0] += " " + segment.text
+                            text_queue.append(re.sub(r"\s+", " ", segment.text).strip())
                             writer.write_segment(segment)
                         transcription = transcriber.transcribeMp3(
                             enhanced,
