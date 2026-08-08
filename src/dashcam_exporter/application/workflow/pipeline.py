@@ -3919,10 +3919,10 @@ def step_preview(ctx):
     # target; whatever publishes re-indexes as its own first act, so publishing
     # never carries a stale manifest anyway. One step, one job.
 
-    done_line("%s stills for %s trips, contact sheet at %s"
-              % (C.yellow("%d" % len(stills)), C.yellow("%d" % len(trips)),
-                 tilde(index)))
-    print(C.green("  100%% - %s clip stills to walk the boundaries by, under %s."
+    done_line("%s preview frames for %s trips, contact sheet at %s"
+              % (C.yellow("%d" % (len(stills) + len(mid_stills))),
+                 C.yellow("%d" % len(trips)), tilde(index)))
+    print(C.green("  100%% - %s clip frames to walk the boundaries by, under %s."
                   % (C.yellow("%d" % shots), tilde(review))))
     print(C.dim("  Clip grid: %s" % tilde(review / "index.html")))
     print(C.dim("  %d stills rebuilt, %d no longer wanted"
