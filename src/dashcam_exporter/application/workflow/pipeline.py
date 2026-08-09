@@ -120,12 +120,14 @@ from dashcam_exporter.application.ui.screens import (ORPHAN_LIST, SHOWN, TIME_CO
                      _off_line, _orphan_file, _paint_body, _plugin_info_lines,
                      _print_all, _safe_verdict, _status_tag, _summary_line,
                      _total_line, _unlink_quietly, _verdicts, _where_lines,
-                     _why_lines, _why_not, print_menu, print_summary)
+                     _why_lines, _why_not)
 
 # Reading the operator's key or line. Imported back under the same names,
 # and the module itself too, so a test can patch the prompt where it lives
 # rather than through this file's re-export.
 from dashcam_exporter.application.ui import prompt           # noqa: F401
+from dashcam_exporter.application.ui import handler as ui_handler
+from dashcam_exporter.application.ui.framed import FramedUiHandler
 from dashcam_exporter.application.ui.prompt import (_HINTED, _echoed, _from_key, _help_command,  # noqa: F401
                     _help_key, _hint_lines, _key_or_help, _meaning,
                     _one_char, _one_char_at, _printable, _raw_capable,
@@ -327,6 +329,13 @@ def _loaded_plugin(spec, exporter_dir):
 
 class Ctx:
     """Everything the steps need: resolved paths, config, and session state."""
+
+    @property
+    def ui(self):
+        """The active UI backend. A property, not a stored attribute, so every
+        ctx already in flight sees a backend swapped mid-session rather than a
+        handler frozen at construction time."""
+        return ui_handler.active()
 
     def __init__(self, checkout=None):
         # Defaulted, because a Ctx is built with no arguments in a dozen places
@@ -771,7 +780,7 @@ def run_stream(child, readout):
     t = threading.Thread(target=_reader, args=(stream, q), daemon=True)
     t.start()
 
-    live = Live(enabled=C.enabled)
+    live = ui_handler.active().new_live()
     readout.begin()
     lines = []
     done = False
@@ -794,7 +803,7 @@ def run_stream(child, readout):
                 # No live area (piped output or --no-color): print everything
                 # plainly. Suppressing it here would leave a long render
                 # looking like a hung terminal.
-                print(item)
+                ui_handler.active().log(item)
                 continue
             readout.feed(item.rstrip())
             readout.tick()
@@ -808,7 +817,7 @@ def run_stream(child, readout):
         # A finished step should leave a line behind saying so.
         if rc == 0 and live.enabled and not readout.quiet_finish:
             live.draw([readout.finish_line()])
-            print()          # commit that line; the next erase starts below it
+            ui_handler.active().log()   # commit that line; next erase starts below it
         elif rc == 0 and live.enabled:
             live.close()     # the caller has its own sentence for this
             live.height = 0
@@ -819,12 +828,13 @@ def run_stream(child, readout):
         # The command line is this module's business: which flags it composed
         # and where the script lives. What the operator can act on is the tail
         # below, which is what the child said before it gave up.
-        print(C.red("  %s failed (exit %d). Last lines:" % (readout.label, rc)))
+        ui = ui_handler.active()
+        ui.log(C.red("  %s failed (exit %d). Last lines:" % (readout.label, rc)))
         tail = [l for l in lines if l.strip()][-FAIL_TAIL_LINES:]
         if tail:
-            print(C.dim("  --- last %d lines of output ---" % len(tail)))
+            ui.log(C.dim("  --- last %d lines of output ---" % len(tail)))
             for l in tail:
-                print(C.dim("  " + l))
+                ui.log(C.dim("  " + l))
     return rc, lines
 
 
@@ -923,7 +933,7 @@ def done_line(what):
     finished, in the streamer's words rather than the step's. This is the
     step's own sentence, and there is exactly one of it.
     """
-    print(C.green("  100%% - %s." % what))
+    ui_handler.active().done(what)
 
 
 def _fit(text, room):
@@ -1490,7 +1500,7 @@ def pick_import(ctx, purpose):
         ctx.selected_import = cands[0]
         return cands[0]
     if ctx.selected_import in cands:
-        keep = prompt.confirm("  Use %s for %s?" % (tilde(ctx.selected_import), purpose), True)
+        keep = ui_handler.active().confirm("  Use %s for %s?" % (tilde(ctx.selected_import), purpose), True)
         if keep:
             return ctx.selected_import
     print("  Import folders:")
@@ -1498,7 +1508,7 @@ def pick_import(ctx, purpose):
         n = clip_count(p)
         print("    %d) %-40s %s" % (i, tilde(p),
                                    C.dim("%s clips" % (n if n is not None else "?"))))
-    s = prompt.ask("  Which one? [1] ", "1")
+    s = ui_handler.active().ask("  Which one? [1] ", "1")
     try:
         ctx.selected_import = cands[int(s) - 1]
     except (ValueError, IndexError):
@@ -2675,7 +2685,7 @@ def step_import(ctx):
             print(C.yellow("    %s  %s clips, %s"
                            % (tilde(src), clip_count(src), human_bytes(tree_size(src / "DCIM")))))
         _print_all(_leftover_lines())
-        if not prompt.confirm("  Import anyway, on top of what is there?", False):
+        if not ui_handler.active().confirm("  Import anyway, on top of what is there?", False):
             return record(ctx, NAME[IMPORT], ABORTED, started,
                           "Aborted by user pre-run.")
 
@@ -2702,7 +2712,7 @@ def step_import(ctx):
         print(C.green("  Nothing new at the source — it is already all imported."))
         return record(ctx, NAME[IMPORT], SATISFIED, started, "no new clips")
     _print_all(_delta_lines(delta))
-    if not prompt.confirm("  Run delta import", True):
+    if not ui_handler.active().confirm("  Run delta import", True):
         return record(ctx, NAME[IMPORT], ABORTED, started,
                       "Aborted by user pre-run.")
 
@@ -2732,7 +2742,7 @@ def step_import(ctx):
     else:
         print(C.dim("  The source is NOT erased by default; import-sd-card.sh only deletes"))
         print(C.dim("  its files after the copy verifies file-for-file."))
-        erase = prompt.confirm("  Erase the source's files after a verified copy?", False)
+        erase = ui_handler.active().confirm("  Erase the source's files after a verified copy?", False)
 
     env = {"DASHCAM_IMPORT_ROOT": str(ctx.import_root)}
     listing = _write_import_list(wanted)
@@ -4104,7 +4114,7 @@ class Picked:
 def _ask_trip_indices(by_index):
     """The indices to drop, or None when the answer was not one."""
     _print_all(_never_renders(by_index))
-    sel = prompt.ask("  Enter Trip indices to exclude: ")
+    sel = ui_handler.active().ask("  Enter Trip indices to exclude: ")
     if not sel.strip():
         return None
     return _parse_indices(sel, by_index)
@@ -4731,7 +4741,7 @@ def step_render(ctx):
             print("  Not yet rendered: %s"
                   % C.yellow(", ".join(str(i) for i in todo_idx)))
 
-    idx = prompt.ask("  Trip indices to render (space separated, blank = %s): "
+    idx = ui_handler.active().ask("  Trip indices to render (space separated, blank = %s): "
               % ("the %d not yet rendered" % len(todo_idx) if done_idx and todo_idx
                  else "nothing to do" if done_idx else "all renderable"))
     if not idx.strip() and done_idx:
@@ -4768,7 +4778,7 @@ def step_render(ctx):
     if vid_secs:
         print(C.dim("        estimates for %s of video, at the current crf" % human_secs(vid_secs)))
     print(C.dim("        or type any height"))
-    height = prompt.ask("  Height [%d]: " % ctx.output_height, str(ctx.output_height))
+    height = ui_handler.active().ask("  Height [%d]: " % ctx.output_height, str(ctx.output_height))
     try:
         height = int(height)
     except ValueError:
@@ -4811,7 +4821,7 @@ def step_render(ctx):
         print()
         print("  Replacing %s: %s files (%s). Only video goes."
               % (what, C.yellow("%d" % len(doomed)), C.yellow(human_bytes(size))))
-        if not prompt.confirm("  Delete and re-render?", True):
+        if not ui_handler.active().confirm("  Delete and re-render?", True):
             return record(ctx, NAME[RENDER], ABORTED, started,
                           "Aborted by user pre-run.")
         for f in doomed:
@@ -4897,7 +4907,7 @@ def _ask_transcription_renders(renders):
         status = C.dim("  [already transcribed]") if complete else ""
         print("  %2d) %-58s%s" % (index, tilde(path), status))
     print()
-    answer = prompt.ask("  Trip indices to transcribe (space separated, blank = all): ")
+    answer = ui_handler.active().ask("  Trip indices to transcribe (space separated, blank = all): ")
     if not answer.strip():
         return [path for _index, path, _complete in rows]
     selected = []
@@ -4920,7 +4930,7 @@ def step_transcribe(ctx, world):
     if not renders:
         return record(ctx, NAME[TRANSCRIBE], ABORTED, started, "cancelled")
     print()
-    diarize = prompt.confirm("  Use speaker diarization?", default=False)
+    diarize = ui_handler.active().confirm("  Use speaker diarization?", default=False)
     if diarize:
         hf_token = ctx.cfg_opt("hf_token") or os.environ.get("HF_TOKEN")
         if not hf_token:
@@ -6669,7 +6679,7 @@ def _unlink_card_files(ctx, dcim):
     # screen sat on the typed word for a minute or more with nothing between
     # the word and the closing line.
     failed = ""
-    with waiting("Deleting SIM data"):
+    with ui_handler.active().waiting("Deleting SIM data"):
         gone = freed = 0
         for f in sorted(dcim.rglob("*")):
             if not _real_file(f):
@@ -7134,7 +7144,7 @@ def looked_at(ctx, scope):
     helper so there is one answer to "what does the operator see while it
     happens", rather than four call sites of which three showed nothing.
     """
-    with waiting("Querying the plugin...") as wait:
+    with ui_handler.active().waiting("Querying the plugin...") as wait:
         return capture_world(ctx, scope, progress=wait.update)
 
 
@@ -7390,7 +7400,7 @@ class Work:
 
     def ask_word(self, word):
         print()
-        return prompt.ask("  Type %s to confirm: " % word)
+        return ui_handler.active().ask("  Type %s to confirm: " % word)
 
     def recapture(self, scope):
         """The refresh point. Called after the word and before the act.
@@ -7446,10 +7456,10 @@ class Runner:
 
     def _turn(self):
         world = self._look()
-        print_menu(self.ctx, self.menu, self.position, world)
+        self.ctx.ui.menu(self.ctx, self.menu, self.position, world)
         print()
         _HINTED[0] = True                      # no hint on the menu itself
-        return self._dispatch(prompt.read_key("Select> "))
+        return self._dispatch(ui_handler.active().read_key("Select> "))
 
     def _look(self):
         """The capture behind every menu draw, and it is not always cheap.
@@ -7573,7 +7583,7 @@ class Runner:
         if not (item.OVERRIDE_WORD and getattr(verdict, "evidence", ())):
             return
         print()
-        if prompt.ask("  Type %s to drop anyway: " % item.OVERRIDE_WORD) \
+        if ui_handler.active().ask("  Type %s to drop anyway: " % item.OVERRIDE_WORD) \
                 != item.OVERRIDE_WORD:
             print(C.dim("  Aborted by user pre-run."))
             return
@@ -7885,9 +7895,14 @@ def _run_menu(ctx):
         print()
         print(C.yellow("  Interrupted."))
     finally:
+        # Leave the frame FIRST, so the summary and "Bye!" land on the normal
+        # screen the operator returns to, not the alternate one being torn down.
+        # close() is idempotent; _start's finally covers the paths that never
+        # reached here.
+        ctx.ui.close()
         show_cursor()
         release_single_instance_lock(ctx)
-        print_summary(ctx)
+        ctx.ui.summary(ctx)
         print("Bye!")
 
 
@@ -7971,16 +7986,43 @@ def _uploader_broken(error):
     return 4
 
 
+def _install_ui(ctx):
+    """Pick the UI backend. Framed only when explicitly asked AND on a real
+    terminal, so a fresh clone, a piped run and every test get the stream backend
+    they always had. `ui_style = framed` in config or SET_UI_STYLE in the env."""
+    style = (os.environ.get("SET_UI_STYLE") or ctx.cfg_opt("ui_style")
+             or "stream").strip().lower()
+    if style == "framed" and sys.stdout.isatty():
+        label = tilde(ctx.selected_import) if ctx.selected_import else ""
+        ui_handler.set_active(FramedUiHandler(subtitle=label))
+    else:
+        ui_handler.set_active(None)          # the default StreamUiHandler
+
+
 def _start(ctx):
-    _print_all(_banner_lines(ctx))
-    # Checked before the status screen: there is nothing useful to show if the
-    # numbers behind it would come from the wrong grouping.
-    if not require_ego_motion(ctx):
-        return 3
-    print_configuration(ctx)
-    print_status(ctx)
-    _run_menu(ctx)
-    return _exit_code(ctx)
+    _install_ui(ctx)
+    ctx.ui.title("dashcam-exporter",
+                 tilde(ctx.selected_import) if ctx.selected_import else "")
+    ctx.ui.status("workspace %s" % tilde(ctx.workspace))
+    banner = _banner_lines(ctx)
+    # The framed backend shows the banner as the launch splash (and says so);
+    # the stream backend does not, so it prints the banner into the scroll as
+    # it always has.
+    splashed = ctx.ui.set_splash(banner)
+    ctx.ui.open()
+    try:
+        if not splashed:
+            _print_all(banner)
+        # Checked before the status screen: there is nothing useful to show if
+        # the numbers behind it would come from the wrong grouping.
+        if not require_ego_motion(ctx):
+            return 3
+        print_configuration(ctx)
+        print_status(ctx)
+        _run_menu(ctx)
+        return _exit_code(ctx)
+    finally:
+        ctx.ui.close()
 
 
 if __name__ == "__main__":
