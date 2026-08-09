@@ -8023,6 +8023,7 @@ def _start(ctx):
     _install_ui(ctx)
     ctx.ui.title("dashcam-exporter",
                  tilde(ctx.selected_import) if ctx.selected_import else "")
+    ctx.ui.status("v%s" % version())     # right-aligned on the title row
     banner = _banner_lines(ctx)
     # The framed backend shows the banner as the launch splash (and says so);
     # the stream backend does not, so it prints the banner into the scroll as
