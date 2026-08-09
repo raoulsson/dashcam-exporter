@@ -33,14 +33,16 @@ if [ -z "${DOS_UI_INNER:-}" ]; then
 fi
 
 # --- Spawn a fresh, correctly-sized window and run there --------------------
-# The window runs the tool (exec'd, so it is the tab's only job). A DETACHED
-# watcher then polls the tab and closes the window once it goes idle -- i.e. the
-# tool has quit (q, or ctrl-c, which the frame's raw mode reads as a byte). At
-# that point nothing is running in the tab, so Terminal closes it WITHOUT the
-# "processes are running" confirmation.
+# The window runs the tool under Terminal's login shell (NOT exec'd -- exec'ing
+# it away breaks Terminal's `busy` tracking, and the watcher below then reads the
+# tab as idle while the tool is only waiting for a key, and closes it). A
+# DETACHED watcher polls `busy` and closes the window once the tab goes idle --
+# i.e. the tool has quit (q, or ctrl-c, which the frame's raw mode reads as a
+# byte). Only the idle login shell is left then, which does not trip Terminal's
+# "processes are running" confirmation, so it closes cleanly.
 if [ -z "${DOS_UI_INNER:-}" ] && [ "$(uname)" = "Darwin" ] \
         && command -v osascript >/dev/null 2>&1; then
-    inner="cd '$HERE' && DOS_UI_INNER=1 exec '$HERE/RUN-DASHCAM-EXPORTER-DOS-UI.sh'"
+    inner="cd '$HERE' && DOS_UI_INNER=1 '$HERE/RUN-DASHCAM-EXPORTER-DOS-UI.sh'"
     winid="$(osascript 2>/dev/null <<OSA
 tell application "Terminal"
     activate
