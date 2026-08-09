@@ -252,7 +252,7 @@ def _fixed_size():
 
 
 class FramedUiHandler(UiHandler):
-    def __init__(self, title="dashcam-exporter", subtitle="", splash_seconds=1.0):
+    def __init__(self, title="dashcam-exporter", subtitle="", splash_seconds=2.0):
         self._title = title
         self._subtitle = subtitle
         self._status = ""
@@ -533,12 +533,12 @@ def _grid_lines(menu_items, position, world, cols):
     frame's menu and the scroll's cannot drift. The p/h/i/q hint is a separate
     row the frame paints itself.
 
-    world=None is the from-the-start paint before the first capture: the items
-    are drawn without greying (nothing yet says an item cannot run), and the real
-    verdicts arrive on the first loop turn."""
+    world=None is the from-the-start paint before the first capture: every item
+    is drawn DIMMED (a loading state -- nothing has been asked yet), and the real
+    verdicts light it up on the first loop turn."""
     offered = position.selectable(menu_items)
     if world is None:
-        verdicts = {n: screens.menu.go() for n in menu_items}
+        verdicts = {n: screens.menu.blocked("") for n in menu_items}
     else:
         verdicts = screens._verdicts(menu_items, world)
     grid = screens._Grid(screens._in_the_grid(menu_items), verdicts, offered, cols)

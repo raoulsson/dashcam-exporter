@@ -7707,24 +7707,36 @@ def build_runner(ctx, classes=None):
     for it. `classes` lets a test drive the whole loop with mocks instead of
     the real ten.
     """
+    menu_items, position = _wire_menu(ctx, classes)
+    _orient_position(ctx, position)
+    return Runner(ctx, menu_items, position)
+
+
+def _wire_menu(ctx, classes=None):
+    """The items and the position for this ctx -- cheap, and no world capture, so
+    a framed frame can paint the menu from this before the plugin is asked."""
     strategy = menu.Strategy.of(ctx.plugin)
     menu_items = menu.build_menu(strategy, Work(ctx), classes)
-    position = menu.position_for(menu_items)
-    # FULL, so the plugin IS asked before the first menu is drawn. Where the
-    # cycle has got to is not knowable from this machine alone once publishing
-    # is somebody else's code: the local artefacts that used to answer it are
-    # the local edition's, and a configured install never makes them. Without
-    # asking, every restart landed back at the renders however much had been
-    # published.
-    #
-    # And the exporter does not get to decide that asking is expensive. It has
-    # no idea what is behind the interface -- an ssh session, a dict, a mock in
-    # a test -- so budgeting on a guess about someone else's implementation is
-    # the one thing this seam exists to stop. Startup is a defined moment an
-    # implementor can plan for; what it costs there is theirs to manage.
+    return menu_items, menu.position_for(menu_items)
+
+
+def _orient_position(ctx, position):
+    """Ask where the cycle has got to and resume the position there.
+
+    FULL, so the plugin IS asked before the first live menu. Where the cycle has
+    got to is not knowable from this machine alone once publishing is somebody
+    else's code: the local artefacts that used to answer it are the local
+    edition's, and a configured install never makes them. Without asking, every
+    restart landed back at the renders however much had been published.
+
+    And the exporter does not get to decide that asking is expensive. It has no
+    idea what is behind the interface -- an ssh session, a dict, a mock in a test
+    -- so budgeting on a guess about someone else's implementation is the one
+    thing this seam exists to stop. Startup is a defined moment an implementor
+    can plan for; what it costs there is theirs to manage.
+    """
     world = looked_at(ctx, menu.Scope.FULL)
     _resume(ctx, position, world)
-    return Runner(ctx, menu_items, position)
 
 
 def _no_colour():
@@ -7889,11 +7901,14 @@ def _run_menu(ctx):
     confirmation in front of that is practice at pressing enter, which is the
     habit the typed word exists to defeat.
     """
-    runner = build_runner(ctx)
-    # Paint the menu before the first world capture (which may block on the
-    # plugin), so a framed frame shows the items from the start; the real
-    # greying arrives on the first loop turn. A no-op for the stream backend.
-    ctx.ui.prime_menu(ctx, runner.menu, runner.position)
+    menu_items, position = _wire_menu(ctx)
+    # Paint the (dimmed) menu and Select BEFORE the FULL capture, which may block
+    # on the plugin query -- so a framed frame is complete from the start and
+    # then lights up once the world is known. A no-op for the stream backend, so
+    # its output is unchanged.
+    ctx.ui.prime_menu(ctx, menu_items, position)
+    _orient_position(ctx, position)
+    runner = Runner(ctx, menu_items, position)
     try:
         runner.loop()
     except (KeyboardInterrupt, Aborted):
@@ -8008,7 +8023,6 @@ def _start(ctx):
     _install_ui(ctx)
     ctx.ui.title("dashcam-exporter",
                  tilde(ctx.selected_import) if ctx.selected_import else "")
-    ctx.ui.status("workspace %s" % tilde(ctx.workspace))
     banner = _banner_lines(ctx)
     # The framed backend shows the banner as the launch splash (and says so);
     # the stream backend does not, so it prints the banner into the scroll as
