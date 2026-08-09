@@ -100,9 +100,26 @@ class TestWhatThePipelineDerives(unittest.TestCase):
     def test_the_memory_is_named_after_the_checkout(self):
         # ~/.dashcam-exporter, never ~/.src. Named after the source directory
         # instead, every previously imported card reads as never imported.
-        self.assertEqual(P.HOME_DIR.name, ".dashcam-exporter")
-        self.assertEqual(P.home_dir_for(P.CHECKOUT.root()).name,
+        #
+        # Asserted as the RULE rather than as one checkout's answer. Naming
+        # the memory after the directory is the whole point -- a second clone
+        # is a second edition with its own high-water mark -- so hardcoding
+        # ".dashcam-exporter" made this fail in exactly the case the feature
+        # exists to serve, and it did: every clone and worktree failed here
+        # while the code was doing precisely what it promises.
+        self.assertEqual(P.home_dir_for(Path("/x/dashcam-exporter")).name,
                          ".dashcam-exporter")
+        self.assertEqual(P.home_dir_for(Path("/x/dashcam-exporter-jondoe")).name,
+                         ".dashcam-exporter-jondoe")
+        # A name that does not already say what it is gets the prefix, so no
+        # bare ~/.myfork appears in somebody's home with nothing to explain it.
+        self.assertEqual(P.home_dir_for(Path("/x/myfork")).name,
+                         ".dashcam-exporter-myfork")
+        # And this checkout obeys the same rule it hands everyone else.
+        self.assertEqual(P.HOME_DIR, P.home_dir_for(P.EXPORTER_DIR))
+        self.assertEqual(P.HOME_DIR.name,
+                         P.home_dir_for(P.CHECKOUT.root()).name)
+        self.assertTrue(P.HOME_DIR.name.startswith(".dashcam-exporter"))
 
 
 class TestCtxTakesACheckout(unittest.TestCase):
