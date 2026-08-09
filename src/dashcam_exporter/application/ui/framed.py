@@ -200,7 +200,7 @@ class FrameLive:
         self._frame.log(line)
 
     def close(self):
-        pass
+        self._frame.set_bar("")     # clear the pinned bar when the step ends
 
 
 class FrameWaiting:
@@ -437,6 +437,10 @@ class FramedUiHandler(UiHandler):
         sys.stdout = self._real_stdout
         try:
             if not keep_label:
+                # The go-back hint is a separate line + newline; drawn at the
+                # cursor it pushes the prompt off the bottom border. Suppress it
+                # (the frame keeps the prompt inside its own Select row instead).
+                prompt_mod._HINTED[0] = True
                 self._write(_at(L.select_row, 1, _box("", L.cols)))
             self._write(_at(L.select_row, col) + SHOW)
             return read()
