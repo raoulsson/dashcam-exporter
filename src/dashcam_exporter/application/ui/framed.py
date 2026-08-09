@@ -544,9 +544,6 @@ def _grid_lines(menu_items, position, world, cols):
     is drawn DIMMED (a loading state -- nothing has been asked yet), and the real
     verdicts light it up on the first loop turn."""
     offered = position.selectable(menu_items)
-    if world is None:
-        verdicts = {n: screens.menu.blocked("") for n in menu_items}
-    else:
-        verdicts = screens._verdicts(menu_items, world)
+    verdicts = screens._verdicts(menu_items, world)   # world=None -> all dimmed
     grid = screens._Grid(screens._in_the_grid(menu_items), verdicts, offered, cols)
     return grid.lines()

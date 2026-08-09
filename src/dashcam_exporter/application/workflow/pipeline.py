@@ -7892,21 +7892,17 @@ def _undone_since(at, world):
     return at == CLEAN_WS and bool(world.imports)
 
 
-def _run_menu(ctx):
+def _run_menu(ctx, menu_items, position):
     """The menu loop IS the state machine: it draws from the position and the
-    world, and dispatches one item at a time.
+    world, and dispatches one item at a time. The menu was already wired and
+    painted (dimmed) before the status block, so this only asks where the cycle
+    got to and then loops.
 
     There is no "Go?" any more. Every item that destroys asks for its own word
     — DROP, CLEAN, ERASE — after showing exactly what goes, and a blind
     confirmation in front of that is practice at pressing enter, which is the
     habit the typed word exists to defeat.
     """
-    menu_items, position = _wire_menu(ctx)
-    # Paint the (dimmed) menu and Select BEFORE the FULL capture, which may block
-    # on the plugin query -- so a framed frame is complete from the start and
-    # then lights up once the world is known. A no-op for the stream backend, so
-    # its output is unchanged.
-    ctx.ui.prime_menu(ctx, menu_items, position)
     _orient_position(ctx, position)
     runner = Runner(ctx, menu_items, position)
     try:
@@ -8038,8 +8034,16 @@ def _start(ctx):
         if not require_ego_motion(ctx):
             return 3
         print_configuration(ctx)
+        # Wire and paint the menu + Select BEFORE the status block and the
+        # resume -- both ask the plugin, which can be slow. So the frame (and the
+        # scroll) show a dimmed menu first, then the "querying" bar, rather than
+        # appearing to hang after the config. The menu lights up on the first
+        # loop turn. prime_menu is a no-op only for a backend with no menu to
+        # pre-paint; the stream backend paints it too.
+        menu_items, position = _wire_menu(ctx)
+        ctx.ui.prime_menu(ctx, menu_items, position)
         print_status(ctx)
-        _run_menu(ctx)
+        _run_menu(ctx, menu_items, position)
         return _exit_code(ctx)
     finally:
         ctx.ui.close()

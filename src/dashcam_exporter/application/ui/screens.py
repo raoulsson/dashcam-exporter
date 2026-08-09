@@ -173,6 +173,11 @@ def print_menu(ctx, menu_items, position, world):
 
 
 def _verdicts(menu_items, world):
+    # world=None is the from-the-start paint, before the plugin has been asked:
+    # every entry is greyed (a loading state), and the real verdicts light it up
+    # once the world has been captured.
+    if world is None:
+        return {n: menu.blocked("") for n in menu_items}
     return {n: _safe_verdict(item, world) for n, item in menu_items.items()}
 
 

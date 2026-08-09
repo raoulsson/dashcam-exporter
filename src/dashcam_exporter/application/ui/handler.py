@@ -126,6 +126,12 @@ class StreamUiHandler(UiHandler):
     def menu(self, ctx, menu_items, position, world):
         screens.print_menu(ctx, menu_items, position, world)
 
+    def prime_menu(self, ctx, menu_items, position):
+        # Paint the dimmed menu before the plugin query, so the scrolling UI --
+        # like the frame -- shows the menu first and then the "querying" bar,
+        # rather than appearing to hang after the status block.
+        screens.print_menu(ctx, menu_items, position, None)
+
     def summary(self, ctx, close=True):
         screens.print_summary(ctx, close)
 
