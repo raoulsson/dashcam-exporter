@@ -315,13 +315,18 @@ class FramedUiHandler(UiHandler):
         self._write(CLEAR)
 
     def _paint_splash_art(self):
+        # Block-centered: ONE offset from the widest line, applied to every line,
+        # so the art keeps its own internal alignment. Centering each line by its
+        # own width skews it -- a shorter glyph row slides out of column.
         L = self.layout
-        art = [ln for ln in self._splash_art if _plain(ln).strip()]
+        art = list(self._splash_art)
+        width = max((len(_plain(ln)) for ln in art), default=1)
+        left = max(1, (L.cols - width) // 2 + 1)
         top = max(1, (L.rows - len(art)) // 2)
         buf = ""
         for i, ln in enumerate(art):
-            left = max(1, (L.cols - len(_plain(ln))) // 2 + 1)
-            buf += _at(top + i, left, ln)
+            if 1 <= top + i <= L.rows:
+                buf += _at(top + i, left, ln)
         self._write(buf)
 
     def _paint_splash_card(self):
