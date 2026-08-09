@@ -416,7 +416,7 @@ explicitly re-encodes those, and only those.
 
 ## The card itself
 
-Expected layout — the DDPAI writes this, you do not create it:
+Your camera writes this; you do not create it. A DDPAI card looks like:
 
 ```
 /Volumes/NO NAME/DCIM/
@@ -425,11 +425,95 @@ Expected layout — the DDPAI writes this, you do not create it:
 `-- 203gps/...                      <- the GPS track
 ```
 
-A clip's name carries its timestamp (`YYYYMMDDHHMMSS`), which is what makes the
-delta import a string comparison rather than a guess.
+Every camera files things differently — BlackVue puts both cameras in one
+folder and names them `20260728_141441_NF.mp4`, VIOFO uses
+`2026_0728_141441_001F.MP4` and hides the GPS inside the video file. You do
+not need to know any of that. The exporter recognises the card and reads it;
+see [Your camera](#your-camera) below.
 
 If your card came formatted so macOS will not mount it, see
 [docs/sd-card-formatting/](docs/sd-card-formatting/FORMATTING_SD_HACK.md).
+
+---
+
+## Your camera
+
+Supported out of the box:
+
+| Camera | Recognised by | GPS comes from |
+|---|---|---|
+| DDPAI | `DCIM/200video/front` | archives in `203gps` the camera labels `.git` |
+| BlackVue | `BlackVue/Record` | a `.gps` file beside the clip, or inside the video |
+| VIOFO | `DCIM/Movie` | inside the video file |
+
+You do not configure this. Put a card in, and the exporter works out which
+camera wrote it — the status block tells you which one it settled on:
+
+```
+  Camera adapter        ddpai
+```
+
+If two cameras' layouts ever look alike enough to be confused, the exporter
+refuses to guess and says so rather than reading your footage with the wrong
+grammar. That is when you name one yourself in `config.txt`:
+
+```
+adapter = ddpai
+```
+
+and the status says `ddpai (from config)` so it is never a mystery why a
+particular reading was used. Leave the key out unless you have a reason —
+detection is the normal path.
+
+### Making the workspace camera-neutral
+
+Once the footage is on your disk, one command rewrites it into names this
+tool chose rather than names your camera chose:
+
+```
+python3 tools/normalize_import.py ~/dashcam-data/import/2026-07-28
+```
+
+It prints what it would do and writes nothing. Add `--apply` to go ahead:
+
+```
+import/2026-07-28/
+|-- clips/20260728141441_front.mp4    <- renamed
+|-- clips/20260728141441_rear.mp4
+|-- tracks/20260728141441.json        <- the GPS, converted
+|-- images/, logs/                    <- copied across
+`-- DCIM/                             <- left as the camera wrote it
+```
+
+Videos are **moved**, not copied, so a 46 GB import does not become 92 GB.
+Photos and logs are copied, so the originals stay where they were. The GPS
+becomes a plain JSON file you can read without this tool.
+
+Two things worth knowing:
+
+- **The rear file gets the clip's timestamp.** Cameras run two clocks and
+  they drift — a DDPAI rear file is usually a second behind, a VIOFO one up
+  to six. After this, both cameras of one clip share one name.
+- **Run it as often as you like.** A second run does nothing; it is not a
+  second set of renames.
+
+Afterwards the status reads `Camera adapter  canonical`, meaning no camera's
+grammar is being interpreted at all any more.
+
+### Adding a camera of your own
+
+The same shape as [publishing](#publishing--plugging-in-your-own): one
+interface, and the exporter calls whatever you point it at. A camera needs
+two small classes — one that recognises a card, one that answers five
+questions about it (what clips are on it, what a file's timestamp is, where
+the GPS is, what to copy, and which files carry a track). Everything else —
+trip grouping, rendering, publishing — already works the moment those five
+answers are right.
+
+Start from `src/dashcam_exporter/infrastructure/adapters/` and the design
+notes in [docs/superpowers/specs/](docs/superpowers/specs/). There is a card
+simulator in `tools/simulate_card.py` that writes a fake card of any
+supported make, so you can develop against one without owning the camera.
 
 ---
 
