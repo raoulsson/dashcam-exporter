@@ -179,6 +179,10 @@ def _box(content, cols):
     return C.dim(DV) + _pad(content, cols - 2) + C.dim(DV)
 
 
+SELECT_LABEL = "  Select> "
+SELECT_COL = 2 + len(SELECT_LABEL)      # cursor sits just after the label
+
+
 class FrameLive:
     """The `new_live()` object run_stream draws into. Same surface the stream
     Live exposes -- draw(lines)/close()/height/enabled -- but a draw paints the
@@ -401,35 +405,38 @@ class FramedUiHandler(UiHandler):
     def done(self, what):
         self.log(C.green("  100%% - %s." % what))
 
-    # -- input: hand the select line to prompt, on the real screen --------
+    # -- input: read inside the bordered Select row, on the real screen ---
     def read_key(self, prompt):
-        return self._on_select(lambda: prompt_mod.read_key(prompt))
+        # The frame already shows "Select> " (painted from the start); read the
+        # key right after it, with an empty prompt so the label is not redrawn.
+        return self._read(lambda: prompt_mod.read_key(""), SELECT_COL, keep_label=True)
 
     def ask(self, prompt, default="", quits=True):
-        return self._on_select(lambda: prompt_mod.ask(prompt, default, quits))
+        return self._read(lambda: prompt_mod.ask(prompt, default, quits), 3,
+                          keep_label=False)
 
     def confirm(self, prompt, default=False):
-        return self._on_select(lambda: prompt_mod.confirm(prompt, default))
+        return self._read(lambda: prompt_mod.confirm(prompt, default), 3,
+                          keep_label=False)
 
-    def _on_select(self, read):
-        """Run a prompt inside the bordered Select row on the real terminal.
-        prompt writes its label and reads there directly (the tee is bypassed so
-        the echo is not swallowed into the log); the cursor is placed just inside
-        the left border so the text lands between the sides. Afterwards the row is
-        redrawn empty and the cursor hidden."""
+    def _read(self, read, col, keep_label):
+        """Read inside the Select row on the real terminal (the tee is bypassed so
+        the echo is not swallowed into the log). A menu keypress reads after the
+        standing "Select> " label; a prompt (Type DELETE...) clears the row and
+        draws itself instead. Afterwards the label is restored, cursor hidden."""
         if not self._open or self._real_stdout is None:
             return read()
         L = self.layout
         saved = sys.stdout
         sys.stdout = self._real_stdout
         try:
-            # Blank the interior, then park the cursor just inside the left border.
-            self._write(_at(L.select_row, 1, _box("", L.cols))
-                        + _at(L.select_row, 3) + SHOW)
+            if not keep_label:
+                self._write(_at(L.select_row, 1, _box("", L.cols)))
+            self._write(_at(L.select_row, col) + SHOW)
             return read()
         finally:
             sys.stdout = saved
-            self._write(HIDE + _at(L.select_row, 1, _box("", L.cols)))
+            self._write(HIDE + _at(L.select_row, 1, _box(SELECT_LABEL, L.cols)))
 
     # -- painting ---------------------------------------------------------
     def _write(self, s):
@@ -499,7 +506,7 @@ class FramedUiHandler(UiHandler):
         hint = C.dim("                p) progress   h) help   i) info   q) quit")
         buf += _at(L.hint_row, 1, _box(hint, cols))
         buf += _at(L.select_rule, 1, _rule_single(cols))
-        buf += _at(L.select_row, 1, _box("", cols))     # Select> drawn by input
+        buf += _at(L.select_row, 1, _box(SELECT_LABEL, cols))   # visible from the start
         buf += _at(L.bottom_rule, 1, _bottom(cols))
         self._write(buf)
 

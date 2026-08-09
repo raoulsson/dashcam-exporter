@@ -56,7 +56,22 @@ OSA
     echo "Could not open a new window (automation permission?); running here."
 fi
 
-# --- Inner run (the new window), or non-macOS: size in place and run --------
+# --- Inner run (the new window), or non-macOS/fallback: size and run --------
 [ -t 1 ] && printf '\033[8;%d;%dt' "$ROWS" "$COLS"
+
+# In our own spawned window: run the tool, then close the window when it exits
+# (q, or ctrl-c -- which the frame's raw mode reads as a byte, so the tool exits
+# cleanly and we still get here). exec the close so bash is gone and Terminal
+# has nothing but osascript left to terminate, closing without a prompt.
+if [ -n "${DOS_UI_INNER:-}" ] && [ "$(uname)" = "Darwin" ] \
+        && command -v osascript >/dev/null 2>&1; then
+    WINID="$(osascript -e 'tell application "Terminal" to id of front window' 2>/dev/null || true)"
+    env SET_UI_STYLE=framed FRAME_ROWS="$ROWS" FRAME_COLS="$COLS" \
+        "$HERE/RUN-DASHCAM-EXPORTER.sh" "$@"
+    [ -n "$WINID" ] && exec osascript -e \
+        "tell application \"Terminal\" to close (every window whose id is $WINID) saving no"
+    exit 0
+fi
+
 exec env SET_UI_STYLE=framed FRAME_ROWS="$ROWS" FRAME_COLS="$COLS" \
     "$HERE/RUN-DASHCAM-EXPORTER.sh" "$@"
