@@ -3,29 +3,51 @@
 #
 # A fixed title/status band on top, the numbered menu as a bar on the bottom, and
 # the work in the middle: a scrolling log with the live progress bar pinned
-# beneath it. Exactly the same workflow, config, .env, plugin and keys as
-# RUN-DASHCAM-EXPORTER.sh — this only turns the frame on (SET_UI_STYLE=framed)
-# and pins it to a FIXED SIZE, then hands over to the normal launcher so the
-# interpreter selection lives in one place and cannot drift between the two.
+# beneath it. Same workflow, config, .env, plugin and keys as
+# RUN-DASHCAM-EXPORTER.sh — this only turns the frame on (SET_UI_STYLE=framed).
 #
-# Fixed size: the window is resized to ROWS x COLS (honored by Terminal.app,
-# iTerm2 and xterm) and FRAME_ROWS/FRAME_COLS pin the frame to the same geometry,
-# so a run looks the same every time regardless of the window it started in.
-# Change the two numbers below to taste.
+# The frame wants a FIXED size, and a terminal resize hits the whole window (so
+# every tab in it). To avoid resizing tabs you are already using, this opens a
+# FRESH Terminal window at ROWS x COLS and runs there. The inner run (marked by
+# DOS_UI_INNER) skips the spawn and does the actual work.
 #
-# Double-click: rename a copy to end in `.command` (chmod +x) and the Finder
-# opens it in a new Terminal window. Or open a fresh window first, then run this.
+# macOS only for the new-window part; elsewhere (or with DOS_UI_INNER set) it
+# resizes the current terminal in place, as before. Uses Terminal.app — if you
+# live in iTerm2, say so and I'll add an iTerm path.
 #
-# If a crash ever leaves the terminal wedged, type `reset` and press Enter.
+# If a crash ever leaves a terminal wedged, type `reset` and press Enter.
 
 set -euo pipefail
 
 ROWS=40
 COLS=140
+HERE="$(cd "$(dirname "$0")" && pwd)"
 
-# Ask the terminal to size itself to the fixed geometry. Only when stdout is a
-# real terminal, so a piped run does not get the escape as garbage.
+# --- Spawn a fresh, correctly-sized window and run there --------------------
+if [ -z "${DOS_UI_INNER:-}" ] && [ "$(uname)" = "Darwin" ] \
+        && command -v osascript >/dev/null 2>&1; then
+    inner="cd '$HERE' && DOS_UI_INNER=1 '$HERE/RUN-DASHCAM-EXPORTER-DOS-UI.sh'"
+    # A first run may prompt for permission to control Terminal; if it is
+    # declined (or anything else fails) fall through to sizing this window.
+    if osascript >/dev/null 2>&1 <<OSA
+tell application "Terminal"
+    activate
+    set theTab to do script "$inner"
+    delay 0.3
+    try
+        set number of columns of theTab to $COLS
+        set number of rows of theTab to $ROWS
+    end try
+end tell
+OSA
+    then
+        echo "Opened the DOS UI in a new Terminal window (${ROWS}x${COLS})."
+        exit 0
+    fi
+    echo "Could not open a new window (automation permission?); running here."
+fi
+
+# --- Inner run (the new window), or non-macOS: size in place and run --------
 [ -t 1 ] && printf '\033[8;%d;%dt' "$ROWS" "$COLS"
-
 exec env SET_UI_STYLE=framed FRAME_ROWS="$ROWS" FRAME_COLS="$COLS" \
-    "$(dirname "$0")/RUN-DASHCAM-EXPORTER.sh" "$@"
+    "$HERE/RUN-DASHCAM-EXPORTER.sh" "$@"
