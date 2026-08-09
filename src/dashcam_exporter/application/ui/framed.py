@@ -265,6 +265,7 @@ class FramedUiHandler(UiHandler):
         self._menu_rows = Layout.DEFAULT_MENU_ROWS
         self._splash_seconds = splash_seconds
         self._splash_art = ()
+        self._lock = threading.Lock()   # the bar spinner draws from a thread
         self._log = collections.deque()
         self._real_stdout = None
         self._open = False
@@ -446,8 +447,9 @@ class FramedUiHandler(UiHandler):
     # -- painting ---------------------------------------------------------
     def _write(self, s):
         out = self._real_stdout if self._real_stdout is not None else sys.__stdout__
-        out.write(s)
-        out.flush()
+        with self._lock:      # serialise the main thread and the spinner thread
+            out.write(s)
+            out.flush()
 
     def repaint(self):
         self._paint_chrome()

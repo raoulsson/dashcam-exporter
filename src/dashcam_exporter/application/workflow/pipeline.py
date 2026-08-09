@@ -8042,7 +8042,11 @@ def _start(ctx):
         # pre-paint; the stream backend paints it too.
         menu_items, position = _wire_menu(ctx)
         ctx.ui.prime_menu(ctx, menu_items, position)
-        print_status(ctx)
+        # Two bars for the two startup waits: the status scans (card, disk,
+        # renders), then the plugin check (the FULL capture inside _run_menu's
+        # _orient_position, which shows "Querying the plugin...").
+        with ctx.ui.waiting("Reading status"):
+            print_status(ctx)
         _run_menu(ctx, menu_items, position)
         return _exit_code(ctx)
     finally:
