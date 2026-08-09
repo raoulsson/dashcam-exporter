@@ -29,11 +29,23 @@ import threading
 import time
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
+_CSI = re.compile(r"\x1b\[[0-9;?]*([A-Za-z])")
 
 
 def _plain(s):
     """The text without colour, for measuring how wide a coloured line really is."""
     return _ANSI.sub("", str(s))
+
+
+def _clean_log(s):
+    """A log line reduced to text and colour. Cursor moves and clears (a step's
+    in-place \\x1b[K, a stray \\r) would otherwise scribble across the row and eat
+    the border; only SGR colour is kept, and a \\r is an in-place update whose
+    last segment wins."""
+    s = str(s)
+    if "\r" in s:
+        s = s.rsplit("\r", 1)[-1]
+    return _CSI.sub(lambda m: m.group(0) if m.group(1) == "m" else "", s)
 
 from dashcam_exporter.application.ui.term import C, term_width
 from dashcam_exporter.application.ui import screens
@@ -76,7 +88,7 @@ class Layout:
     """
 
     DEFAULT_MENU_ROWS = 3
-    MIN_ROWS = 20
+    MIN_ROWS = 22
     MIN_COLS = 60
 
     def __init__(self, rows, cols, menu_rows=DEFAULT_MENU_ROWS):
@@ -84,18 +96,20 @@ class Layout:
         self.cols = max(cols, self.MIN_COLS)
         self.grid_rows = max(1, menu_rows)
 
-        # Title box, five rows at the top.
+        # Title box, five rows at the top (top corner, pad, title, pad, sep).
         self.title_top_rule = 1
         self.title_pad_top = 2
         self.title_row = 3
         self.title_pad_bot = 4
-        self.title_bot_rule = 5
+        self.title_sep = 5
 
-        # Bottom stack, counted up from the last row.
-        self.select_row = self.rows
-        self.menu_bot_rule = self.rows - 1
-        self.hint_row = self.rows - 2
-        self.menu_bottom = self.rows - 3
+        # Bottom stack, counted up from the closing border. The box is closed:
+        # Select sits inside it, with the bottom corner below.
+        self.bottom_rule = self.rows
+        self.select_row = self.rows - 1
+        self.select_rule = self.rows - 2
+        self.hint_row = self.rows - 3
+        self.menu_bottom = self.rows - 4
         self.menu_top = self.menu_bottom - self.grid_rows + 1
         self.progress_sep = self.menu_top - 1
         self.bar_pad_bot = self.progress_sep - 1
@@ -104,7 +118,7 @@ class Layout:
         self.progress_top_rule = self.bar_pad_top - 1
 
         # The log fills what is left, between the title box and the progress box.
-        self.log_top = self.title_bot_rule + 1
+        self.log_top = self.title_sep + 1
         self.log_bottom = self.progress_top_rule - 1
 
     @property
@@ -134,9 +148,35 @@ def _pad(text, width):
     return text
 
 
+# Box-drawing, so the frame's lines are continuous. Double for the outer box and
+# the major separators, single for the internal rules; junctions where a rule
+# meets the double side border.
+TL, TR, BL, BR = "╔", "╗", "╚", "╝"
+DH, DV = "═", "║"
+LTD, RTD = "╠", "╣"     # double rule meeting the side
+SH = "─"
+LTS, RTS = "╟", "╢"     # single rule meeting the side
+
+
+def _top(cols):
+    return C.dim(TL + DH * (cols - 2) + TR)
+
+
+def _bottom(cols):
+    return C.dim(BL + DH * (cols - 2) + BR)
+
+
+def _rule_double(cols):
+    return C.dim(LTD + DH * (cols - 2) + RTD)
+
+
+def _rule_single(cols):
+    return C.dim(LTS + SH * (cols - 2) + RTS)
+
+
 def _box(content, cols):
-    """A content row inside the frame's vertical borders."""
-    return C.dim("|") + _pad(content, cols - 2) + C.dim("|")
+    """A content row between the frame's double side borders."""
+    return C.dim(DV) + _pad(content, cols - 2) + C.dim(DV)
 
 
 class FrameLive:
@@ -253,6 +293,9 @@ class FramedUiHandler(UiHandler):
         self._splash_art = tuple(lines or ())
         return True
 
+    def prime_menu(self, ctx, menu_items, position):
+        self.menu(ctx, menu_items, position, None)   # items now, greying later
+
     def _splash(self):
         """Held for a beat when a window is launched. Shows the launch art (the
         ASCII banner) centered when it has been given some; otherwise a small
@@ -339,7 +382,7 @@ class FramedUiHandler(UiHandler):
 
     def log(self, text=""):
         for piece in str(text).split("\n"):
-            self._log.append(piece)
+            self._log.append(_clean_log(piece))
         keep = self.layout.log_height
         while len(self._log) > keep:
             self._log.popleft()
@@ -369,20 +412,24 @@ class FramedUiHandler(UiHandler):
         return self._on_select(lambda: prompt_mod.confirm(prompt, default))
 
     def _on_select(self, read):
-        """Run a prompt at the select row on the real terminal. prompt writes and
-        reads there directly; the tee is bypassed so its echo is not swallowed
-        into the log. Afterwards the select row is wiped and the cursor hidden."""
+        """Run a prompt inside the bordered Select row on the real terminal.
+        prompt writes its label and reads there directly (the tee is bypassed so
+        the echo is not swallowed into the log); the cursor is placed just inside
+        the left border so the text lands between the sides. Afterwards the row is
+        redrawn empty and the cursor hidden."""
         if not self._open or self._real_stdout is None:
             return read()
+        L = self.layout
         saved = sys.stdout
         sys.stdout = self._real_stdout
         try:
-            self._write(_at(self.layout.select_row, 1)
-                        + (" " * self.layout.cols) + _at(self.layout.select_row, 1) + SHOW)
+            # Blank the interior, then park the cursor just inside the left border.
+            self._write(_at(L.select_row, 1, _box("", L.cols))
+                        + _at(L.select_row, 3) + SHOW)
             return read()
         finally:
             sys.stdout = saved
-            self._write(HIDE + _clear_row(self.layout.select_row, self.layout.cols))
+            self._write(HIDE + _at(L.select_row, 1, _box("", L.cols)))
 
     # -- painting ---------------------------------------------------------
     def _write(self, s):
@@ -405,11 +452,11 @@ class FramedUiHandler(UiHandler):
         inner = cols - 2
         gap = max(2, inner - len(_plain(left)) - len(_plain(right)) - 2)
         title = " " + left + (" " * gap) + C.dim(right) + " "
-        buf = _at(L.title_top_rule, 1, C.dim("=" * cols))
+        buf = _at(L.title_top_rule, 1, _top(cols))
         buf += _at(L.title_pad_top, 1, _box("", cols))
         buf += _at(L.title_row, 1, _box(title, cols))
         buf += _at(L.title_pad_bot, 1, _box("", cols))
-        buf += _at(L.title_bot_rule, 1, C.dim("=" * cols))
+        buf += _at(L.title_sep, 1, _rule_double(cols))
         self._write(buf)
 
     def _paint_log(self):
@@ -427,10 +474,10 @@ class FramedUiHandler(UiHandler):
         if not self._open:
             return
         L, cols = self.layout, self.layout.cols
-        buf = _at(L.progress_top_rule, 1, C.dim("-" * cols))
+        buf = _at(L.progress_top_rule, 1, _rule_single(cols))
         buf += _at(L.bar_pad_top, 1, _box("", cols))
         buf += _at(L.bar_pad_bot, 1, _box("", cols))
-        buf += _at(L.progress_sep, 1, C.dim("=" * cols))
+        buf += _at(L.progress_sep, 1, _rule_double(cols))
         self._write(buf)
         self._paint_bar()
 
@@ -449,10 +496,11 @@ class FramedUiHandler(UiHandler):
         for i, row in enumerate(L.menu_rows):
             text = self._menu_lines[i] if i < len(self._menu_lines) else ""
             buf += _at(row, 1, _box(text, cols))
-        hint = C.dim("  p) progress   h) help   i) info   q) quit")
+        hint = C.dim("                p) progress   h) help   i) info   q) quit")
         buf += _at(L.hint_row, 1, _box(hint, cols))
-        buf += _at(L.menu_bot_rule, 1, C.dim("-" * cols))
-        buf += _clear_row(L.select_row, cols)   # Select> is drawn borderless by input
+        buf += _at(L.select_rule, 1, _rule_single(cols))
+        buf += _at(L.select_row, 1, _box("", cols))     # Select> drawn by input
+        buf += _at(L.bottom_rule, 1, _bottom(cols))
         self._write(buf)
 
 
@@ -483,8 +531,15 @@ def _grid_lines(menu_items, position, world, cols):
     """The exact grid the scrolling UI draws -- screens._Grid, in the same
     columns, coloured and greyed and red the same way. One renderer, so the
     frame's menu and the scroll's cannot drift. The p/h/i/q hint is a separate
-    row the frame paints itself."""
-    verdicts = screens._verdicts(menu_items, world)
+    row the frame paints itself.
+
+    world=None is the from-the-start paint before the first capture: the items
+    are drawn without greying (nothing yet says an item cannot run), and the real
+    verdicts arrive on the first loop turn."""
     offered = position.selectable(menu_items)
+    if world is None:
+        verdicts = {n: screens.menu.go() for n in menu_items}
+    else:
+        verdicts = screens._verdicts(menu_items, world)
     grid = screens._Grid(screens._in_the_grid(menu_items), verdicts, offered, cols)
     return grid.lines()

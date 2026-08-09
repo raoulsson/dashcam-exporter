@@ -23,20 +23,22 @@ class _NoColour(unittest.TestCase):
 class TheLayoutIsPureArithmetic(unittest.TestCase):
     def test_the_bands_stack_in_order_on_an_80x24(self):
         L = framed.Layout(24, 80)
-        self.assertEqual((L.title_top_rule, L.title_row, L.title_bot_rule), (1, 3, 5))
-        self.assertEqual((L.log_top, L.log_bottom), (6, 13))
-        self.assertEqual((L.progress_top_rule, L.bar_row, L.progress_sep), (14, 16, 18))
-        self.assertEqual(L.menu_rows, [19, 20, 21])          # 3 grid rows
-        self.assertEqual((L.hint_row, L.menu_bot_rule, L.select_row), (22, 23, 24))
-        self.assertEqual(L.log_height, 8)
+        self.assertEqual((L.title_top_rule, L.title_row, L.title_sep), (1, 3, 5))
+        self.assertEqual((L.log_top, L.log_bottom), (6, 12))
+        self.assertEqual((L.progress_top_rule, L.bar_row, L.progress_sep), (13, 15, 17))
+        self.assertEqual(L.menu_rows, [18, 19, 20])          # 3 grid rows
+        self.assertEqual((L.hint_row, L.select_rule, L.select_row, L.bottom_rule),
+                         (21, 22, 23, 24))
+        self.assertEqual(L.log_height, 7)
 
     def test_the_boxes_stack_in_order_at_any_height(self):
-        for rows in (20, 24, 40, 60):
+        for rows in (22, 24, 40, 60):
             L = framed.Layout(rows, 80)
             self.assertEqual(L.bar_row, L.progress_top_rule + 2)   # rule, pad, bar
             self.assertEqual(L.progress_sep, L.bar_row + 2)        # bar, pad, sep
             self.assertEqual(L.menu_top, L.progress_sep + 1)
-            self.assertEqual(L.select_row, L.menu_bot_rule + 1)
+            self.assertEqual(L.select_row, L.select_rule + 1)      # rule, then select
+            self.assertEqual(L.bottom_rule, L.select_row + 1)      # box closes below it
             self.assertGreaterEqual(L.log_height, 1)
 
     def test_a_tiny_terminal_is_clamped_not_broken(self):
@@ -55,7 +57,7 @@ class TheMenuRegionSizesToItsContent(unittest.TestCase):
     def test_the_layout_reserves_the_grid_rows_it_is_told_to(self):
         L = framed.Layout(40, 140, menu_rows=6)
         self.assertEqual(len(L.menu_rows), 6)
-        self.assertEqual(L.menu_bottom, 40 - 3)        # above hint + rule + select
+        self.assertEqual(L.menu_bottom, 40 - 4)        # above hint, select-rule, select, bottom
         self.assertEqual(L.menu_top, L.menu_bottom - 5)
         self.assertGreaterEqual(L.log_height, 1)
 
@@ -99,7 +101,7 @@ class TheFrameRendersIntoRegions(_NoColour):
         out = self._render()
         self.assertEqual(self._row_of(out, "dashcam-exporter"), 3)   # in the title box
         self.assertEqual(self._row_of(out, "3 trips"), 3)            # status shares that row
-        self.assertEqual(self._row_of(out, "Render ####"), 16)       # the pinned bar
+        self.assertEqual(self._row_of(out, "Render ####"), 15)       # the pinned bar
         # the six log lines fill the top of the log region (rows 6..)
         self.assertEqual(self._row_of(out, "clip 1/20"), 6)
         self.assertEqual(self._row_of(out, "clip 6/20"), 11)

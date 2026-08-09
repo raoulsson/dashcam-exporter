@@ -23,6 +23,15 @@ ROWS=40
 COLS=140
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
+# --- On restart, stop any instance already running --------------------------
+# Testing the frame means launching it over and over; a previous run still
+# holding the single-instance lock would refuse the new one. Kill it here, in
+# the OUTER launch only -- the inner run is the new instance and must not kill
+# itself. SIGTERM, so it can tidy up; the stale lock clears on the dead pid.
+if [ -z "${DOS_UI_INNER:-}" ]; then
+    pkill -f 'dashcam_exporter.application.workflow.pipeline' 2>/dev/null || true
+fi
+
 # --- Spawn a fresh, correctly-sized window and run there --------------------
 if [ -z "${DOS_UI_INNER:-}" ] && [ "$(uname)" = "Darwin" ] \
         && command -v osascript >/dev/null 2>&1; then

@@ -55,6 +55,12 @@ class UiHandler(ABC):
         and the caller prints the banner into the scroll as it always has."""
         return False
 
+    def prime_menu(self, ctx, menu_items, position):
+        """Draw the menu straightaway, before the first (possibly slow) world
+        capture, so a framed frame is complete from the start; greying arrives
+        with the real world on the first loop turn. A no-op for the stream
+        backend, which has no standing frame to fill."""
+
     @abstractmethod
     def block(self, lines):
         """A screen: ready-made lines (help, info, the summary table)."""

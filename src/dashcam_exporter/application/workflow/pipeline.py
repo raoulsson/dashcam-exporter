@@ -7889,8 +7889,13 @@ def _run_menu(ctx):
     confirmation in front of that is practice at pressing enter, which is the
     habit the typed word exists to defeat.
     """
+    runner = build_runner(ctx)
+    # Paint the menu before the first world capture (which may block on the
+    # plugin), so a framed frame shows the items from the start; the real
+    # greying arrives on the first loop turn. A no-op for the stream backend.
+    ctx.ui.prime_menu(ctx, runner.menu, runner.position)
     try:
-        build_runner(ctx).loop()
+        runner.loop()
     except (KeyboardInterrupt, Aborted):
         print()
         print(C.yellow("  Interrupted."))
