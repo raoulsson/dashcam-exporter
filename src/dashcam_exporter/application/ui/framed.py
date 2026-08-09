@@ -59,36 +59,53 @@ def _clear_row(row, cols):
 class Layout:
     """Where each band sits, in 1-based ANSI rows, for a given terminal size.
 
-    Bands, top to bottom: title, status, a rule, the log, a dotted divider, the
-    pinned bar, a rule, the menu (fixed rows), the select line. Pure: two calls
-    with the same size give the same rows, which is the whole of what the frame
-    needs to be tested without a real screen.
+    A boxed frame with vertical borders down both sides. Top to bottom:
+
+        title box   =====   |pad|   | title      version |   |pad|   =====
+        log         | content ... |   (bordered, scrolls)
+        progress    -----   |pad|   | bar |   |pad|
+        separator   =====
+        menu        | grid row |...   | hint |
+        menu rule   -----
+        select      Select>          (borderless, the very last row)
+
+    Pure: two calls with the same size give the same rows, which is the whole of
+    what the frame needs to be tested without a real screen. `menu_rows` is the
+    number of grid rows the menu drew (the hint is its own row); the frame passes
+    it in and recomputes when the grid's height changes with the width.
     """
 
-    # The menu region holds the original grid (screens._Grid) plus a hint line.
-    # Its height is not fixed -- the grid's row count depends on the width -- so
-    # the frame passes it in and recomputes when it changes. DEFAULT_MENU_ROWS is
-    # the initial guess before the first real menu is drawn.
-    DEFAULT_MENU_ROWS = 4
-    MIN_ROWS = 14
-    MIN_COLS = 48
+    DEFAULT_MENU_ROWS = 3
+    MIN_ROWS = 20
+    MIN_COLS = 60
 
     def __init__(self, rows, cols, menu_rows=DEFAULT_MENU_ROWS):
         self.rows = max(rows, self.MIN_ROWS)
         self.cols = max(cols, self.MIN_COLS)
-        self.menu_rows_count = max(2, menu_rows)
-        # One restricted line up top: the title and the status share it, so the
-        # fixed chrome costs a row less and the log gets it.
-        self.title_row = 1
-        self.top_rule_row = 2
+        self.grid_rows = max(1, menu_rows)
+
+        # Title box, five rows at the top.
+        self.title_top_rule = 1
+        self.title_pad_top = 2
+        self.title_row = 3
+        self.title_pad_bot = 4
+        self.title_bot_rule = 5
+
+        # Bottom stack, counted up from the last row.
         self.select_row = self.rows
-        self.menu_bottom = self.rows - 1
-        self.menu_top = self.rows - self.menu_rows_count
-        self.bottom_rule_row = self.menu_top - 1
-        self.bar_row = self.bottom_rule_row - 1
-        self.divider_row = self.bar_row - 1
-        self.log_top = self.top_rule_row + 1
-        self.log_bottom = self.divider_row - 1
+        self.menu_bot_rule = self.rows - 1
+        self.hint_row = self.rows - 2
+        self.menu_bottom = self.rows - 3
+        self.menu_top = self.menu_bottom - self.grid_rows + 1
+        self.progress_sep = self.menu_top - 1
+        self.bar_pad_bot = self.progress_sep - 1
+        self.bar_row = self.bar_pad_bot - 1
+        self.bar_pad_top = self.bar_row - 1
+        self.progress_top_rule = self.bar_pad_top - 1
+
+        # The log fills what is left, between the title box and the progress box.
+        self.log_top = self.title_bot_rule + 1
+        self.log_bottom = self.progress_top_rule - 1
 
     @property
     def log_height(self):
@@ -105,6 +122,21 @@ def _fit(text, cols):
     if len(_plain(text)) <= cols:
         return text
     return _plain(text)[:cols - 1] + "…"
+
+
+def _pad(text, width):
+    """Pad (or clip) a possibly-coloured line to exactly `width` visible cols."""
+    n = len(_plain(text))
+    if n < width:
+        return text + " " * (width - n)
+    if n > width:
+        return _plain(text)[:width]
+    return text
+
+
+def _box(content, cols):
+    """A content row inside the frame's vertical borders."""
+    return C.dim("|") + _pad(content, cols - 2) + C.dim("|")
 
 
 class FrameLive:
@@ -283,7 +315,8 @@ class FramedUiHandler(UiHandler):
         self._paint_chrome()
 
     def menu(self, ctx, menu_items, position, world):
-        lines = _menu_lines_original(menu_items, position, world, self.layout.cols)
+        # The grid is drawn inside the borders, so it gets the inner width.
+        lines = _grid_lines(menu_items, position, world, self.layout.cols - 2)
         self._menu_lines = lines
         if len(lines) != self._menu_rows:
             # The grid's height changed (a resize); move the region and repaint
@@ -360,20 +393,23 @@ class FramedUiHandler(UiHandler):
     def repaint(self):
         self._paint_chrome()
         self._paint_log()
-        self._paint_divider()
-        self._paint_bar()
+        self._paint_progress()
         self._paint_menu()
 
     def _paint_chrome(self):
         if not self._open:
             return
         L, cols = self.layout, self.layout.cols
-        left = self._title + (("  " + self._subtitle) if self._subtitle else "")
+        left = C.bold(self._title) + (C.dim("  " + self._subtitle) if self._subtitle else "")
         right = self._status or ""
-        gap = max(2, cols - len(_plain(left)) - len(_plain(right)) - 2)
-        line = " " + C.bold(left) + (" " * gap) + C.dim(right) + " "
-        buf = _clear_row(L.title_row, cols) + _at(L.title_row, 1, _fit(line, cols))
-        buf += _at(L.top_rule_row, 1, C.dim("-" * cols))
+        inner = cols - 2
+        gap = max(2, inner - len(_plain(left)) - len(_plain(right)) - 2)
+        title = " " + left + (" " * gap) + C.dim(right) + " "
+        buf = _at(L.title_top_rule, 1, C.dim("=" * cols))
+        buf += _at(L.title_pad_top, 1, _box("", cols))
+        buf += _at(L.title_row, 1, _box(title, cols))
+        buf += _at(L.title_pad_bot, 1, _box("", cols))
+        buf += _at(L.title_bot_rule, 1, C.dim("=" * cols))
         self._write(buf)
 
     def _paint_log(self):
@@ -383,31 +419,40 @@ class FramedUiHandler(UiHandler):
         lines = list(self._log)[-L.log_height:]
         buf = ""
         for i, row in enumerate(range(L.log_top, L.log_bottom + 1)):
-            text = lines[i] if i < len(lines) else ""
-            buf += _clear_row(row, cols) + _at(row, 1, _fit(text, cols))
+            text = (" " + lines[i]) if i < len(lines) else ""
+            buf += _at(row, 1, _box(text, cols))
         self._write(buf)
 
-    def _paint_divider(self):
-        if not self._open:
-            return
-        L = self.layout
-        self._write(_at(L.divider_row, 1, C.dim("." * L.cols)))
-
-    def _paint_bar(self):
+    def _paint_progress(self):
         if not self._open:
             return
         L, cols = self.layout, self.layout.cols
-        self._write(_clear_row(L.bar_row, cols) + _at(L.bar_row, 1, _fit(self._bar, cols)))
+        buf = _at(L.progress_top_rule, 1, C.dim("-" * cols))
+        buf += _at(L.bar_pad_top, 1, _box("", cols))
+        buf += _at(L.bar_pad_bot, 1, _box("", cols))
+        buf += _at(L.progress_sep, 1, C.dim("=" * cols))
+        self._write(buf)
+        self._paint_bar()
+
+    def _paint_bar(self):
+        # The bar row alone -- redrawn often while a step or the spinner runs.
+        if not self._open:
+            return
+        L, cols = self.layout, self.layout.cols
+        self._write(_at(L.bar_row, 1, _box((" " + self._bar) if self._bar else "", cols)))
 
     def _paint_menu(self):
         if not self._open:
             return
         L, cols = self.layout, self.layout.cols
-        buf = _at(L.bottom_rule_row, 1, C.dim("-" * cols))
+        buf = ""
         for i, row in enumerate(L.menu_rows):
             text = self._menu_lines[i] if i < len(self._menu_lines) else ""
-            buf += _clear_row(row, cols) + _at(row, 1, _fit(text, cols))
-        buf += _clear_row(L.select_row, cols)
+            buf += _at(row, 1, _box(text, cols))
+        hint = C.dim("  p) progress   h) help   i) info   q) quit")
+        buf += _at(L.hint_row, 1, _box(hint, cols))
+        buf += _at(L.menu_bot_rule, 1, C.dim("-" * cols))
+        buf += _clear_row(L.select_row, cols)   # Select> is drawn borderless by input
         self._write(buf)
 
 
@@ -434,13 +479,12 @@ class _LogTee:
         return self._real.isatty()
 
 
-def _menu_lines_original(menu_items, position, world, cols):
+def _grid_lines(menu_items, position, world, cols):
     """The exact grid the scrolling UI draws -- screens._Grid, in the same
-    columns, coloured and greyed and red the same way -- followed by the p/h/i/q
-    hint line. This is what "same as the original menu" means: one renderer, so
-    the frame and the scroll cannot drift."""
+    columns, coloured and greyed and red the same way. One renderer, so the
+    frame's menu and the scroll's cannot drift. The p/h/i/q hint is a separate
+    row the frame paints itself."""
     verdicts = screens._verdicts(menu_items, world)
     offered = position.selectable(menu_items)
     grid = screens._Grid(screens._in_the_grid(menu_items), verdicts, offered, cols)
-    hint = C.dim("  p) progress   h) help   i) info   q) quit")
-    return grid.lines() + [hint]
+    return grid.lines()
