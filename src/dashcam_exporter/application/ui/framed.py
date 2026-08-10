@@ -47,10 +47,11 @@ def _clean_log(s):
         s = s.rsplit("\r", 1)[-1]
     return _CSI.sub(lambda m: m.group(0) if m.group(1) == "m" else "", s)
 
-from dashcam_exporter.application.ui.term import C, term_width
+from dashcam_exporter.application.ui.term import C, term_width, human_secs
 from dashcam_exporter.application.ui import screens
 from dashcam_exporter.application.ui import prompt as prompt_mod
 from dashcam_exporter.application.ui.handler import UiHandler
+from dashcam_exporter.application.ui.progress import ProgressState, render_progress
 
 CSI = "\x1b["
 ALT_ON = CSI + "?1049h"
@@ -233,13 +234,12 @@ class FrameWaiting:
         return False
 
     def _run(self):
-        width, i = 14, 0
+        started, i = time.time(), 0
         while not self._stop.wait(0.12):
-            pos = i % (2 * (width - 3))
-            pos = pos if pos < width - 2 else 2 * (width - 3) - pos
-            track = "." * pos + "###" + "." * (width - 3 - pos)
-            note = ("  " + self._note) if self._note else ""
-            self._frame.set_bar("%s [%s]%s" % (self._label, track, note))
+            state = ProgressState(action=self._label, infinite=True,
+                                  time=human_secs(time.time() - started),
+                                  subaction=self._note or None, bounce=i)
+            self._frame.set_bar(render_progress(state, term_width()))
             i += 1
 
 

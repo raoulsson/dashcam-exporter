@@ -83,9 +83,9 @@ from dashcam_exporter.domain.menu.menu import (PROGRESS, IMPORT, META, PREVIEW, 
 # and the progress bars. Moved out whole; imported back under the same names
 # so every call site below still reads the way it always did.
 from dashcam_exporter.application.ui.term import C, human_age, human_bytes, human_secs, rule, term_width, tilde
-from dashcam_exporter.application.ui.progress import (Bar, Live, Waiting, _bar_line, _clip, _erase_line,  # noqa: F401
-                      _eta, _still_bar, _sweep_line, _write_line, show_cursor,
-                      waiting)
+from dashcam_exporter.application.ui.progress import (Bar, Live, ProgressDetail, ProgressState, Waiting,  # noqa: F401
+                      _bar_line, _clip, _erase_line, _eta, _still_bar, _sweep_line, _write_line,
+                      render_progress, show_cursor, waiting)
 from dashcam_exporter.splice.audio.mp3_voice_enhancer import Mp3VoiceEnhancer
 from dashcam_exporter.splice.audio.mp4_to_mp3_splicer import Mp4AudioSplicer
 from dashcam_exporter.splice.transcription.faster_whisper_transcriber import FasterWhisperTranscriber
@@ -655,6 +655,11 @@ class Readout:
         self.counts = ""
         self.last_raw = ""
         self.spin = 0
+        # The three fields a parser can pull out separately (speed, size, and
+        # the subaction) instead of packing them into `note`. Filled from a
+        # ProgressDetail; left None when the parser returns a bare note.
+        self.speed = None
+        self.size = None
 
     def begin(self):
         """Start the clock at the spawn, not at construction.
@@ -682,7 +687,23 @@ class Readout:
         got = self.parser(stripped)
         if got is None:
             return
-        self.frac, self.note = got
+        self.frac, detail = got
+        # A parser may hand back the three fields split out (ProgressDetail) or,
+        # for the simpler steps, a bare note string. Normalise to `note` plus the
+        # optional speed/size, and skip the \0 tail-drop dance for the split form
+        # (it names its own subaction, so there is no raw tail to suppress).
+        if isinstance(detail, ProgressDetail):
+            self.note = detail.subaction
+            self.speed = detail.speed or None
+            self.size = detail.size or None
+            if detail.subaction:
+                self.last_raw = ""
+            mc = re.search(r"\d+\s*/\s*\d+", self.note or "")
+            if mc:
+                self.counts = mc.group(0).replace(" ", "")
+            return
+        self.speed = self.size = None
+        self.note = detail
         # A parser can ask for the tail to be dropped by ending its note with
         # \0. The child prints nothing during a silent phase, so the last line
         # it DID print would otherwise sit there looking like the file being
@@ -697,64 +718,42 @@ class Readout:
         if mc:
             self.counts = mc.group(0).replace(" ", "")
 
-    def _head(self):
+    def _subaction(self):
+        """The identity part of the row: the phase/counter the parser named,
+        plus the child's current file where that is a distinct thing.
+
+        For a step whose parser hands back a ProgressDetail the subaction is
+        already the filename and there is no raw tail. For the others `note` is
+        a phase/counter and `last_raw` is the file being worked on -- show both,
+        with whatever the note already spelled out stripped off the tail."""
+        tail = ""
+        if self.last_raw:
+            tail = _compact_paths(self.last_raw.strip())
+            if self.note:
+                tail = re.sub(r"^\[[^\]]*\]\s*", "", tail)
+                tail = re.sub(r"^Completed\s+[\d.]+\s*\w+\s*/\s*~?[\d.]+\s*\w+\s*",
+                              "", tail)
+        return " ".join(x for x in (self.note or "", tail) if x).strip()
+
+    def state(self):
+        """This row as data. The colours and the field order are the client's
+        (render_progress); here we only say what the fields ARE."""
         if self.frac is not None:
-            # The bar is deliberately narrow: the room goes to the log tail
-            # below, which is the part that says it is still alive.
-            head = _bar_line(self.label, self.frac, self.elapsed, self.note,
-                             self.note_first)
-            # Notes are always appended after the stable bar head. Keeping
-            # them out of the head means a changing filename/phase cannot move
-            # the bar sideways between redraws.
-            used = False
+            pct = int(self.frac * 100)
+            elapsed_eta = "%s/%s" % (human_secs(self.elapsed),
+                                     human_secs(_eta(self.frac, self.elapsed)))
         else:
-            # The indeterminate bar, not a spinner. Both say "still working",
-            # but only one of them looks like the rest of the tool: a step with
-            # a countable unit draws [####......] and a step without one drew a
-            # bare |/-\, so the deploy read as a different program from the
-            # render three lines above it. Waiting already knew how to draw
-            # this for blocking calls; it just had no way in from here.
-            head = _sweep_line(self.label, self.spin, self.elapsed)
-            used = False
-        if self.note and not used:
-            head += "  " + C.yellow(self.note)
-        return head
-
-    def _tail(self, head):
-        """Whatever is left of the terminal, given to the child's latest line.
-
-        _visible_len, not len: the bar inside `head` carries colour now, and
-        counting its escapes as width would shrink the tail by a dozen
-        characters that are not on the screen.
-        """
-        room = term_width() - _visible_len(head) - 4
-        if not (self.last_raw and room > 12):
-            return ""
-        t = _compact_paths(self.last_raw.strip())
-        # The note already carries the counter, so a tail that starts with
-        # "[scan  17/ 239]" spends its width repeating it. Strip the bracket
-        # and show what it identifies — the file being worked on.
-        if self.note:
-            # Drop whatever the note already says. Two shapes do this:
-            # "[scan  17/ 239] NAME" and aws's "Completed 6.0 MiB/13.0 GiB
-            # (457.4 KiB/s) with 6 files remaining" — in both, the head of
-            # the line is the counter we have already extracted, and the
-            # useful remainder (the filename, or the rate and files left)
-            # was being pushed off the right edge by it.
-            t = re.sub(r"^\[[^\]]*\]\s*", "", t)
-            t = re.sub(r"^Completed\s+[\d.]+\s*\w+\s*/\s*~?[\d.]+\s*\w+\s*", "", t)
-        return "  " + C.dim(_fit(t, room))
+            pct, elapsed_eta = None, human_secs(self.elapsed)
+        return ProgressState(action=self.label, fraction=self.frac,
+                             infinite=(self.frac is None), percent=pct,
+                             speed=self.speed, time=elapsed_eta, size=self.size,
+                             subaction=self._subaction() or None, bounce=self.spin)
 
     def line(self):
-        """The whole row, ready to draw.
-
-        No wrapper round the whole line: every piece carries its own colour
-        now, and a colour that spans a nested one ends at the nested one's
-        reset -- which is how the closing bracket and everything after it
-        lost the amber the opening bracket had.
-        """
-        head = self._head()
-        return "  " + head + self._tail(head)
+        """The whole row, ready to draw -- built from `state()` and coloured by
+        the client-side renderer, so the string this step emits carries no
+        colours of its own."""
+        return render_progress(self.state(), term_width())
 
     def finish_line(self):
         """The line a finished step leaves behind.
@@ -908,11 +907,13 @@ NAME_W, RATE_W, SIZE_W = uploader.NAME_W, uploader.RATE_W, uploader.SIZE_W
 def _import_progress(state, moved, total, rate):
     if not total:
         return None
-    note = uploader.progress_note(state["name"], rate, moved, total)
-    # \0: no log tail after this. The tail shows the child's last raw line,
-    # and for rsync that line IS where these numbers came from -- it printed
-    # the rate and a percentage again, truncated, after the ones on the left.
-    return min(moved / float(total), 1.0), note + "\0"
+    # The three fields split out for the client to colour and place -- the file
+    # being copied (subaction), the rate (speed) and how far through (size). No
+    # log tail: a ProgressDetail names its own subaction, so rsync's own
+    # truncated re-print of these numbers is suppressed by feed().
+    size = "%s/%s" % (human_bytes(moved), human_bytes(total))
+    detail = ProgressDetail(subaction=state["name"], speed=rate, size=size)
+    return min(moved / float(total), 1.0), detail
 
 
 def _fitted(text, width):
@@ -7144,7 +7145,7 @@ def looked_at(ctx, scope):
     helper so there is one answer to "what does the operator see while it
     happens", rather than four call sites of which three showed nothing.
     """
-    with ui_handler.active().waiting("Querying the plugin...") as wait:
+    with ui_handler.active().waiting("Querying the plugin") as wait:
         return capture_world(ctx, scope, progress=wait.update)
 
 

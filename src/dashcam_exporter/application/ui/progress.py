@@ -12,6 +12,7 @@ import sys
 import re
 import threading
 import time
+from dataclasses import dataclass
 
 from dashcam_exporter.application.ui.term import C, human_secs, term_width
 
@@ -42,6 +43,81 @@ def _clip(text, width):
     if used < width and pos < len(text):
         out.append(text[pos:pos + width - used])
     return "".join(out)
+
+
+# ---------------------------------------------------------------------------
+# A progress row as DATA, coloured on the client. The message side (a Readout,
+# a waiting bar) fills a ProgressState; render_progress maps the palette and the
+# order. The colours no longer live in the string the message builds, so a copy,
+# a render and a plugin query are one shape rendered one way.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ProgressState:
+    """One progress row, no colour and no layout -- just its fields. Anything
+    left None is dropped from the row rather than blanked."""
+    action: str                  # "Import", "Render", "Querying the plugin"
+    fraction: float = None       # 0..1 fill for the bar; None => not measured
+    infinite: bool = False       # indeterminate: a bouncing block, no percent
+    percent: int = None          # explicit percent; else omitted
+    speed: str = None            # "77.18MB/s"
+    time: str = None             # "0:05/--:--" or "0:07"
+    size: str = None             # "373.2 MB/32.6 GB"
+    subaction: str = None        # filename / phase / plugin note
+    bounce: int = 0              # frame index, for the infinite block's slot
+
+
+@dataclass(frozen=True)
+class ProgressDetail:
+    """What a parser pulls out of a line beyond the fraction -- the fields that
+    used to be crammed into one formatted `note`. A parser may still return a
+    bare string instead (taken as `subaction`) where it has nothing more."""
+    subaction: str = ""
+    speed: str = ""
+    size: str = ""
+
+
+_FILLED, _EMPTY, _BLOCK = "#", ".", "###"
+
+
+def _bounce_at(i, width):
+    span = max(1, width - len(_BLOCK))
+    step = i % (2 * span)
+    return step if step < span else 2 * span - step
+
+
+def _bar_cells(state, width):
+    if state.infinite:
+        at = _bounce_at(state.bounce, width)
+        return _EMPTY * at + _BLOCK + _EMPTY * (width - at - len(_BLOCK))
+    frac = min(max(state.fraction or 0.0, 0.0), 1.0)
+    filled = int(round(width * frac))
+    return _FILLED * filled + _EMPTY * (width - filled)
+
+
+def render_progress(state, width):
+    """Assemble and COLOUR one progress row from its data -- the client side.
+
+    Fixed order and palette so every bar reads alike:
+      action(green)  bar(violet)  percent(cyan)  speed/time/size(amber)  subaction(green)
+    """
+    bar_w = max(8, min(24, width - 60))
+    parts = [C.green(state.action),
+             C.magenta("[%s]" % _bar_cells(state, bar_w))]
+    if not state.infinite and state.percent is not None:
+        parts.append(C.cyan("%3d%%" % state.percent))
+    if state.speed:
+        parts.append(C.gold(state.speed))
+    if state.time:
+        parts.append(C.gold(state.time))
+    if state.size:
+        parts.append(C.gold(state.size))
+    if state.subaction:
+        parts.append(C.green(state.subaction))
+    # No clip here: the draw layer fits the row (stream _clip, frame _box), and
+    # a subaction longer than the row must survive to be trimmed there.
+    return "  " + "  ".join(parts)
+
 
 # ---------------------------------------------------------------------------
 # Live output area: a progress bar (or spinner) plus the raw last line, redrawn
@@ -248,20 +324,12 @@ class Waiting(Bar):
             i += 1
 
     def render_at(self, i, elapsed):
-        """`label [.........###....] 0:03`."""
-        width = self.width(room_for=40)
-        at = self._bounce(i, width)
-        bar = self.EMPTY * at + self.BLOCK + self.EMPTY * (width - at - len(self.BLOCK))
-        text = "  %s %s %s" % (C.gold(self.label), C.magenta("[%s]" % bar),
-                               C.gold(human_secs(elapsed)))
-        return text + (("  " + self._note) if self._note else "") + " "
-
-    def _bounce(self, i, width):
-        span = max(1, width - len(self.BLOCK))
-        step = i % (2 * span)
-        if step < span:
-            return step
-        return 2 * span - step
+        """`action [.........###....] 0:03  note` -- via the shared renderer, so
+        the indeterminate bar wears the same colours as the determinate one."""
+        state = ProgressState(action=self.label, infinite=True,
+                              time=human_secs(elapsed),
+                              subaction=self._note or None, bounce=i)
+        return render_progress(state, term_width())
 
 
 def _write_line(text):
