@@ -124,9 +124,12 @@ def render_progress(state, width):
         parts.append(C.green(state.subaction))
     if state.tail:
         parts.append(C.green(state.tail))
-    # No clip here: the draw layer fits the row (stream _clip, frame _box), and
-    # a subaction longer than the row must survive to be trimmed there.
-    return "  " + "  ".join(parts)
+    # Cap (and pad) to exactly one row's width. A long subaction -- a plugin's
+    # ssh note, a long filename -- must never overrun the line; and padding to
+    # the width clears the tail of the previous, longer redraw so nothing of it
+    # is left behind.
+    line = _clip("  " + "  ".join(parts), width)
+    return line + " " * max(0, width - len(_ANSI.sub("", line)))
 
 
 # ---------------------------------------------------------------------------
