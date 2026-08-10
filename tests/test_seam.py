@@ -1323,6 +1323,20 @@ class TestGenerateMetaRebuildsRatherThanSkips(SeamTest):
         """A fragment too short to render never had one."""
         self.assertEqual(P._wipe_sidecars({"trips": [{"index": 1}]}), 0)
 
+    def test_generate_meta_clears_the_boundary_cache_first(self):
+        """The cache is keyed on the clips, not on the grouping algorithm, so a
+        code change that moves trip boundaries would otherwise be reused stale.
+        Item 2 must recompute the grouping, not rewrite sidecars around it."""
+        b = self.bench()
+        b.ctx.scan_cache = b.ctx.out_dir / ".scan_cache.json"
+        b.ctx.scan_cache.write_text('{"groups": [], "trip_moved": []}')
+        b.ctx.last_groups = (b.ctx.import_root, {"trips": []})
+        b.ctx.last_scan = object()
+        P._clear_scan_cache(b.ctx)
+        self.assertFalse(b.ctx.scan_cache.exists(), "the stale boundary cache survived")
+        self.assertIsNone(b.ctx.last_groups)
+        self.assertIsNone(b.ctx.last_scan)
+
 
 class TestThePreviewBoxTicksWhenThereIsAPreview(SeamTest):
     """The state of a step is read off what the step WRITES.

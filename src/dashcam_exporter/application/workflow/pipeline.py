@@ -3030,6 +3030,16 @@ def step_generate_meta(ctx):
     if root is None:
         return record(ctx, NAME[META], SKIPPED, started, "no import folder")
 
+    # Clean first, then really redo. Item 2 is where the trip boundaries are
+    # ESTABLISHED, so it must not trust a cached view of them. The on-disk
+    # boundary cache is keyed on the clips and the tuning params but NOT on the
+    # grouping ALGORITHM -- so after the code that draws trip boundaries changes,
+    # the same card hits the same key and gets the OLD boundaries back, and the
+    # sidecars get rewritten faithfully around a grouping that is out of date.
+    # Wiping it here forces one fresh scan (which repopulates the cache), and the
+    # --sidecars-only pass below then reuses that fresh result rather than
+    # scanning twice.
+    _clear_scan_cache(ctx)
     have = load_groups(ctx, root)
     if have is None:
         # The scan failed and said so in red. Carrying on runs the whole pass
@@ -3076,6 +3086,25 @@ def step_generate_meta(ctx):
               % (C.yellow("%d" % n), _skipped_note(have),
                  tilde(ctx.out_dir / root.name)))
     return record(ctx, NAME[META], RAN, started, "%d trips described" % n)
+
+
+def _clear_scan_cache(ctx):
+    """Drop the boundary cache -- the on-disk .scan_cache.json and the in-memory
+    (root, payload) -- so the next scan recomputes the grouping from scratch.
+
+    The cache exists so the preview, Exclude and the sidecar pass share one
+    expensive scan; it is right to keep for those. But it is keyed on the inputs,
+    not on the algorithm, so it cannot tell that the grouping code moved under
+    it. Generate Meta is the one step whose whole job is to (re)establish the
+    boundaries, so it clears the cache and pays for a fresh scan every time."""
+    cache = getattr(ctx, "scan_cache", None)
+    if cache is not None:
+        try:
+            cache.unlink()
+        except OSError:
+            pass      # already gone, or never written
+    ctx.last_groups = None
+    ctx.last_scan = None
 
 
 def _wipe_sidecars(payload):
