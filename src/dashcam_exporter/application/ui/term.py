@@ -95,6 +95,10 @@ class C:
         return cls._w("32", s)
 
     @classmethod
+    def bright_green(cls, s):
+        return cls._w("92", s)
+
+    @classmethod
     def muted_green(cls, s):
         """A positive state that is informational, not a fresh completion."""
         return cls._w("2;32", s)

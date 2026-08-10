@@ -106,11 +106,11 @@ def render_progress(state, width):
     THE one progress renderer. Every bar in the tool -- a child's stream, a
     waiting spinner, an in-process loop -- goes through here, so they all read
     alike. Fixed order and palette:
-      action(green bold)  bar(violet)  percent(cyan)  speed/time/size(amber)  subaction(green)  tail(green)
+      action(bright green bold)  bar(violet)  percent(cyan)  speed/time/size(amber)  subaction(bright green)
     A filename is a subaction. Nothing here is dim.
     """
     bar_w = max(8, min(24, width - 60))
-    parts = [C.bold(C.green(state.action)),
+    parts = [C.bold(C.bright_green(state.action)),
              C.magenta("[%s]" % _bar_cells(state, bar_w))]
     if not state.infinite and state.percent is not None:
         parts.append(C.cyan("%3d%%" % state.percent))
@@ -121,9 +121,9 @@ def render_progress(state, width):
     if state.size:
         parts.append(C.gold(state.size))
     if state.subaction:
-        parts.append(C.green(state.subaction))
+        parts.append(C.bright_green(state.subaction))
     if state.tail:
-        parts.append(C.green(state.tail))
+        parts.append(C.bright_green(state.tail))
     # Cap (and pad) to exactly one row's width. A long subaction -- a plugin's
     # ssh note, a long filename -- must never overrun the line; and padding to
     # the width clears the tail of the previous, longer redraw so nothing of it
