@@ -43,16 +43,27 @@ fi
 if [ -z "${DOS_UI_INNER:-}" ] && [ "$(uname)" = "Darwin" ] \
         && command -v osascript >/dev/null 2>&1; then
     inner="cd '$HERE' && DOS_UI_INNER=1 '$HERE/RUN-DASHCAM-EXPORTER-DOS-UI.sh'"
+    # Open the window EMPTY, size it, THEN run the tool in it. Two reasons this
+    # order matters: number of rows/columns are WINDOW properties (setting them
+    # on the tab that `do script` returns errors, and the try swallows it), and
+    # the frame reads the terminal size once at startup with no SIGWINCH catch --
+    # so it has to be the right size before the tool starts, not resized under
+    # it afterwards. The request is clamped to what the screen/font can show
+    # (140 cols may land at ~131), and the frame follows that actual size rather
+    # than painting a fixed 140 that overflows the window.
     winid="$(osascript 2>/dev/null <<OSA
 tell application "Terminal"
     activate
-    set theTab to do script "$inner"
+    set theTab to do script ""
+    set theWin to window 1
     delay 0.3
     try
-        set number of columns of theTab to $COLS
-        set number of rows of theTab to $ROWS
+        set number of columns of theWin to $COLS
+        set number of rows of theWin to $ROWS
     end try
-    return id of window 1
+    delay 0.2
+    do script "$inner" in theTab
+    return id of theWin
 end tell
 OSA
 )"
@@ -85,6 +96,9 @@ OSA
 fi
 
 # --- Inner run (the new window), or non-macOS/fallback: size and run --------
+# The window is already sized (macOS osascript above, or this printf on a
+# terminal that honours it). Do NOT pin FRAME_ROWS/FRAME_COLS: let the frame
+# read the ACTUAL terminal size, so a request clamped by the screen (140 -> ~131)
+# gives a frame that fits the window instead of one that overflows it.
 [ -t 1 ] && printf '\033[8;%d;%dt' "$ROWS" "$COLS"
-exec env SET_UI_STYLE=framed FRAME_ROWS="$ROWS" FRAME_COLS="$COLS" \
-    "$HERE/RUN-DASHCAM-EXPORTER.sh" "$@"
+exec env SET_UI_STYLE=framed "$HERE/RUN-DASHCAM-EXPORTER.sh" "$@"
