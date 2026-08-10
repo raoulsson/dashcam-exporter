@@ -4014,22 +4014,29 @@ def step_preview(ctx):
     # same line, so a failure looked exactly like a success.
     bar = Bar("Stills")
     for i, t in enumerate(trips, 1):
-        front = t.get("front") or []
+        # Sample the DRIVING clips, not the raw span: the first frame of a trip
+        # is the same driveway every time and the middle frame lands in the
+        # 3-hour park. Two stills at a third and two thirds THROUGH the driving
+        # give one on the way out and one on the way back, with nothing pulled
+        # from a parked stretch. Falls back to all clips if a trip has no driving
+        # list (an older grouping payload without the field).
+        driving = t.get("driving") or t.get("front") or []
         name = "trip_%02d_%s_%s.jpg" % (t["index"], t["day"], t["start"][11:16].replace(":", "-"))
         dst = previews_dir / name
         _still_bar(bar, i, len(trips), name)
-        if not front:
+        if not driving:
             failed.append(t["index"])
             continue
-        ordered_front = _clip_review_order(front)
-        src = Path(ordered_front[0])
+        ordered = _clip_review_order(driving)
+        n = len(ordered)
+        src = Path(ordered[n // 3])                    # ~1/3 through the driving
         if extract_still(src, dst,
                          seconds=ctx.still_seconds, width=ctx.still_width):
             stills[t["index"]] = dst
             made += 1
         else:
             failed.append(t["index"])
-        mid_src = Path(ordered_front[len(ordered_front) // 2])
+        mid_src = Path(ordered[min(n - 1, (2 * n) // 3)])   # ~2/3 through
         mid_dst = previews_dir / (name[:-4] + "_mid.jpg")
         if extract_still(mid_src, mid_dst,
                          seconds=ctx.still_seconds, width=ctx.still_width):

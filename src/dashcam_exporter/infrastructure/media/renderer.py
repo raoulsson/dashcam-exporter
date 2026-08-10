@@ -2896,6 +2896,14 @@ def main() -> int:
                                  f"trip_{day_labels[i - 1]}_{start:%H-%M}_{pub_no[i]:02d}")
                              if renderable and i in pub_no else None),
                 "front": [str(c.front) for c in g],
+                # The DRIVING front clips -- those not sitting parked (GPS shows
+                # a standstill, or no fix at all under a garage roof). This is
+                # what survives rendering, so the preview samples its stills from
+                # here and a frame is never pulled from the 3-hour park in the
+                # middle of a trip. Falls back to all of `front` if a trip is
+                # somehow all-parked (a fragment), so there is always something.
+                "driving": [str(c.front) for c in g if not track.is_parked(c)]
+                           or [str(c.front) for c in g],
                 # A clip can legitimately have no rear file (rear cam absent or
                 # its file loop-overwritten), so this list is often shorter than
                 # `front` and must not be zipped with it positionally.
