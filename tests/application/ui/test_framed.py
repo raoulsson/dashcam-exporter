@@ -22,24 +22,33 @@ class _NoColour(unittest.TestCase):
 
 class TheLayoutIsPureArithmetic(unittest.TestCase):
     def test_the_bands_stack_in_order_on_an_80x24(self):
-        L = framed.Layout(24, 80)
+        L = framed.Layout(24, 80)                              # show_progress default
         self.assertEqual((L.title_top_rule, L.title_row, L.title_sep), (1, 3, 5))
-        self.assertEqual((L.log_top, L.log_bottom), (6, 12))
-        self.assertEqual((L.progress_top_rule, L.bar_row, L.progress_sep), (13, 15, 17))
+        self.assertEqual((L.log_top, L.log_bottom), (6, 14))
+        self.assertEqual((L.progress_top_rule, L.bar_row, L.progress_sep), (15, 16, 17))
         self.assertEqual(L.menu_rows, [18, 19, 20])          # 3 grid rows
         self.assertEqual((L.hint_row, L.select_rule, L.select_row, L.bottom_rule),
                          (21, 22, 23, 24))
-        self.assertEqual(L.log_height, 7)
+        self.assertEqual(L.log_height, 9)
 
-    def test_the_boxes_stack_in_order_at_any_height(self):
+    def test_the_progress_box_is_one_bar_row_no_padding(self):
         for rows in (22, 24, 40, 60):
             L = framed.Layout(rows, 80)
-            self.assertEqual(L.bar_row, L.progress_top_rule + 2)   # rule, pad, bar
-            self.assertEqual(L.progress_sep, L.bar_row + 2)        # bar, pad, sep
+            self.assertEqual(L.bar_row, L.progress_top_rule + 1)   # rule, then bar
+            self.assertEqual(L.progress_sep, L.bar_row + 1)        # bar, then sep
             self.assertEqual(L.menu_top, L.progress_sep + 1)
             self.assertEqual(L.select_row, L.select_rule + 1)      # rule, then select
             self.assertEqual(L.bottom_rule, L.select_row + 1)      # box closes below it
             self.assertGreaterEqual(L.log_height, 1)
+
+    def test_when_idle_the_progress_box_is_gone_and_the_log_grows(self):
+        with_bar = framed.Layout(24, 80, show_progress=True)
+        idle = framed.Layout(24, 80, show_progress=False)
+        self.assertIsNone(idle.bar_row)
+        self.assertIsNone(idle.progress_top_rule)
+        self.assertEqual(idle.progress_sep, with_bar.progress_sep)   # menu unmoved
+        self.assertEqual(idle.log_bottom, idle.progress_sep - 1)     # log reclaims the box
+        self.assertEqual(idle.log_height, with_bar.log_height + 2)   # the rule + bar row
 
     def test_a_tiny_terminal_is_clamped_not_broken(self):
         L = framed.Layout(4, 10)
@@ -101,7 +110,7 @@ class TheFrameRendersIntoRegions(_NoColour):
         out = self._render()
         self.assertEqual(self._row_of(out, "dashcam-exporter"), 3)   # in the title box
         self.assertEqual(self._row_of(out, "3 trips"), 3)            # status shares that row
-        self.assertEqual(self._row_of(out, "Render ####"), 15)       # the pinned bar
+        self.assertEqual(self._row_of(out, "Render ####"), 16)       # the pinned bar
         # the six log lines fill the top of the log region (rows 6..)
         self.assertEqual(self._row_of(out, "clip 1/20"), 6)
         self.assertEqual(self._row_of(out, "clip 6/20"), 11)

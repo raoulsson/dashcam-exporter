@@ -92,10 +92,11 @@ class Layout:
     MIN_ROWS = 22
     MIN_COLS = 60
 
-    def __init__(self, rows, cols, menu_rows=DEFAULT_MENU_ROWS):
+    def __init__(self, rows, cols, menu_rows=DEFAULT_MENU_ROWS, show_progress=True):
         self.rows = max(rows, self.MIN_ROWS)
         self.cols = max(cols, self.MIN_COLS)
         self.grid_rows = max(1, menu_rows)
+        self.show_progress = show_progress
 
         # Title box, five rows at the top (top corner, pad, title, pad, sep).
         self.title_top_rule = 1
@@ -112,15 +113,22 @@ class Layout:
         self.hint_row = self.rows - 3
         self.menu_bottom = self.rows - 4
         self.menu_top = self.menu_bottom - self.grid_rows + 1
-        self.progress_sep = self.menu_top - 1
-        self.bar_pad_bot = self.progress_sep - 1
-        self.bar_row = self.bar_pad_bot - 1
-        self.bar_pad_top = self.bar_row - 1
-        self.progress_top_rule = self.bar_pad_top - 1
 
-        # The log fills what is left, between the title box and the progress box.
+        # The double rule between the log and the menu is always here. The
+        # progress box lives just above it and ONLY when a bar is running: one
+        # row for the bar, set off by a single rule, with no blank padding. When
+        # idle it is gone entirely and the log reclaims those rows -- an empty
+        # box was eating the mid-screen and cutting the log off short.
+        self.progress_sep = self.menu_top - 1
         self.log_top = self.title_sep + 1
-        self.log_bottom = self.progress_top_rule - 1
+        if show_progress:
+            self.bar_row = self.progress_sep - 1
+            self.progress_top_rule = self.bar_row - 1
+            self.log_bottom = self.progress_top_rule - 1
+        else:
+            self.bar_row = None
+            self.progress_top_rule = None
+            self.log_bottom = self.progress_sep - 1
 
     @property
     def log_height(self):
@@ -269,8 +277,9 @@ class FramedUiHandler(UiHandler):
         self._log = collections.deque()
         self._real_stdout = None
         self._open = False
+        self._show_progress = False   # the pbar box appears only while a bar runs
         rows, cols = self._size()
-        self.layout = Layout(rows, cols, self._menu_rows)
+        self.layout = Layout(rows, cols, self._menu_rows, self._show_progress)
 
     # -- lifecycle --------------------------------------------------------
     def _size(self):
@@ -286,7 +295,7 @@ class FramedUiHandler(UiHandler):
 
     def open(self):
         rows, cols = self._size()
-        self.layout = Layout(rows, cols, self._menu_rows)
+        self.layout = Layout(rows, cols, self._menu_rows, self._show_progress)
         self._real_stdout = sys.stdout
         sys.stdout = _LogTee(self, self._real_stdout)
         self._open = True
@@ -376,7 +385,7 @@ class FramedUiHandler(UiHandler):
             # the whole frame so the bands above it follow.
             self._menu_rows = len(lines)
             rows, cols = self._size()
-            self.layout = Layout(rows, cols, self._menu_rows)
+            self.layout = Layout(rows, cols, self._menu_rows, self._show_progress)
             self.repaint()
         else:
             self._paint_menu()
@@ -410,7 +419,16 @@ class FramedUiHandler(UiHandler):
 
     def set_bar(self, text):
         self._bar = text
-        self._paint_bar()
+        want = bool(text)
+        if want != self._show_progress:
+            # The box opens when a bar arrives and closes when it goes; the log
+            # region grows or shrinks with it, so the whole frame is repainted.
+            self._show_progress = want
+            rows, cols = self._size()
+            self.layout = Layout(rows, cols, self._menu_rows, self._show_progress)
+            self.repaint()
+        else:
+            self._paint_bar()
 
     def done(self, what):
         self.log(C.green("  100%% - %s." % what))
@@ -496,16 +514,18 @@ class FramedUiHandler(UiHandler):
         if not self._open:
             return
         L, cols = self.layout, self.layout.cols
-        buf = _at(L.progress_top_rule, 1, _rule_single(cols))
-        buf += _at(L.bar_pad_top, 1, _box("", cols))
-        buf += _at(L.bar_pad_bot, 1, _box("", cols))
+        buf = ""
+        if L.show_progress:
+            # A single rule, then the one bar row -- no blank padding.
+            buf += _at(L.progress_top_rule, 1, _rule_single(cols))
+            buf += _at(L.bar_row, 1, _box(" " + self._bar, cols))
+        # The log|menu double rule is always drawn (it is the menu's top edge).
         buf += _at(L.progress_sep, 1, _rule_double(cols))
         self._write(buf)
-        self._paint_bar()
 
     def _paint_bar(self):
         # The bar row alone -- redrawn often while a step or the spinner runs.
-        if not self._open:
+        if not self._open or not self.layout.show_progress:
             return
         L, cols = self.layout, self.layout.cols
         self._write(_at(L.bar_row, 1, _box((" " + self._bar) if self._bar else "", cols)))
