@@ -162,6 +162,33 @@ class TestBoundariesFallWhereTheDrivingSays(GroupingTest):
         self.assertEqual(len(self.group()), 1)
 
 
+class TestAFixlessDepartureStillAnchors(GroupingTest):
+    """A trip whose first clip has NO GPS fix — a cold start or pulling out of
+    an underground spot at home — must still segment. Seeding the anchor to None
+    there made `min_dist` None for every clip, so `left` never tripped and the
+    whole card came back as a single open trip. A real card began exactly this
+    way (first three clips fixless) and merged a home->mall->home outing and a
+    later out-and-back into one. The anchor falls back to `home` here."""
+
+    def add_nofix(self, at, secs=CLIP_SECS):
+        """A clip that recorded no GPS at all — no .gpx file for it."""
+        stamp = at.strftime("%Y%m%d%H%M%S")
+        front = self.root / "front" / ("%s_%04d.mp4" % (stamp, secs))
+        front.write_bytes(b"")
+        self.clips.append(Clip.paired(stamp, 0, secs, front, None))
+        return at + timedelta(seconds=secs)
+
+    def test_it_does_not_collapse_into_one_trip(self):
+        t = datetime(2026, 7, 28, 14, 14, 41)
+        t = self.add_nofix(t)                 # cold start at home, no fix
+        t = self.add_nofix(t)
+        for where in (_away(400), HOME, _away(400), HOME):
+            t = self.add(t, where)
+        trips = self.group()
+        self.assertEqual(len(trips), 2, "a fixless first clip merged the day")
+        self.assertEqual(sum(len(x) for x in trips), len(self.clips))
+
+
 class TestTheRolloverSplitsRatherThanDiscards(GroupingTest):
     """A drive running through 04:00 is force-closed there, and what follows
     is the next trip — not footage that falls off the end.

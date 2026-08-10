@@ -447,6 +447,28 @@ def group_into_trips(
         s, e = eps[idx]
         return e if e is not None else s
 
+    def _seed_anchor(start):
+        """The trip's origin — where it departs from. Its own first fix when it
+        has one (a trip can start anywhere, not just home). But the departure
+        clip often has NO fix at all: a cold GPS start, or pulling out of an
+        underground spot. Seeding the anchor to None there silently disabled the
+        whole leave/return/park close logic — `min_dist` returns None against a
+        None anchor, so `left` never trips and the trip never ends — which merged
+        an entire day (first three clips fixless) into one open trip. Fall back
+        to `home` when configured (the usual fixless departure is from home),
+        else scan forward to the first clip that DID fix; a phantom parking-mode
+        jump on clip 0 is exactly what `home` steps over."""
+        f = eps[start][0] if eps[start][0] is not None else last_fix(start)
+        if f is not None:
+            return f
+        if home is not None:
+            return home
+        for k in range(start + 1, n):
+            lf = last_fix(k)
+            if lf is not None:
+                return lf
+        return None
+
     def rollover_before(idx):
         """Whether this clip opens on the far side of the rollover.
 
@@ -515,7 +537,7 @@ def group_into_trips(
                 break
         start = i
         if anchor is None:
-            anchor = eps[start][0] if eps[start][0] is not None else last_fix(start)
+            anchor = _seed_anchor(start)
         # --- DRIVING: accumulate until arrival-park at the anchor, or rollover. -
         left = False
         end = None
