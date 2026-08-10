@@ -55,7 +55,7 @@ from dashcam_exporter.application.ui.term import C, term_width, human_secs
 from dashcam_exporter.application.ui import screens
 from dashcam_exporter.application.ui import prompt as prompt_mod
 from dashcam_exporter.application.ui.handler import UiHandler
-from dashcam_exporter.application.ui.progress import ProgressState, render_progress
+from dashcam_exporter.application.ui.progress import ProgressState, render_progress, _clip
 
 CSI = "\x1b["
 ALT_ON = CSI + "?1049h"
@@ -152,12 +152,16 @@ def _fit(text, cols):
 
 
 def _pad(text, width):
-    """Pad (or clip) a possibly-coloured line to exactly `width` visible cols."""
+    """Fit a possibly-coloured line to exactly `width` VISIBLE columns -- the one
+    place the box cell fits its content. On overflow, clip by an ANSI-aware pass
+    that keeps the colour (a plain slice dropped every escape, which is how the
+    bar lost its colour once the box trimmed it to cols-2), and reset at the cut
+    so the trimmed colour cannot bleed into the border that follows."""
     n = len(_plain(text))
     if n < width:
         return text + " " * (width - n)
     if n > width:
-        return _plain(text)[:width]
+        return _clip(text, width) + CSI + "0m"
     return text
 
 
