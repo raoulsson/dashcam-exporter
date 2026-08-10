@@ -206,8 +206,13 @@ class Ui(ABC):
 
         `parser` is a callable given each output line, returning either None or
         (fraction_done, note) — that is what turns the spinner into a real bar.
-        Your tool's output format is yours to parse, which is why the hook is
-        here rather than a table of formats this repo would have to maintain.
+        `note` is normally the identity of what is being worked on (a filename,
+        a phase); the child's current line is shown dimmer beside it. For finer
+        control the second element may instead be a `ProgressDetail`
+        (subaction/speed/size/tail), whose fields the display colours and places
+        itself. Your tool's output format is yours to parse, which is why the
+        hook is here rather than a table of formats this repo would have to
+        maintain.
         """
 
 

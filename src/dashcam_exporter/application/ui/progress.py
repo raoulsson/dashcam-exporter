@@ -63,7 +63,8 @@ class ProgressState:
     speed: str = None            # "77.18MB/s"
     time: str = None             # "0:05/--:--" or "0:07"
     size: str = None             # "373.2 MB/32.6 GB"
-    subaction: str = None        # filename / phase / plugin note
+    subaction: str = None        # the identity: filename / phase / plugin note
+    tail: str = None             # the ticking detail beside it (counter, file)
     bounce: int = 0              # frame index, for the infinite block's slot
 
 
@@ -71,10 +72,14 @@ class ProgressState:
 class ProgressDetail:
     """What a parser pulls out of a line beyond the fraction -- the fields that
     used to be crammed into one formatted `note`. A parser may still return a
-    bare string instead (taken as `subaction`) where it has nothing more."""
+    bare string instead (taken as `subaction`) where it has nothing more.
+
+    `subaction` is the identity (what is being worked on); `tail` is the live
+    detail shown dimmer beside it (a clip counter, the child's current file)."""
     subaction: str = ""
     speed: str = ""
     size: str = ""
+    tail: str = ""
 
 
 _FILLED, _EMPTY, _BLOCK = "#", ".", "###"
@@ -99,7 +104,7 @@ def render_progress(state, width):
     """Assemble and COLOUR one progress row from its data -- the client side.
 
     Fixed order and palette so every bar reads alike:
-      action(green)  bar(violet)  percent(cyan)  speed/time/size(amber)  subaction(green)
+      action(green)  bar(violet)  percent(cyan)  speed/time/size(amber)  subaction(green)  tail(dim)
     """
     bar_w = max(8, min(24, width - 60))
     parts = [C.green(state.action),
@@ -114,6 +119,8 @@ def render_progress(state, width):
         parts.append(C.gold(state.size))
     if state.subaction:
         parts.append(C.green(state.subaction))
+    if state.tail:
+        parts.append(C.dim(state.tail))
     # No clip here: the draw layer fits the row (stream _clip, frame _box), and
     # a subaction longer than the row must survive to be trimmed there.
     return "  " + "  ".join(parts)

@@ -655,11 +655,13 @@ class Readout:
         self.counts = ""
         self.last_raw = ""
         self.spin = 0
-        # The three fields a parser can pull out separately (speed, size, and
-        # the subaction) instead of packing them into `note`. Filled from a
-        # ProgressDetail; left None when the parser returns a bare note.
+        # The fields a parser can pull out separately (speed, size, and an
+        # explicit tail) instead of packing them into `note`. Filled from a
+        # ProgressDetail; left None when the parser returns a bare note, in which
+        # case the tail falls back to the child's current line.
         self.speed = None
         self.size = None
+        self.tail = None
 
     def begin(self):
         """Start the clock at the spawn, not at construction.
@@ -696,13 +698,15 @@ class Readout:
             self.note = detail.subaction
             self.speed = detail.speed or None
             self.size = detail.size or None
-            if detail.subaction:
-                self.last_raw = ""
-            mc = re.search(r"\d+\s*/\s*\d+", self.note or "")
+            self.tail = detail.tail or None
+            # A ProgressDetail names its own fields, so the child's raw re-print
+            # of them is not wanted as a fallback tail.
+            self.last_raw = ""
+            mc = re.search(r"\d+\s*/\s*\d+", (self.note or "") + " " + (self.tail or ""))
             if mc:
                 self.counts = mc.group(0).replace(" ", "")
             return
-        self.speed = self.size = None
+        self.speed = self.size = self.tail = None
         self.note = detail
         # A parser can ask for the tail to be dropped by ending its note with
         # \0. The child prints nothing during a silent phase, so the last line
@@ -718,26 +722,24 @@ class Readout:
         if mc:
             self.counts = mc.group(0).replace(" ", "")
 
-    def _subaction(self):
-        """The identity part of the row: the phase/counter the parser named,
-        plus the child's current file where that is a distinct thing.
-
-        For a step whose parser hands back a ProgressDetail the subaction is
-        already the filename and there is no raw tail. For the others `note` is
-        a phase/counter and `last_raw` is the file being worked on -- show both,
-        with whatever the note already spelled out stripped off the tail."""
-        tail = ""
-        if self.last_raw:
-            tail = _compact_paths(self.last_raw.strip())
-            if self.note:
-                tail = re.sub(r"^\[[^\]]*\]\s*", "", tail)
-                tail = re.sub(r"^Completed\s+[\d.]+\s*\w+\s*/\s*~?[\d.]+\s*\w+\s*",
-                              "", tail)
-        return " ".join(x for x in (self.note or "", tail) if x).strip()
+    def _tail(self):
+        """The live detail beside the identity: an explicit ProgressDetail tail
+        when the parser gave one, else the child's current line (with whatever
+        the note already spelled out stripped off, so it does not repeat)."""
+        if self.tail is not None:
+            return self.tail
+        if not self.last_raw:
+            return ""
+        t = _compact_paths(self.last_raw.strip())
+        if self.note:
+            t = re.sub(r"^\[[^\]]*\]\s*", "", t)
+            t = re.sub(r"^Completed\s+[\d.]+\s*\w+\s*/\s*~?[\d.]+\s*\w+\s*", "", t)
+        return t
 
     def state(self):
         """This row as data. The colours and the field order are the client's
-        (render_progress); here we only say what the fields ARE."""
+        (render_progress); here we only say what the fields ARE -- `note` is the
+        identity (subaction), and `_tail` the ticking detail beside it."""
         if self.frac is not None:
             pct = int(self.frac * 100)
             elapsed_eta = "%s/%s" % (human_secs(self.elapsed),
@@ -747,7 +749,8 @@ class Readout:
         return ProgressState(action=self.label, fraction=self.frac,
                              infinite=(self.frac is None), percent=pct,
                              speed=self.speed, time=elapsed_eta, size=self.size,
-                             subaction=self._subaction() or None, bounce=self.spin)
+                             subaction=self.note or None,
+                             tail=self._tail() or None, bounce=self.spin)
 
     def line(self):
         """The whole row, ready to draw -- built from `state()` and coloured by
@@ -1071,7 +1074,12 @@ def make_render_parser():
         doing = "trip %d/%d" % (state["trips_seen"], total)
         if state["clips"]:
             doing += "  clip %d/%d" % (state["clip"], state["clips"])
-        return min(frac, 1.0), uploader.progress_note(state["name"], tail=doing)
+        # The trip name is the identity (subaction); the trip/clip counter is
+        # the detail that ticks (tail). On a one-trip card the header carries no
+        # name, so the counter becomes the identity rather than a dim aside.
+        if state["name"]:
+            return min(frac, 1.0), ProgressDetail(subaction=state["name"], tail=doing)
+        return min(frac, 1.0), ProgressDetail(subaction=doing)
 
     return parse
 
