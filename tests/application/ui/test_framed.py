@@ -157,8 +157,8 @@ class TheSplashCanCarryLaunchArt(_NoColour):
         self.assertNotIn("+-", out)        # art, not the fallback card
 
 
-class TheLogIsARingOfTheVisibleHeight(_NoColour):
-    def test_it_keeps_only_the_last_screenful(self):
+class TheLogKeepsHistoryAndPages(_NoColour):
+    def _filled(self):
         h = framed.FramedUiHandler(splash_seconds=0)
         h._size = lambda: (24, 80)
         cap = io.StringIO()
@@ -168,11 +168,37 @@ class TheLogIsARingOfTheVisibleHeight(_NoColour):
             h.open()
             for i in range(100):
                 h.log("line %d" % i)
+            yield h, cap
             h.close()
         finally:
             sys.stdout = saved
-        self.assertEqual(len(h._log), h.layout.log_height)
+
+    def _visible(self, cap):
+        rows = {}
+        for m in re.finditer(r"\x1b\[(\d+);1H\s*([^\x1b]*)", cap.getvalue()):
+            rows[int(m.group(1))] = m.group(2)
+        return rows
+
+    def test_history_is_kept_but_only_a_screenful_shows(self):
+        gen = self._filled()
+        h, cap = next(gen)
+        # History retained for paging; the newest line sits at the bottom.
+        self.assertEqual(len(h._log), 100)
         self.assertEqual(h._log[-1], "line 99")
+        self.assertEqual(h._log_offset, 0)
+        list(gen)
+
+    def test_j_pages_back_and_l_pages_forward(self):
+        gen = self._filled()
+        h, cap = next(gen)
+        h.page("j")                       # older
+        self.assertEqual(h._log_offset, h.layout.log_height)
+        h.page("l")                       # newer, back to the bottom
+        self.assertEqual(h._log_offset, 0)
+        # l at the bottom clamps, does not go negative
+        h.page("l")
+        self.assertEqual(h._log_offset, 0)
+        list(gen)
 
 
 class TheWaitingSpinnerUsesThePinnedBar(_NoColour):

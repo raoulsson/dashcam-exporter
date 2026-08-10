@@ -55,6 +55,13 @@ class UiHandler(ABC):
         and the caller prints the banner into the scroll as it always has."""
         return False
 
+    def page(self, direction):
+        """Scroll the mid-screen a page (j/left = older, l/right = newer) when
+        the log has more than fits. Returns True if the backend consumed the key.
+        The stream backend has no fixed region to page, so it returns False and
+        the key falls through to the menu as before."""
+        return False
+
     def clear_log(self):
         """Start a fresh mid-screen for a new action. The framed backend wipes
         its scrolling region so the step's own header and output begin at the

@@ -165,6 +165,7 @@ DH, DV = "═", "║"
 LTD, RTD = "╠", "╣"     # double rule meeting the side
 SH = "─"
 LTS, RTS = "╟", "╢"     # single rule meeting the side
+UP, DOWN = "↑", "↓"     # page-indicator arrows (lines hidden above / below)
 
 
 def _top(cols):
@@ -264,6 +265,8 @@ def _fixed_size():
 
 
 class FramedUiHandler(UiHandler):
+    LOG_HISTORY = 2000     # lines kept for paging back with j/l
+
     def __init__(self, title="dashcam-exporter", subtitle="", splash_seconds=2.0):
         self._title = title
         self._subtitle = subtitle
@@ -274,7 +277,8 @@ class FramedUiHandler(UiHandler):
         self._splash_seconds = splash_seconds
         self._splash_art = ()
         self._lock = threading.Lock()   # the bar spinner draws from a thread
-        self._log = collections.deque()
+        self._log = collections.deque(maxlen=self.LOG_HISTORY)
+        self._log_offset = 0            # lines scrolled up from the bottom (j/l)
         self._real_stdout = None
         self._open = False
         self._show_progress = False   # the pbar box appears only while a bar runs
@@ -400,16 +404,42 @@ class FramedUiHandler(UiHandler):
             self.log(line.rstrip())
 
     def log(self, text=""):
+        added = 0
         for piece in str(text).split("\n"):
             self._log.append(_clean_log(piece))
-        keep = self.layout.log_height
-        while len(self._log) > keep:
-            self._log.popleft()
+            added += 1
+        # Keep a paged-up view anchored to the same lines as new output lands
+        # below it; a view at the bottom (offset 0) stays at the bottom.
+        if self._log_offset > 0:
+            self._log_offset += added
+        self._clamp_offset()
         self._paint_log()
 
     def clear_log(self):
         self._log.clear()
+        self._log_offset = 0
         self._paint_log()
+        self._paint_menu()      # the j/l page hint clears with the log
+
+    def _clamp_offset(self):
+        maxoff = max(0, len(self._log) - self.layout.log_height)
+        self._log_offset = max(0, min(self._log_offset, maxoff))
+
+    def page(self, direction):
+        """Scroll the mid-screen a page at a time. Consumes j/l even when there
+        is nothing to scroll, so they never fall through to the menu as a typo."""
+        if not self._open:
+            return False
+        h = self.layout.log_height
+        maxoff = max(0, len(self._log) - h)
+        if maxoff:
+            if direction in ("j", "left"):        # older, up
+                self._log_offset = min(maxoff, self._log_offset + h)
+            else:                                 # 'l' / right: newer, down
+                self._log_offset = max(0, self._log_offset - h)
+            self._paint_log()
+            self._paint_menu()                    # refresh the page indicator
+        return True
 
     def new_live(self):
         return FrameLive(self)
@@ -503,10 +533,14 @@ class FramedUiHandler(UiHandler):
         if not self._open:
             return
         L, cols = self.layout, self.layout.cols
-        lines = list(self._log)[-L.log_height:]
+        self._clamp_offset()
+        lines = list(self._log)
+        h = L.log_height
+        end = len(lines) - self._log_offset      # bottom of the window (exclusive)
+        window = lines[max(0, end - h):end]
         buf = ""
         for i, row in enumerate(range(L.log_top, L.log_bottom + 1)):
-            text = (" " + lines[i]) if i < len(lines) else ""
+            text = (" " + window[i]) if i < len(window) else ""
             buf += _at(row, 1, _box(text, cols))
         self._write(buf)
 
@@ -522,6 +556,15 @@ class FramedUiHandler(UiHandler):
         # The log|menu double rule is always drawn (it is the menu's top edge).
         buf += _at(L.progress_sep, 1, _rule_double(cols))
         self._write(buf)
+
+    def _page_hint(self):
+        """`j/l) page` with how many lines are hidden above/below, shown only
+        when the log has more than one screenful."""
+        above = max(0, len(self._log) - self.layout.log_height - self._log_offset)
+        below = self._log_offset
+        if not (above or below):
+            return ""
+        return C.dim("   j/l) page  %s%d %s%d" % (UP, above, DOWN, below))
 
     def _paint_bar(self):
         # The bar row alone -- redrawn often while a step or the spinner runs.
@@ -539,6 +582,7 @@ class FramedUiHandler(UiHandler):
             text = self._menu_lines[i] if i < len(self._menu_lines) else ""
             buf += _at(row, 1, _box(text, cols))
         hint = C.dim("                p) progress   h) help   i) info   q) quit")
+        hint += self._page_hint()
         buf += _at(L.hint_row, 1, _box(hint, cols))
         buf += _at(L.select_rule, 1, _rule_single(cols))
         buf += _at(L.select_row, 1, _box(SELECT_LABEL, cols))   # visible from the start

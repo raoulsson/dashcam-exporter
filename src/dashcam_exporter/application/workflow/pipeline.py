@@ -7494,6 +7494,11 @@ class Runner:
         """
         if not sel:
             return True
+        # j/l page the mid-screen when the log overruns it. Handled before the
+        # menu sees them (no clear, no dispatch); a no-op in the stream backend,
+        # where the terminal scrolls and the keys fall through as before.
+        if sel in ("j", "l") and ui_handler.active().page(sel):
+            return True
         return self._chosen(sel)
 
     def _chosen(self, sel):
