@@ -27,6 +27,10 @@ import shutil
 import sys
 import threading
 import time
+try:
+    import termios
+except ImportError:          # non-unix; the frame is macOS/Linux only anyway
+    termios = None
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _CSI = re.compile(r"\x1b\[[0-9;?]*([A-Za-z])")
@@ -297,12 +301,55 @@ class FramedUiHandler(UiHandler):
         sz = shutil.get_terminal_size(fallback=(term_width(), 24))
         return sz.lines, sz.columns
 
+    # -- terminal mode. The frame owns the tty for its lifetime: echo OFF, so a
+    #    key pressed WHILE A STEP RUNS is not cooked-echoed by the terminal into
+    #    the middle of the frame (and buffered) -- which is invisible in the log
+    #    because it is the terminal's own echo of stdin, not anything we wrote.
+    #    Echo is turned back on only for a typed-word prompt, where the operator
+    #    must see what they type. --
+    def _tty_fd(self):
+        if termios is None:
+            return None
+        try:
+            fd = sys.stdin.fileno()
+        except (ValueError, OSError, AttributeError):
+            return None
+        return fd if os.isatty(fd) else None
+
+    def _set_echo(self, on):
+        fd = self._tty_fd()
+        if fd is None:
+            return
+        try:
+            attrs = termios.tcgetattr(fd)
+            if on:
+                attrs[3] |= termios.ECHO
+            else:
+                attrs[3] &= ~termios.ECHO
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        except termios.error:
+            pass
+
+    def _flush_input(self):
+        """Drop keys typed during the step just finished, so impatient presses
+        do not fire menu items nobody chose."""
+        fd = self._tty_fd()
+        if fd is None:
+            return
+        try:
+            termios.tcflush(fd, termios.TCIFLUSH)
+        except termios.error:
+            pass
+
     def open(self):
         rows, cols = self._size()
         self.layout = Layout(rows, cols, self._menu_rows, self._show_progress)
         self._real_stdout = sys.stdout
         sys.stdout = _LogTee(self, self._real_stdout)
         self._open = True
+        fd = self._tty_fd()
+        self._saved_tty = termios.tcgetattr(fd) if fd is not None else None
+        self._set_echo(False)
         self._write(ALT_ON + HIDE + CLEAR)
         self._splash()          # a centered card of the same info, ~1s
         self.repaint()          # then the frame, with that info on top
@@ -366,6 +413,12 @@ class FramedUiHandler(UiHandler):
         if not self._open:
             return
         self._open = False
+        fd = self._tty_fd()
+        if fd is not None and getattr(self, "_saved_tty", None) is not None:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, self._saved_tty)
+            except termios.error:
+                pass
         if self._real_stdout is not None:
             sys.stdout = self._real_stdout
         self._write(SHOW + ALT_OFF)
@@ -485,6 +538,9 @@ class FramedUiHandler(UiHandler):
         if not self._open or self._real_stdout is None:
             return read()
         L = self.layout
+        # Drop anything typed during the step just finished; it was not a menu
+        # choice and must not become one now.
+        self._flush_input()
         saved = sys.stdout
         sys.stdout = self._real_stdout
         try:
@@ -493,10 +549,14 @@ class FramedUiHandler(UiHandler):
                 # cursor it pushes the prompt off the bottom border. Suppress it
                 # (the frame keeps the prompt inside its own Select row instead).
                 prompt_mod._HINTED[0] = True
+                # A typed word must be visible, so echo goes back on just here.
+                self._set_echo(True)
                 self._write(_at(L.select_row, 1, _box("", L.cols)))
             self._write(_at(L.select_row, col) + SHOW)
             return read()
         finally:
+            if not keep_label:
+                self._set_echo(False)
             sys.stdout = saved
             self._write(HIDE + _at(L.select_row, 1, _box(SELECT_LABEL, L.cols)))
 
