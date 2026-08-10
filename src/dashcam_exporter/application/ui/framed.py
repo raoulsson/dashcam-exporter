@@ -398,6 +398,10 @@ class FramedUiHandler(UiHandler):
             self._log.popleft()
         self._paint_log()
 
+    def clear_log(self):
+        self._log.clear()
+        self._paint_log()
+
     def new_live(self):
         return FrameLive(self)
 

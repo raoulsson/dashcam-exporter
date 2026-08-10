@@ -177,7 +177,11 @@ def _verdicts(menu_items, world):
     # every entry is greyed (a loading state), and the real verdicts light it up
     # once the world has been captured.
     if world is None:
-        return {n: menu.blocked("") for n in menu_items}
+        # A NON-EMPTY reason on purpose: an offered item (Import SIM at the start
+        # position) is greyed by its verdict's reason, and an empty one reads as
+        # "nothing stops it" -> painted lit. "checking" keeps every entry dimmed
+        # until the real world lands.
+        return {n: menu.blocked("checking") for n in menu_items}
     return {n: _safe_verdict(item, world) for n, item in menu_items.items()}
 
 

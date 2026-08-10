@@ -7502,6 +7502,11 @@ class Runner:
         return self._not_quit(sel)
 
     def _not_quit(self, sel):
+        # A new action owns the mid-screen: wipe whatever the last one (or the
+        # startup status) left there, so this item's header and output begin at
+        # the top rather than under an accumulated scroll. Framed only; the
+        # stream backend scrolls and keeps its history (clear_log is a no-op).
+        ui_handler.active().clear_log()
         if sel in ("p", "progress"):
             return self._progress()
         if sel.split()[0] in ("h", "help", "?"):

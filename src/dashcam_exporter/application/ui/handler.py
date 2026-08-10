@@ -55,6 +55,12 @@ class UiHandler(ABC):
         and the caller prints the banner into the scroll as it always has."""
         return False
 
+    def clear_log(self):
+        """Start a fresh mid-screen for a new action. The framed backend wipes
+        its scrolling region so the step's own header and output begin at the
+        top; the stream backend keeps its scrollback (a terminal scrolls, it does
+        not have a region to clear), so this is a no-op there."""
+
     def prime_menu(self, ctx, menu_items, position):
         """Draw the menu straightaway, before the first (possibly slow) world
         capture, so a framed frame is complete from the start; greying arrives
