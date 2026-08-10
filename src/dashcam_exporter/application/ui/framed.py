@@ -641,7 +641,7 @@ class FramedUiHandler(UiHandler):
         for i, row in enumerate(L.menu_rows):
             text = self._menu_lines[i] if i < len(self._menu_lines) else ""
             buf += _at(row, 1, _box(text, cols))
-        hint = C.dim("                p) progress   h) help   i) info   q) quit")
+        hint = C.dim("            p) progress    h) help    i) info    q) quit")
         hint += self._page_hint()
         buf += _at(L.hint_row, 1, _box(hint, cols))
         buf += _at(L.select_rule, 1, _rule_single(cols))
