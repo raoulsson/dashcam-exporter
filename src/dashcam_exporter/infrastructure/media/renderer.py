@@ -495,6 +495,21 @@ def group_into_trips(
                     return True
         return False
 
+    detected: set = set()
+
+    def _emit_detect(idx):
+        # After the fast endpoint scan, the ego-motion pass decodes clips one at
+        # a time and prints NOTHING for however long that takes -- so a progress
+        # line upstream freezes on "[scan n/n] <last file>" and reads as wedged.
+        # Announce each clip the moment its flow is actually computed (once, on
+        # the first decode), so the bar's note keeps moving with the work.
+        key = clips[idx].front
+        if key in detected:
+            return
+        detected.add(key)
+        line = f"[detect {len(detected):4d}] {clips[idx].front.name}"
+        print(line + ("\r" if _tty else "\n"), end="", flush=True)
+
     def parks_here(idx, anchor):
         # Car parks at the anchor/home within this clip? Requires GPS within the
         # radius AND (video) a sustained stop. No video -> radius entry counts.
@@ -502,11 +517,13 @@ def group_into_trips(
             return False
         if not video:
             return True
+        _emit_detect(idx)
         return VIDEO_MOTION.park_second(clips[idx]) is not None
 
     def departs_here(idx, anchor):
         # Car starts driving away in this clip (ends the IDLE gap between trips)?
         if video:
+            _emit_detect(idx)
             return VIDEO_MOTION.drive_away_second(clips[idx]) is not None
         d = min_dist(idx, anchor)
         return d is None or d > leave_m
