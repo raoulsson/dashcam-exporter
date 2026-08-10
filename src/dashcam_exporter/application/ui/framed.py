@@ -661,9 +661,24 @@ class _LogTee:
 
     def write(self, s):
         self._buf += s
+        # A newline commits a real log line. It may carry \r redraws inside it
+        # (a bar that finished, then printed a newline) -- keep only the segment
+        # after the last \r, which is its final content.
         while "\n" in self._buf:
             line, self._buf = self._buf.split("\n", 1)
-            self._frame.log(line)
+            self._frame.log(line.rsplit("\r", 1)[-1])
+        # A trailing \r with no newline is a live progress redraw: an in-process
+        # loop drawing a bar directly to stdout (Bar/_still_bar/_write_line).
+        # The log only takes committed lines, so without this those bars vanish
+        # in the frame. Pin the redraw to the bar instead; an erase (\r\x1b[2K,
+        # nothing visible left) clears it.
+        if "\r" in self._buf:
+            tail = self._buf.rsplit("\r", 1)[-1]
+            shown = _clean_log(tail)
+            self._frame.set_bar(shown if _plain(shown).strip() else "")
+            # A redraw is a complete line (the loop resends it whole each tick),
+            # so the buffer is spent; keeping it would prefix the next log line.
+            self._buf = ""
         return len(s)
 
     def flush(self):
