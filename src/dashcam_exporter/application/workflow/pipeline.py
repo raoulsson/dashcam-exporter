@@ -84,7 +84,7 @@ from dashcam_exporter.domain.menu.menu import (PROGRESS, IMPORT, META, PREVIEW, 
 # so every call site below still reads the way it always did.
 from dashcam_exporter.application.ui.term import C, human_age, human_bytes, human_secs, rule, term_width, tilde
 from dashcam_exporter.application.ui.progress import (Bar, Live, ProgressDetail, ProgressState, Waiting,  # noqa: F401
-                      _bar_line, _clip, _erase_line, _eta, _still_bar, _sweep_line, _write_line,
+                      _clip, _erase_line, _eta, _still_bar, _sweep_line, _write_line,
                       render_progress, show_cursor, waiting)
 from dashcam_exporter.splice.audio.mp3_voice_enhancer import Mp3VoiceEnhancer
 from dashcam_exporter.splice.audio.mp4_to_mp3_splicer import Mp4AudioSplicer
@@ -4992,19 +4992,15 @@ def step_transcribe(ctx, world):
     trip_labels = {path: "Trip %d" % number for number, path in enumerate(renders, 1)}
 
     def show(path, percent, phase="Transcribe"):
-        if C.enabled:
-            label = trip_labels[path] + ": " + phase
-            prefix = "  %s %s %3.0f%%" % (label, bar.bracket(percent / 100.0), percent)
-            tail = ""
-            if phase == "Transcribe" and display_text[0]:
-                room = max(0, term_width() - _visible_len(prefix) - 2)
-                words=[]; used=0
-                for word in display_text[0].split():
-                    extra=len(word)+(1 if words else 0)
-                    if used+extra > room: break
-                    words.append(word); used+=extra
-                tail = "  " + " ".join(words) if words else ""
-            _write_line("\x1b[2K\x1b[?25l" + C.gold(prefix) + C.gold(tail))
+        # Through the one renderer, like every other bar. The live transcript is
+        # the subaction; the draw layer clips it to the row, so no hand-fitting.
+        if not C.enabled:
+            return
+        label = trip_labels[path] + ": " + phase
+        sub = display_text[0] if (phase == "Transcribe" and display_text[0]) else None
+        state = ProgressState(action=label, fraction=percent / 100.0,
+                              percent=int(percent), subaction=sub)
+        _write_line("\x1b[2K\x1b[?25l" + render_progress(state, term_width()))
 
     def pulse(path, progress_ref):
         stop = threading.Event()

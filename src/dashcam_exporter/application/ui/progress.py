@@ -103,11 +103,14 @@ def _bar_cells(state, width):
 def render_progress(state, width):
     """Assemble and COLOUR one progress row from its data -- the client side.
 
-    Fixed order and palette so every bar reads alike:
-      action(green)  bar(violet)  percent(cyan)  speed/time/size(amber)  subaction(green)  tail(dim)
+    THE one progress renderer. Every bar in the tool -- a child's stream, a
+    waiting spinner, an in-process loop -- goes through here, so they all read
+    alike. Fixed order and palette:
+      action(green bold)  bar(violet)  percent(cyan)  speed/time/size(amber)  subaction(green)  tail(green)
+    A filename is a subaction. Nothing here is dim.
     """
     bar_w = max(8, min(24, width - 60))
-    parts = [C.green(state.action),
+    parts = [C.bold(C.green(state.action)),
              C.magenta("[%s]" % _bar_cells(state, bar_w))]
     if not state.infinite and state.percent is not None:
         parts.append(C.cyan("%3d%%" % state.percent))
@@ -120,7 +123,7 @@ def render_progress(state, width):
     if state.subaction:
         parts.append(C.green(state.subaction))
     if state.tail:
-        parts.append(C.dim(state.tail))
+        parts.append(C.green(state.tail))
     # No clip here: the draw layer fits the row (stream _clip, frame _box), and
     # a subaction longer than the row must survive to be trimmed there.
     return "  " + "  ".join(parts)
@@ -198,18 +201,12 @@ class Live:
 
 
 class Bar:
-    """One line of progress, drawn in place. The shape only -- who redraws it
-    and when is the caller's business.
-
-    Two kinds, because there are two kinds of waiting. When the size of the
-    work is known a filled bar is a promise you can plan around: how far, how
-    long, how much is left. When it is NOT known -- a call into somebody
-    else's code, a network round trip -- a percentage would be a guess dressed
-    as a measurement, so Waiting says only that the tool is alive and how long
-    it has been.
+    """The blank-line protocol around an in-place bar -- open a line to draw on,
+    take it back when the bar is gone. Nothing about how the bar LOOKS lives here
+    any more: render_progress is the one renderer, and Waiting and _still_bar
+    draw through it. This carries the label and the open/close bookkeeping they
+    share, and Waiting subclasses it for the same open_once/close.
     """
-
-    FILLED, EMPTY = "#", "."
 
     def __init__(self, label, width=None):
         self.label = label
@@ -243,31 +240,6 @@ class Bar:
             sys.stdout.write("\x1b[1A\x1b[J")
             sys.stdout.flush()
         self.opened = False
-
-    def width(self, room_for=60):
-        if self._width:
-            return self._width
-        return max(8, min(24, term_width() - room_for))
-
-    def render(self, fraction, elapsed):
-        """`label [####......]  42%  0:12/0:30`."""
-        return "%s %s %s" % (C.gold(self.label), self.bracket(fraction),
-                             C.gold("%3d%% %s/%s"
-                                      % (int(fraction * 100), human_secs(elapsed),
-                                         human_secs(_eta(fraction, elapsed)))))
-
-    def bracket(self, fraction):
-        """`[####......]` -- brackets included, and violet like what is inside.
-
-        They belong to the bar. Left outside the colour they took whatever the
-        line around them had, which after the bar's own reset was nothing at
-        all: the opening bracket came out amber with the text before it and
-        the closing one came out bare.
-        """
-        width = self.width()
-        filled = int(round(width * min(fraction, 1.0)))
-        return C.magenta("[%s]" % (self.FILLED * filled
-                                  + self.EMPTY * (width - filled)))
 
 
 def _eta(fraction, elapsed):
@@ -367,12 +339,16 @@ def show_cursor():
 
 
 def _still_bar(bar, i, total, name):
-    """One line, redrawn, for a loop that is countable and short."""
+    """One line, redrawn, for a countable in-process loop -- a determinate bar
+    through the one renderer, so it wears the same colours as a child's stream.
+    The filename is the subaction; the count is read from the percentage."""
     if not C.enabled:
         return
     bar.open_once()
-    _write_line("  %s %s %s" % (C.gold(bar.label), bar.bracket(i / float(total)),
-                                C.gold("%d/%d  %s" % (i, total, name))))
+    frac = (i / float(total)) if total else 0.0
+    state = ProgressState(action=bar.label, fraction=frac,
+                          percent=int(frac * 100), subaction=name)
+    _write_line(render_progress(state, term_width()))
 
 
 def _sweep_line(label, i, elapsed):
@@ -389,16 +365,3 @@ def _sweep_line(label, i, elapsed):
     line, this one is a head that the child's latest output is appended to.
     """
     return Waiting(label).render_at(i, elapsed).strip()
-
-
-def _bar_line(label, frac, elapsed, note, note_first=False):
-    """The stable head shared by every determinate progress line.
-
-    ``note_first`` remains in the signature for plugins/tests written against
-    the old helper, but notes now always follow the bar. Putting a filename or
-    phase description before it made the bar jump horizontally whenever that
-    text changed length. The bar, percentage and elapsed time are the stable
-    landmarks; the changing detail belongs in the tail.
-    """
-    bar = Bar(label)
-    return bar.render(frac, elapsed)
