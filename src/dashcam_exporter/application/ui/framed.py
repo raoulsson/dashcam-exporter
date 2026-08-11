@@ -287,7 +287,8 @@ class FramedUiHandler(UiHandler):
         self._splash_art = ()
         self._lock = threading.Lock()   # the bar spinner draws from a thread
         self._log = collections.deque(maxlen=self.LOG_HISTORY)
-        self._log_offset = 0            # lines scrolled up from the bottom (j/l)
+        self._log_view = 0             # index of the top visible line (page-anchored)
+        self._summary = collections.OrderedDict()   # live counters for a task
         self._real_stdout = None
         self._open = False
         self._show_progress = False   # the pbar box appears only while a bar runs
@@ -462,22 +463,32 @@ class FramedUiHandler(UiHandler):
             self.log(line.rstrip())
 
     def log(self, text=""):
-        added = 0
         for piece in str(text).split("\n"):
             self._log.append(_clean_log(piece))
-            added += 1
-        # Keep a paged-up view anchored to the same lines as new output lands
-        # below it; a view at the bottom (offset 0) stays at the bottom.
-        if self._log_offset > 0:
-            self._log_offset += added
-        self._clamp_offset()
+        self._follow()          # new output shows on the newest page
         self._paint_log()
 
     def clear_log(self):
         self._log.clear()
-        self._log_offset = 0
+        self._log_view = 0
+        self._summary.clear()   # each action starts its own tally
         self._paint_log()
         self._paint_menu()      # the j/l page hint clears with the log
+
+    def stat(self, name, value):
+        """A named running total shown in the main window and updated in place --
+        "Clips reviewed: 45", "Stills created: 90" -- so the mid says what the
+        task is producing while the bar says where it is. Pinned to the foot of
+        the log so it stays put as any output scrolls above it."""
+        self._summary[name] = value
+        self._paint_log()
+
+    def _summary_lines(self):
+        if not self._summary:
+            return []
+        w = max(len(k) for k in self._summary)
+        return [C.bold("  %-*s %s" % (w + 1, k + ":", v))
+                for k, v in self._summary.items()]
 
     def paragraph(self, text):
         """A finished paragraph, wrapped to the row, PAGED not scrolled: when it
@@ -486,33 +497,57 @@ class FramedUiHandler(UiHandler):
         if not self._open:
             print(text)
             return
-        width = max(10, self.layout.cols - 3)
+        width = max(10, self.layout.cols - 4)   # -4: border, a leading and a trailing space
         wrapped = []
         for line in str(text).split("\n"):
             wrapped.extend(textwrap.wrap(line, width) or [""])
         wrapped.append("")                      # a blank row between paragraphs
-        if len(self._log) + len(wrapped) > self.layout.log_height:
-            self.clear_log()
+        body = self._body_height()
+        used = len(self._log) - self._last_page_start()   # rows on the current page
+        if self._log and used + len(wrapped) > body:
+            # A paragraph never straddles a page. Fill the rest of this page so
+            # the next starts on a page boundary (keeps j/l pages aligned), then
+            # a row of air at its top. Nothing is cleared -- the pages remain in
+            # history to walk back through once transcription is done.
+            while len(self._log) % body != 0:
+                self._log.append("")
+            self._log.append("")
+        elif not self._log:
+            self._log.append("")                # a row of air on the first page
         for ln in wrapped:
             self._log.append(_clean_log(ln))
+        self._follow()
         self._paint_log()
 
-    def _clamp_offset(self):
-        maxoff = max(0, len(self._log) - self.layout.log_height)
-        self._log_offset = max(0, min(self._log_offset, maxoff))
+    def _body_height(self):
+        """Rows the paged log gets -- the summary is pinned below it."""
+        return max(1, self.layout.log_height - len(self._summary))
+
+    def _last_page_start(self):
+        """Top-line index of the page holding the newest line."""
+        body = self._body_height()
+        return (max(0, len(self._log) - 1) // body) * body
+
+    def _follow(self):
+        """Jump the view to the newest page (while output is being written)."""
+        self._log_view = self._last_page_start()
+
+    def _clamp_view(self):
+        self._log_view = max(0, min(self._log_view, self._last_page_start()))
 
     def page(self, direction):
-        """Scroll the mid-screen a page at a time. Consumes j/l even when there
-        is nothing to scroll, so they never fall through to the menu as a typo."""
+        """Turn to the previous/next PAGE of the log -- j back, l forward. Pages
+        are kept (nothing is cleared), so this walks the whole history once a
+        step is done. Consumes j/l even at the ends so they never fall through
+        to the menu as a typo."""
         if not self._open:
             return False
-        h = self.layout.log_height
-        maxoff = max(0, len(self._log) - h)
-        if maxoff:
-            if direction in ("j", "left"):        # older, up
-                self._log_offset = min(maxoff, self._log_offset + h)
-            else:                                 # 'l' / right: newer, down
-                self._log_offset = max(0, self._log_offset - h)
+        body = self._body_height()
+        if self._last_page_start() > 0:
+            if direction in ("j", "left"):        # older, back a page
+                self._log_view = max(0, self._log_view - body)
+            else:                                 # 'l' / right: newer, forward
+                self._log_view = min(self._last_page_start(), self._log_view + body)
             self._paint_log()
             self._paint_menu()                    # refresh the page indicator
         return True
@@ -620,14 +655,18 @@ class FramedUiHandler(UiHandler):
         if not self._open:
             return
         L, cols = self.layout, self.layout.cols
-        self._clamp_offset()
+        summary = self._summary_lines()
+        h = self._body_height()                  # paged rows above the summary
+        self._clamp_view()
         lines = list(self._log)
-        h = L.log_height
-        end = len(lines) - self._log_offset      # bottom of the window (exclusive)
-        window = lines[max(0, end - h):end]
+        window = lines[self._log_view:self._log_view + h]   # the current page
         buf = ""
         for i, row in enumerate(range(L.log_top, L.log_bottom + 1)):
-            text = (" " + window[i]) if i < len(window) else ""
+            if i < h:                            # the paged log
+                text = (" " + window[i]) if i < len(window) else ""
+            else:                                # the pinned summary at the foot
+                s = i - h
+                text = (" " + summary[s]) if s < len(summary) else ""
             buf += _at(row, 1, _box(text, cols))
         self._write(buf)
 
@@ -647,8 +686,8 @@ class FramedUiHandler(UiHandler):
     def _page_hint(self):
         """`j/l) page` with how many lines are hidden above/below, shown only
         when the log has more than one screenful."""
-        above = max(0, len(self._log) - self.layout.log_height - self._log_offset)
-        below = self._log_offset
+        above = self._log_view
+        below = max(0, len(self._log) - self._log_view - self._body_height())
         if not (above or below):
             return ""
         return C.dim("   j/l) page  %s%d %s%d" % (UP, above, DOWN, below))

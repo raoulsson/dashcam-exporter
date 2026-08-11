@@ -179,25 +179,26 @@ class TheLogKeepsHistoryAndPages(_NoColour):
             rows[int(m.group(1))] = m.group(2)
         return rows
 
-    def test_history_is_kept_but_only_a_screenful_shows(self):
+    def test_history_is_kept_and_the_view_sits_on_the_newest_page(self):
         gen = self._filled()
         h, cap = next(gen)
-        # History retained for paging; the newest line sits at the bottom.
+        # History retained for paging; the view is on the page with the newest.
         self.assertEqual(len(h._log), 100)
         self.assertEqual(h._log[-1], "line 99")
-        self.assertEqual(h._log_offset, 0)
+        self.assertEqual(h._log_view, h._last_page_start())
         list(gen)
 
     def test_j_pages_back_and_l_pages_forward(self):
         gen = self._filled()
         h, cap = next(gen)
-        h.page("j")                       # older
-        self.assertEqual(h._log_offset, h.layout.log_height)
-        h.page("l")                       # newer, back to the bottom
-        self.assertEqual(h._log_offset, 0)
-        # l at the bottom clamps, does not go negative
-        h.page("l")
-        self.assertEqual(h._log_offset, 0)
+        body, last = h._body_height(), h._last_page_start()
+        self.assertEqual(h._log_view, last)
+        h.page("j")                       # back a page
+        self.assertEqual(h._log_view, max(0, last - body))
+        h.page("l")                       # forward, to the newest page
+        self.assertEqual(h._log_view, last)
+        h.page("l")                       # clamps at the last page
+        self.assertEqual(h._log_view, last)
         list(gen)
 
 

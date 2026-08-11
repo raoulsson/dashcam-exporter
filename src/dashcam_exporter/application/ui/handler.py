@@ -55,6 +55,14 @@ class UiHandler(ABC):
         and the caller prints the banner into the scroll as it always has."""
         return False
 
+    def stat(self, name, value):
+        """A named running total for the task (Clips reviewed: 45, Stills
+        created: 90). The framed backend pins it to the foot of the main window
+        and updates it in place, so the mid says what the task is producing
+        while the bar says where it is. The stream backend has no fixed region
+        to pin it in, so it is a no-op there -- the step's closing line
+        summarises."""
+
     def paragraph(self, text):
         """One finished paragraph of streaming output (a transcript paragraph).
         The framed backend wraps it to the row and starts a FRESH page when the
