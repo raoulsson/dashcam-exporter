@@ -758,7 +758,12 @@ class DeleteSimData(Destructive):
         it records the decision, which makes the refusal false, and the erase
         then passes the same gates any erase passes and asks for the same word.
         """
-        if not world.card.new_stamps:
+        # owed_stamps, not new_stamps: the refusal is copy_lost ("clips exist
+        # nowhere but this card"), which is about every clip accounted for by
+        # nothing. A card that was imported and then had its workspace cleaned
+        # holds clips that are owed but NOT new, so a new_stamps gate returned
+        # None here and typing ERASE did nothing.
+        if not world.card.owed_stamps:
             return None
         # The override IS the item running, so its result becomes the item's
         # outcome -- exactly as execute() records its own. Without this the

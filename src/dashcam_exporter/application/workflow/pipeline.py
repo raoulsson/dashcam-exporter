@@ -6569,11 +6569,19 @@ def drop_unaccounted_then_erase(ctx, world):
 
     Then the ordinary path: capture again, ask card_is_expendable, and erase
     only if it now says yes. If some OTHER refusal is standing -- nothing ever
-    imported, a clip that is owed for a different reason -- this stops, having
-    changed only the ledger.
+    imported -- this stops, having changed only the ledger.
+
+    Drops the OWED clips, not just the never-imported ones. owed_stamps is the
+    whole of what copy_lost refuses about -- every clip accounted for by
+    nothing -- and it is a superset of new_stamps (a never-imported clip is
+    also accounted for by nothing). Dropping only new_stamps left the
+    import-then-Clean-Workspace card refusing: its clips were imported (so not
+    new) but their only copy went with the workspace, so they were owed and the
+    drop set was empty. Dropping owed_stamps clears both clips_never_copied and
+    copy_lost in one act.
     """
     started = time.time()
-    fresh, refusal = _dropped_on_purpose(ctx, ERASE_CARD, world.card.new_stamps,
+    fresh, refusal = _dropped_on_purpose(ctx, ERASE_CARD, world.card.owed_stamps,
                                          guards.card_is_expendable,
                                          menu.Scope.LOCAL, started)
     if refusal is not None:

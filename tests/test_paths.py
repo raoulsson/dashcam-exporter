@@ -504,6 +504,24 @@ class TestDestructiveItemsOnThePath(unittest.TestCase):
         b.type("10", "ERASE")
         self.assertIn(ERASE_CARD, b.work.done)
 
+    def _imported_then_cleaned(self):
+        # The real workflow: import (the mark is set), then Clean Workspace
+        # takes the only copy. The clips are now OWED but NOT new -- exactly the
+        # case a new_stamps gate missed, where typing ERASE did nothing.
+        return every_item_can_run(UPLOADER,
+                                  card=W.Card(path=Path("/w/card"), dcim=True,
+                                              present=True,
+                                              stamps=frozenset({CLIP}),
+                                              owed_stamps=frozenset({CLIP})))
+
+    def test_the_word_erases_a_card_that_is_owed_but_not_new(self):
+        """copy_lost refuses (clips exist nowhere but the card), and the way
+        past drops owed_stamps -- so ERASE reaches the wipe even when nothing is
+        NEW. The new_stamps gate returned None here and erased nothing."""
+        b = Bench(UPLOADER, world=self._imported_then_cleaned(), current=RENDER)
+        b.type("10", "ERASE")
+        self.assertIn(ERASE_CARD, b.work.done)
+
     def test_anything_but_the_word_erases_nothing_and_stays_put(self):
         """Rule 3: an aborted step does not complete, so the pipeline is
         exactly where it was and the wide offer survives."""
