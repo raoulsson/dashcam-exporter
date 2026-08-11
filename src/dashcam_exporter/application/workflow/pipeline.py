@@ -1096,13 +1096,15 @@ _RE_R_FOUND = re.compile(r"Found (\d+) clip pairs grouped into (\d+)")
 _RE_R_MAP = re.compile(r"^\s*map:\s+([\d.]+) km in (\d+) segments")
 
 
-def render_narrator(ctx):
-    """Turn the renderer's milestone lines into the STORY in the main window --
-    an installer's growing list of what it is doing -- and keep the foot totals.
+def scan_narrator(ctx, verb="Working on", done_word=None):
+    """The STORY for any renderer pass -- the boundary scan, the sidecar write,
+    the encode -- as a growing list in the main window, with the foot totals.
     The bar already says WHERE it is (trip 2/6, clip 40/212); this says WHAT is
-    happening, once per milestone, and never every clip. Returns a sentence to
-    log, or None for a line that is not a milestone."""
-    done = {"videos": 0}
+    happening, once per milestone, never per clip. `verb` names what the pass
+    does to a trip ("Rendering", "Describing"); `done_word`, when set, turns the
+    renderer's per-output ✓ line into a "<done_word> written." line and counts
+    it. Returns a sentence to log, or None for a line that is not a milestone."""
+    done = {"n": 0}
 
     def tell(line):
         if line.startswith("Scanning:"):
@@ -1114,14 +1116,33 @@ def render_narrator(ctx):
             return "Files loaded: %s clips in %s trips." % (m.group(1), m.group(2))
         m = RE_TRIP.match(line)
         if m:
-            return "Rendering trip %s of %s…" % (m.group(1), m.group(2))
+            return "%s trip %s of %s…" % (verb, m.group(1), m.group(2))
         m = _RE_R_MAP.match(line)
         if m:
             return "  route: %s km over %s segments." % (m.group(1), m.group(2))
-        if line.strip().startswith("✓"):
-            done["videos"] += 1
-            ctx.ui.stat("Videos rendered", done["videos"])
-            return "  video written."
+        if done_word and line.strip().startswith("✓"):
+            done["n"] += 1
+            ctx.ui.stat(done_word + "s written", done["n"])
+            return "  %s written." % done_word
+        return None
+
+    return tell
+
+
+def import_narrator(ctx):
+    """The card-copy story, from import-sd-card.sh's own milestone lines."""
+    def tell(line):
+        m = re.search(r"(\d+) of (\d+) files selected", line)
+        if m:
+            return "Copying %s of %s files from the card…" % (m.group(1), m.group(2))
+        m = re.search(r"Verified:\s*(\d+) files", line)
+        if m:
+            ctx.ui.stat("Files verified", int(m.group(1)))
+            return "Verified %s files against the card." % m.group(1)
+        m = re.search(r"Done\.\s*Imported (\d+) files", line)
+        if m:
+            ctx.ui.stat("Files imported", int(m.group(1)))
+            return "Imported %s files." % m.group(1)
         return None
 
     return tell
@@ -2820,7 +2841,8 @@ def step_import(ctx):
     # whoever ran it by hand; here they say twice, in the script's words, what
     # the line below says once in the tool's.
     rc, lines = run_stream(Child(cmd, ctx.exporter, env=env),
-                           Readout("Import", watch, quiet_finish=True))
+                           Readout("Import", watch, quiet_finish=True),
+                           narrator=import_narrator(ctx))
     if rc != 0:
         return record(ctx, NAME[IMPORT], FAILED, started, "exit %d" % rc)
 
@@ -3109,7 +3131,8 @@ def step_generate_meta(ctx):
             "--out", str(ctx.out_dir)] + ctx.config_args + ctx.scan_args)
     rc, _lines = run_stream(Child(cmd, ctx.exporter, env=_renderer_env(ctx)),
                             Readout("Sidecars", make_scan_parser(),
-                                    quiet_finish=True))
+                                    quiet_finish=True),
+                            narrator=scan_narrator(ctx, "Describing"))
     if rc != 0:
         return record(ctx, NAME[META], FAILED, started, "sidecars exit %d" % rc)
     # Counted where they were written, not across the whole export tree: an
@@ -4013,7 +4036,8 @@ def build_sidecars(ctx):
         rc, _lines = run_stream(Child(cmd, ctx.exporter,
                                       env=_renderer_env(ctx)),
                                 Readout("Sidecars", make_scan_parser(),
-                                        quiet_finish=True))
+                                        quiet_finish=True),
+                                narrator=scan_narrator(ctx, "Describing"))
         if rc == 0:
             ran.append(cand)
     return ran
@@ -4945,7 +4969,7 @@ def step_render(ctx):
     rc, _lines = run_stream(Child(cmd, ctx.exporter, env=_renderer_env(ctx)),
                             Readout("Render", make_render_parser(),
                                     quiet_finish=True),
-                            narrator=render_narrator(ctx))
+                            narrator=scan_narrator(ctx, "Rendering", done_word="Video"))
     after = set(rendered_mp4s(ctx.out_dir))
     new = after - before
     if rc != 0:
@@ -5077,16 +5101,22 @@ def step_transcribe(ctx, world):
             text_queue.clear(); display_text[0] = ""
             text_path = path.with_suffix(".transcript.txt")
             timeline_path = path.with_suffix(".transcript.timeline.json")
+            # The story of this trip's transcript, a step at a time, in the main
+            # window; the bar shows how far through each step is.
+            ctx.ui.log(C.bold("%s" % trip_labels[path]))
+            ctx.ui.log("  splicing the audio track off the video…")
             with path.open("rb") as source:
                 extracted = splicer.spliceMp3OffMp4(
                     source, progress_callback=lambda p: show(path, p * .15, "Splice")
                 )
+            ctx.ui.log("  enhancing and normalising the audio…")
             try:
                 enhanced = enhancer.enhanceMp3(
                     extracted, progress_callback=lambda p: show(path, 15 + p * .20, "Enhance")
                 )
             finally:
                 extracted.close()
+            ctx.ui.log("  transcribing%s…" % (" and identifying speakers" if diarize else ""))
             try:
                 if diarize:
                     with enhanced:
@@ -5141,6 +5171,8 @@ def step_transcribe(ctx, world):
                         writer.write_timeline(timeline_path)
                 made += 1
                 show(path, 100.0)
+                ctx.ui.log("  transcript written.")
+                ctx.ui.stat("Trips transcribed", made)
             finally:
                 enhanced.close()
     finally:
