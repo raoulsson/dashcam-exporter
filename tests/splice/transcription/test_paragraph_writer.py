@@ -23,6 +23,17 @@ class ParagraphWriterTest(unittest.TestCase):
             destination.getvalue(),
         )
 
+    def test_each_finished_paragraph_is_handed_to_the_callback(self) -> None:
+        seen = []
+        writer = ParagraphWriter(io.StringIO(), minimum_characters=30,
+                                 maximum_characters=100, on_paragraph=seen.append)
+        writer.write_segment(TranscriptSegment(0.0, 1.0, "First complete sentence."))
+        writer.write_segment(TranscriptSegment(1.1, 2.0, "Second sentence."))
+        writer.write_segment(TranscriptSegment(2.1, 3.0, "Third sentence."))
+        writer.close()
+        self.assertEqual(
+            ["First complete sentence. Second sentence.", "Third sentence."], seen)
+
     def test_flushes_on_a_significant_pause_even_for_short_text(self) -> None:
         destination = io.StringIO()
         writer = ParagraphWriter(destination, pause_seconds=1.5)

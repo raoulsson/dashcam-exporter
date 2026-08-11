@@ -5061,14 +5061,14 @@ def step_transcribe(ctx, world):
                         turns = SpeakerDiarizer(model_name=diarization_model, token=hf_token).diarizeMp3(enhanced)
                         labeler = SpeakerLabeler(turns)
                         with text_path.open("w", encoding="utf-8") as destination:
-                            writer = ParagraphWriter(destination)
+                            writer = ParagraphWriter(destination, on_paragraph=ctx.ui.paragraph)
                             for segment in transcription.segments:
                                 writer.write_segment(labeler.label(segment))
                             writer.close()
                             writer.write_timeline(timeline_path)
                 else:
                     with enhanced, text_path.open("w", encoding="utf-8") as destination:
-                        writer = ParagraphWriter(destination)
+                        writer = ParagraphWriter(destination, on_paragraph=ctx.ui.paragraph)
                         progress_ref = [35.0]
                         stop, pulse_thread = pulse(path, progress_ref)
                         def on_progress(value):

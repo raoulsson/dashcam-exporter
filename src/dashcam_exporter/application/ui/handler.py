@@ -55,6 +55,14 @@ class UiHandler(ABC):
         and the caller prints the banner into the scroll as it always has."""
         return False
 
+    def paragraph(self, text):
+        """One finished paragraph of streaming output (a transcript paragraph).
+        The framed backend wraps it to the row and starts a FRESH page when the
+        current one is full, so paragraphs are read a screenful at a time rather
+        than scrolling past. The stream backend just prints it -- the terminal
+        scrolls, which is the same reading model there."""
+        print(text)
+
     def page(self, direction):
         """Scroll the mid-screen a page (j/left = older, l/right = newer) when
         the log has more than fits. Returns True if the backend consumed the key.

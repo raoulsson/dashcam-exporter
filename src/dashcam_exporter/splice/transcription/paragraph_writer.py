@@ -33,10 +33,15 @@ class ParagraphWriter:
         minimum_characters: int = 350,
         maximum_characters: int = 700,
         pause_seconds: float = 1.5,
+        on_paragraph=None,
     ) -> None:
         if minimum_characters > maximum_characters:
             raise ValueError("minimum_characters cannot exceed maximum_characters")
         self._destination = destination
+        # Called with each completed paragraph as it is flushed, so a caller can
+        # show it on screen the moment it is whole. Optional -- the file write is
+        # the writer's job; the display is the caller's.
+        self._on_paragraph = on_paragraph
         self._minimum_characters = minimum_characters
         self._maximum_characters = maximum_characters
         self._pause_seconds = pause_seconds
@@ -74,6 +79,8 @@ class ParagraphWriter:
             paragraph = f"{self._speaker}: {paragraph}"
         self._destination.write(paragraph + "\n\n")
         self._destination.flush()
+        if self._on_paragraph is not None:
+            self._on_paragraph(paragraph)
         self._timeline.append(
             ParagraphTimelineEntry(
                 paragraph_index=len(self._timeline),

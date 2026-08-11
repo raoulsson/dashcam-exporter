@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import sys
+import textwrap
 import threading
 import time
 try:
@@ -477,6 +478,24 @@ class FramedUiHandler(UiHandler):
         self._log_offset = 0
         self._paint_log()
         self._paint_menu()      # the j/l page hint clears with the log
+
+    def paragraph(self, text):
+        """A finished paragraph, wrapped to the row, PAGED not scrolled: when it
+        will not fit in what remains of the page on screen, clear to a fresh one
+        and start it at the top. So a transcript is read a screenful at a time."""
+        if not self._open:
+            print(text)
+            return
+        width = max(10, self.layout.cols - 3)
+        wrapped = []
+        for line in str(text).split("\n"):
+            wrapped.extend(textwrap.wrap(line, width) or [""])
+        wrapped.append("")                      # a blank row between paragraphs
+        if len(self._log) + len(wrapped) > self.layout.log_height:
+            self.clear_log()
+        for ln in wrapped:
+            self._log.append(_clean_log(ln))
+        self._paint_log()
 
     def _clamp_offset(self):
         maxoff = max(0, len(self._log) - self.layout.log_height)
