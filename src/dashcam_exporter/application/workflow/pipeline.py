@@ -3483,6 +3483,10 @@ def write_clip_review(ctx, trips):
                 suffix="_mid", seconds=_clip_review_midpoint(src))
             seen.add(mid_dst)
             made += mid_was_made
+            # Running totals in the main window -- the bar says where it is, the
+            # summary says what it has produced, and both survive to the end.
+            ctx.ui.stat("Clips reviewed", n_done)
+            ctx.ui.stat("Stills created", made)
     bar.close()
     dropped = _drop_orphans(root, seen)
     _write_clip_review_overview(root, trips)
