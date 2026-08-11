@@ -4052,10 +4052,12 @@ def step_preview(ctx):
     index = write_contact_sheet(ctx, root, payload, previews_dir, stills, mid_stills)
     # The contact sheet is rewritten every run and belongs to this folder, so
     # it is kept alongside the stills it links to.
-    dropped = _drop_orphans(previews_dir, set(stills.values()) |
-                            set(mid_stills.values()) | {index})
-    shots, review, clips_made, clips_dropped = write_clip_review(ctx, trips)
-    dropped += clips_dropped
+    # Sweep the stills no current trip asks for -- a side effect, not news: an
+    # excluded trip is the operator's decision, already made, and reporting the
+    # tidy-up count afterwards only nags about it.
+    _drop_orphans(previews_dir, set(stills.values()) |
+                  set(mid_stills.values()) | {index})
+    shots, review, clips_made, _clips_dropped = write_clip_review(ctx, trips)
 
     # No trips.json refresh here any more. Preview used to re-index the site
     # manifest "while we're here", which made a looking-step write into the
@@ -4069,8 +4071,7 @@ def step_preview(ctx):
                   % (C.yellow("%d" % clips_made), C.yellow("%d" % shots),
                      tilde(review))))
     print(C.dim("  Clip grid: %s" % tilde(review / "index.html")))
-    print(C.dim("  %d stills rebuilt, %d no longer wanted"
-                % (made + clips_made, dropped)))
+    print(C.dim("  %d stills rebuilt" % (made + clips_made)))
     return record(ctx, NAME[PREVIEW], RAN, started,
                   "%d trips, %d stills in %s" % (len(trips), len(stills), previews_dir))
 
