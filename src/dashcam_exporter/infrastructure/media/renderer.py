@@ -1132,6 +1132,22 @@ MAP_TRACK_PAD  = 12            # px padding around bounding box of the route
 # may clip outside the panel).
 MAP_ZOOM_BOOST = 0
 
+# One cycling colour per LEG (a drive between stops / FF slides), the SAME eight
+# the HTML sidecar map uses (write_html_map's COLORS), so the burned-in video
+# widget and the interactive map read as the same route. A white halo sits under
+# each leg for contrast over both OSM tiles and the offline beige background.
+LEG_COLORS_HEX = ["#3b82f6", "#ec4899", "#06b6d4", "#22c55e",
+                  "#f59e0b", "#a855f7", "#ef4444", "#14b8a6"]
+LEG_COLORS_RGB = [tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) for h in LEG_COLORS_HEX]
+
+
+def _leg_hex(i: int) -> str:
+    return LEG_COLORS_HEX[i % len(LEG_COLORS_HEX)]
+
+
+def _leg_rgb(i: int):
+    return LEG_COLORS_RGB[i % len(LEG_COLORS_RGB)]
+
 
 def _speed_color(kmh: float) -> tuple[int, int, int]:
     # Matches the Leaflet COLORS[] blue ramp (darker palette for OSM contrast).
@@ -1316,13 +1332,15 @@ def render_base_route_panel(points: list[tuple[float, float, float, datetime]],
         from staticmap import StaticMap, Line as SMLine, CircleMarker as SMMarker
         m = StaticMap(size, size, padding_x=MAP_TRACK_PAD, padding_y=MAP_TRACK_PAD,
                       url_template="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png")
-        # Draw one Line per segment so gaps stay visually broken.
-        # Navy chosen to pop against OSM's beige/yellow/orange road palette.
-        for seg in segments:
+        # One Line per LEG, in a cycling colour matching the HTML map, so gaps
+        # stay visually broken and each drive between stops is its own colour.
+        # A white halo under each pops it off OSM's beige/yellow/orange roads.
+        for seg_i, seg in enumerate(segments):
             if len(seg) < 2:
                 continue
             coords = [(p[1], p[0]) for p in seg]
-            m.add_line(SMLine(coords, "#084594", 5))
+            m.add_line(SMLine(coords, "#ffffff", 8))
+            m.add_line(SMLine(coords, _leg_hex(seg_i), 5))
         if segments and segments[0]:
             m.add_marker(SMMarker((segments[0][0][1], segments[0][0][0]), "#1a9850", 9))
         if segments and segments[-1]:
@@ -1390,11 +1408,15 @@ def render_base_route_panel(points: list[tuple[float, float, float, datetime]],
         for g in range(0, size, 40):
             draw.line([(g, 0), (g, size)], fill=(225, 220, 210), width=1)
             draw.line([(0, g), (size, g)], fill=(225, 220, 210), width=1)
-        # Draw polylines per segment, never across segment boundaries
-        for i in range(1, len(points)):
-            if seg_index_of_point[i] != seg_index_of_point[i-1]:
-                continue
-            draw.line([px_list[i-1], px_list[i]], fill=_speed_color(points[i][2]), width=5)
+        # Per-leg cycling colour (matching the OSM path and the HTML map), never
+        # across a segment boundary. White halo first so the colour pops off the
+        # beige background, then the leg colour on top.
+        for width, colour in ((8, (255, 255, 255)), (5, None)):
+            for i in range(1, len(points)):
+                if seg_index_of_point[i] != seg_index_of_point[i-1]:
+                    continue
+                fill = colour if colour is not None else _leg_rgb(seg_index_of_point[i])
+                draw.line([px_list[i-1], px_list[i]], fill=fill, width=width)
         # Start dot from first segment, end dot from last segment
         sx, sy = px_list[0]
         ex, ey = px_list[-1]
