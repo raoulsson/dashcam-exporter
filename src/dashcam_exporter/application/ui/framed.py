@@ -559,11 +559,12 @@ class FramedUiHandler(UiHandler):
         return FrameWaiting(self, label)
 
     def set_bar(self, text):
-        # Clip to a right MARGIN, not to the border: a long subaction (a meta
-        # pass's "map: ... -> a.html, a.gpx, a_links.txt") otherwise fills the
-        # row to the very edge and reads as if it runs off. cols-3 leaves the
-        # border plus a column of air.
-        self._bar = _clip(text, max(1, self.layout.cols - 3)) if text else ""
+        # Clip to leave a column of air on BOTH sides, not fill to the border:
+        # a long subaction (a deploy's "pulling live curation + manifests (ssh
+        # ...", a meta pass's "map: ... -> a.gpx") otherwise runs to the very
+        # edge and reads as if it overflows. cols-4 = border + a space each side
+        # (_box adds the leading space and pads the trailing one).
+        self._bar = _clip(text, max(1, self.layout.cols - 4)) if text else ""
         want = bool(text)
         if want != self._show_progress:
             # The box opens when a bar arrives and closes when it goes; the log

@@ -216,7 +216,7 @@ class TheWaitingSpinnerUsesThePinnedBar(_NoColour):
         sys.stdout = cap
         try:
             h.open()
-            with h.waiting("Querying the plugin...") as w:
+            with h.waiting("Querying the plugin") as w:
                 w.update("asking the plugin")
                 time.sleep(0.3)          # let the animator draw at least once
             cleared = h._bar
