@@ -505,7 +505,11 @@ class FramedUiHandler(UiHandler):
         return FrameWaiting(self, label)
 
     def set_bar(self, text):
-        self._bar = text
+        # Clip to a right MARGIN, not to the border: a long subaction (a meta
+        # pass's "map: ... -> a.html, a.gpx, a_links.txt") otherwise fills the
+        # row to the very edge and reads as if it runs off. cols-3 leaves the
+        # border plus a column of air.
+        self._bar = _clip(text, max(1, self.layout.cols - 3)) if text else ""
         want = bool(text)
         if want != self._show_progress:
             # The box opens when a bar arrives and closes when it goes; the log
