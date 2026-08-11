@@ -760,7 +760,12 @@ class DeleteSimData(Destructive):
         """
         if not world.card.new_stamps:
             return None
-        return self._work.drop_unaccounted_then_erase(world)
+        # The override IS the item running, so its result becomes the item's
+        # outcome -- exactly as execute() records its own. Without this the
+        # runner's _stayed_lines asks completed() on an item whose _outcome is
+        # still None and gets NotRun instead of "erased" / "still refused".
+        self._outcome = self._work.drop_unaccounted_then_erase(world)
+        return self._outcome
 
 
 # The cold-start orientation: the first row that matches names where we are.

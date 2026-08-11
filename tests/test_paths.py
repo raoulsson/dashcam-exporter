@@ -233,6 +233,11 @@ class FakeWork:
     def _erase(self, world):
         return self._ran(ERASE_CARD)
 
+    def drop_unaccounted_then_erase(self, world):
+        # The way past: record the strays as dropped, then erase. The real path
+        # re-checks card_is_expendable after the drop; here the drop makes it so.
+        return self._ran(ERASE_CARD)
+
     # -- what Destructive needs between the plan and the act ---------------
     def show(self, banner):
         self.shown.append(tuple(banner))
@@ -443,16 +448,16 @@ class TestThePathsThatMustNotExist(unittest.TestCase):
         built = M.build_menu(UPLOADER, FakeWork(UPLOADER))
         self.assertEqual(_reachable(built), set(built))
 
-    def test_freeing_the_card_can_never_follow_erasing_the_workspace(self):
-        """The defect the unfold closes, expressed as a path that does not
-        exist. The folded step gathered the card's evidence from the
-        workspace, erased the workspace, then asked about the card — refusing
-        after the irreversible half had run. Clean Workspace's outbound is
-        {1,9} — itself and a new cycle, never 10 — so there is no position from
-        which that order can be typed.
+    def test_the_graph_does_not_offer_the_card_erase_after_the_workspace_clean(self):
+        """The folded step gathered the card's evidence from the workspace,
+        erased the workspace, then asked about the card — refusing after the
+        irreversible half had run. Clean Workspace's outbound is {1,9} — itself
+        and a new cycle, never 10 — so the erase is not OFFERED there. (It can
+        still be forced with the ERASE word, which re-captures the world fresh
+        and so cannot repeat the folded bug; here that force is aborted.)
         """
         b = Bench(UPLOADER)
-        b.type("1", "2", "9", "10")
+        b.type("1", "2", "9", "10", "no")   # 10 not offered -> way past -> aborts
         self.assertEqual(b.work.done, [META, CLEAN_WS])
         self.assertEqual(b.offered_at[3], AFTER_CLEAN)
         self.assertNotIn(ERASE_CARD, AFTER_CLEAN)
@@ -471,20 +476,33 @@ class TestThePathsThatMustNotExist(unittest.TestCase):
 class TestDestructiveItemsOnThePath(unittest.TestCase):
     """Reaching one is not being allowed to run it."""
 
-    def test_the_card_is_not_erased_without_the_evidence_for_it(self):
-        """A clip that exists nowhere but the card refuses the erase, and the
-        refusal comes BEFORE the banner and the word — an operator who has
-        typed ERASE has been told the erase was going to happen."""
-        stranded = every_item_can_run(UPLOADER,
-                                      card=W.Card(path=Path("/w/card"), dcim=True,
-                                                  present=True,
-                                                  stamps=frozenset({CLIP}),
-                                                  owed_stamps=frozenset({CLIP})))
-        b = Bench(UPLOADER, world=stranded, current=RENDER)
-        b.type("10")
+    def _stranded(self):
+        # A clip that exists nowhere but the card: the erase is refused, but the
+        # operator owns his data, so the refusal offers a way past (ERASE).
+        return every_item_can_run(UPLOADER,
+                                  card=W.Card(path=Path("/w/card"), dcim=True,
+                                              present=True,
+                                              stamps=frozenset({CLIP}),
+                                              new_stamps=frozenset({CLIP}),
+                                              new_files=("/w/card/%s.mp4" % CLIP,),
+                                              owed_stamps=frozenset({CLIP})))
+
+    def test_the_refusal_still_offers_a_way_past_and_aborting_erases_nothing(self):
+        """The guard warns, then trusts him: even a clip that exists nowhere but
+        the card gets a way past. But nothing is erased unless he types the word
+        -- anything else aborts, footage intact."""
+        b = Bench(UPLOADER, world=self._stranded(), current=RENDER)
+        b.type("10", "no")               # 10 -> refusal -> ERASE prompt -> aborts
         self.assertEqual(b.work.done, [])
-        self.assertEqual(b.work.shown, [])
-        self.assertEqual(b.work.asked, [])
+        self.assertEqual(len(b.offered_at), 3,
+                         "the refusal did not offer the ERASE prompt")
+
+    def test_the_word_forces_the_erase_through_the_refusal(self):
+        """Typing ERASE past the refusal records the strays as dropped and
+        erases -- the operator's decision over his own card."""
+        b = Bench(UPLOADER, world=self._stranded(), current=RENDER)
+        b.type("10", "ERASE")
+        self.assertIn(ERASE_CARD, b.work.done)
 
     def test_anything_but_the_word_erases_nothing_and_stays_put(self):
         """Rule 3: an aborted step does not complete, so the pipeline is

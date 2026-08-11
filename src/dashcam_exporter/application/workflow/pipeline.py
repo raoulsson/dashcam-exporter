@@ -7709,12 +7709,16 @@ class Runner:
     def _offer_way_past(self, number, verdict):
         """A refusal an item declares a way past, asked for by its word.
 
-        Only under a refusal that NAMED what it is about: the operator has the
-        paths on screen and the full list in a file, which is the whole basis
-        on which he is allowed to answer this.
+        Offered whenever the item has a word, evidence or not. This is a tool
+        for rendering a dashcam for fun, not a data bunker: the operator owns
+        the card and could wipe it in Finder this second. So the guard's job is
+        to SAY what is not accounted for -- the reason is on screen, the files
+        when there are any -- and then trust him. Getting the card back in the
+        car before five hours of render and ten of upload is a normal thing to
+        want; the tool warns and gets out of the way rather than forbidding it.
         """
         item = self.menu[number]
-        if not (item.OVERRIDE_WORD and getattr(verdict, "evidence", ())):
+        if not item.OVERRIDE_WORD:
             return
         print()
         if ui_handler.active().ask("  Type %s to drop anyway: " % item.OVERRIDE_WORD) \
