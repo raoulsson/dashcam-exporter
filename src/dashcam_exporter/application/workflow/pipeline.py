@@ -410,9 +410,9 @@ class Ctx:
             or (self.workspace / "website")).expanduser()
 
         try:
-            self.output_height = int(self.cfg.get("output_height", "1080"))
+            self.output_height = int(self.cfg.get("output_height", "720"))
         except ValueError:
-            self.output_height = 1080
+            self.output_height = 720
 
         self.offline = as_bool(self.cfg.get("offline"), False)
         # A non-default --config must reach the renderer too, or this CLI would

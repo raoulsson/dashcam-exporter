@@ -38,7 +38,7 @@ class RenderOptions:
     timestamp: bool = True
     speed: bool = True
     audio: bool = True
-    output_height: int = 1080
+    output_height: int = 720
     front_width: int = 2560
     front_height: int = 1600
     crop_top: int = 80

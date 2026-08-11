@@ -334,7 +334,7 @@
 # all, the full 2402x1080 composite (~3.5–4 GB per hour of source, archive
 # size); 540 is web/phone-friendly (~400–500 MB per hour). Aspect ratio is
 # preserved; VT bitrate auto-scales.
-#output_height = 720
+output_height = 720
 
 # Encoder selection. libx264 (software) is the DEFAULT: ~2-3x smaller files than
 # hardware VideoToolbox at the same quality (far better bits-per-pixel via CRF),
