@@ -3460,10 +3460,15 @@ def write_clip_review(ctx, trips):
     root = ctx.out_dir / CLIP_REVIEW_DIRNAME
     root.mkdir(parents=True, exist_ok=True)
     seen, made = set(), 0
-    bar, n_done, total = Bar("Clips"), 0, sum(len(t.get("front") or []) for t in trips)
+    # The DRIVING clips only: a 3-hour park is 50 identical dark-garage frames
+    # that answer no boundary question, and generating them is most of the work.
+    # Falls back to all clips for an older payload without the driving list.
+    def _clips_of(t):
+        return t.get("driving") or t.get("front") or []
+    bar, n_done, total = Bar("Clips"), 0, sum(len(_clips_of(t)) for t in trips)
     for trip in trips:
         folder = _review_folder(root, trip)
-        clips = _clip_review_order(trip.get("front") or [])
+        clips = _clip_review_order(_clips_of(trip))
         index_width = max(2, len(str(len(clips))))
         for n, clip in enumerate(clips, 1):
             n_done += 1
@@ -4821,9 +4826,6 @@ def step_render(ctx):
             est = "  ~%.1f GB" % gb
         mark = C.bold(" <- default") if h == ctx.output_height else ""
         print("    %4d  %-30s%s%s" % (h, why, C.bold(est), mark))
-    if vid_secs:
-        print(C.dim("        estimates for %s of video, at the current crf" % human_secs(vid_secs)))
-    print(C.dim("        or type any height"))
     height = ui_handler.active().ask("  Height [%d]: " % ctx.output_height, str(ctx.output_height))
     try:
         height = int(height)
