@@ -111,6 +111,36 @@ class StreamUiHandlerInputDelegatesToPrompt(unittest.TestCase):
         cf.assert_called_once_with("Y?", True)
 
 
+class OneWaitsForASecondKeySoTenIsReachable(unittest.TestCase):
+    """A single-digit menu fires on one keypress, which makes 1 unreachable as
+    the start of 10) Delete SIM Data. 1 alone now waits: 0 makes it 10, Enter or
+    anything else confirms plain 1. Every other key still fires at once."""
+
+    def _key(self, seq):
+        import io, sys
+        from unittest import mock
+        from dashcam_exporter.application.ui import prompt
+        with mock.patch.object(prompt, "_raw_capable", return_value=True), \
+                mock.patch.object(prompt, "_one_char", side_effect=list(seq)):
+            saved, sys.stdout = sys.stdout, io.StringIO()
+            try:
+                return prompt.read_key("Select> ")
+            finally:
+                sys.stdout = saved
+
+    def test_one_then_zero_is_ten(self):
+        self.assertEqual(self._key(["1", "0"]), "10")
+
+    def test_one_then_enter_is_one(self):
+        self.assertEqual(self._key(["1", "\r"]), "1")
+
+    def test_one_then_another_digit_is_still_one(self):
+        self.assertEqual(self._key(["1", "5"]), "1")
+
+    def test_any_other_digit_fires_at_once(self):
+        self.assertEqual(self._key(["2"]), "2")
+
+
 class TheActiveHandler(unittest.TestCase):
     def tearDown(self):
         H.set_active(None)   # never leak a backend into another test

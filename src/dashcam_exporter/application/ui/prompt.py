@@ -112,8 +112,25 @@ def _echoed(ch):
 def _key_or_help(ch):
     if ch.lower() == "h":
         return _help_key()
+    if ch == "1":
+        return _ten_or_one()
     print(C.bold(C.bright_cyan(_printable(ch))))
     return ch.strip().lower()
+
+
+def _ten_or_one():
+    """1 is the only menu key that is also the START of another one (10), so it
+    cannot fire on its own keystroke or 10) Delete SIM Data is unreachable. Wait
+    for a second key: 0 makes it 10; Enter -- or anything that is not 0 --
+    confirms plain 1."""
+    sys.stdout.write(C.bold(C.bright_cyan("1")))
+    sys.stdout.flush()
+    second = _one_char() or ""
+    if second == "0":
+        print(C.bold(C.bright_cyan("0")))
+        return "10"
+    print()
+    return "1"
 
 
 def _printable(ch):
