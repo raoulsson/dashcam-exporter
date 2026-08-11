@@ -2307,11 +2307,11 @@ def main() -> int:
         MAP_PANEL_POSITION = "right"
 
     # Final-output downscaling (e.g. for web/mobile delivery).
-    # Default 1080 = OUT_H, i.e. native: the downscale filter is skipped
-    # entirely and the composite ships at full 2402x1080. Set 720 in
-    # config.txt for ~half the bitrate (the (h/1080)^2 VT auto-scale), or
-    # 540 for a phone-friendly file. 0 is still accepted and means native.
-    output_height_cfg = ci("output_height", 1080)
+    # Default 720: ~half the bitrate of native (the (h/1080)^2 VT auto-scale)
+    # for a web/mobile-friendly file. Set 1080 in config.txt to ship the full
+    # native 2402x1080 composite (the downscale filter is skipped, 0 also means
+    # native), or 540 for an even smaller phone file.
+    output_height_cfg = ci("output_height", 720)
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(config_path),
@@ -2487,8 +2487,8 @@ def main() -> int:
                          "exit-slice anchoring (default 30).")
     ap.add_argument("--output-height", type=int, default=output_height_cfg,
                     help="Downscale the final composite to this height in px "
-                         "(0 or 1080 = keep native 1080). Default 1080 "
-                         "(native). Use 720 for roughly half the size, or "
+                         "(0 or 1080 = keep native 1080). Default 720 "
+                         "(roughly half the size). Use 1080 for native, or "
                          "540 for a smaller phone-sized "
                          "file.")
     args = ap.parse_args()

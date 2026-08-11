@@ -329,17 +329,17 @@
 # ============================================================================
 
 # Final-output downscale of the composite for web/mobile delivery.
-# 1080 (default) is native — no downscale at all, the full 2402x1080
-# composite (~3.5–4 GB per hour of source, archive size). 720 is the
-# quality / size sweet spot, still detail-rich enough to read plates and
-# signs (~1.5–2 GB per hour); 540 is web/phone-friendly (~400–500 MB per
-# hour). Aspect ratio is preserved; VT bitrate auto-scales.
-#output_height = 1080
+# 720 (default) is the quality / size sweet spot, still detail-rich enough to
+# read plates and signs (~1.5–2 GB per hour). 1080 is native — no downscale at
+# all, the full 2402x1080 composite (~3.5–4 GB per hour of source, archive
+# size); 540 is web/phone-friendly (~400–500 MB per hour). Aspect ratio is
+# preserved; VT bitrate auto-scales.
+#output_height = 720
 
 # Encoder selection. libx264 (software) is the DEFAULT: ~2-3x smaller files than
 # hardware VideoToolbox at the same quality (far better bits-per-pixel via CRF),
 # and portable. Trade-off: slower to encode. Set false to use Mac hardware (bigger
-# files, much faster). For a further ~2x, also set output_height = 720 above.
+# files, much faster). For a further ~2x, drop output_height to 540 above.
 software = true
 
 # Keep the per-clip intermediate .mp4 files after concat.
