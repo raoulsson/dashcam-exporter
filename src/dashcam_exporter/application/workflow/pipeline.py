@@ -1674,6 +1674,41 @@ def write_ledger(ctx, stamp, note=""):
         pass
 
 
+def imported_stamps(ctx):
+    """The clip stamps a verified import has actually copied off a card, ever.
+
+    The manifest the high-water mark is NOT. `through` is one number, and a
+    cleanup lifts it from a rendered trip's meta -- so it asserts clips were
+    imported that were never copied, the thirteen-clip hole record_import
+    warns about. This set is written ONLY by record_import, and only after
+    import-sd-card.sh verified the copy file-for-file; never by a cleanup.
+
+    So a stamp in here is a clip that really was copied off, which is the
+    per-clip authority the card accounting needs: it lets a card whose footage
+    is provably on this machine be erased after its workspace is swept, without
+    trusting a mark that a render could have moved. It is the same durable JSON
+    the mark lives in, outside the folders the cleanup empties.
+    """
+    return {str(s) for s in read_ledger(ctx).get("imported", [])}
+
+
+def record_imported_stamps(ctx, stamps):
+    """Union verified-copied clip stamps into the durable import manifest.
+
+    Only record_import calls this, only after a file-for-file verify. Union,
+    not replace: a delta import copies the new clips this run and the manifest
+    already holds the ones earlier runs copied, and both are now on the machine.
+    """
+    stamps = _strings(stamps)
+    if not stamps:
+        return imported_stamps(ctx)
+    d = read_ledger(ctx)
+    merged = _strings(d.get("imported", ())) | stamps
+    d["imported"] = sorted(merged)
+    _write_ledger(ctx, d)
+    return merged
+
+
 STAMP_RE = re.compile(r"(\d{14})")
 
 # The camera's own drive/park event log, at the root of DCIM. Named here
@@ -2483,8 +2518,17 @@ def record_import(ctx, card):
     The mark is therefore an optimisation, not the authority. What a delta
     actually offers is to_import(): above the mark OR owed, and owed is the
     per-clip accounting that cannot be lifted by an unrelated render.
+
+    The per-clip manifest IS the authority the mark is not: every stamp on the
+    card at this point was just verified-copied (import-sd-card.sh exited 0
+    file-for-file, or copied it in an earlier round that is still recorded), so
+    the whole card set is unioned into the durable import manifest. That is what
+    lets the card be erased after its workspace is swept -- the accounting reads
+    a record only a real copy could have written, never a mark a render moved.
     """
-    newest = max(card_access.stamps_on(card), default="")
+    on_card = card_access.stamps_on(card)
+    record_imported_stamps(ctx, on_card)
+    newest = max(on_card, default="")
     if newest:
         write_ledger(ctx, newest, "imported and verified")
     return newest or None
@@ -6716,27 +6760,35 @@ def card_accounting(ctx):
     """(owed, note) — which of this card's clips are accounted for by nothing.
 
     The per-clip guard on erasing the card. Every clip must be accounted for,
-    by whichever mix of evidence: excluded on purpose, inside a rendered
-    trip's span, or still in the workspace. Approving on any single accounted
-    clip is what let one rendered trip vouch for a whole card, and the wipe
-    then erased clips whose only copy was the card itself. The kinds of
-    evidence may mix; the accounting may not have gaps.
+    by whichever mix of evidence: verified-imported (the manifest), excluded on
+    purpose, inside a rendered trip's span, or still in the workspace. Approving
+    on any single accounted clip is what let one rendered trip vouch for a whole
+    card, and the wipe then erased clips whose only copy was the card itself.
+    The kinds of evidence may mix; the accounting may not have gaps.
     """
     stamps = card_stamps(ctx)
     # Excluded clips are accounted for BY the exclusion: their footage was
     # dropped on purpose, so no copy is supposed to exist and none is owed.
     dropped = stamps & excluded_stamps(ctx)
     stamps = stamps - dropped
+    # Verified-imported clips are accounted for BY the copy the manifest
+    # records. This is the per-clip authority the mark is not, so a card that
+    # was imported and then had its workspace swept is expendable on the
+    # strength of the copy that really happened -- item 10 need not be forced.
+    imported = stamps & imported_stamps(ctx)
+    stamps = stamps - imported
     covered = covered_stamps(ctx, stamps)
     in_workspace = workspace_stamps(ctx, stamps)
-    return stamps - covered - in_workspace, _accounting_note(dropped, covered,
-                                                             in_workspace - covered)
+    return stamps - covered - in_workspace, _accounting_note(
+        dropped, imported, covered, in_workspace - covered)
 
 
-def _accounting_note(dropped, covered, only_in_workspace):
+def _accounting_note(dropped, imported, covered, only_in_workspace):
     bits = []
     if dropped:
         bits.append("%d excluded" % len(dropped))
+    if imported:
+        bits.append("%d imported" % len(imported))
     if covered:
         bits.append("%d rendered" % len(covered))
     if only_in_workspace:

@@ -64,12 +64,14 @@ def clips_never_copied(world) -> Optional[Verdict]:
 def copy_lost(world) -> Optional[Verdict]:
     """Per clip, with no gaps.
 
-    The ledger records that a verified copy WAS made; it cannot notice that
-    the copy was later deleted, moved to a disk that is not plugged in, or
-    swept. Every clip on THIS card must be accounted for by something you can
-    go and look at — a rendered trip whose meta span contains it, or the clip
-    itself still in the workspace. Approving on any single accounted clip is
-    how a wipe erased clips whose only copy was the card.
+    The high-water mark records that a verified copy WAS made; it cannot notice
+    that the copy was later deleted, moved to a disk that is not plugged in, or
+    swept, and a cleanup can lift it from a render it never copied. Every clip
+    on THIS card must instead be accounted for by something with per-clip
+    authority — its stamp in the import manifest a verified copy actually wrote,
+    a rendered trip whose meta span contains it, or the clip itself still in the
+    workspace. Approving on the mark, or on any single accounted clip standing
+    for the rest, is how a wipe erased clips whose only copy was the card.
     """
     if not world.card.owed_stamps:
         return None

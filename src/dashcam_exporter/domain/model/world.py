@@ -63,10 +63,11 @@ class Card:
     """The source in the slot, and the per-clip accounting for it.
 
     `owed_stamps` is the whole guard on erasing it: every clip on THIS card
-    that is not excluded, not inside a rendered trip's span, and not sitting
-    in the workspace. Non-empty means some clip exists nowhere else. It is a
-    set rather than a boolean because one rendered trip vouching for a whole
-    card is exactly how a wipe erased footage whose only copy was the card.
+    that is not verified-imported (its stamp in the import manifest), not
+    excluded, not inside a rendered trip's span, and not sitting in the
+    workspace. Non-empty means some clip exists nowhere else. It is a set
+    rather than a boolean because one rendered trip vouching for a whole card
+    is exactly how a wipe erased footage whose only copy was the card.
     """
 
     path: Optional[Path] = None

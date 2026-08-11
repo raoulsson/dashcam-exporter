@@ -939,6 +939,50 @@ class TestOldFootageIsNotADeadEnd(unittest.TestCase):
         self.assertEqual(offered, frozenset())
 
 
+class TestTheImportManifestAccountsForACard(GuardTest):
+    """A verified import records which clips it copied, and that record alone
+    makes the card expendable -- even after the workspace is swept.
+
+    The high-water mark could not do this: a cleanup lifts it from a rendered
+    trip's meta, so it says clips were imported that were never copied. The
+    manifest is written only by a real verified import, so a stamp in it is a
+    clip that was actually copied off -- the per-clip authority card_accounting
+    needs to let 'import, then Clean Workspace, then wipe the card' just work.
+    """
+
+    def test_a_card_with_no_evidence_is_owed_in_full(self):
+        a, b = "20260728080000", "20260728081500"
+        self.w.clips([a, b])
+        owed, _note = P.card_accounting(self.w.ctx)
+        self.assertEqual(owed, {a, b})
+
+    def test_the_manifest_accounts_for_the_clips_it_records(self):
+        a, b = "20260728080000", "20260728081500"
+        self.w.clips([a, b])
+        P.record_imported_stamps(self.w.ctx, [a, b])
+        owed, note = P.card_accounting(self.w.ctx)
+        self.assertEqual(owed, set(), "a verified-imported card is still owed")
+        self.assertIn("2 imported", note)
+
+    def test_record_import_writes_the_manifest_and_it_survives_a_read(self):
+        a, b = "20260728080000", "20260728081500"
+        self.w.clips([a, b])
+        P.record_import(self.w.ctx, self.w.ctx.card)
+        self.assertEqual(P.imported_stamps(self.w.ctx), {a, b})
+        # And with no render and no workspace copy, the card is expendable.
+        owed, _note = P.card_accounting(self.w.ctx)
+        self.assertEqual(owed, set())
+
+    def test_a_clip_the_manifest_does_not_name_is_still_owed(self):
+        """Per clip, no generalising: importing one card does not vouch for a
+        different clip that was never copied."""
+        imported, stray = "20260728080000", "20260502102459"
+        self.w.clips([imported, stray])
+        P.record_imported_stamps(self.w.ctx, [imported])
+        owed, _note = P.card_accounting(self.w.ctx)
+        self.assertEqual(owed, {stray})
+
+
 class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
     """The second way into item 8, and the only one that does not go through
     the publish gates.
