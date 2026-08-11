@@ -983,6 +983,44 @@ class TestTheImportManifestAccountsForACard(GuardTest):
         self.assertEqual(owed, {stray})
 
 
+class TestAnUnimportedCardDefersTheProcessingSteps(unittest.TestCase):
+    """A new card in the slot, with a PREVIOUS card's import still in the
+    workspace, must not offer Generate Meta on that earlier footage.
+
+    The manifest lets a card be wiped and its laptop copy processed later, so an
+    import folder being present no longer means the card in the slot is the one
+    it describes. While the slot card has clips to fetch, the next move is
+    Import, and card_awaiting_import blocks the processing step and points there.
+    """
+
+    def _world(self, card, imports=(Path("/w/import"),)):
+        return W.World(has_track=True, workspace_settled=True, imports=imports,
+                       card=card)
+
+    def _new_card(self):
+        return W.Card(path=Path("/card"), dcim=True, present=True,
+                      stamps=frozenset({"s"}), new_stamps=frozenset({"s"}),
+                      to_fetch=1, owed_stamps=frozenset({"s"}))
+
+    def test_a_new_card_with_footage_to_fetch_blocks_meta(self):
+        r = guards.card_awaiting_import(self._world(self._new_card()))
+        self.assertIsNotNone(r)
+        self.assertIn("import it first", r)
+
+    def test_a_card_already_imported_does_not_block(self):
+        imported = W.Card(path=Path("/card"), dcim=True, present=True,
+                          stamps=frozenset({"s"}))
+        self.assertIsNone(guards.card_awaiting_import(self._world(imported)))
+
+    def test_no_card_does_not_block_processing_the_leftover_import(self):
+        # The 'process the laptop copy later' flow: card removed, import stays.
+        self.assertIsNone(guards.card_awaiting_import(self._world(W.Card())))
+
+    def test_the_meta_item_defers_to_import(self):
+        gm = items.GenerateMeta.__new__(items.GenerateMeta)
+        self.assertTrue(gm.evaluate(self._world(self._new_card())).blocked)
+
+
 class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
     """The second way into item 8, and the only one that does not go through
     the publish gates.

@@ -187,6 +187,7 @@ class GenerateMeta(MenuItem):
         nothing however many times it is run.
         """
         return Verdict.first_block(
+            guards.card_awaiting_import(world),
             guards.no_import(world, "no import — nothing to build meta from"),
             guards.track_missing(world))
 

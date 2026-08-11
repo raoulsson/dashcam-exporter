@@ -22,7 +22,8 @@ from __future__ import annotations
 
 from typing import Optional, Tuple
 
-from dashcam_exporter.domain.menu.menu import Evidence, Verdict, blocked, go, satisfied
+from dashcam_exporter.domain.menu.menu import (
+    Evidence, Verdict, blocked, go, satisfied, IMPORT)
 
 
 def _is_blocking(verdict) -> bool:
@@ -563,6 +564,29 @@ def no_import(world, reason: str):
     if world.imports:
         return None
     return reason
+
+
+def card_awaiting_import(world) -> Optional[str]:
+    """A card in the slot with footage not yet imported takes precedence.
+
+    The workspace can hold a PREVIOUS card's import -- the manifest lets a card
+    be wiped and its laptop copy processed later -- so an import folder being
+    present does not mean the card in the slot is the one it describes. When the
+    slot card has clips to fetch, the operator's next move is to import it, and
+    building meta now would describe the earlier card's footage under a screen
+    that shows a new card in. Block the processing step and point at Import; the
+    same condition Import uses to offer real work, so the two never disagree.
+
+    Silent when there is no card, or when the card in the slot holds nothing new
+    -- then the workspace import is the thing to work on and meta is available,
+    exactly as before.
+    """
+    card = world.card
+    if card.dcim and (card.new_stamps or card.to_fetch):
+        n = len(card.new_stamps) or card.to_fetch
+        return ("a card with %d clip%s not yet imported is in the slot — "
+                "import it first (%d)" % (n, "" if n == 1 else "s", IMPORT))
+    return None
 
 
 def track_missing(world) -> Optional[str]:
