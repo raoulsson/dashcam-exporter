@@ -1503,5 +1503,58 @@ class TestTheOverrideIsDiscoverableFromProgress(unittest.TestCase):
         self.assertNotIn("force", line)
 
 
+class TestTheMenuSaysWhenTheImportIsAnotherCard(unittest.TestCase):
+    """A previous card's round still in the workspace, with a NEW card in the
+    slot, makes Import and Generate Meta read as if they were about the card
+    just inserted. The menu says plainly that they are not."""
+
+    def setUp(self):
+        from dashcam_exporter.application.ui import term, screens
+        self._was, term.C.enabled = term.C.enabled, False
+        self.addCleanup(setattr, term.C, "enabled", self._was)
+        self.screens = screens
+        self.menu_items = {M.CLEAN_WS: type("X", (), {"NAME": "Clean Workspace"})()}
+
+    def _world(self, card, **kw):
+        base = dict(has_track=True, workspace_settled=True,
+                    imports=(Path("/w/2026-08-12"),),
+                    selected_import=Path("/w/2026-08-12"),
+                    unsourced_files=frozenset({"a.mp4"}))
+        base.update(kw)
+        return W.World(card=card, **base)
+
+    def _new_card(self):
+        return W.Card(path=Path("/card"), dcim=True, present=True,
+                      stamps=frozenset({"s"}), new_stamps=frozenset({"s"}),
+                      to_fetch=1)
+
+    def _lines(self, world):
+        return "\n".join(self.screens._foreign_import_lines(self.menu_items, world))
+
+    def test_a_new_card_over_a_foreign_round_is_named(self):
+        text = self._lines(self._world(self._new_card()))
+        self.assertIn("NEW card", text)
+        self.assertIn("2026-08-12", text)
+        self.assertIn("Clean Workspace", text)
+
+    def test_an_interrupted_copy_of_the_same_card_is_silent(self):
+        # unsourced empty: every import file is on the card -> the same card,
+        # importing again just finishes it. No conflict to announce.
+        self.assertEqual(
+            self.screens._foreign_import_lines(
+                self.menu_items, self._world(self._new_card(),
+                                             unsourced_files=frozenset())),
+            ())
+
+    def test_no_card_in_the_slot_is_silent(self):
+        self.assertEqual(
+            self.screens._foreign_import_lines(
+                self.menu_items, self._world(W.Card())), ())
+
+    def test_the_loading_paint_is_silent(self):
+        self.assertEqual(
+            self.screens._foreign_import_lines(self.menu_items, None), ())
+
+
 if __name__ == "__main__":
     unittest.main()

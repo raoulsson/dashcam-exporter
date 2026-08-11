@@ -173,6 +173,7 @@ def print_menu(ctx, menu_items, position, world):
     offered = position.selectable(menu_items)
     _print_all(_Grid(_in_the_grid(menu_items), verdicts, offered,
                      term_width()).lines())
+    _print_all(_foreign_import_lines(menu_items, world))
     # The reasons entries are greyed have moved to `p`. They are the same eight
     # lines under every menu draw, and a block that never changes stops being
     # read -- which is a problem when the one line that DID change is in it.
@@ -180,6 +181,41 @@ def print_menu(ctx, menu_items, position, world):
     # a typed word before it does anything. A line naming them under every
     # draw was a third telling of the same fact.
     print(C.dim("\tp = progress   h = help   i = info   q = quit"))
+
+
+def _foreign_import_lines(menu_items, world):
+    """Say when the workspace still holds a DIFFERENT card's round.
+
+    Import and Generate Meta act on whatever is in the workspace, so with a
+    previous card's import still there and a NEW card in the slot they read as
+    if they were about the card just inserted. They are not. unsourced_files
+    being non-empty is the frozen form of "the import holds files that are not
+    on this card" -- the same test the import step warns on, so the two agree.
+
+    Silent unless there is genuinely a new card AND a foreign round: no card,
+    an empty workspace, or the slot card being the import's own card (an
+    interrupted copy that importing again simply finishes) all read as no
+    conflict, which is what they are.
+    """
+    if world is None:
+        return ()
+    card = world.card
+    if not (card.dcim and (card.new_stamps or card.to_fetch)):
+        return ()
+    if not (world.imports and world.unsourced_files):
+        return ()
+    rounds = ", ".join(sorted(p.name for p in world.imports))
+    clean = menu_items.get(menu.CLEAN_WS) if hasattr(menu_items, "get") else None
+    clean_ref = "%d) %s" % (menu.CLEAN_WS, clean.NAME) if clean else "Clean Workspace"
+    return (
+        "",
+        C.yellow("  The card in the slot is a NEW card — the workspace still holds"),
+        C.yellow("  a previous round: %s." % rounds),
+        C.dim("  Import (%d) and Generate Meta (%d) act on THAT round, not this"
+              " card." % (menu.IMPORT, menu.META)),
+        C.dim("  Clear it with %s first, or finish the round it belongs to."
+              % clean_ref),
+    )
 
 
 def _verdicts(menu_items, world):
