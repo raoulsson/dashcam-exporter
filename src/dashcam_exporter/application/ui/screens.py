@@ -80,14 +80,24 @@ def _why_lines(menu_items, verdicts, offered):
 
 
 def _blocked_lines(menu_items, verdicts, offered):
-    said = map(lambda n: _blocked_line(n, verdicts[n]), sorted(offered))
+    said = map(lambda n: _blocked_line(n, verdicts[n], menu_items.get(n)),
+               sorted(offered))
     return list(filter(None, said))
 
 
-def _blocked_line(number, verdict):
+def _blocked_line(number, verdict, item=None):
     if not verdict.blocked:
         return ""
-    return C.dim("   %d) %s" % (number, verdict.reason))
+    line = "   %d) %s" % (number, verdict.reason)
+    # An item that declares a way past its own refusal -- Delete SIM Data's
+    # ERASE -- says so here, so the override is discoverable from Progress and
+    # not only by trying the greyed entry and reading the prompt. Gated on the
+    # SAME condition the way-past itself is (a named word AND evidence the
+    # refusal is about), so the hint never promises a door that is not there.
+    word = getattr(item, "OVERRIDE_WORD", None)
+    if word and getattr(verdict, "evidence", ()):
+        line += "  (select it, type %s to force)" % word
+    return C.dim(line)
 
 
 def _not_here_line(menu_items, offered):

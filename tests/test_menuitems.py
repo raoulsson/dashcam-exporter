@@ -1469,5 +1469,39 @@ class TestCompleted(unittest.TestCase):
         self.assertFalse(item.completed())
 
 
+class TestTheOverrideIsDiscoverableFromProgress(unittest.TestCase):
+    """A refusal with a way past it should say so on the Progress screen, not
+    only when the operator tries the greyed entry -- and only when the way past
+    is really there (a named word AND the evidence the refusal is about)."""
+
+    def setUp(self):
+        from dashcam_exporter.application.ui import term
+        self._was, term.C.enabled = term.C.enabled, False
+        self.addCleanup(setattr, term.C, "enabled", self._was)
+        from dashcam_exporter.application.ui import screens
+        self.screens = screens
+
+    class _Erasable:
+        OVERRIDE_WORD = "ERASE"
+
+    class _Plain:
+        OVERRIDE_WORD = None
+
+    def test_the_word_shows_when_the_refusal_names_its_files(self):
+        v = M.blocked("card: 42 new clips ready for next session", ("a.mp4",))
+        line = self.screens._blocked_line(10, v, self._Erasable())
+        self.assertIn("type ERASE to force", line)
+
+    def test_no_word_when_the_refusal_has_no_evidence(self):
+        v = M.blocked("card: nothing was ever imported")
+        line = self.screens._blocked_line(10, v, self._Erasable())
+        self.assertNotIn("force", line)
+
+    def test_no_word_for_an_item_that_declares_none(self):
+        v = M.blocked("some reason", ("a.mp4",))
+        line = self.screens._blocked_line(9, v, self._Plain())
+        self.assertNotIn("force", line)
+
+
 if __name__ == "__main__":
     unittest.main()
