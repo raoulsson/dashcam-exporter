@@ -771,7 +771,7 @@ class Readout:
                           tail_bits)).rstrip()
 
 
-def run_stream(child, readout):
+def run_stream(child, readout, narrator=None):
     """Run a Child, stream its output through a Readout, return (rc, all_lines).
 
     Two arguments, and they are two objects rather than one bag: what to run
@@ -809,6 +809,14 @@ def run_stream(child, readout):
                 continue
             readout.feed(item.rstrip())
             readout.tick()
+            # The bar shows WHERE the child is; a narrator turns the milestone
+            # lines into the STORY in the main window -- an installer's growing
+            # list of what it is doing -- and updates the foot totals. Returns a
+            # sentence to log, or None for a line that is not a milestone.
+            if narrator:
+                told = narrator(item.rstrip())
+                if told:
+                    ui_handler.active().log(told)
             live.draw([readout.line()])
         rc = child.proc.wait()
     except KeyboardInterrupt:
@@ -1082,6 +1090,41 @@ def make_render_parser():
         return min(frac, 1.0), ProgressDetail(subaction=doing)
 
     return parse
+
+
+_RE_R_FOUND = re.compile(r"Found (\d+) clip pairs grouped into (\d+)")
+_RE_R_MAP = re.compile(r"^\s*map:\s+([\d.]+) km in (\d+) segments")
+
+
+def render_narrator(ctx):
+    """Turn the renderer's milestone lines into the STORY in the main window --
+    an installer's growing list of what it is doing -- and keep the foot totals.
+    The bar already says WHERE it is (trip 2/6, clip 40/212); this says WHAT is
+    happening, once per milestone, and never every clip. Returns a sentence to
+    log, or None for a line that is not a milestone."""
+    done = {"videos": 0}
+
+    def tell(line):
+        if line.startswith("Scanning:"):
+            return "Loading files…"
+        m = _RE_R_FOUND.search(line)
+        if m:
+            ctx.ui.stat("Clips", int(m.group(1)))
+            ctx.ui.stat("Trips", int(m.group(2)))
+            return "Files loaded: %s clips in %s trips." % (m.group(1), m.group(2))
+        m = RE_TRIP.match(line)
+        if m:
+            return "Rendering trip %s of %s…" % (m.group(1), m.group(2))
+        m = _RE_R_MAP.match(line)
+        if m:
+            return "  route: %s km over %s segments." % (m.group(1), m.group(2))
+        if line.strip().startswith("✓"):
+            done["videos"] += 1
+            ctx.ui.stat("Videos rendered", done["videos"])
+            return "  video written."
+        return None
+
+    return tell
 
 
 # ---------------------------------------------------------------------------
@@ -4901,7 +4944,8 @@ def step_render(ctx):
     # renderer's words -- the sentence below counts them once, in the tool's.
     rc, _lines = run_stream(Child(cmd, ctx.exporter, env=_renderer_env(ctx)),
                             Readout("Render", make_render_parser(),
-                                    quiet_finish=True))
+                                    quiet_finish=True),
+                            narrator=render_narrator(ctx))
     after = set(rendered_mp4s(ctx.out_dir))
     new = after - before
     if rc != 0:
