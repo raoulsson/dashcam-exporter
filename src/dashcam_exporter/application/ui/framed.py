@@ -468,6 +468,11 @@ class FramedUiHandler(UiHandler):
         self._follow()          # new output shows on the newest page
         self._paint_log()
 
+    def scroll_top(self):
+        self._log_view = 0
+        self._paint_log()
+        self._paint_menu()      # refresh the page indicator (now UP 0)
+
     def clear_log(self):
         self._log.clear()
         self._log_view = 0

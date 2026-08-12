@@ -201,6 +201,17 @@ class TheLogKeepsHistoryAndPages(_NoColour):
         self.assertEqual(h._log_view, last)
         list(gen)
 
+    def test_scroll_top_anchors_the_view_on_the_first_page(self):
+        # A read-me screen (the licence) prints taller than the region; without
+        # anchoring, log() follows to the last, near-empty page and the screen
+        # reads as blank. scroll_top puts the view back on the heading.
+        gen = self._filled()
+        h, cap = next(gen)
+        self.assertEqual(h._log_view, h._last_page_start())
+        h.scroll_top()
+        self.assertEqual(h._log_view, 0)
+        list(gen)
+
 
 class TheWaitingSpinnerUsesThePinnedBar(_NoColour):
     """The stream spinner writes carriage-return redraws the frame's tee cannot

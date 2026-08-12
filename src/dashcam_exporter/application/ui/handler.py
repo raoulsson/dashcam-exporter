@@ -78,6 +78,13 @@ class UiHandler(ABC):
         the key falls through to the menu as before."""
         return False
 
+    def scroll_top(self):
+        """Anchor the paged mid-screen on its FIRST page, for a screen printed to
+        be read from the top (the licence). Without it the log follows each line
+        to the newest page, so a block taller than the region lands on its last,
+        near-empty page. The stream backend scrolls a real terminal and has no
+        region to anchor, so it is a no-op there."""
+
     def clear_log(self):
         """Start a fresh mid-screen for a new action. The framed backend wipes
         its scrolling region so the step's own header and output begin at the

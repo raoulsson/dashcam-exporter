@@ -7730,6 +7730,9 @@ class Runner:
 
     def _license(self):
         _print_all(_license_lines())
+        # It is a page and a half; the log otherwise follows to its last, near-
+        # empty page. Anchor on the top so it reads from the heading, j/k to page.
+        ui_handler.active().scroll_top()
         return True
 
     def _select(self, sel):
