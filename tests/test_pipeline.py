@@ -1583,6 +1583,40 @@ class TheInfoScreen(unittest.TestCase):
         with mock.patch.object(P.uploader, "last_change", return_value=""):
             self.assertIsNone(self._row("Last Update"))
 
+    def test_the_licence_row_names_polyform_and_points_at_l(self):
+        """The rename from MIT is global; the row a bug report quotes must not
+        still say MIT, and it names the key that shows the full text."""
+        row = self._row("Licence")
+        self.assertIn("PolyForm Noncommercial 1.0.0", row)
+        self.assertIn("l", row)
+        self.assertNotIn("MIT", " ".join(self._plain()))
+
+
+class TheLicenceScreen(unittest.TestCase):
+    """`l` shows the full licence, read from the checkout's own LICENSE file so
+    it cannot drift from the text that governs."""
+
+    def _plain(self):
+        return [re.sub(r"\x1b\[[0-9;]*m", "", ln) for ln in P._license_lines()]
+
+    def test_it_is_the_actual_licence_file(self):
+        body = "\n".join(self._plain())
+        self.assertIn("PolyForm Noncommercial License 1.0.0", body)
+        self.assertIn("Required Notice: Copyright 2026 Raoul Marc Schmidiger", body)
+
+    def test_a_missing_file_says_so_rather_than_crashing(self):
+        with mock.patch.dict(P._license_lines.__globals__,
+                             {"EXPORTER_DIR": Path("/no/such/tree")}):
+            body = "\n".join(self._plain())
+        self.assertIn("No LICENSE file", body)
+
+    def test_pressing_l_prints_the_licence_and_holds_the_position(self):
+        menu_items, position = machine(at=M.NOWHERE)
+        run = drive(menu_items, position, ["l", "q"])
+        self.assertIn("PolyForm Noncommercial License 1.0.0", run.printed)
+        self.assertNotIn("Unknown option", run.printed)
+        self.assertEqual(run.position.current, M.NOWHERE)
+
 
 class TheDateIsSpelled(unittest.TestCase):
 

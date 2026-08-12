@@ -115,6 +115,7 @@ from dashcam_exporter.application.ui.screens import (ORPHAN_LIST, SHOWN, TIME_CO
                      _entry_help, _evidence_lines, _general_help,
                      _graph_row, _grid_columns, _guard_reason, _help_lines,
                      _hms, _in_the_grid, _info_lines, _info_setting,
+                     _license_lines,
                      _last_name, _later_line, _menu_line, _named_list,
                      _next_steps, _not_here_line, _not_offered_reason,
                      _off_line, _orphan_file, _paint_body, _plugin_info_lines,
@@ -7671,10 +7672,12 @@ class Runner:
         """
         if not sel:
             return True
-        # j/l page the mid-screen when the log overruns it. Handled before the
+        # j/k page the mid-screen when the log overruns it. Handled before the
         # menu sees them (no clear, no dispatch); a no-op in the stream backend,
-        # where the terminal scrolls and the keys fall through as before.
-        if sel in ("j", "l") and ui_handler.active().page(sel):
+        # where the terminal scrolls and the keys fall through as before. `l`
+        # used to be the forward key -- it moved to `k` so `l` can show the
+        # licence, which a page key can never reach once the frame is open.
+        if sel in ("j", "k") and ui_handler.active().page(sel):
             return True
         return self._chosen(sel)
 
@@ -7695,6 +7698,8 @@ class Runner:
             return self._help(sel)
         if sel in ("i", "info"):
             return self._info()
+        if sel in ("l", "licence", "license"):
+            return self._license()
         return self._select(sel)
 
     def _progress(self):
@@ -7721,6 +7726,10 @@ class Runner:
 
     def _info(self):
         _print_all(_info_lines(self.ctx.plugin))
+        return True
+
+    def _license(self):
+        _print_all(_license_lines())
         return True
 
     def _select(self, sel):

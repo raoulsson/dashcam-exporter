@@ -72,7 +72,7 @@ class UiHandler(ABC):
         print(text)
 
     def page(self, direction):
-        """Scroll the mid-screen a page (j/left = older, l/right = newer) when
+        """Scroll the mid-screen a page (j/left = older, k/right = newer) when
         the log has more than fits. Returns True if the backend consumed the key.
         The stream backend has no fixed region to page, so it returns False and
         the key falls through to the menu as before."""

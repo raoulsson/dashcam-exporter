@@ -274,7 +274,7 @@ def _fixed_size():
 
 
 class FramedUiHandler(UiHandler):
-    LOG_HISTORY = 2000     # lines kept for paging back with j/l
+    LOG_HISTORY = 2000     # lines kept for paging back with j/k
 
     def __init__(self, title="dashcam-exporter", subtitle="", splash_seconds=2.0):
         self._title = title
@@ -473,7 +473,7 @@ class FramedUiHandler(UiHandler):
         self._log_view = 0
         self._summary.clear()   # each action starts its own tally
         self._paint_log()
-        self._paint_menu()      # the j/l page hint clears with the log
+        self._paint_menu()      # the j/k page hint clears with the log
 
     def stat(self, name, value):
         """A named running total shown in the main window and updated in place --
@@ -506,7 +506,7 @@ class FramedUiHandler(UiHandler):
         used = len(self._log) - self._last_page_start()   # rows on the current page
         if self._log and used + len(wrapped) > body:
             # A paragraph never straddles a page. Fill the rest of this page so
-            # the next starts on a page boundary (keeps j/l pages aligned), then
+            # the next starts on a page boundary (keeps j/k pages aligned), then
             # a row of air at its top. Nothing is cleared -- the pages remain in
             # history to walk back through once transcription is done.
             while len(self._log) % body != 0:
@@ -536,9 +536,9 @@ class FramedUiHandler(UiHandler):
         self._log_view = max(0, min(self._log_view, self._last_page_start()))
 
     def page(self, direction):
-        """Turn to the previous/next PAGE of the log -- j back, l forward. Pages
+        """Turn to the previous/next PAGE of the log -- j back, k forward. Pages
         are kept (nothing is cleared), so this walks the whole history once a
-        step is done. Consumes j/l even at the ends so they never fall through
+        step is done. Consumes j/k even at the ends so they never fall through
         to the menu as a typo."""
         if not self._open:
             return False
@@ -546,7 +546,7 @@ class FramedUiHandler(UiHandler):
         if self._last_page_start() > 0:
             if direction in ("j", "left"):        # older, back a page
                 self._log_view = max(0, self._log_view - body)
-            else:                                 # 'l' / right: newer, forward
+            else:                                 # 'k' / right: newer, forward
                 self._log_view = min(self._last_page_start(), self._log_view + body)
             self._paint_log()
             self._paint_menu()                    # refresh the page indicator
@@ -688,13 +688,13 @@ class FramedUiHandler(UiHandler):
         self._write(buf)
 
     def _page_hint(self):
-        """`j/l) page` with how many lines are hidden above/below, shown only
+        """`j/k) page` with how many lines are hidden above/below, shown only
         when the log has more than one screenful."""
         above = self._log_view
         below = max(0, len(self._log) - self._log_view - self._body_height())
         if not (above or below):
             return ""
-        return C.dim("   j/l) page  %s%d %s%d" % (UP, above, DOWN, below))
+        return C.dim("   j/k) page  %s%d %s%d" % (UP, above, DOWN, below))
 
     def _paint_bar(self):
         # The bar row alone -- redrawn often while a step or the spinner runs.
@@ -711,7 +711,7 @@ class FramedUiHandler(UiHandler):
         for i, row in enumerate(L.menu_rows):
             text = self._menu_lines[i] if i < len(self._menu_lines) else ""
             buf += _at(row, 1, _box(text, cols))
-        hint = C.dim("            p) progress    h) help    i) info    q) quit")
+        hint = C.dim("         p) progress   h) help   i) info   l) licence   q) quit")
         hint += self._page_hint()
         buf += _at(L.hint_row, 1, _box(hint, cols))
         buf += _at(L.select_rule, 1, _rule_single(cols))

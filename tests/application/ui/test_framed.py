@@ -188,16 +188,16 @@ class TheLogKeepsHistoryAndPages(_NoColour):
         self.assertEqual(h._log_view, h._last_page_start())
         list(gen)
 
-    def test_j_pages_back_and_l_pages_forward(self):
+    def test_j_pages_back_and_k_pages_forward(self):
         gen = self._filled()
         h, cap = next(gen)
         body, last = h._body_height(), h._last_page_start()
         self.assertEqual(h._log_view, last)
         h.page("j")                       # back a page
         self.assertEqual(h._log_view, max(0, last - body))
-        h.page("l")                       # forward, to the newest page
+        h.page("k")                       # forward, to the newest page
         self.assertEqual(h._log_view, last)
-        h.page("l")                       # clamps at the last page
+        h.page("k")                       # clamps at the last page
         self.assertEqual(h._log_view, last)
         list(gen)
 

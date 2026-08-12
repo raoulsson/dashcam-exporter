@@ -180,7 +180,7 @@ def print_menu(ctx, menu_items, position, world):
     # The destructive entries are already red, and every one of them asks for
     # a typed word before it does anything. A line naming them under every
     # draw was a third telling of the same fact.
-    print(C.dim("\tp = progress   h = help   i = info   q = quit"))
+    print(C.dim("\tp = progress   h = help   i = info   l = licence   q = quit"))
 
 
 def _foreign_import_lines(menu_items, world):
@@ -353,7 +353,7 @@ def _info_lines(plugin=None):
              _info_setting("Designed by", "Raoul Marc Schmidiger"),
              _info_setting("Implemented by", "Claude"),
              _info_setting("Repository", REPO_URL),
-             _info_setting("Licence", "MIT"),
+             _info_setting("Licence", "PolyForm Noncommercial 1.0.0 (l for the text)"),
              _info_setting("Version", version()))
             + _dated("Last Update", uploader.last_change(EXPORTER_DIR))
             + _plugin_info_lines(plugin)
@@ -362,6 +362,19 @@ def _info_lines(plugin=None):
                _info_setting("Sponsor", SPONSORS_URL),
                _info_setting("Buy a coffee", COFFEE_URL),
                ""))
+
+
+def _license_lines():
+    """The whole LICENSE file, read from the checkout so the `l` screen cannot
+    drift from the text that actually governs -- a relicence edits one file and
+    this shows exactly what ships, not a hand-kept second copy."""
+    path = EXPORTER_DIR / "LICENSE"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return ("", C.yellow("  No LICENSE file at %s." % path), "")
+    body = tuple("  " + ln for ln in text.rstrip("\n").split("\n"))
+    return ("", rule("Licence", ch="="), "") + body + ("",)
 
 
 def _plugin_info_lines(plugin):
@@ -404,6 +417,7 @@ def _general_help(menu_items):
             "    h<n>         what entry n is, and why it is or is not offered",
             "    p            progress, and why each greyed entry is greyed",
             "    i            version, licence, repository, funding",
+            "    l            the full licence text",
             "    q            quit",
             "",
             C.dim("  Entries erasing footage ask for a typed word first: %s."
