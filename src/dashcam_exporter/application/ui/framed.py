@@ -466,7 +466,13 @@ class FramedUiHandler(UiHandler):
 
     def log(self, text=""):
         for piece in str(text).split("\n"):
-            self._log.append(_clean_log(piece))
+            cleaned = _clean_log(piece)
+            if self._pinned_top and not cleaned.strip():
+                # A held read-screen (the licence) ignores the menu loop's
+                # decorative blank line -- appended every turn, it would both
+                # re-follow the view off the top and inflate the page counter.
+                continue
+            self._log.append(cleaned)
         self._follow()          # new output shows on the newest page
         self._paint_log()
 
@@ -562,7 +568,10 @@ class FramedUiHandler(UiHandler):
         to the menu as a typo."""
         if not self._open:
             return False
-        self._pinned_top = False                  # the operator is steering now
+        # The pin HOLDS through paging: it means the operator drives the view,
+        # not that the view is stuck at the top. Releasing it here let the menu
+        # loop's next blank line re-follow to the empty tail -- a blank page on
+        # every keypress. Only a new action (clear_log) releases it.
         body = self._body_height()
         if self._last_page_start() > 0:
             if direction in ("j", "left"):        # older, back a page
