@@ -364,20 +364,33 @@ def _info_lines(plugin=None):
                ""))
 
 
-def _license_lines():
+def _license_lines(width=76):
     """The whole LICENSE file, read from the checkout so the `l` screen cannot
     drift from the text that actually governs -- a relicence edits one file and
-    this shows exactly what ships, not a hand-kept second copy."""
+    this shows exactly what ships, not a hand-kept second copy.
+
+    Wrapped to `width` so nothing runs off the right border and no word is cut
+    mid-render (urls and hyphenated terms stay whole). The caller passes the
+    text column budget of whatever region it prints into; the box that frames it
+    adds the one leading pad column. One blank line separates paragraphs -- the
+    file's own single blanks, kept as paragraph breaks now that the paragraphs
+    wrap, not the double-spacing they read as when every line stood alone."""
     path = EXPORTER_DIR / "LICENSE"
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return ("", C.yellow("  No LICENSE file at %s." % path), "")
-    # Single-spaced: the file blank-lines every paragraph, which reads as double
-    # spacing in the region and doubles the height for no gain. Drop the blanks
-    # and keep the text lines, so the whole licence is shorter and denser.
-    body = tuple("  " + ln for ln in text.split("\n") if ln.strip())
-    return ("", rule("Licence", ch="="), "") + body + ("",)
+    head = "== Licence "
+    header = C.bold(head) + "=" * max(0, width - len(head))
+    out = ["", header, ""]
+    for para in text.split("\n"):
+        if not para.strip():
+            if out and out[-1] != "":
+                out.append("")               # one blank between paragraphs
+            continue
+        out.extend(textwrap.wrap(para, width, break_long_words=False,
+                                 break_on_hyphens=False) or [""])
+    return tuple(out) + ("",)
 
 
 def _plugin_info_lines(plugin):

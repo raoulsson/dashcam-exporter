@@ -219,6 +219,58 @@ class TheLogKeepsHistoryAndPages(_NoColour):
         self.assertFalse(h._pinned_top)
         list(gen)
 
+    def test_the_nav_lives_in_the_log_foot_right_aligned_over_a_gutter(self):
+        gen = self._filled()
+        h, cap = next(gen)
+        inner = h.layout.cols - 2
+        foot = h._footer_text(inner)
+        self.assertIn("j/k) page", foot)
+        self.assertEqual(len(foot), inner - 1)   # one col short; the box pads the last
+        self.assertTrue(foot.startswith(" "))    # pushed to the right
+        list(gen)
+
+    def test_the_foot_is_empty_when_the_log_fits_on_one_page(self):
+        h = framed.FramedUiHandler(splash_seconds=0)
+        h._size = lambda: (24, 80)
+        cap, saved = io.StringIO(), sys.stdout
+        sys.stdout = cap
+        try:
+            h.open()
+            h.log("just one line")
+            self.assertEqual(h._page_hint(), "")
+            self.assertEqual(h._footer_text(h.layout.cols - 2), "")
+        finally:
+            h.close()
+            sys.stdout = saved
+
+    def test_the_nav_keys_are_bold(self):
+        gen = self._filled()
+        h, cap = next(gen)
+        C.enabled = True
+        try:
+            self.assertIn(C.bold("j/k"), h._page_hint())
+        finally:
+            C.enabled = False
+        list(gen)
+
+    def test_the_submenu_keys_are_bold(self):
+        h = framed.FramedUiHandler(splash_seconds=0)
+        h._size = lambda: (24, 80)
+        cap, saved = io.StringIO(), sys.stdout
+        sys.stdout = cap
+        C.enabled = True
+        try:
+            h.open()
+            h._paint_menu()
+            bold_keys = [C.bold(k) for k in ("p)", "h)", "i)", "l)", "q)")]
+        finally:
+            C.enabled = False
+            h.close()
+            sys.stdout = saved
+        out = cap.getvalue()
+        for bold_key in bold_keys:
+            self.assertIn(bold_key, out)
+
 
 class TheWaitingSpinnerUsesThePinnedBar(_NoColour):
     """The stream spinner writes carriage-return redraws the frame's tee cannot

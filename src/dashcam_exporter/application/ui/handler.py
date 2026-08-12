@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from dashcam_exporter.application.ui.term import C
+from dashcam_exporter.application.ui.term import C, term_width
 from dashcam_exporter.application.ui import screens
 from dashcam_exporter.application.ui import prompt as prompt_mod
 from dashcam_exporter.application.ui.progress import Live, waiting as _stream_waiting
@@ -77,6 +77,12 @@ class UiHandler(ABC):
         The stream backend has no fixed region to page, so it returns False and
         the key falls through to the menu as before."""
         return False
+
+    def text_width(self):
+        """Columns available for wrapping a read-me screen's text (the licence).
+        The stream backend has the whole terminal less a small margin; the
+        framed backend overrides this with its bordered region's inner width."""
+        return max(20, term_width() - 2)
 
     def scroll_top(self):
         """Anchor the paged mid-screen on its FIRST page, for a screen printed to

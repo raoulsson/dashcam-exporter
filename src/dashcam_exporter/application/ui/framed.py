@@ -275,6 +275,7 @@ def _fixed_size():
 
 class FramedUiHandler(UiHandler):
     LOG_HISTORY = 2000     # lines kept for paging back with j/k
+    FOOTER_ROWS = 2        # a blank gutter row + the page-nav footer, at the log foot
 
     def __init__(self, title="dashcam-exporter", subtitle="", splash_seconds=2.0):
         self._title = title
@@ -527,9 +528,15 @@ class FramedUiHandler(UiHandler):
         self._follow()
         self._paint_log()
 
+    def text_width(self):
+        # The bordered region's inner text budget: two side borders, one leading
+        # pad column, one trailing column so nothing sits against the border.
+        return max(20, self.layout.cols - 4)
+
     def _body_height(self):
-        """Rows the paged log gets -- the summary is pinned below it."""
-        return max(1, self.layout.log_height - len(self._summary))
+        """Rows the paged log gets -- the summary is pinned below it, and the
+        two footer rows (a blank gutter and the page-nav line) below that."""
+        return max(1, self.layout.log_height - len(self._summary) - self.FOOTER_ROWS)
 
     def _last_page_start(self):
         """Top-line index of the page holding the newest line."""
@@ -678,15 +685,30 @@ class FramedUiHandler(UiHandler):
         self._clamp_view()
         lines = list(self._log)
         window = lines[self._log_view:self._log_view + h]   # the current page
+        region = range(L.log_top, L.log_bottom + 1)
+        last = len(range(L.log_top, L.log_bottom + 1)) - 1
         buf = ""
-        for i, row in enumerate(range(L.log_top, L.log_bottom + 1)):
-            if i < h:                            # the paged log
+        for i, row in enumerate(region):
+            if i == last:                        # the page-nav footer, at the foot
+                text = self._footer_text(cols - 2)
+            elif i < h:                          # the paged log
                 text = (" " + window[i]) if i < len(window) else ""
-            else:                                # the pinned summary at the foot
-                s = i - h
-                text = (" " + summary[s]) if s < len(summary) else ""
+            elif i - h < len(summary):           # the pinned summary
+                text = " " + summary[i - h]
+            else:                                # the blank gutter above the footer
+                text = ""
             buf += _at(row, 1, _box(text, cols))
         self._write(buf)
+
+    def _footer_text(self, inner):
+        """The page-nav hint, right-aligned in the log foot with one trailing
+        column of air, or an empty row when the log fits on one page. Returned
+        one column short of `inner` so the box's own pad leaves that air."""
+        hint = self._page_hint()
+        if not hint:
+            return ""
+        left = max(1, inner - len(_plain(hint)) - 1)
+        return " " * left + hint
 
     def _paint_progress(self):
         if not self._open:
@@ -702,13 +724,14 @@ class FramedUiHandler(UiHandler):
         self._write(buf)
 
     def _page_hint(self):
-        """`j/k) page` with how many lines are hidden above/below, shown only
-        when the log has more than one screenful."""
+        """`j/k) page` with how many lines are hidden above/below, shown in the
+        log foot only when the log has more than one screenful. The keys are
+        bold; the rest is dim."""
         above = self._log_view
         below = max(0, len(self._log) - self._log_view - self._body_height())
         if not (above or below):
             return ""
-        return C.dim("   j/k) page  %s%d %s%d" % (UP, above, DOWN, below))
+        return C.bold("j/k") + C.dim(") page  %s%d %s%d" % (UP, above, DOWN, below))
 
     def _paint_bar(self):
         # The bar row alone -- redrawn often while a step or the spinner runs.
@@ -725,8 +748,10 @@ class FramedUiHandler(UiHandler):
         for i, row in enumerate(L.menu_rows):
             text = self._menu_lines[i] if i < len(self._menu_lines) else ""
             buf += _at(row, 1, _box(text, cols))
-        hint = C.dim("         p) progress   h) help   i) info   l) licence   q) quit")
-        hint += self._page_hint()
+        keys = (("p", "progress"), ("h", "help"), ("i", "info"),
+                ("l", "licence"), ("q", "quit"))
+        hint = "         " + "   ".join(C.bold(k + ")") + C.dim(" " + label)
+                                        for k, label in keys)
         buf += _at(L.hint_row, 1, _box(hint, cols))
         buf += _at(L.select_rule, 1, _rule_single(cols))
         buf += _at(L.select_row, 1, _box(SELECT_LABEL, cols))   # visible from the start
