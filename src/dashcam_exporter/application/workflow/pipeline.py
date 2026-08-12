@@ -4909,10 +4909,12 @@ def step_render(ctx):
 
     idx = ui_handler.active().ask("  Trip indices to render (space separated, blank = %s): "
               % ("the %d not yet rendered" % len(todo_idx) if done_idx and todo_idx
-                 else "nothing to do" if done_idx else "all renderable"))
+                 else "nothing to do, or name a trip to re-render it" if done_idx
+                 else "all renderable"))
     if not idx.strip() and done_idx:
         if not todo_idx:
-            print(C.dim("  Nothing to render."))
+            print(C.dim("  Nothing to render. Name a trip (e.g. %s) to re-render it "
+                        "at another height." % done_idx[0]))
             # Every renderable trip has its mp4: the postcondition holds.
             return record(ctx, NAME[RENDER], SATISFIED, started, "all trips already rendered")
         idx = " ".join(str(i) for i in todo_idx)
