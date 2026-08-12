@@ -210,6 +210,13 @@ class TheLogKeepsHistoryAndPages(_NoColour):
         self.assertEqual(h._log_view, h._last_page_start())
         h.scroll_top()
         self.assertEqual(h._log_view, 0)
+        # The menu loop prints a blank line after every draw; the pin must hold
+        # the view at the top through that lone log(), not snap back down.
+        h.log("")
+        self.assertEqual(h._log_view, 0)
+        # The operator paging releases the pin and takes over.
+        h.page("j")
+        self.assertFalse(h._pinned_top)
         list(gen)
 
 

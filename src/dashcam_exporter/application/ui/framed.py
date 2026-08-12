@@ -288,6 +288,7 @@ class FramedUiHandler(UiHandler):
         self._lock = threading.Lock()   # the bar spinner draws from a thread
         self._log = collections.deque(maxlen=self.LOG_HISTORY)
         self._log_view = 0             # index of the top visible line (page-anchored)
+        self._pinned_top = False       # a read-me screen holds the view at its top
         self._summary = collections.OrderedDict()   # live counters for a task
         self._real_stdout = None
         self._open = False
@@ -469,6 +470,7 @@ class FramedUiHandler(UiHandler):
         self._paint_log()
 
     def scroll_top(self):
+        self._pinned_top = True   # hold here despite the menu loop's trailing blank
         self._log_view = 0
         self._paint_log()
         self._paint_menu()      # refresh the page indicator (now UP 0)
@@ -476,6 +478,7 @@ class FramedUiHandler(UiHandler):
     def clear_log(self):
         self._log.clear()
         self._log_view = 0
+        self._pinned_top = False   # a new action follows its own output again
         self._summary.clear()   # each action starts its own tally
         self._paint_log()
         self._paint_menu()      # the j/k page hint clears with the log
@@ -534,7 +537,12 @@ class FramedUiHandler(UiHandler):
         return (max(0, len(self._log) - 1) // body) * body
 
     def _follow(self):
-        """Jump the view to the newest page (while output is being written)."""
+        """Jump the view to the newest page (while output is being written) --
+        unless a read-me screen has pinned the top. The menu loop prints a blank
+        line after each draw, and without the pin that lone `log("")` would snap
+        a just-shown licence straight back down to its last, empty page."""
+        if self._pinned_top:
+            return
         self._log_view = self._last_page_start()
 
     def _clamp_view(self):
@@ -547,6 +555,7 @@ class FramedUiHandler(UiHandler):
         to the menu as a typo."""
         if not self._open:
             return False
+        self._pinned_top = False                  # the operator is steering now
         body = self._body_height()
         if self._last_page_start() > 0:
             if direction in ("j", "left"):        # older, back a page

@@ -373,7 +373,10 @@ def _license_lines():
         text = path.read_text(encoding="utf-8")
     except OSError:
         return ("", C.yellow("  No LICENSE file at %s." % path), "")
-    body = tuple("  " + ln for ln in text.rstrip("\n").split("\n"))
+    # Single-spaced: the file blank-lines every paragraph, which reads as double
+    # spacing in the region and doubles the height for no gain. Drop the blanks
+    # and keep the text lines, so the whole licence is shorter and denser.
+    body = tuple("  " + ln for ln in text.split("\n") if ln.strip())
     return ("", rule("Licence", ch="="), "") + body + ("",)
 
 
