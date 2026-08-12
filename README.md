@@ -676,7 +676,9 @@ the outbounds, reporting every difference rather than reconciling it.
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE).
+[PolyForm Noncommercial 1.0.0](LICENSE) — free to use, modify, and share for any
+noncommercial purpose. Commercial use needs a separate licence: contact
+hello@raoulsson.com.
 
 ---
 
