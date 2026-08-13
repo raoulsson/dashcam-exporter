@@ -87,6 +87,30 @@ def card_is_expendable(world) -> Verdict:
     return _first_blocking(world, CARD_GUARDS) or go()
 
 
+def drop_would_clear_the_card(world) -> bool:
+    """Would recording the owed clips as dropped let the erase through?
+
+    The word past item 10's refusal writes footage off permanently: the stamps
+    go in the excluded list, every guard honours it, the delta import stops
+    offering those clips back, and nothing in the tool takes it off again. That
+    price is worth offering only when paying it actually opens the door.
+
+    Two of the three card guards it does open, because both are counted out of
+    owed_stamps. `never_imported` it cannot: that guard is about the ABSENCE of
+    a ledger mark, and no quantity of dropped clips creates one. Offered
+    against it, the word cost the operator the footage AND still refused --
+    on a card the tool had never seen, two keystrokes from a cold start.
+
+    Asked here rather than read off the verdict's evidence, which looks like
+    the same question and is not: `copy_lost` reports `new_files`, and the
+    import-then-Clean-Workspace card owes clips that are not new, so its
+    evidence is empty while the drop would work perfectly.
+    """
+    if not world.card.owed_stamps:
+        return False                     # nothing to drop; the word changes nothing
+    return never_imported(world) is None
+
+
 # ---------------------------------------------------------------------------
 # The workspace — item 8, Clean Workspace. Two gates and one sentence.
 # ---------------------------------------------------------------------------

@@ -6957,6 +6957,21 @@ def drop_unaccounted_then_erase(ctx, world):
     copy_lost in one act.
     """
     started = time.time()
+    # Ask BEFORE recording whether the recording can work. _dropped_on_purpose
+    # writes the exclusion first and re-asks the guard after, which is right
+    # when the drop is what the refusal is about -- and pure loss when it is
+    # not. never_imported is about a missing ledger mark; dropping clips never
+    # makes one, so against it the write-off is permanent and the erase still
+    # refuses. The guard that decides is the same one the offer consults, so
+    # the door shown and the door taken cannot disagree.
+    if not guards.drop_would_clear_the_card(world):
+        verdict = guards.card_is_expendable(world)
+        print(C.red("  Still refusing: %s." % verdict.reason))
+        print(C.dim("  Nothing was dropped and nothing was erased: writing these"
+                    " clips off would not lift that refusal, and it could not be"
+                    " undone afterwards."))
+        return _outcome(record(ctx, NAME[ERASE_CARD], SKIPPED, started,
+                               "refused: %s" % verdict.reason))
     fresh, refusal = _dropped_on_purpose(ctx, ERASE_CARD, world.card.owed_stamps,
                                          guards.card_is_expendable,
                                          menu.Scope.LOCAL, started)
@@ -8134,18 +8149,33 @@ class Runner:
     def _offer_way_past(self, number, verdict):
         """A refusal an item declares a way past, asked for by its word.
 
-        Offered whenever the item has a word, evidence or not. This is a tool
-        for rendering a dashcam for fun, not a data bunker: the operator owns
-        the card and could wipe it in Finder this second. So the guard's job is
-        to SAY what is not accounted for -- the reason is on screen, the files
-        when there are any -- and then trust him. Getting the card back in the
-        car before five hours of render and ten of upload is a normal thing to
-        want; the tool warns and gets out of the way rather than forbidding it.
+        Offered on any refusal the word can actually lift, evidence or not.
+        This is a tool for rendering a dashcam for fun, not a data bunker: the
+        operator owns the card and could wipe it in Finder this second. So the
+        guard's job is to SAY what is not accounted for -- the reason is on
+        screen, the files when there are any -- and then trust him. Getting the
+        card back in the car before five hours of render and ten of upload is a
+        normal thing to want; the tool warns and gets out of the way rather
+        than forbidding it.
+
+        What it must not do is offer a door that opens onto nothing. The word
+        writes footage off PERMANENTLY before it re-asks the guard, so offering
+        it against a refusal the drop cannot lift charged the operator the
+        whole price for no exit: on a card that had never been imported, `10`
+        then ERASE recorded every clip on it as dropped, erased nothing, and
+        left the card un-importable for good. Two keystrokes, from a cold
+        start, with a refusal message as the only feedback.
         """
         item = self.menu[number]
         if not item.OVERRIDE_WORD:
             return
+        world = looked_at(self.ctx, item.SCOPE)
+        if not guards.drop_would_clear_the_card(world):
+            return
+        # Irreversible and unbounded: say how much before asking, not after.
         print()
+        print(C.yellow("  %d clips would be written off permanently, and will "
+                       "not be offered again." % len(world.card.owed_stamps)))
         if ui_handler.active().ask("  Type %s to drop anyway: " % item.OVERRIDE_WORD) \
                 != item.OVERRIDE_WORD:
             print(C.dim("  Aborted by user pre-run."))

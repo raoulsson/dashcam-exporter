@@ -899,6 +899,54 @@ class TestARefusalNamesWhatItIsAbout(unittest.TestCase):
         self.assertEqual(M.go().evidence, ())
 
 
+class TestTheWordIsOnlyOfferedWhenItOpensSomething(unittest.TestCase):
+    """Item 10's ERASE writes footage off permanently BEFORE it re-asks the
+    guard, so offering it against a refusal the drop cannot lift charges the
+    whole price for no exit.
+
+    That is what happened: on a card the tool had never seen, `10` then ERASE
+    recorded every clip on it as dropped, erased nothing, and left the card
+    un-importable for good -- two keystrokes from a cold start, with a refusal
+    message as the only feedback.
+    """
+
+    def _card(self, **kw):
+        return W.World(card=W.Card(path=Path("/Volumes/SIM"), dcim=True,
+                                   present=True, **kw))
+
+    def test_a_never_imported_card_is_not_offered_the_word(self):
+        """No ledger mark, so never_imported blocks -- and no quantity of
+        dropped clips creates a mark. The drop would be pure loss."""
+        world = self._card(owed_stamps=frozenset({"20260801120000"}))
+        self.assertTrue(guards.never_imported(world).blocked)
+        self.assertFalse(guards.drop_would_clear_the_card(world))
+
+    def test_a_card_owing_clips_below_a_mark_is_offered_the_word(self):
+        """The refusal copy_lost is about exactly what the drop removes."""
+        world = self._card(owed_stamps=frozenset({"20260801120000"}))
+        world = W.World(card=world.card, ledger_mark="20260801130000")
+        self.assertTrue(guards.drop_would_clear_the_card(world))
+
+    def test_the_word_is_not_offered_when_there_is_nothing_to_drop(self):
+        """An empty drop set cannot change any answer, so the prompt would be
+        a door onto the same refusal."""
+        world = W.World(card=W.Card(path=Path("/Volumes/SIM"), dcim=True,
+                                    present=True), ledger_mark="20260801130000")
+        self.assertFalse(guards.drop_would_clear_the_card(world))
+
+    def test_the_evidence_of_copy_lost_is_not_the_test(self):
+        """copy_lost reports new_files, which is EMPTY on the import-then-Clean
+        card: its clips are owed but not new. Gating the offer on the verdict's
+        evidence would refuse the door in exactly the case it is for."""
+        world = W.World(card=W.Card(path=Path("/Volumes/SIM"), dcim=True,
+                                    present=True,
+                                    owed_stamps=frozenset({"20260801120000"}),
+                                    new_stamps=frozenset(), new_files=()),
+                        ledger_mark="20260801130000")
+        self.assertEqual(guards.copy_lost(world).evidence, ())
+        self.assertTrue(guards.drop_would_clear_the_card(world))
+
+
 class TestOldFootageIsNotADeadEnd(unittest.TestCase):
     """A card carrying clips older than the last import must stay actionable.
 
