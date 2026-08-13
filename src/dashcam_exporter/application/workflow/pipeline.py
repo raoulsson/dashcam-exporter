@@ -8009,7 +8009,7 @@ class Runner:
     def _turn(self):
         world = self._look()
         self.ctx.ui.menu(self.ctx, self.menu, self.position, world)
-        print()
+        ui_handler.active().menu_spacer()      # a blank line in the scroll, nothing in the frame
         _HINTED[0] = True                      # no hint on the menu itself
         return self._dispatch(ui_handler.active().read_key("Select> "))
 
@@ -8618,8 +8618,14 @@ def _start(ctx):
     # the stream backend does not, so it prints the banner into the scroll as
     # it always has.
     splashed = ctx.ui.set_splash(banner)
-    ctx.ui.open()
     try:
+        # INSIDE the try, because open() is itself a window in which the
+        # terminal is already wrecked: it enters the alternate screen, hides the
+        # cursor and turns echo off, and then holds the splash for two seconds.
+        # A ctrl-C in there escaped this finally, so the operator was left on the
+        # alternate screen with no cursor and no echo, blind-typing `reset`.
+        # close() is written to survive a half-finished open().
+        ctx.ui.open()
         if not splashed:
             _print_all(banner)
         # Checked before the status screen: there is nothing useful to show if

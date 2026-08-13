@@ -71,6 +71,19 @@ class UiHandler(ABC):
         scrolls, which is the same reading model there."""
         print(text)
 
+    def menu_spacer(self):
+        """The blank line the menu loop leaves under the menu each turn.
+
+        Concrete here as the `print()` the loop used to call directly, so the
+        stream backend's bytes are exactly what they were. It is a seam because
+        the framed backend must answer it with NOTHING: the menu is a fixed
+        region there, so the line separates nothing, and appended to the log
+        every turn it both flooded the bounded history while the tool sat idle
+        and -- through log()'s follow -- snapped the view back to the tail on
+        the turn after the operator paged away from it.
+        """
+        print()
+
     def page(self, direction):
         """Scroll the mid-screen a page (j/left = older, k/right = newer) when
         the log has more than fits. Returns True if the backend consumed the key.

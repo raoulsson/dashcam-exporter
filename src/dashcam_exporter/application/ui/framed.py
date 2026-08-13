@@ -24,6 +24,7 @@ import collections
 import os
 import re
 import shutil
+import signal
 import sys
 import textwrap
 import threading
@@ -298,12 +299,26 @@ class FramedUiHandler(UiHandler):
         self._menu_rows = Layout.DEFAULT_MENU_ROWS
         self._splash_seconds = splash_seconds
         self._splash_art = ()
-        self._lock = threading.Lock()   # the bar spinner draws from a thread
+        # Reentrant, not a plain Lock: the SIGWINCH handler runs in the MAIN
+        # thread between bytecodes, so it can land inside a _write that is
+        # already holding this -- and a repaint from there would then wait on
+        # the thread that is waiting for it to return. The spinner thread still
+        # serialises against the main thread as before (an RLock is only
+        # reentrant for its own owner).
+        self._lock = threading.RLock()
         self._log = collections.deque(maxlen=self.LOG_HISTORY)
         self._log_view = 0             # index of the top visible line (page-anchored)
-        self._pinned_top = False       # a read-me screen holds the view at its top
+        # The operator is steering the view: they paged away from the newest
+        # page, or a read-me screen anchored them at the top. While it is set,
+        # output does NOT yank the view back down. Cleared by paging back to the
+        # tail, and by clear_log -- a new action owns the screen again.
+        self._held = False
         self._summary = collections.OrderedDict()   # live counters for a task
         self._real_stdout = None
+        self._saved_tty = None
+        self._prev_winch = None        # whatever owned SIGWINCH before open()
+        self._writing = False          # a paint is in flight (see _on_winch)
+        self._resized = False          # a resize arrived during one
         self._open = False
         self._show_progress = False   # the pbar box appears only while a bar runs
         rows, cols = self._size()
@@ -370,9 +385,81 @@ class FramedUiHandler(UiHandler):
         fd = self._tty_fd()
         self._saved_tty = termios.tcgetattr(fd) if fd is not None else None
         self._set_echo(False)
+        self._watch_resize()
         self._write(ALT_ON + HIDE + CLEAR)
         self._splash()          # a centered card of the same info, ~1s
         self.repaint()          # then the frame, with that info on top
+
+    # -- resize -----------------------------------------------------------
+    def _watch_resize(self):
+        """Follow the window while the frame owns the screen.
+
+        The layout was only ever recomputed when something else happened to
+        change it -- the menu grid growing a row, the progress box opening --
+        so shrinking a 40-row window to 24 left the frame painting rows 1..40
+        over the top of the shell until one of those incidents came along.
+
+        Not installed when FRAME_ROWS/FRAME_COLS pin the geometry: a pinned
+        frame is a deliberate fixed size (the launcher sets them and sizes the
+        window to match), and following the terminal would be the launcher's
+        instruction being overruled by the window manager. Not installed off the
+        main thread either -- signal.signal refuses there, and a UI running in a
+        worker thread is a test harness, not a terminal to resize.
+        """
+        if _fixed_size():
+            return
+        try:
+            self._prev_winch = signal.signal(signal.SIGWINCH, self._on_winch)
+        except (ValueError, OSError, AttributeError):
+            self._prev_winch = None
+
+    def _restore_resize(self):
+        if self._prev_winch is None:
+            return
+        try:
+            signal.signal(signal.SIGWINCH, self._prev_winch)
+        except (ValueError, OSError, AttributeError):
+            pass
+        self._prev_winch = None
+
+    def _on_winch(self, signum, frame):
+        """Re-lay-out and repaint on the new size.
+
+        Three things this must not do. It must not raise: it interrupts
+        arbitrary main-thread code (the blocking key read at the Select prompt
+        is where it lands in practice), and an exception out of here surfaces as
+        a traceback from whatever line happened to be running. It must not run
+        when the frame is closed -- a resize after close() would write a frame
+        onto the shell the operator has been handed back. And it must not paint
+        THROUGH another paint: it interrupts the main thread between bytecodes,
+        so it can land inside a `_write` that is part way into a frame (a real
+        one, seen in a pty whose reader was not draining -- the write blocked
+        and the resize landed inside it), and half of the old frame arriving
+        after the new one is exactly the smeared screen this fixes. When a write
+        is in flight the resize is left for that write to finish and act on.
+
+        The menu grid is NOT re-flowed here; its lines are re-rendered on the
+        next menu() call, which is the next loop turn. Painting stale grid lines
+        is safe (the box pads and clips them to the new width) and re-rendering
+        would need the items and the world, which a signal handler has no
+        business holding.
+        """
+        if not self._open:
+            return
+        if self._writing:
+            self._resized = True        # _write finishes, then repaints
+            return
+        self._relayout()
+
+    def _relayout(self):
+        try:
+            self._resized = False
+            rows, cols = self._size()
+            self.layout = Layout(rows, cols, self._menu_rows, self._show_progress)
+            self._write(CLEAR)     # the old frame's rows are outside the new one
+            self.repaint()
+        except Exception:
+            pass
 
     def set_splash(self, lines):
         self._splash_art = tuple(lines or ())
@@ -433,8 +520,9 @@ class FramedUiHandler(UiHandler):
         if not self._open:
             return
         self._open = False
+        self._restore_resize()
         fd = self._tty_fd()
-        if fd is not None and getattr(self, "_saved_tty", None) is not None:
+        if fd is not None and self._saved_tty is not None:
             try:
                 termios.tcsetattr(fd, termios.TCSADRAIN, self._saved_tty)
             except termios.error:
@@ -477,19 +565,24 @@ class FramedUiHandler(UiHandler):
             self.log(line.rstrip())
 
     def log(self, text=""):
+        # Blank lines are kept: they are the caller's spacing. The menu loop's
+        # own per-turn spacer used to arrive here and had to be filtered out by
+        # guessing at it (a blank while pinned), which also ate a step's
+        # deliberate blanks. It no longer arrives -- `menu_spacer` is a seam
+        # method the frame answers with nothing.
         for piece in str(text).split("\n"):
-            cleaned = _clean_log(piece)
-            if self._pinned_top and not cleaned.strip():
-                # A held read-screen (the licence) ignores the menu loop's
-                # decorative blank line -- appended every turn, it would both
-                # re-follow the view off the top and inflate the page counter.
-                continue
-            self._log.append(cleaned)
+            self._log.append(_clean_log(piece))
         self._follow()          # new output shows on the newest page
         self._paint_log()
 
+    def menu_spacer(self):
+        """Nothing: the menu is its own region here, so the blank line the
+        scroll needs between the menu and the next prompt has nothing to
+        separate -- and appended every turn it slowly flooded the 2000-line
+        history while the tool sat idle at the menu."""
+
     def scroll_top(self):
-        self._pinned_top = True   # hold here despite the menu loop's trailing blank
+        self._held = True         # a read-me screen: the operator drives from here
         self._log_view = 0
         self._paint_log()
         self._paint_menu()      # refresh the page indicator (now UP 0)
@@ -497,7 +590,7 @@ class FramedUiHandler(UiHandler):
     def clear_log(self):
         self._log.clear()
         self._log_view = 0
-        self._pinned_top = False   # a new action follows its own output again
+        self._held = False         # a new action follows its own output again
         self._summary.clear()   # each action starts its own tally
         self._paint_log()
         self._paint_menu()      # the j/k page hint clears with the log
@@ -575,11 +668,14 @@ class FramedUiHandler(UiHandler):
         return max(0, len(self._log) - self._body_height())
 
     def _follow(self):
-        """Jump the view to the newest page (while output is being written) --
-        unless a read-me screen has pinned the top. The menu loop prints a blank
-        line after each draw, and without the pin that lone `log("")` would snap
-        a just-shown licence straight back down to its last, empty page."""
-        if self._pinned_top:
+        """Jump the view to the newest page -- unless the operator is steering.
+
+        Output following its own tail is right while a step is streaming: that
+        is the live case, and there `_held` is false because the action that
+        started cleared the log. It is wrong the moment the operator has paged
+        back, which is the only other time output can arrive, and it made j/k
+        look broken everywhere except the licence screen."""
+        if self._held:
             return
         self._log_view = self._last_page_start()
 
@@ -593,16 +689,17 @@ class FramedUiHandler(UiHandler):
         to the menu as a typo."""
         if not self._open:
             return False
-        # The pin HOLDS through paging: it means the operator drives the view,
-        # not that the view is stuck at the top. Releasing it here let the menu
-        # loop's next blank line re-follow to the empty tail -- a blank page on
-        # every keypress. Only a new action (clear_log) releases it.
         body = self._body_height()
         if self._last_page_start() > 0:
             if direction in ("j", "left"):        # older, back a page
                 self._log_view = max(0, self._log_view - body)
             else:                                 # 'k' / right: newer, forward
                 self._log_view = min(self._last_page_start(), self._log_view + body)
+            # Paging away from the newest page IS the operator taking the wheel;
+            # paging back onto it is handing it back, and output resumes
+            # following. Anything else needs a second key to mean "resume", and
+            # a reader who has walked to the bottom has said it already.
+            self._held = self._log_view < self._last_page_start()
             self._paint_log()
             self._paint_menu()                    # refresh the page indicator
         return True
@@ -686,8 +783,17 @@ class FramedUiHandler(UiHandler):
     def _write(self, s):
         out = self._real_stdout if self._real_stdout is not None else sys.__stdout__
         with self._lock:      # serialise the main thread and the spinner thread
-            out.write(s)
-            out.flush()
+            self._writing = True
+            try:
+                out.write(s)
+                out.flush()
+            finally:
+                self._writing = False
+        # A SIGWINCH that landed inside that write deferred to here rather than
+        # painting a new frame through the middle of the old one. Outside the
+        # lock: the repaint takes it again, several times.
+        if self._resized:
+            self._relayout()
 
     def repaint(self):
         self._paint_chrome()
