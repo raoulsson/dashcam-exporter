@@ -84,7 +84,7 @@ the workspace is not a step in working through it.
 
 | | Item | What it does |
 |---|---|---|
-| 1 | **Import SIM** | Copies the source's `DCIM` tree into the workspace and verifies it file-for-file. Takes only clips newer than the last import. |
+| 1 | **Import SIM** | Copies the source's `DCIM` tree into the workspace and verifies it file-for-file. Takes the clips nothing accounts for yet — not excluded, not inside a rendered trip, not already in the workspace — so a clip older than the last import is still fetched if it exists nowhere else. |
 | 2 | **Generate Meta** | Writes each trip's sidecars — `_meta.json`, `.gpx`, `.html` map. The metadata everything downstream reads. |
 | 3 | **Build Preview** | One still per trip and a local contact sheet, from the sidecars. No encoding. |
 | 4 | **Exclude Trip** &#9888; | Deletes the chosen trips' source clips, their renders and their sidecars. Deleting locally does not unpublish: a trip already at the publishing target stays there. |
@@ -208,7 +208,7 @@ contiguous driving segment, so each engine-on leg is its own polyline:
 |   |       |-- trip_2026-07-28_08-57_01_meta.json  <- the state that outlives the video
 |   |       `-- trip_2026-07-28_08-57_01_links.txt
 |   `-- previews/preview_2026-07-28.html            <- the contact sheet
-|-- final_2026-07-28_1924/          <- the finished deliverable, BESIDE export/
+|-- final_2026-07-28_192417/        <- the finished deliverable, BESIDE export/
 |                                      (the export tree is swept by Clean Workspace)
 |-- logs/run-20260728-192417.log
 `-- pid.lock                        <- this workspace is busy right now
@@ -300,12 +300,20 @@ one setting:
 
 | Configured | You get |
 |---|---|
-| nothing | Import, render, and `dashcam_export_data_site.html` — one self-contained page, every still embedded, every route drawn from its GPX. Opens from `file://` with no network. |
-| `upload_plugin` | Item 5 builds what YOUR plugin publishes instead of the local page, and item 8, Upload Website, wakes up. |
+| nothing | Import, render, and `dashcam_export_data_site.html` — one self-contained page, every still embedded, every route drawn from its GPX. Opens from `file://` with no network. Item 8 stays greyed out; `p` gives the reason. |
+| `website_export_dir` | The same local page, and item 8 wakes up as a copy: the whole gathered folder goes to that directory — an external disk, a NAS share, a synced folder. |
+| `upload_plugin` | Item 5 builds what YOUR plugin publishes instead of the local page, and item 8 hands over to it. Wins outright if `website_export_dir` is also set. |
 
-Unconfigured, item 8 stays in the menu, greyed out, and `p` gives the reason.
 Run the cycle and the result is gathered into `final_<day>_<import>/` — page,
 videos and sidecars together, ready to move wherever you keep things.
+
+The middle row is worth one more sentence, because it is what lets 9) Clean
+Workspace erase anything. Running item 8 again copies again and overwrites, so
+a re-rendered trip replaces the older copy. What that gate reads afterwards is
+that the copy **happened**, recorded when it succeeded — not whether the files
+are still sitting there. A destination like this is meant to be unplugged and
+carried off, and going back to look would read an empty slot, or a different
+disk mounted at the same path, as though the export never took place.
 
 There is no second edition of this repo and no fork. There is one program, and
 whether it publishes depends on whether you supplied something that publishes.
@@ -349,9 +357,14 @@ The handful most people touch:
 | `speed_colour` | `true` | colour the route by speed |
 | `final_dir` | beside the export dir | where the finished folder is gathered |
 
-Two environment variables apply, because they are conventions rather than
-settings of this tool: `NO_COLOR` disables colour, and `DASHCAM_IMPORT_ROOT`
-overrides the workspace for a single run.
+A few environment variables apply. `NO_COLOR` disables colour and
+`DASHCAM_IMPORT_ROOT` overrides the import root for a single run, both being
+conventions rather than settings of this tool. `SET_UI_STYLE=framed` turns on
+the full-screen frame, with `FRAME_ROWS` / `FRAME_COLS` pinning its geometry.
+`HF_TOKEN` supplies the diarization token for Transcribe Trips. And every
+private setting can be given as `SET_<KEY>` — `SET_UPLOAD_PLUGIN`,
+`SET_WEBSITE_EXPORT_DIR`, `SET_CARD`, `SET_HOME_LAT`, `SET_HOME_LON`,
+`SET_HF_TOKEN` — which beats `.env`, which beats `config.txt`.
 
 ---
 
@@ -555,6 +568,33 @@ answers — and the uploader answers one more:
 | `execute(workspace)` | Do it, and say what happened: `did(note)` or `stopped(note)`. |
 | `is_complete(trip_ids)` — uploader only | Are **all** of these trips at the destination? `YES` / `NO` / `UNKNOWN` / `NA`. |
 
+### When each one is called
+
+The two hot methods are called far more often than the two that do work, and
+mixing that up is the usual way a plugin makes the menu feel broken.
+
+| | Called | Budget |
+|---|---|---|
+| `describe()` | every menu draw | a string you already have |
+| `evaluate(workspace)` | every menu draw, for both classes | local `stat` calls at most — no network, no subprocess |
+| `execute(workspace)` | once, when the operator picks the item | as long as it takes; say what you are doing through `workspace.ui` |
+| `is_complete(trip_ids)` | a few times per dispatch, and before any erase | may go to the destination; cache if that is expensive |
+
+`evaluate()` returning `satisfied(reason)` is **not** `go()`. It means there is
+nothing owed, and the exporter moves on without calling `execute()` at all.
+Return `go()` whenever running again would do something — if your destination
+can hold a stale copy, that is every time.
+
+`workspace` is a reduced view built for you: the output dir, the selected
+import, the renders, the trip metas, the trip ids, the dropped ids, `offline`,
+and a `ui` to speak through. Not the `World` — that carries card facts, ledger
+marks and the destination's own answers, which are the exporter's business and
+would couple you to internals that move.
+
+`offline` is a hint you are handed, not a decision made for you. You are asked
+whether the trips are there whether or not it is set; answer `UNKNOWN` if you
+cannot check.
+
 ### Two rules about the order, if your destination has pages and media
 
 **Pages first, media after.** A trip is publishable as soon as it is described:
@@ -643,7 +683,7 @@ backwards, that the owner's own worked example holds against the live items,
 and that `import-sd-card.sh` refuses to erase the card when its verify pass
 cannot run or reports files still pending.
 
-506 Python checks plus 7 shell ones, in about a dozen seconds.
+Around 890 Python checks plus 7 shell ones, in a couple of minutes.
 
 `python3 tests/print_step_graph.py` prints the graph from the live item
 objects, per strategy, with the start/end/destr columns and both neighbour
@@ -657,7 +697,9 @@ the outbounds, reporting every difference rather than reconciling it.
 - **ffmpeg** and **ffprobe** — every render, still and duration goes through them
 - **Python 3.9+** with numpy, opencv, staticmap, Pillow — `INSTALLER.sh` handles these
 - **rsync** — for the import; macOS ships `openrsync`, which works
-- optional: **awscli**, configured, for Upload Website
+- Upload Website needs nothing extra: with no plugin it copies to
+  `website_export_dir`, and with one configured the transport is the
+  plugin's own business
 
 ---
 

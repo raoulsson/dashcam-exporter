@@ -148,15 +148,33 @@
 # `output_dir` and `out` are read as aliases for this setting. export_dir wins.
 #export_dir = ${workspace}/export
 
-# Where the finished website is placed by 8) Upload Website under the LOCAL
-# edition, which has no network destination to send it to. The whole directory
-# is replaced on each run, so point this at somewhere the tool owns rather than
-# at a folder that also holds anything of yours.
+# Where 8) Upload Website copies the finished result to when no upload plugin
+# is configured. Setting it is what gives that edition a destination at all:
+# leave it unset and item 8 has nowhere to put anything and stays switched off.
 #
-# Ignored entirely when an upload plugin is configured: the destination is then
-# the plugin's, and it is the plugin that says where its files go. `h 8` prints
-# whichever of the two applies to this installation.
-#default_website_export_dir = ${workspace}/website
+# An external disk, a NAS share or a synced folder are the usual answers. What
+# is copied is the whole gathered folder 5) Build Website produces — the page,
+# the videos, the maps and the tracks together, with every link inside it
+# resolving — and it is a COPY: the working area still holds everything
+# afterwards, which is what 9) Clean Workspace then erases.
+#
+# Running item 8 again copies again, overwriting. That is how a trip you have
+# re-rendered replaces the older copy already on the disk.
+#
+# For 9) Clean Workspace what counts is that the copy HAPPENED, not that the
+# files are still there. The tool records each trip it copies out and reads
+# that record afterwards. A destination like this is expected to be unplugged
+# and carried off, and going back to look would read an empty slot — or a
+# different disk mounted at the same path — as though the export never took
+# place. Only trips whose video was copied are recorded, so a run that leaves
+# the videos out does not open that gate.
+#
+# `default_website_export_dir` is read as an alias for this setting.
+#
+# Not to be confused with `export_dir` above, which is where renders are
+# written. Ignored entirely when an upload plugin is configured: the plugin
+# owns its destination and answers for it. `h 8` prints whichever applies here.
+#website_export_dir = ${workspace}/website
 
 # ============================================================================
 # 3. PUBLISHING — all optional, all unset by default
@@ -365,10 +383,11 @@ software = true
 # ============================================================================
 
 # Each drive on the result page is drawn from its own .gpx. By default the line
-# is coloured by the speed recorded at each point, using the same bands as the
-# map burned into the video (<20 / 20-40 / 40-60 / 60-80 / >80 km/h), so the
-# glyph reads as where you were held up and where you were moving. Set false to
-# draw every route in one colour, which shows the shape and nothing else.
+# is coloured by the speed recorded at each point, banded at 20 / 40 / 60 / 80
+# km/h, so the glyph reads as where you were held up and where you were moving.
+# The map burned into the video bands at the same speeds but uses its own
+# palette, so the two are comparable rather than identical. Set false to draw
+# every route in one colour, which shows the shape and nothing else.
 #speed_colour = true
 
 # Where the finished folders land. Each import becomes one
@@ -629,18 +648,17 @@ software = true
 # pipeline.py takes no command-line arguments: everything is a setting here.
 
 # Tells your plugin this machine is on a bad connection, so it should skip
-# anything optional that would go and look. It arrives as `world.offline`.
-# Nothing in this repo reads it — the geocoder and the map tiles go out
-# regardless of it — so with no plugin configured it does nothing. It exists so
-# "am I offline" has one name across every plugin instead of each inventing its
-# own.
+# anything optional that would go and look. It reaches the plugin as
+# `workspace.offline`; nothing else in the tool changes behaviour with it. The
+# geocoder and the map tiles go out regardless, so with no plugin configured it
+# does nothing at all. It exists so "am I offline" has one name across every
+# plugin instead of each inventing its own.
 #
-# It does NOT change what the exporter asks. A configured plugin is asked
-# whether the trips are at its destination every time, offline or not: whether
-# it can reach that destination is its own question, and it is holding this
-# flag when it answers. The exporter used to skip the question instead, which
-# quietly dropped a delete gate — this setting was documented as inert and was
-# not, which is the worst way for a setting to be wrong.
+# It does not change which questions the exporter asks. A configured plugin is
+# asked whether its trips are at the destination on every world capture, offline
+# or not: whether it can reach that destination is the plugin's own question,
+# and it is holding this flag when it answers. A plugin that cannot check should
+# answer UNKNOWN, which keeps 9) Clean Workspace shut.
 #offline = false
 
 # Still frames: the preview sheet and the local result page both pull a frame
