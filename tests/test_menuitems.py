@@ -273,7 +273,10 @@ def item_for(number, strategy=UPLOADER, work=None):
 
 IMPORTS = (Path("/ws/import/20260101"),)
 TRIP = W.TripMeta(id="t1", start="20260101120000", end="20260101130000")
-MP4 = W.Render(name="trip_t1.mp4", size=1000)
+# A name the renderer can actually write. The local render floor asks each
+# Render which TRIP it belongs to, so "trip_t1.mp4" -- a shape the tool never
+# produces -- stopped standing for a rendered trip at all.
+MP4 = W.Render(name="trip_2026-01-01_12-00_01_h720.mp4", size=1000)
 
 
 def world(**kw):
@@ -1062,7 +1065,7 @@ def clean_with(guard, fresh, word="CLEAN"):
 
 def rendered_world(**kw):
     """Two renderable trips, both encoded. The local half of the evidence."""
-    second = W.Render(name="trip_t2.mp4", size=2000)
+    second = W.Render(name="trip_2026-01-01_14-00_02_h720.mp4", size=2000)
     base = dict(renders=(MP4, second), renders_here=(MP4, second),
                 expected_trips=2)
     base.update(kw)

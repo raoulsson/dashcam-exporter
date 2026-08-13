@@ -149,7 +149,17 @@ class Gates:
     def _enough_renders(self) -> Evidence:
         if self.world.expected_trips is None:
             return Evidence.UNKNOWN
-        return self._at_least(len(self.world.renders_here),
+        # DISTINCT TRIPS, not files. The two are not the same and the gap is
+        # not exotic: the height is in the filename, so a re-render at another
+        # output_height leaves both files, and --debug-cuts leaves a preview
+        # beside them. Counted as files, two renderings of ONE trip cleared a
+        # floor meaning TWO trips -- and with the card still in the slot no
+        # orphan check fires, so the sweep took the raw clips of a trip that
+        # was never encoded. A Render answers for which trip it renders (and
+        # a preview answers for none), so the count asks it rather than
+        # guessing from the length of a list.
+        return self._at_least(len({r.trip_id for r in self.world.renders_here
+                                   if r.trip_id}),
                               self.world.expected_trips)
 
     def _at_least(self, have: int, want: int) -> Evidence:

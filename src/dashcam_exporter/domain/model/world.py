@@ -27,11 +27,21 @@ Three shapes here carry weight and must not be simplified:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import FrozenSet, Optional, Tuple
 
 from dashcam_exporter.domain.menu.menu import Evidence, Scope, Strategy
+
+# The renderer's output name, taken apart: trip_<day>_<HH-MM>_<NN>, then the
+# optional --debug-cuts preview tag, then the always-written height tag. Spelled
+# out here rather than matched loosely because the pieces after the trip are
+# exactly what makes one trip produce several files.
+_RENDER_NAME = re.compile(
+    r"^(?P<trip>trip_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}_\d+)"
+    r"(?P<preview>_debugcuts\d+s)?"
+    r"(?:_h\d+)?\.mp4$")
 
 
 @dataclass(frozen=True)
@@ -41,6 +51,28 @@ class Render:
     name: str
     size: int
     path: Optional[Path] = None
+
+    @property
+    def trip_id(self) -> str:
+        """Which trip this file is a full rendering of, or "" if it is not one.
+
+        A trip does not own exactly one file, which is what makes counting
+        files where trips are meant a footage-safety bug rather than a tidiness
+        one. The output height is baked into the name, so re-rendering at a
+        different height leaves BOTH files -- routine now that the default
+        moved from 1080 to 720 -- and --debug-cuts writes a ~23 second preview
+        of the transitions beside the real render. Two files for one trip then
+        satisfied a floor meaning two trips, and Clean Workspace swept the raw
+        clips of a trip that was never encoded.
+
+        The preview answers "" rather than its trip: it is a handful of cut
+        moments, not the drive, so counting it as that trip's render would
+        authorise deleting footage nothing holds.
+        """
+        m = _RENDER_NAME.match(self.name)
+        if m is None or m.group("preview"):
+            return ""
+        return m.group("trip")
 
 
 @dataclass(frozen=True)

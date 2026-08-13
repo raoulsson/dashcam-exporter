@@ -278,8 +278,10 @@ class TestAClipWithNoSecondCopyStopsTheSweep(unittest.TestCase):
         return W.World(
             out_dir=Path("/ws"), imports=(Path("/ws/import"),),
             selected_import=Path("/ws/import"),
-            renders=tuple(W.Render("t%d.mp4" % i, 10) for i in range(4)),
-            renders_here=tuple(W.Render("t%d.mp4" % i, 10) for i in range(4)),
+            # Real render names: the local floor asks each one which TRIP it
+            # renders, so a name the tool cannot write proves nothing here.
+            renders=tuple(_renders(4)),
+            renders_here=tuple(_renders(4)),
             expected_trips=4, trip_ids=("t0", "t1", "t2", "t3"),
             card=W.Card(path=Path("/card"), dcim=True, present=False),
             target=W.TargetFacts(configured=True, name="site",
@@ -478,7 +480,15 @@ class TestCleanSimEvidence(GuardTest):
 # ---------------------------------------------------------------------------
 
 def _renders(n):
-    return tuple(W.Render("trip_%d.mp4" % i, 64) for i in range(n))
+    """Names shaped the way the renderer actually writes them.
+
+    It used to build "trip_0.mp4", which the tool cannot produce. That was
+    harmless while the gate counted files and became a lie the moment it
+    started asking a Render which TRIP it belongs to -- a fixture that cannot
+    occur proves nothing about the code that reads it.
+    """
+    return tuple(W.Render("trip_2026-07-19_%02d-00_%02d_h720.mp4" % (8 + i, i + 1), 64)
+                 for i in range(n))
 
 
 def _world(renders_here=1, expected=3, complete=M.Evidence.NA):
@@ -492,6 +502,55 @@ def _world(renders_here=1, expected=3, complete=M.Evidence.NA):
     return W.World(renders_here=_renders(renders_here), expected_trips=expected,
                    target=target(complete=complete,
                                  configured=complete is not M.Evidence.NA))
+
+
+class TestTheRenderFloorCountsTripsNotFiles(unittest.TestCase):
+    """One trip does not own exactly one file, and the gate that decides
+    whether raw footage may be swept has to know that.
+
+    The height is baked into the name, so re-rendering a trip at another
+    output_height leaves both files -- routine now the default moved 1080 to
+    720 -- and --debug-cuts writes a ~23 second preview of the transitions
+    beside the real render. Counted as files, two renderings of ONE trip
+    cleared a floor meaning TWO trips; with the card still in the slot no
+    orphan check fires, so Clean Workspace swept the raw clips of a trip that
+    was never encoded.
+    """
+
+    def _gates(self, names, expected):
+        world = W.World(renders_here=tuple(W.Render(n, 64) for n in names),
+                        expected_trips=expected,
+                        target=target(complete=M.Evidence.YES, configured=True))
+        return guards.Gates(world)
+
+    def test_two_heights_of_one_trip_are_one_trip(self):
+        gates = self._gates(("trip_2026-07-19_12-46_01_h1080.mp4",
+                             "trip_2026-07-19_12-46_01_h720.mp4"), expected=2)
+        self.assertEqual(gates.rendered_locally(), M.Evidence.NO,
+                         "two files for one trip cleared a floor meaning two trips")
+
+    def test_the_same_two_files_satisfy_a_floor_of_one(self):
+        gates = self._gates(("trip_2026-07-19_12-46_01_h1080.mp4",
+                             "trip_2026-07-19_12-46_01_h720.mp4"), expected=1)
+        self.assertEqual(gates.rendered_locally(), M.Evidence.YES)
+
+    def test_a_debug_cuts_preview_is_not_a_render_of_its_trip(self):
+        """It is a handful of cut moments, not the drive. Counting it as the
+        trip's render would authorise deleting footage nothing holds."""
+        gates = self._gates(("trip_2026-07-19_12-46_01_debugcuts5s_h720.mp4",),
+                            expected=1)
+        self.assertEqual(gates.rendered_locally(), M.Evidence.NO)
+
+    def test_distinct_trips_still_count(self):
+        gates = self._gates(("trip_2026-07-19_12-46_01_h720.mp4",
+                             "trip_2026-07-19_14-02_02_h720.mp4"), expected=2)
+        self.assertEqual(gates.rendered_locally(), M.Evidence.YES)
+
+    def test_a_preview_beside_a_real_render_does_not_inflate_it(self):
+        gates = self._gates(("trip_2026-07-19_12-46_01_h720.mp4",
+                             "trip_2026-07-19_12-46_01_debugcuts5s_h720.mp4"),
+                            expected=2)
+        self.assertEqual(gates.rendered_locally(), M.Evidence.NO)
 
 
 class TestTheTripCountIsSomethingWeKnow(unittest.TestCase):
