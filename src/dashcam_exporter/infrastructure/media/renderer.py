@@ -2560,8 +2560,17 @@ def main() -> int:
     if cfg:
         print(f"config:      loaded {len(cfg)} settings from {config_path}")
 
-    root = Path(args.root).expanduser()
-    out_dir = Path(args.out).expanduser()
+    # Resolved, not just expanded. `root.name` is the whole of the cross-card
+    # guarantee -- every output goes under out_dir/<root.name>/ so two cards
+    # holding the same calendar day cannot overwrite each other -- and an
+    # unresolved relative path has no name to give. `--root .` (the documented
+    # direct invocation, run from inside the import folder) makes root.name ""
+    # and `out_dir / ""` is out_dir itself, collapsing the namespace: the
+    # fresh-output reset then walked out_dir/<day>, and import folders ARE
+    # date-named, so that is a DIFFERENT card's namespace. It deleted a
+    # finished render while printing "other imports untouched".
+    root = Path(args.root).expanduser().resolve()
+    out_dir = Path(args.out).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Default the boundary cache to <out>/.scan_cache.json rather than making
@@ -2876,6 +2885,16 @@ def main() -> int:
     # without the namespace, rendering one card would sweep and overwrite days
     # rendered from a different, already-deleted card.)
     import_ns = out_dir / root.name
+    # Prove it before anything deletes through it. The namespace is what keeps
+    # one card's reset off another card's renders, and the two ways it can fail
+    # are silent: an empty root.name collapses it onto out_dir, and a root.name
+    # of ".." climbs out of the tree entirely. Both then read as a normal path.
+    if import_ns.parent != out_dir or not root.name or root.name in (".", ".."):
+        raise SystemExit(
+            f"refusing to run: --root {root} gives no usable import name, so "
+            f"output would land directly in {out_dir} instead of a namespace "
+            f"of its own -- and the fresh-output reset would clear another "
+            f"import's renders. Pass the import folder itself.")
 
     if args.print_groups:
         # Serialise the grouping the scan just produced — `groups` straight out of
