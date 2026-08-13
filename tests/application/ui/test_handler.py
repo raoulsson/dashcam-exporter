@@ -140,6 +140,23 @@ class OneWaitsForASecondKeySoTenIsReachable(unittest.TestCase):
     def test_any_other_digit_fires_at_once(self):
         self.assertEqual(self._key(["2"]), "2")
 
+    def test_the_help_key_waits_for_ten_too(self):
+        """`h` takes a second key, and it read exactly ONE of them.
+
+        So `h` 1 0 was help about entry 1 plus a LOOSE 0, which the menu took
+        as a fresh keypress and answered with Progress -- item 10's help was
+        unreachable, and asking for it quietly did something else. It is the
+        one entry whose help matters most: the one that erases a card.
+        """
+        self.assertEqual(self._key(["h", "1", "0"]), "h 10")
+
+    def test_the_help_key_still_takes_a_plain_one(self):
+        self.assertEqual(self._key(["h", "1", "\r"]), "h 1")
+
+    def test_the_help_key_is_unchanged_for_every_other_entry(self):
+        self.assertEqual(self._key(["h", "5"]), "h 5")
+        self.assertEqual(self._key(["h", ""]), "h")
+
 
 class TheActiveHandler(unittest.TestCase):
     def tearDown(self):

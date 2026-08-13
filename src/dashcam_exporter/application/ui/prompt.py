@@ -140,9 +140,20 @@ def _printable(ch):
 
 
 def _help_key():
+    """`h` and then the entry it is about, which may be two digits.
+
+    The second key goes through the SAME 1-vs-10 wait the menu itself does.
+    Reading a single character here made `h` then 1 then 0 into help about
+    entry 1 followed by a loose `0` -- which the menu took as a fresh keypress
+    and answered with Progress. So h10 could not reach 10) Delete SIM Data's
+    help at all, and quietly did something else instead: the entry whose help
+    matters most, because it is the one that erases a card.
+    """
     sys.stdout.write(C.bold(C.bright_cyan("h")))
     sys.stdout.flush()
     second = _one_char() or ""
+    if second == "1":
+        return _help_command(_ten_or_one())
     print(C.bold(C.bright_cyan(_printable(second))))
     return _help_command(second)
 
