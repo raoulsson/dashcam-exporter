@@ -135,9 +135,17 @@ class UiHandler(ABC):
         update(note) the blocking work can call. The stream backend animates a
         line; a framed backend animates the pinned bar."""
 
-    @abstractmethod
     def done(self, what):
-        """The one line a step leaves behind when it worked."""
+        """The one line a step leaves behind when it worked.
+
+        Concrete here, not abstract: both backends emitted the identical
+        sentence through their own `log`, so the only thing the duplication
+        bought was two places for one line to drift -- and it did drift, in the
+        colour. This is the tool's single FRESH completion, the one moment
+        bright_green is for; plain green is the standing "this is fine" state
+        that half the summary already wears.
+        """
+        self.log(C.bright_green("  100%% - %s." % what))
 
     # -- input. The frame reads keys in-frame; the stream backend keeps the
     #    terminal's raw/cooked reads. Tests patch the prompt module underneath,
@@ -185,9 +193,6 @@ class StreamUiHandler(UiHandler):
 
     def waiting(self, label):
         return _stream_waiting(label)
-
-    def done(self, what):
-        print(C.green("  100%% - %s." % what))
 
     def read_key(self, prompt):
         return prompt_mod.read_key(prompt)

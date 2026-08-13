@@ -8022,7 +8022,7 @@ def _paint_banner_line(line):
     """Apply the banner palette without disturbing its fixed-width art."""
     if " v" in line and line.rstrip().endswith(version()):
         art, suffix = line.rsplit(" v", 1)
-        return C.bold(C.bright_cyan(art)) + C.magenta(" v" + suffix)
+        return C.bold(C.bright_cyan(art)) + C.violet(" v" + suffix)
     if DESIGNED_BY in line and IMPLEMENTED_BY in line:
         d, i = line.index(DESIGNED_BY), line.index(IMPLEMENTED_BY)
         sep = line.index("|_|", d)
@@ -8033,8 +8033,8 @@ def _paint_banner_line(line):
         gap = raw_name[len(d_name):] + line[sep:i]
         i_name = line[i + len(i_label):].strip()
         return (C.bold(C.bright_cyan(line[:d])) + C.green(d_label)
-                + C.gold(d_name) + C.bold(C.bright_cyan(gap))
-                + C.green(i_label) + C.gold(i_name))
+                + C.yellow(d_name) + C.bold(C.bright_cyan(gap))
+                + C.green(i_label) + C.yellow(i_name))
     return C.bold(C.bright_cyan(line))
 
 

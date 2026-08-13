@@ -26,6 +26,15 @@ def _clip(text, width):
     old slice in ``Live.draw``. That cut the useful filename off the right
     edge even when there was visible room left, and made redraws appear to
     change shape. Keep complete escapes and clip only printable characters.
+
+    A clipped line is closed with a reset. The loop appends the escape it is
+    standing on before it notices the budget is spent, so a cut that lands
+    inside a coloured span emits that span's OPENING code as the last thing on
+    the line and nothing to close it -- the colour then runs on into whatever
+    the caller writes next, which in the frame is the box's right border. It
+    only showed up once the row's last field stopped being wrapped in colour of
+    its own; before that the escape the loop happened to append was usually the
+    span's reset, and the bug was invisible rather than absent.
     """
     if width <= 0:
         return ""
@@ -42,7 +51,10 @@ def _clip(text, width):
             break
     if used < width and pos < len(text):
         out.append(text[pos:pos + width - used])
-    return "".join(out)
+    clipped = "".join(out)
+    if _ANSI.search(clipped) and len(_ANSI.sub("", text)) > width:
+        clipped += "\x1b[0m"
+    return clipped
 
 
 # ---------------------------------------------------------------------------
@@ -106,24 +118,42 @@ def render_progress(state, width):
     THE one progress renderer. Every bar in the tool -- a child's stream, a
     waiting spinner, an in-process loop -- goes through here, so they all read
     alike. Fixed order and palette:
-      action(bright green bold)  bar(violet)  percent(cyan)  speed/time/size(amber)  subaction(bright green)
-    A filename is a subaction. Nothing here is dim.
+      action(bold)  bar(violet)  percent(bold)  speed/time/size(dim)  subaction(plain)  tail(dim)
+
+    Every colour on this row used to be borrowed from somewhere it meant
+    something else, which is why a running bar read like a wall of alarms:
+
+    - the action and the identity were BRIGHT GREEN, the colour that means a
+      completion that just happened. A step at 3% wore the same green as the
+      line saying it had finished, so the one colour that should make the eye
+      jump was on screen for the whole of every render.
+    - the speed, the elapsed time and the size were YELLOW, the colour that
+      means a decision is waiting. Nothing is waiting: they are measurements,
+      and three of them ticked in the attention colour on every frame.
+    - the percentage was CYAN, which belongs to the operator's own input and
+      the things he can press. He cannot press a percentage.
+
+    So each field now wears what it is. The bar keeps violet (it is the only
+    moving bar), the two things worth reading -- what is running and how far --
+    are bold, and the measurements around them recede. The old rule was
+    "nothing here is dim", which is what forced every field onto a colour: the
+    row had six voices and no background.
     """
     bar_w = max(8, min(24, width - 60))
-    parts = [C.bold(C.bright_green(state.action)),
-             C.magenta("[%s]" % _bar_cells(state, bar_w))]
+    parts = [C.bold(state.action),
+             C.violet("[%s]" % _bar_cells(state, bar_w))]
     if not state.infinite and state.percent is not None:
-        parts.append(C.cyan("%3d%%" % state.percent))
+        parts.append(C.bold("%3d%%" % state.percent))
     if state.speed:
-        parts.append(C.gold(state.speed))
+        parts.append(C.dim(state.speed))
     if state.time:
-        parts.append(C.gold(state.time))
+        parts.append(C.dim(state.time))
     if state.size:
-        parts.append(C.gold(state.size))
+        parts.append(C.dim(state.size))
     if state.subaction:
-        parts.append(C.bright_green(state.subaction))
+        parts.append(state.subaction)
     if state.tail:
-        parts.append(C.bright_green(state.tail))
+        parts.append(C.dim(state.tail))
     # Cap (and pad) to exactly one row's width. A long subaction -- a plugin's
     # ssh note, a long filename -- must never overrun the line; and padding to
     # the width clears the tail of the previous, longer redraw so nothing of it

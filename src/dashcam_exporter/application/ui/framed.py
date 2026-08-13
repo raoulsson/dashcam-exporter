@@ -623,8 +623,9 @@ class FramedUiHandler(UiHandler):
         else:
             self._paint_bar()
 
-    def done(self, what):
-        self.log(C.green("  100%% - %s." % what))
+    # `done` is not overridden: it emits through `log`, which this backend
+    # already routes into the log region, so the base class's one copy serves
+    # both backends.
 
     # -- input: read inside the bordered Select row, on the real screen ---
     def read_key(self, prompt):
@@ -824,9 +825,11 @@ class _LogTee:
 
 def _grid_lines(menu_items, position, world, cols):
     """The exact grid the scrolling UI draws -- screens._Grid, in the same
-    columns, coloured and greyed and red the same way. One renderer, so the
-    frame's menu and the scroll's cannot drift. The p/h/i/q hint is a separate
-    row the frame paints itself.
+    columns, greyed and lit the same way. One renderer, so the frame's menu and
+    the scroll's cannot drift. (It used to say "and red": the grid has not
+    painted a destructive entry red since _paint_body dropped it, and a comment
+    naming a colour nothing draws is a description of a system that is gone.)
+    The p/h/i/q hint is a separate row the frame paints itself.
 
     world=None is the from-the-start paint before the first capture: every item
     is drawn DIMMED (a loading state -- nothing has been asked yet), and the real

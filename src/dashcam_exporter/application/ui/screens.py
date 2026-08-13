@@ -59,9 +59,22 @@ def _grid_columns(width, cell):
 
 
 def _menu_line(item, verdict, offered, cell):
-    body = _paint_body(item, verdict, offered)
+    """The key and the name in one weight, because they are one entry.
+
+    The number carried no colour at all: on a greyed entry it stayed at full
+    weight beside a dimmed name, so the brightest thing in the cell was the key
+    of the one entry that will not run -- and the available entries, whose keys
+    are the whole point of a numbered menu, had their number no louder than
+    anyone else's. The key IS the thing the operator acts on.
+
+    Coloured as its own span rather than inside the body's, so "%d) " survives
+    contiguously in the output: the menu tests read the entries back out of the
+    painted screen with a lookbehind on that exact text.
+    """
+    paint = C.dim if _why_not(item, verdict, offered) else C.bold
     pad = cell - (len(item.name()) + len(str(item.number)) + 2)
-    return "%d) %s%s" % (item.number, body, " " * max(1, pad))
+    return "%s%s%s" % (paint("%d) " % item.number),
+                       _paint_body(item, verdict, offered), " " * max(1, pad))
 
 
 def _why_lines(menu_items, verdicts, offered):
@@ -74,6 +87,10 @@ def _why_lines(menu_items, verdicts, offered):
     for every entry it applies to, and gets one line naming them together;
     printing it eight times taught the eye to skip the block that also holds
     the actionable ones.
+
+    The weight says which is which: the guard's lines read plain, the graph's
+    stay dim. They were all dim, so the distinction the two paragraphs above
+    are about existed only in the wording.
     """
     return _blocked_lines(menu_items, verdicts, offered) + _not_here_line(
         menu_items, offered)
@@ -86,6 +103,18 @@ def _blocked_lines(menu_items, verdicts, offered):
 
 
 def _blocked_line(number, verdict, item=None):
+    """The guard's own sentence, at reading weight.
+
+    It was dim, in the same ink as the two graph lines under it, and that was
+    the one place dim could not be afforded. Progress is the screen the
+    operator opens to find out WHY an entry is grey; the guard's refusal is the
+    answer, it is different for every world, and it names the thing that has to
+    change before the step will run. Dim is for what the eye may skip. Skipping
+    this leaves nothing on the screen worth having opened it for -- and it made
+    "no GPS track in the import" look like the same class of remark as "not
+    available from here", which is a standing fact about the graph that no
+    amount of fixing the workspace will alter.
+    """
     if not verdict.blocked:
         return ""
     line = "   %d) %s" % (number, verdict.reason)
@@ -94,10 +123,14 @@ def _blocked_line(number, verdict, item=None):
     # not only by trying the greyed entry and reading the prompt. Gated on the
     # SAME condition the way-past itself is (a named word AND evidence the
     # refusal is about), so the hint never promises a door that is not there.
+    #
+    # Yellow, because it is the one thing on this screen that asks for a
+    # decision: a door past a refusal that is guarding footage. The refusal
+    # itself is a statement of fact and stays unaccented.
     word = getattr(item, "OVERRIDE_WORD", None)
     if word and getattr(verdict, "evidence", ()):
-        line += "  (select it, type %s to force)" % word
-    return C.dim(line)
+        line += C.yellow("  (select it, type %s to force)" % word)
+    return line
 
 
 def _not_here_line(menu_items, offered):
@@ -177,10 +210,18 @@ def print_menu(ctx, menu_items, position, world):
     # The reasons entries are greyed have moved to `p`. They are the same eight
     # lines under every menu draw, and a block that never changes stops being
     # read -- which is a problem when the one line that DID change is in it.
-    # The destructive entries are already red, and every one of them asks for
-    # a typed word before it does anything. A line naming them under every
-    # draw was a third telling of the same fact.
-    print(C.dim("\tp = progress   h = help   i = info   l = licence   q = quit"))
+    # A line naming the destructive entries went the same way: each says what
+    # it does in its own name and asks for a typed word before it does it, so
+    # under every draw it was a third telling of one fact. (It once said "the
+    # destructive entries are already red". They are not, and have not been
+    # since _paint_body dropped red -- see the argument there.)
+    # The keys bold, the glosses dim -- the same shape the frame's hint row uses
+    # (framed._paint_menu) and the help screen's key table. This row was dim
+    # end to end, so the five letters the operator presses to leave the grid
+    # were the least visible thing under it.
+    print("\t" + "   ".join(C.bold(k) + C.dim(" = " + label) for k, label in
+                            (("p", "progress"), ("h", "help"), ("i", "info"),
+                             ("l", "licence"), ("q", "quit"))))
 
 
 def _foreign_import_lines(menu_items, world):
@@ -196,6 +237,13 @@ def _foreign_import_lines(menu_items, world):
     an empty workspace, or the slot card being the import's own card (an
     interrupted copy that importing again simply finishes) all read as no
     conflict, which is what they are.
+
+    Yellow raises the alarm and stops there; the two lines under it say what
+    the alarm MEANS (which entries are lying to you) and what to do about it,
+    and they were dim. That is the exact shape of a warning nobody acts on --
+    a coloured headline over an unread body. They read plain now. Yellow is not
+    spread over all four either: four attention-coloured lines in a row is a
+    paragraph, and a paragraph has no headline.
     """
     if world is None:
         return ()
@@ -211,10 +259,10 @@ def _foreign_import_lines(menu_items, world):
         "",
         C.yellow("  The card in the slot is a NEW card — the workspace still holds"),
         C.yellow("  a previous round: %s." % rounds),
-        C.dim("  Import (%d) and Generate Meta (%d) act on THAT round, not this"
-              " card." % (menu.IMPORT, menu.META)),
-        C.dim("  Clear it with %s first, or finish the round it belongs to."
-              % clean_ref),
+        "  Import (%d) and Generate Meta (%d) act on THAT round, not this"
+        " card." % (menu.IMPORT, menu.META),
+        "  Clear it with %s first, or finish the round it belongs to."
+        % clean_ref,
     )
 
 
@@ -247,9 +295,15 @@ def _evidence_lines(verdict):
     which is the decision the refusal is asking for. The whole list goes to a
     file in the workspace, because a card that has never been imported puts
     every clip in here and a thousand paths on the screen answer nothing.
+
+    So they are not dim. This block exists to be READ, in front of an erase:
+    the five names are the evidence the operator judges before typing the word,
+    and the sentence above already says they are the decision the refusal is
+    asking for. The "and N more" tail IS dim -- it is a count of what is not on
+    screen, not evidence.
     """
     files = getattr(verdict, "evidence", ()) or ()
-    lines = tuple(C.dim("        %s" % tilde(f)) for f in files[:SHOWN])
+    lines = tuple("        %s" % tilde(f) for f in files[:SHOWN])
     if len(files) > SHOWN:
         lines += (C.dim("        ... and %d more" % (len(files) - SHOWN)),)
     return lines
@@ -261,6 +315,12 @@ def _orphan_file(ctx, files):
     Written whole on every refusal that has clips to name, and DELETED when
     there are none -- a stale list of clips that have since been imported is
     worse than no list, because it reads as current.
+
+    The pointer is not bold. It was, back when the five names above it were
+    dim, and the block came out inverted: the loudest line in a refusal was
+    where to read the rest, and the evidence itself receded. Bold is for the
+    thing acted on; the evidence is what is acted on and now carries the
+    weight, so this is an ordinary line under it.
     """
     path = ctx.workspace / ORPHAN_LIST
     if not files:
@@ -270,7 +330,7 @@ def _orphan_file(ctx, files):
         path.write_text("\n".join(files) + "\n")
     except OSError:
         return ()
-    return (C.bold("        Full list: %s" % tilde(path)),)
+    return ("        Full list: %s" % tilde(path),)
 
 
 def _unlink_quietly(path):
@@ -381,7 +441,11 @@ def _license_lines(width=76):
     except OSError:
         return ("", C.yellow("  No LICENSE file at %s." % path), "")
     head = "== Licence "
-    header = C.bold(head) + "=" * max(0, width - len(head))
+    # Hand-built rather than rule(), because this one is measured to the caller's
+    # text column and not to the terminal -- but it wears rule()'s weights: the
+    # title bold, the run of "=" after it dim. It is the frame around the text,
+    # not the text.
+    header = C.bold(head) + C.dim("=" * max(0, width - len(head)))
     out = ["", header, ""]
     for para in text.split("\n"):
         if not para.strip():
@@ -428,19 +492,36 @@ def _help_lines(menu_items, position, args):
     return _general_help(menu_items)
 
 
+_KEYS = (("<n>", "run entry n"),
+         ("h<n>", "what entry n is, and why it is or is not offered"),
+         ("p", "progress, and why each greyed entry is greyed"),
+         ("i", "version, licence, repository, funding"),
+         ("l", "the full licence text"),
+         ("q", "quit"))
+
+
+def _key_row(key, what):
+    # The key is bold and the gloss is not, which is what the frame's own hint
+    # row has always done (framed._paint_menu). Here both halves were plain, so
+    # the same five keys were one kind of thing at the bottom of the screen and
+    # another on the screen that exists to teach them -- and the column the
+    # reader is scanning for, the one he will press, was the half with no
+    # weight on it.
+    return "    " + C.bold(key) + " " * (13 - len(key)) + what
+
+
 def _general_help(menu_items):
-    return (rule("Help", ch="="),
-            C.bold("  keys"),
-            "    <n>          run entry n",
-            "    h<n>         what entry n is, and why it is or is not offered",
-            "    p            progress, and why each greyed entry is greyed",
-            "    i            version, licence, repository, funding",
-            "    l            the full licence text",
-            "    q            quit",
-            "",
-            C.dim("  Entries erasing footage ask for a typed word first: %s."
-                  % _destructive_list(menu_items)),
-            "")
+    return ((rule("Help", ch="="),
+             C.bold("  keys"))
+            + tuple(_key_row(k, w) for k, w in _KEYS)
+            + ("",
+               # A standing hint: true of this tool for as long as it exists,
+               # and the same sentence on every draw. Dim is exactly what it is
+               # for, and it is what tells this line apart from the reasons on
+               # the Progress screen, which change with the world and do not.
+               C.dim("  Entries erasing footage ask for a typed word first: %s."
+                     % _destructive_list(menu_items)),
+               ""))
 
 
 def _entry_help(menu_items, position, arg):
@@ -558,7 +639,13 @@ def _next_steps(menu_items, verdicts, offered):
                    and not menu.is_view(menu_items[n]))
     if not ready:
         return ()
-    return ("", C.cyan("  Next available steps:")) + tuple(
+    # Bold, not cyan. It is a section heading, and every other heading the tool
+    # draws -- "keys", "Funding", "plugin", the info screen's own title -- is
+    # bold. Cyan belongs to the operator's side of the conversation: what he
+    # types and what he can press. A heading is neither, and having one heading
+    # in the whole tool wear a colour of its own made cyan mean "heading" here
+    # and "your input" everywhere else.
+    return ("", C.bold("  Next available steps:")) + tuple(
         "     %d - %s" % (n, menu_items[n].description()) for n in ready) + ("",)
 
 

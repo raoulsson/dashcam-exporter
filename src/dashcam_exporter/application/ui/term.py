@@ -105,12 +105,8 @@ class C:
 
     @classmethod
     def yellow(cls, s):
+        """Attention: a decision to make, or a warning that is not an error."""
         return cls._w("33", s)
-
-    @classmethod
-    def gold(cls, s):
-        """Attention/action accent, distinct from success green."""
-        return cls.yellow(s)
 
     @classmethod
     def cyan(cls, s):
@@ -126,18 +122,29 @@ class C:
         same weight as the red that means "this destroys something"."""
         return cls._w("38;5;177", s)
 
-    @classmethod
-    def magenta(cls, s):
-        """Progress accent; reserved for moving bars."""
-        return cls.violet(s)
+    # There were two more names here, `gold` for yellow and `magenta` for
+    # violet, and both taught the reader the wrong thing. `gold` was a second
+    # name for one colour, so five call sites looked like a different decision
+    # from the forty-nine that typed `yellow` for the same ink; and `magenta`
+    # named the exact colour (35) this class deliberately refuses, so a call
+    # site reading `C.magenta` claimed the shade violet exists to avoid. A
+    # semantic alias that only ever forwards is not an abstraction, it is a
+    # synonym -- and a palette with synonyms cannot be audited by grep.
 
 
 def rule(title="", ch="-"):
     # Exactly the reported width. A character wider reaches the right edge and
     # then wraps a blank line onto the next one, which reads as a gap between
     # sections rather than as a rule.
+    #
+    # The dashes are dim, the title is not. A hundred columns of "=" at full
+    # weight was the brightest thing on a screen whose content is a menu of dim
+    # and bold names -- chrome outshouting what it frames. The framed backend
+    # has always drawn its borders dim (`framed._rule_double`); this is the same
+    # separator in the scrolling backend, so it had to be the same weight or the
+    # two backends teach two different ideas of what a rule is.
     w = term_width()
     if not title:
-        return ch * w
+        return C.dim(ch * w)
     head = "%s %s " % (ch * 2, title)
-    return C.bold(head) + ch * max(0, w - len(head))
+    return C.bold(head) + C.dim(ch * max(0, w - len(head)))
