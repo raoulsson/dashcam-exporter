@@ -81,6 +81,7 @@ from dashcam_exporter.infrastructure.media.speed_analysis import (
     filter_gps_outliers as _filter_gps_outliers,
     smooth_speeds as _smooth_speeds,
 )
+from dashcam_exporter.infrastructure.media import tracking
 from dashcam_exporter.infrastructure.media.tracking import Track, parse_gpx_track
 from dashcam_exporter.infrastructure.media.motion import (
     Detection, MotionDetector, VideoMotionDetector, GpsMotionDetector,
@@ -919,7 +920,7 @@ def _nearest_track_fix(track: list[tuple[float, float, float, datetime]],
 
 
 def segment_track(points: list[tuple[float, float, float, datetime]],
-                  min_points: int = SEGMENT_MIN_POINTS,
+                  min_points: int | None = None,
                   ) -> list[list[tuple[float, float, float, datetime]]]:
     """
     Split the flat list of GPS fixes into contiguous-driving segments. Any
@@ -933,6 +934,12 @@ def segment_track(points: list[tuple[float, float, float, datetime]],
     would remove every segment, the unfiltered list is returned so the
     caller still has something to work with.
     """
+    # Resolved per call, not bound as a default. A default argument is
+    # evaluated once when the function is defined, which is before config.txt
+    # has been read -- so `gps_segment_min_points` was parsed, stored, and then
+    # never reached the only code that uses it.
+    if min_points is None:
+        min_points = SEGMENT_MIN_POINTS
     if not points:
         return []
     segments: list[list[tuple[float, float, float, datetime]]] = [[points[0]]]
@@ -2411,7 +2418,11 @@ def main() -> int:
     MAP_TRACK_PAD      = ci("map_track_pad",      MAP_TRACK_PAD)
     MAP_ZOOM_BOOST     = ci("map_zoom_boost",     MAP_ZOOM_BOOST)
     SEGMENT_MIN_POINTS = ci("gps_segment_min_points", SEGMENT_MIN_POINTS)
+    # Set on the module that OWNS it. parse_gpx_track resolves this per call
+    # from tracking's own global; this module's copy of the name is read by
+    # nothing, so assigning it here parsed the setting and then dropped it.
     CLIP_GPX_WINDOW_SECONDS = ci("clip_gpx_window_seconds", CLIP_GPX_WINDOW_SECONDS)
+    tracking.CLIP_GPX_WINDOW_SECONDS = CLIP_GPX_WINDOW_SECONDS
     FRONT_CROP_TOP     = ci("front_crop_top",     FRONT_CROP_TOP)
     FRONT_CROP_BOTTOM  = ci("front_crop_bottom",  FRONT_CROP_BOTTOM)
     TRANSITION_SECS    = ci("transition_secs",    TRANSITION_SECS)
