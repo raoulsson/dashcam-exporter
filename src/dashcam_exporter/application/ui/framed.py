@@ -177,6 +177,18 @@ LTS, RTS = "╟", "╢"     # single rule meeting the side
 UP, DOWN = "↑", "↓"     # page-indicator arrows (lines hidden above / below)
 
 
+def _dir_keys():
+    """The paging keys tagged with direction: j pages back (older, the view
+    moves up), k pages forward (newer, down). Arrow glyphs when the terminal
+    can encode them, spelled out otherwise."""
+    enc = getattr(sys.__stdout__, "encoding", None) or "utf-8"
+    try:
+        (UP + DOWN).encode(enc)
+        return "%s j)" % UP, "%s k)" % DOWN
+    except (UnicodeEncodeError, LookupError):
+        return "up: j)", "down: k)"
+
+
 def _top(cols):
     return C.dim(TL + DH * (cols - 2) + TR)
 
@@ -545,9 +557,11 @@ class FramedUiHandler(UiHandler):
         return max(1, self.layout.log_height - len(self._summary) - self.FOOTER_ROWS)
 
     def _last_page_start(self):
-        """Top-line index of the page holding the newest line."""
-        body = self._body_height()
-        return (max(0, len(self._log) - 1) // body) * body
+        """Topmost view index that still shows the final line -- the last stop
+        for paging and where new output follows to. Anchored so the last screen
+        is FULL, the tail sitting at the foot, rather than page-aligned, which
+        left the final page holding one line above a screen of blank."""
+        return max(0, len(self._log) - self._body_height())
 
     def _follow(self):
         """Jump the view to the newest page (while output is being written) --
@@ -740,7 +754,9 @@ class FramedUiHandler(UiHandler):
         below = max(0, len(self._log) - self._log_view - self._body_height())
         if not (above or below):
             return ""
-        return C.bold("j/k") + C.dim(") page  %s%d %s%d" % (UP, above, DOWN, below))
+        up_key, down_key = _dir_keys()
+        return (C.bold(up_key) + C.dim("  ") + C.bold(down_key)
+                + C.dim("   %s%d %s%d" % (UP, above, DOWN, below)))
 
     def _paint_bar(self):
         # The bar row alone -- redrawn often while a step or the spinner runs.

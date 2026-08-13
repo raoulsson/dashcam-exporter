@@ -390,7 +390,9 @@ def _license_lines(width=76):
             continue
         out.extend(textwrap.wrap(para, width, break_long_words=False,
                                  break_on_hyphens=False) or [""])
-    return tuple(out) + ("",)
+    while out and not out[-1].strip():
+        out.pop()               # no trailing blank -> the last page holds text
+    return tuple(out)
 
 
 def _plugin_info_lines(plugin):

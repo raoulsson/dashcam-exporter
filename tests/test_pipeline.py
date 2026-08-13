@@ -1604,6 +1604,10 @@ class TheLicenceScreen(unittest.TestCase):
         self.assertIn("PolyForm Noncommercial License 1.0.0", body)
         self.assertIn("Required Notice: Copyright 2026 Raoul Marc Schmidiger", body)
 
+    def test_it_ends_on_text_so_the_last_page_is_not_blank(self):
+        lines = self._plain()
+        self.assertTrue(lines[-1].strip(), "a trailing blank makes an empty last page")
+
     def test_a_missing_file_says_so_rather_than_crashing(self):
         with mock.patch.dict(P._license_lines.__globals__,
                              {"EXPORTER_DIR": Path("/no/such/tree")}):

@@ -5,7 +5,9 @@ by capturing the ANSI the frame writes and asking which row each thing reached."
 import io
 import re
 import sys
+import types
 import unittest
+import unittest.mock
 
 from dashcam_exporter.application.ui.term import C
 from dashcam_exporter.application.ui import framed
@@ -60,6 +62,18 @@ class TheLayoutIsPureArithmetic(unittest.TestCase):
 class ThePlainHelperStripsColour(unittest.TestCase):
     def test_it_measures_the_visible_width(self):
         self.assertEqual(framed._plain("\x1b[32mgo\x1b[0m"), "go")
+
+
+class TheDirectionKeysFallBackToText(unittest.TestCase):
+    def test_arrows_when_the_terminal_encodes_them(self):
+        with unittest.mock.patch.object(framed.sys, "__stdout__",
+                                        types.SimpleNamespace(encoding="utf-8")):
+            self.assertEqual(framed._dir_keys(), ("↑ j)", "↓ k)"))
+
+    def test_spelled_out_when_it_cannot(self):
+        with unittest.mock.patch.object(framed.sys, "__stdout__",
+                                        types.SimpleNamespace(encoding="ascii")):
+            self.assertEqual(framed._dir_keys(), ("up: j)", "down: k)"))
 
 
 class TheMenuRegionSizesToItsContent(unittest.TestCase):
@@ -235,7 +249,9 @@ class TheLogKeepsHistoryAndPages(_NoColour):
         h, cap = next(gen)
         inner = h.layout.cols - 2
         foot = h._footer_text(inner)
-        self.assertIn("j/k) page", foot)
+        up_key, down_key = framed._dir_keys()
+        self.assertIn(up_key, foot)              # the j key, tagged with its direction
+        self.assertIn(down_key, foot)            # the k key
         self.assertEqual(len(foot), inner - 1)   # one col short; the box pads the last
         self.assertTrue(foot.startswith(" "))    # pushed to the right
         list(gen)
@@ -259,7 +275,10 @@ class TheLogKeepsHistoryAndPages(_NoColour):
         h, cap = next(gen)
         C.enabled = True
         try:
-            self.assertIn(C.bold("j/k"), h._page_hint())
+            up_key, down_key = framed._dir_keys()
+            hint = h._page_hint()
+            self.assertIn(C.bold(up_key), hint)
+            self.assertIn(C.bold(down_key), hint)
         finally:
             C.enabled = False
         list(gen)
