@@ -8083,22 +8083,31 @@ class Runner:
         _print_all(_next_steps(self.menu, verdicts, offered))
         _print_all(_blocked_lines(self.menu, verdicts, offered))
         _print_all(_where_lines(self.menu, self.position))
-        return True
+        return self._read_from_the_top()
 
     def _help(self, sel):
         _print_all(_help_lines(self.menu, self.position, sel.split()[1:]))
-        return True
+        return self._read_from_the_top()
 
     def _info(self):
         _print_all(_info_lines(self.ctx.plugin))
-        return True
+        return self._read_from_the_top()
 
     def _license(self):
-        ui = ui_handler.active()
-        _print_all(_license_lines(ui.text_width()))
-        # It is a page and a half; the log otherwise follows to its last, near-
-        # empty page. Anchor on the top so it reads from the heading, j/k to page.
-        ui.scroll_top()
+        _print_all(_license_lines(ui_handler.active().text_width()))
+        return self._read_from_the_top()
+
+    def _read_from_the_top(self):
+        """Every screen printed to be READ opens at its heading.
+
+        The log follows what is written to it, which is right for a step whose
+        newest line is the interesting one and wrong for a screen with a title:
+        anything taller than the region landed on its last, near-empty page, so
+        `h5` opened on the final two lines of the entry's description and `l` on
+        the tail of the licence. The licence had this and the others did not,
+        which made it look like a property of the licence rather than of reading.
+        """
+        ui_handler.active().scroll_top()
         return True
 
     def _select(self, sel):
