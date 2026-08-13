@@ -7531,16 +7531,19 @@ def _target_facts(ctx, scope, root, trip_ids, progress=None):
     """
     if ctx.plugin is None:
         return W.TargetFacts()
-    if ctx.offline:
-        # `offline=true` is the explicit local-only flag. Keep the plugin's
-        # identity in the world for the menu/info screens, but do not ask its
-        # remote status hook (which may perform SSH, bucket listings, or API
-        # calls). FULL-scope safety gates will consequently remain unknown.
-        return W.TargetFacts(configured=True, name=ctx.plugin.name,
-                             origin=ctx.plugin.origin,
-                             complete=menu.Evidence.NA,
-                             namespace=_namespace_of(root),
-                             note="offline: remote status not checked")
+    # A configured plugin is always asked, `offline` or not. Whether it can
+    # reach its destination is ITS question -- it is handed `offline` on the
+    # Workspace and can answer UNKNOWN, or skip its own network calls, without
+    # the exporter deciding on its behalf.
+    #
+    # This used to short-circuit to NA, and NA is not a weaker yes: it is the
+    # answer meaning THERE IS NO DESTINATION, and _decided_by_the_destination
+    # drops the gate on it entirely. So a config key documented as inert --
+    # config.txt said "nothing in this repo reads it" -- turned a fail-closed
+    # delete gate into one that was never asked, for a machine that has a
+    # destination and simply did not consult it. The comment here said the
+    # gates would "remain unknown", which was the right intent and the wrong
+    # constant.
     return _asked(ctx, scope, _namespace_of(root), trip_ids, progress=progress)
 
 

@@ -634,6 +634,13 @@ software = true
 # regardless of it — so with no plugin configured it does nothing. It exists so
 # "am I offline" has one name across every plugin instead of each inventing its
 # own.
+#
+# It does NOT change what the exporter asks. A configured plugin is asked
+# whether the trips are at its destination every time, offline or not: whether
+# it can reach that destination is its own question, and it is holding this
+# flag when it answers. The exporter used to skip the question instead, which
+# quietly dropped a delete gate — this setting was documented as inert and was
+# not, which is the worst way for a setting to be wrong.
 #offline = false
 
 # Still frames: the preview sheet and the local result page both pull a frame

@@ -111,6 +111,28 @@ class TestAnAnswerThatIsNotAnAnswerPermitsNothing(unittest.TestCase):
         self.assertEqual(
             self.P._target_facts(ctx, M.Scope.FULL, None, ()).namespace, "")
 
+    def test_offline_does_not_stop_a_configured_plugin_being_asked(self):
+        """`offline` is a hint FOR the plugin, not an answer about it.
+
+        It used to short-circuit to NA, and NA is not a weaker yes -- it is the
+        answer meaning there is no destination at all, and the workspace rule
+        drops its gate entirely on it. So a setting config.txt documented as
+        inert ("nothing in this repo reads it") turned a fail-closed delete
+        gate into one that was never asked. Whether the destination is
+        reachable is the plugin's question; it is handed `offline` on its
+        Workspace and can answer UNKNOWN itself, which blocks.
+        """
+        ctx = _a_ctx(_Silent())
+        ctx.offline = True
+        facts = self.P._target_facts(ctx, M.Scope.FULL, Path("/w/2026-07-28"),
+                                     ("trip_A",))
+        self.assertIsNot(facts.complete, M.Evidence.NA,
+                         "offline dropped the destination gate instead of asking")
+        self.assertEqual(facts.complete,
+                         self.P._target_facts(_a_ctx(_Silent()), M.Scope.FULL,
+                                              Path("/w/2026-07-28"),
+                                              ("trip_A",)).complete)
+
 
 class _Silent(U.Uploader):
     def describe(self):
