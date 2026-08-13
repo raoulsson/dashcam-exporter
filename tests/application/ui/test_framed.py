@@ -2,6 +2,7 @@
 where each band lands is checkable without a real screen; the render is checked
 by capturing the ANSI the frame writes and asking which row each thing reached."""
 
+import collections
 import io
 import re
 import sys
@@ -62,6 +63,55 @@ class TheLayoutIsPureArithmetic(unittest.TestCase):
 class ThePlainHelperStripsColour(unittest.TestCase):
     def test_it_measures_the_visible_width(self):
         self.assertEqual(framed._plain("\x1b[32mgo\x1b[0m"), "go")
+
+
+class TheParagraphPagerTerminates(_NoColour):
+    """Item 7 streams every transcript paragraph through `paragraph()`.
+
+    It padded to a page boundary with `while len(self._log) % body != 0`, and
+    the log is a BOUNDED deque -- once at maxlen, appending stops changing
+    len(), so that condition can never come true. The tool wedged with no
+    output and no menu a few hundred paragraphs into a transcription.
+    """
+
+    def _handler(self, maxlen):
+        h = framed.FramedUiHandler(splash_seconds=0)
+        h._size = lambda: (24, 80)
+        h._log = collections.deque(maxlen=maxlen)
+        return h
+
+    def test_it_returns_with_the_log_at_its_cap(self):
+        # A maxlen deliberately NOT divisible by the page height: that is the
+        # case the modulo condition could never satisfy.
+        h = self._handler(101)
+        cap, saved = io.StringIO(), sys.stdout
+        sys.stdout = cap
+        try:
+            h.open()
+            self.assertNotEqual(101 % h._body_height(), 0, "harness must hit the bad case")
+            for i in range(60):
+                h.paragraph("paragraph %d, long enough to wrap across a couple "
+                            "of rows in an eighty column frame." % i)
+        finally:
+            h.close()
+            sys.stdout = saved
+        self.assertEqual(len(h._log), 101)      # still bounded, and it got here
+
+    def test_a_paragraph_lands_on_the_page_it_was_given(self):
+        h = self._handler(2000)
+        cap, saved = io.StringIO(), sys.stdout
+        sys.stdout = cap
+        try:
+            h.open()
+            h.paragraph("first")
+            after_first = len(h._log)
+            h.paragraph("second")
+        finally:
+            h.close()
+            sys.stdout = saved
+        # Two short paragraphs share a page: the second must not have padded a
+        # whole screen of blanks to open one of its own.
+        self.assertLess(len(h._log) - after_first, h._body_height())
 
 
 class TheDirectionKeysFallBackToText(unittest.TestCase):

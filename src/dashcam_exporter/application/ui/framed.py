@@ -530,13 +530,24 @@ class FramedUiHandler(UiHandler):
             wrapped.extend(textwrap.wrap(line, width) or [""])
         wrapped.append("")                      # a blank row between paragraphs
         body = self._body_height()
-        used = len(self._log) - self._last_page_start()   # rows on the current page
-        if self._log and used + len(wrapped) > body:
+        # Rows already on the current page, counted modulo the page height --
+        # NOT `len - _last_page_start()`. That anchor became tail-aligned (it
+        # keeps the newest screen full rather than page-aligned), so it reported
+        # a whole page as used every time and every paragraph opened a fresh
+        # one, each rendering as a line or two at the top of a screen of blanks.
+        used = len(self._log) % body
+        if self._log and used and used + len(wrapped) > body:
             # A paragraph never straddles a page. Fill the rest of this page so
             # the next starts on a page boundary (keeps j/k pages aligned), then
             # a row of air at its top. Nothing is cleared -- the pages remain in
             # history to walk back through once transcription is done.
-            while len(self._log) % body != 0:
+            #
+            # A counted pad, not `while len(self._log) % body`: the log is a
+            # BOUNDED deque, so once it reaches maxlen appending stops changing
+            # len() and that condition can never come true. Transcribe streams
+            # every paragraph through here and wedged the whole tool -- no
+            # output, no menu, no Ctrl-C -- a few hundred paragraphs in.
+            for _ in range(body - used):
                 self._log.append("")
             self._log.append("")
         elif not self._log:
