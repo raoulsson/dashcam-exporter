@@ -37,7 +37,7 @@ Trips, 8 Upload Website, 9 Clean Workspace, 10 Delete SIM Data. Inserting item 7
 in 2026-07 pushed Upload/Clean/Delete up by one — a renumber is global, and the
 path/gate tests that type item numbers had to move with it.
 
-`./run-tests.sh` runs 677 Python tests and 7 shell tests and prints `all green`;
+`./run-tests.sh` runs ~870 Python tests and 7 shell tests and prints `all green`;
 it also fails on pyflakes undefined names and redefinitions. Anything touching
 `guards.py`, `items.py` or `menu.py` is expected to come with a test, because
 those decide whether footage may be deleted. The renderer itself stays a
@@ -304,8 +304,14 @@ distance). Each day folder also holds `info.txt` (source import folder).
 ## Gotchas
 
 - DDPAI dumps stale GPS from a previous drive into a clip's GPX (parking-mode
-  buffer). `parse_gpx_track` keeps only the densest time-window; there's a lot
-  of code fighting phantom fixes — respect it when touching GPS.
+  buffer). `parse_gpx_track` keeps the NEWEST time-window, unless an earlier one
+  is more than `_DENSEST_MARGIN`× denser — the camera writes the live recording
+  last, so newest is right for stale strays, and the density escape catches a
+  fix stamped *ahead* of the drive (which makes itself "newest" and otherwise
+  becomes the entire track). It does NOT keep the densest outright: that moves
+  ordinary tracks 30–60 s whenever a dropout lets an earlier window win by one
+  fix. There's a lot of code fighting phantom fixes — respect it when touching
+  GPS.
 - `.intermediates/` is scratch, wiped every run. `.gpx_cache/` persists (harvested
   from tarred NMEA), TTL-evicted via `--cache-max-age-days`.
 - Restartable: a trip whose final `.mp4` exists is skipped unless `--force`.
