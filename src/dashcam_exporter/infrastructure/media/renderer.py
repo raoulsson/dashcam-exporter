@@ -583,6 +583,36 @@ def group_into_trips(
     return trips, moved
 
 
+def publish_numbers(day_labels: list[str], publishable: set[int],
+                    forced: set[int]) -> dict[int, int]:
+    """Per-DAY publish index (the _NN in the filename) for every group.
+
+    A trip's publish number is a property of ITS DAY, not of which subset of
+    trips a particular run happened to select. This used to be counted over
+    the SELECTED groups, so `--drives 2` numbered the day's second trip 01 and
+    wrote a whole second set of files beside the correct `_02` ones — two
+    copies of one drive in the day folder and two _meta.json both claiming
+    trip_index 1, with the `final.exists()` skip blind to the difference
+    because it was looking for a name the run no longer computed. `--drives`
+    is routine (`./make-trips-rendered.sh 2`, and the operator tool emits it),
+    so this was reachable on any re-render of a single trip.
+
+    Hence: number the groups a FULL render would publish, 1..N within each day,
+    from `publishable` alone. `forced` is the other case — indices named on
+    --drives that a full render would skip (fragments, stationary groups).
+    They still need a number, and they get one AFTER their day's publishable
+    trips rather than in index order among them, so that forcing a fragment
+    cannot shift the number of a real trip rendered in the same run.
+    """
+    pub_no: dict[int, int] = {}
+    per_day: dict[str, int] = {}
+    for i in sorted(publishable) + sorted(forced):
+        d = day_labels[i - 1]
+        per_day[d] = per_day.get(d, 0) + 1
+        pub_no[i] = per_day[d]
+    return pub_no
+
+
 def has_videotoolbox() -> bool:
     try:
         out = subprocess.check_output(
@@ -1795,21 +1825,47 @@ _NOISY_FFMPEG_PATTERNS = (
 )
 
 
+#: Lines ffmpeg prints when it gave up on an input but still exits 0.
+#: Only for the concat demuxer, and only mid-stream: if the FIRST file fails
+#: to open, ffmpeg exits non-zero and the return code is enough. Once one file
+#: has opened, a later one going missing is reported as a demuxing error, the
+#: process stops early, writes a valid but SHORT file, and returns success.
+_FFMPEG_SILENT_FAILURES = ("Error during demuxing",)
+
+
 def run_ffmpeg(cmd: list[str]) -> None:
     """
     Run an ffmpeg command, streaming stderr through a line filter that drops
     known harmless DDPAI-metadata noise. Real warnings still pass through.
-    Raises subprocess.CalledProcessError on non-zero exit.
+    Raises subprocess.CalledProcessError on non-zero exit -- or on an error
+    ffmpeg reported and then exited 0 about.
+
+    That second case is not defensive programming, it is a measured hole. Give
+    the concat demuxer a list whose first clip is fine and whose second is
+    missing, and ffmpeg writes the first clip's frames, prints "Error during
+    demuxing", and exits 0. Nothing downstream can tell that file from a
+    finished trip: the atomic rename promotes it to the final name, the next
+    run's exists() check skips it, and the delete gates count it as proof the
+    footage was rendered. A truncated render that looks complete is how the
+    only copy of a drive gets erased, so the exit code is not the whole answer
+    and stderr has to be read.
     """
     proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True, bufsize=1)
     assert proc.stderr is not None
+    silent_failure = ""
     for line in proc.stderr:
         if any(p in line for p in _NOISY_FFMPEG_PATTERNS):
             continue
+        if any(p in line for p in _FFMPEG_SILENT_FAILURES):
+            silent_failure = line.strip()
         sys.stderr.write(line)
     proc.wait()
     if proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, cmd)
+    if silent_failure:
+        # Reported as the failure it is, with ffmpeg's own words, so the run
+        # log says which input went missing rather than only that something did.
+        raise subprocess.CalledProcessError(1, cmd, stderr=silent_failure)
 
 
 def encode_clip(
@@ -1997,21 +2053,75 @@ def generate_transition_slide(
     run_ffmpeg(cmd)
 
 
+def _partial_of(out_path: Path) -> Path:
+    """Where the encode writes before it has earned the final name.
+
+    Two properties are load-bearing, and both are about what OTHER code sees:
+
+    * LEADING DOT. The whole tool treats a dotted entry as not-its-output —
+      pipeline.rendered_mp4s() skips any path with a dotted part, and the
+      fresh-output day reset keeps hidden entries rather than deleting them.
+      A half-written file that no sweep counts is exactly what is wanted.
+    * The name does NOT end in .mp4. `trip_*.mp4` is globbed in several places
+      to mean "a finished render" — most seriously in rendered_mp4s(), which is
+      the evidence Clean Workspace weighs before erasing the only copy of the
+      footage. A `<final>.part.mp4` would match that glob, so the suffix goes
+      last: <dir>/.<name>.mp4.part.
+    """
+    return out_path.with_name("." + out_path.name + ".part")
+
+
 def concat_clips(intermediate_paths: list[Path], out_path: Path) -> None:
-    list_file = out_path.with_suffix(".concat.txt")
-    with list_file.open("w") as f:
-        for p in intermediate_paths:
-            f.write(f"file '{p.as_posix()}'\n")
-    cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
-        "-f", "concat", "-safe", "0",
-        "-i", str(list_file),
-        "-c", "copy",
-        "-movflags", "+faststart",
-        str(out_path),
-    ]
-    run_ffmpeg(cmd)
-    list_file.unlink(missing_ok=True)
+    """Join the intermediates into out_path -- ATOMICALLY.
+
+    The encode used to write straight to the final name, so a Ctrl-C, a full
+    disk or a crash left a truncated MP4 sitting there under the name that
+    means "finished". Nothing downstream could tell: the next run's
+    `final.exists()` check skipped it as already rendered, and
+    pipeline.rendered_mp4s() counted it as evidence that the raw footage had
+    been rendered and could therefore be deleted. A half-written file must
+    never be able to help authorise erasing its own source.
+
+    So ffmpeg writes to a partial sibling and the file only takes the final
+    name via os.replace() after a zero exit -- atomic within a filesystem, and
+    the sibling guarantees the same filesystem. The final name existing is then
+    the same statement as "ffmpeg finished".
+    """
+    tmp = _partial_of(out_path)
+    # A partial left by an earlier crash is not output and is not a resume
+    # point: ffmpeg cannot continue into it, and keeping it would only let
+    # partials accumulate invisibly in the day folder (the reset does not
+    # touch hidden entries). Clear every stale one here, since this is the
+    # only code that writes them.
+    for stale in out_path.parent.glob(".*.mp4.part"):
+        stale.unlink(missing_ok=True)
+    list_file = tmp.with_suffix(".concat.txt")
+    try:
+        with list_file.open("w") as f:
+            for p in intermediate_paths:
+                f.write(f"file '{p.as_posix()}'\n")
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
+            "-f", "concat", "-safe", "0",
+            "-i", str(list_file),
+            "-c", "copy",
+            "-movflags", "+faststart",
+            # The muxer must be named: ffmpeg picks it from the output
+            # extension, and the partial's extension is deliberately not .mp4,
+            # so without this it exits with "Invalid argument" before writing
+            # a frame.
+            "-f", "mp4",
+            str(tmp),
+        ]
+        run_ffmpeg(cmd)
+        os.replace(tmp, out_path)
+    except BaseException:
+        # BaseException, not Exception: Ctrl-C is the commonest way this is
+        # interrupted and KeyboardInterrupt is not an Exception.
+        tmp.unlink(missing_ok=True)
+        raise
+    finally:
+        list_file.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -2822,18 +2932,21 @@ def main() -> int:
           "Generate Meta (item 2)\nwrites the real moving time per trip into "
           "each _meta.json.")
 
+    # The groups a FULL render would publish: auto-skip fragments (too few
+    # clips) AND stationary trips (had GPS but never left the anchor —
+    # parking-mode junk). Both are force-encodable by naming the index via
+    # --drives. Computed whether or not --drives was given, because it is what
+    # the publish numbering below counts — see there.
+    publishable = {i for i, g in enumerate(groups, 1)
+                   if len(g) >= args.min_clips_per_group and trip_moved[i - 1]}
+
     # When --drives is given, ONLY those groups run (and the min-clips filter
-    # is bypassed for them — user explicitly asked). Otherwise, every group
-    # that has at least min_clips_per_group clips runs.
+    # is bypassed for them — user explicitly asked).
     explicit_set = set(args.drives) if args.drives else None
     if explicit_set is not None:
         wanted = explicit_set
     else:
-        # Auto-skip fragments (too few clips) AND stationary trips (had GPS but
-        # never left the anchor — parking-mode junk). Both are force-encodable
-        # by naming the index via --drives.
-        wanted = {i for i, g in enumerate(groups, 1)
-                  if len(g) >= args.min_clips_per_group and trip_moved[i - 1]}
+        wanted = publishable
         skipped_small = [(i, len(g)) for i, g in enumerate(groups, 1)
                          if len(g) < args.min_clips_per_group]
         skipped_still = [i for i, g in enumerate(groups, 1)
@@ -2859,8 +2972,6 @@ def main() -> int:
     # arithmetic, no side effects) so those two modes can report the same
     # publish numbers and output paths a real render would produce, from this
     # one copy of the rule rather than a second one that could drift.
-    pub_no: dict[int, int] = {}
-    _per_day: dict[str, int] = {}
     # An out-of-range --drives index is silently ignored by the render loop
     # below (it walks the groups and skips what isn't wanted); without this
     # bound it would blow up here on day_labels instead. Say so rather than
@@ -2871,10 +2982,9 @@ def main() -> int:
         print(f"WARNING: ignoring --drives index/indices "
               f"{', '.join(str(w) for w in _oob)}: only {len(groups)} "
               f"{group_kind}s were found.", file=sys.stderr)
-    for i in sorted(w for w in wanted if 1 <= w <= len(groups)):
-        d = day_labels[i - 1]
-        _per_day[d] = _per_day.get(d, 0) + 1
-        pub_no[i] = _per_day[d]
+    pub_no = publish_numbers(
+        day_labels, publishable,
+        {w for w in wanted if 1 <= w <= len(groups)} - publishable)
 
     # Output is NAMESPACED BY IMPORT: everything from one import lives under
     # out_dir/<import-name>/<day>/. This makes cross-card clobbering impossible —
