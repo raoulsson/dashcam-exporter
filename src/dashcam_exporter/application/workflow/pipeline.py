@@ -72,6 +72,11 @@ from dashcam_exporter.application.ports import uploader
 # module's -- nothing below names a directory a camera invented.
 from dashcam_exporter.application.workflow import card_access
 from dashcam_exporter.infrastructure.runtime.runtime import Child, _reader
+# The plugin this repo ships with itself: item 5's local build, plus a copy of
+# the gathered folder to a directory. Constructed only when a destination is
+# configured and nothing else is, and from then on it IS the plugin -- there is
+# no second kind of publishing anywhere below this line.
+from dashcam_exporter.infrastructure import plugin as built_in
 from dashcam_exporter.infrastructure.config import (PRIVATE_KEYS, as_bool, card_root,
                                      load_config, load_env)
 from dashcam_exporter.domain.model import world as W
@@ -317,6 +322,19 @@ def _safe_iterdir(directory):
         return []
 
 
+def _configured_path(value):
+    """A configured directory, or None when the setting is absent.
+
+    `~` expands here rather than at every reader: the destination is typed by
+    hand into config.txt or .env, and a literal "~" directory created beside
+    the checkout is the failure this prevents -- one nobody notices until the
+    footage is on a disk that is not the one on the desk.
+    """
+    if not value:
+        return None
+    return Path(value).expanduser()
+
+
 def _loaded_plugin(spec, exporter_dir):
     """The configured plugin — both its classes — or None for the local edition.
 
@@ -402,13 +420,26 @@ class Ctx:
         self.import_root = Path(os.environ.get("DASHCAM_IMPORT_ROOT")
                                 or self.render_root).expanduser()
         self.card = card_root(Path(self.cfg.get("card", FALLBACK_CARD)).expanduser())
-        # Where the LOCAL edition puts the finished site. Item 8 under that
-        # edition is a copy into here rather than a network transport; with a
-        # plugin configured nothing reads it. Defaults beside the export tree
-        # so an unconfigured install still has an answer to print.
-        self.website_export_dir = Path(
-            self.cfg.get("default_website_export_dir")
-            or (self.workspace / "website")).expanduser()
+        # Where an install with no publisher wants the finished folder PUT.
+        # None when nothing is configured, and that is load-bearing: it is the
+        # switch that decides whether item 8 exists at all on this machine, so
+        # a compiled-in default would turn the copy on for every fresh clone
+        # and point it at a directory nobody chose.
+        #
+        # NOT `export_dir`, which has meant the render output tree since long
+        # before this existed. `default_website_export_dir` is read as an alias
+        # because that is the name the setting shipped under.
+        self.website_export_dir = _configured_path(
+            self.cfg_opt("website_export_dir")
+            or self.cfg_opt("default_website_export_dir"))
+        # Said out loud at startup rather than resolved quietly. Two publishers
+        # disagreeing about where the footage went is how the only copy gets
+        # erased, so the operator is told which of the two answered.
+        self.export_dir_ignored = bool(self.website_export_dir and self.plugin)
+        if self.website_export_dir and self.plugin is None:
+            self.plugin = built_in.export_plugin(
+                LocalPage(self), lambda: _final_folders(self),
+                self.website_export_dir, ExportRecord(self))
 
         try:
             self.output_height = int(self.cfg.get("output_height", "720"))
@@ -1313,7 +1344,41 @@ def _edition_rows(ctx):
     """
     if ctx.plugin is None:
         return _local_site_rows(ctx)
-    return _plugin_rows(ctx.plugin)
+    if isinstance(ctx.plugin, built_in.ExportPlugin):
+        return _export_rows(ctx)
+    return _plugin_rows(ctx.plugin) + _ignored_export_rows(ctx)
+
+
+def _export_rows(ctx):
+    """The built-in export: still the local page, plus where it is copied.
+
+    Reported as its own thing rather than as a "user plugin", which is what
+    _plugin_rows says: nobody supplied this code and there is no file of theirs
+    to name. What an operator needs from this row is the destination, because
+    that is the directory 9) Clean Workspace will look in before it erases.
+    """
+    return (_setting("Export-Mode", "local page + export: built here, then "
+                                    "copied out by 8) Upload Website"),
+            _setting("Local site", _built_or_not(_result_page(ctx))),
+            _setting("Export to", tilde(ctx.website_export_dir), indent=4))
+
+
+def _ignored_export_rows(ctx):
+    """The one place both settings are configured, said out loud.
+
+    A plugin and a copy-out destination are two publishers, and the erase gate
+    listens to exactly one of them. Silently preferring the plugin would leave
+    an operator believing his footage is being copied to the disk on the desk
+    while the gate that clears it for deletion is asking somewhere else
+    entirely. It is not an error -- the plugin is the right winner, and saying
+    so costs one line.
+    """
+    if not getattr(ctx, "export_dir_ignored", False):
+        return ()
+    return (C.yellow("    %-18s %s" % ("Export to",
+                                       "IGNORED: %s -- upload_plugin is "
+                                       "configured and publishes instead"
+                                       % tilde(ctx.website_export_dir))),)
 
 
 def _plugin_rows(plugin):
@@ -1783,6 +1848,46 @@ def record_imported_stamps(ctx, stamps):
     d["imported"] = sorted(merged)
     _write_ledger(ctx, d)
     return merged
+
+
+class ExportRecord:
+    """Which trips the built-in export has copied out, ever.
+
+    The same answer the import manifest gives about a card, for the same
+    reason. A high-water mark could not tell "was copied" from "is still
+    present", and neither can looking at the destination: the built-in export
+    writes to a directory the operator named, which is ordinarily a stick or an
+    external drive, and the ordinary state of one of those is unplugged and in
+    a drawer. Going back to look would read the empty slot -- or a DIFFERENT
+    disk mounted at the same path -- as though the export had never happened,
+    and Clean Workspace would then refuse for good on footage that is
+    demonstrably on a shelf.
+
+    So the copy is recorded when it succeeds and the record is what the gate
+    reads. It lives in the ledger beside the import manifest, which survives
+    Clean Workspace: a record erased by the step it authorises would be no
+    record at all.
+
+    A plugin needs none of this. It owns a destination it can go back and
+    look at, so it answers by looking, and what it says is true because only
+    it can know.
+    """
+
+    def __init__(self, ctx):
+        self._ctx = ctx
+
+    def exported(self):
+        return _strings(read_ledger(self._ctx).get("exported", ()))
+
+    def mark(self, trip_ids):
+        trips = _strings(trip_ids)
+        if not trips:
+            return self.exported()
+        d = read_ledger(self._ctx)
+        merged = _strings(d.get("exported", ())) | trips
+        d["exported"] = sorted(merged)
+        _write_ledger(self._ctx, d)
+        return merged
 
 
 STAMP_RE = re.compile(r"(\d{14})")
@@ -7858,9 +7963,10 @@ def _outcome(result):
 # Publishing collaborators live in their own cohesive module.  Re-exporting
 # these names keeps the historical pipeline API stable for callers/tests.
 from dashcam_exporter.application.workflow.publishing import (
-    Console, PublishingCollaborator, LocalPage, TargetBuild, TargetPublish,
-    NoPublisher, _handed_over, _holds, _long_description, _with_the_count,
-    _delta_words, _logged, _closed_on, _status_of, _did_or_settled,
+    Console, PublishingCollaborator, ExportBuild, LocalPage, TargetBuild,
+    TargetPublish, NoPublisher, _handed_over, _holds, _long_description,
+    _with_the_count, _delta_words, _logged, _closed_on, _status_of,
+    _did_or_settled,
 )
 
 
@@ -7917,9 +8023,14 @@ class Work:
         that nothing had left the machine. Making the whole body the branch is
         what fixes that, and it is why there is no gatherer() any more.
         """
-        if strategy is menu.Strategy.UPLOADER:
-            return TargetBuild(self.ctx, self.ctx.plugin.builder)
-        return LocalPage(self.ctx)
+        if strategy is not menu.Strategy.UPLOADER:
+            return LocalPage(self.ctx)
+        # The built-in export plugin's builder IS LocalPage, one call deeper,
+        # and it logs its own step. Everything else about it is a plugin act
+        # and is treated as one -- see ExportBuild.
+        if isinstance(self.ctx.plugin, built_in.ExportPlugin):
+            return ExportBuild(self.ctx, self.ctx.plugin.builder)
+        return TargetBuild(self.ctx, self.ctx.plugin.builder)
 
     def publisher(self, strategy):
         if strategy is menu.Strategy.UPLOADER:
@@ -8453,6 +8564,11 @@ def _chain(ctx):
     longer knows where anything goes."""
     if ctx.plugin is None:
         return "card -> render -> local page"
+    # The built-in export is named by what it does rather than by its class:
+    # the chain is the one sentence that says where the footage ends up, and
+    # "DirectoryExport" is a class name, not a place.
+    if isinstance(ctx.plugin, built_in.ExportPlugin):
+        return "card -> render -> local page -> %s" % tilde(ctx.website_export_dir)
     return "card -> render -> %s" % ctx.plugin.name
 
 

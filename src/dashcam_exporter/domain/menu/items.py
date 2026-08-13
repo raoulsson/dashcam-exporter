@@ -531,11 +531,14 @@ class UploadWebsite(MenuItem):
         """
         where = self._work.website_export_dir()
         return self._handover.about(
-            "This step uploads the built website to its destination. In local "
-            "mode, the website is copied to the specified directory:\n\t%s\n\n"
-            "If you configured a plugin, the operational details of the "
-            "process are delegated to the plugin."
-            % (where or "<default_website_export_dir>"))
+            "This step uploads the built website to its destination. With no "
+            "upload plugin configured, it copies the folder 5) gathered to the "
+            "directory named by website_export_dir:\n\t%s\n\n"
+            "Set neither and there is nowhere for this step to put anything, "
+            "which is why it is switched off on a fresh clone. If you "
+            "configured a plugin, the operational details of the process are "
+            "delegated to the plugin."
+            % (where or "<website_export_dir, not set>"))
 
     def evaluate(self, world) -> Verdict:
         """The exporter's own evidence first, then the uploader, then the

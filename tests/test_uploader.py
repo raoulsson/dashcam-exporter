@@ -547,5 +547,171 @@ class TestTheToolStopsRatherThanDegrading(unittest.TestCase):
         self.assertIsNone(P._loaded_plugin(None, REPO))
 
 
+class TestTheExportRecordIsWrittenDownAndStaysWrittenDown(unittest.TestCase):
+    """Which trips the built-in export has copied out, ever.
+
+    It exists because the answer cannot be recovered by looking. The built-in
+    destination is a directory the operator named -- ordinarily a stick or an
+    external disk -- and the ordinary state of one of those is unplugged and in
+    a drawer, so a gate that went back to look would read the empty slot, or a
+    DIFFERENT disk mounted at the same path, as though the copy never took
+    place. That is the same reason the import manifest exists, and it lives in
+    the same ledger, which survives Clean Workspace: a record erased by the
+    step it authorises would be no record at all.
+    """
+
+    def setUp(self):
+        from dashcam_exporter import pipeline as P
+
+        self.P = P
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.ctx = P.Ctx.__new__(P.Ctx)
+        self.ctx.state_dir = Path(self.tmp.name) / "state"
+        self.record = P.ExportRecord(self.ctx)
+
+    def test_a_fresh_ledger_has_exported_nothing(self):
+        """Empty rather than absent, and never an error. No record means no
+        trip has been copied out, which refuses an erase -- so this is the
+        reading everything else rests on."""
+        self.assertEqual(self.record.exported(), set())
+
+    def test_marking_unions_rather_than_replacing(self):
+        """Two exports of two different days is the ordinary case: the operator
+        copies out one import, renders another, copies that. A mark that
+        replaced would drop the first import's trips out of the record, and
+        Clean Workspace would then refuse on footage already on the disk."""
+        self.record.mark(("trip_A",))
+        self.record.mark(("trip_B",))
+        self.assertEqual(self.record.exported(), {"trip_A", "trip_B"})
+
+    def test_marking_nothing_leaves_the_record_alone(self):
+        """A pages-only run reaches mark() with an empty set, and must not
+        rewrite the ledger to say so."""
+        self.record.mark(("trip_A",))
+        self.record.mark(())
+        self.assertEqual(self.record.exported(), {"trip_A"})
+
+    def test_it_survives_a_re_read_by_a_record_built_later(self):
+        """The point of it being durable. The session that copied the files out
+        is long gone by the time item 9 asks, so the answer has to come off the
+        disk rather than out of an object somebody kept."""
+        self.record.mark(("trip_A",))
+        self.assertEqual(self.P.ExportRecord(self.ctx).exported(), {"trip_A"})
+
+    def test_it_shares_the_ledger_without_disturbing_the_import_manifest(self):
+        """One file, two records. The import manifest is what says a card's
+        clips are safely on this machine, and losing it to an export mark would
+        make an imported card unerasable -- so the merge is per key, not a
+        rewrite of the file."""
+        self.P.record_imported_stamps(self.ctx, ("20260728085700",))
+        self.P.write_ledger(self.ctx, "20260728085700", note="a test")
+        self.record.mark(("trip_A",))
+        self.assertEqual(self.P.imported_stamps(self.ctx), {"20260728085700"})
+        self.assertEqual(self.P.read_ledger(self.ctx).get("through"),
+                         "20260728085700")
+        self.assertEqual(self.record.exported(), {"trip_A"})
+
+
+class TestWhichPublisherAnInstallEndsUpWith(unittest.TestCase):
+    """One destination, decided out loud.
+
+    Two publishers disagreeing about where the footage went is how the only
+    copy gets erased, so `upload_plugin` WINS whenever both are configured and
+    the built-in is not installed at all -- not installed and ignored, not
+    installed as a second opinion. The regression that matters more is the
+    other end: an install that configures NEITHER must be the local edition it
+    has always been, with item 8 switched off.
+    """
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+        (self.dir / "src").mkdir()
+        # The example plugin reads these, and a real environment must not reach
+        # into the test either way: website_export_dir is a PRIVATE_KEY, so a
+        # SET_WEBSITE_EXPORT_DIR in the operator's shell would otherwise
+        # configure an edition the test never asked for.
+        for key, sub in (("DASHCAM_LOCAL_SITE_STAGING", "staging"),
+                         ("DASHCAM_LOCAL_SITE_DEST", "dest")):
+            os.environ[key] = str(self.dir / sub)
+            self.addCleanup(os.environ.pop, key, None)
+        for key in ("SET_WEBSITE_EXPORT_DIR", "SET_UPLOAD_PLUGIN"):
+            if key in os.environ:
+                self.addCleanup(os.environ.__setitem__, key, os.environ[key])
+                del os.environ[key]
+
+    def ctx(self, **settings):
+        from dashcam_exporter.application.ports.checkout import FakeCheckout
+        from dashcam_exporter import pipeline as P
+
+        lines = ["workspace=%s/ws" % self.dir]
+        lines += ["%s=%s" % (k, v) for k, v in settings.items()]
+        (self.dir / "config.txt").write_text("\n".join(lines) + "\n",
+                                             encoding="utf-8")
+        return P.Ctx(FakeCheckout(self.dir))
+
+    def test_a_destination_alone_installs_the_built_in_export(self):
+        from dashcam_exporter.infrastructure.plugin import ExportPlugin
+
+        ctx = self.ctx(website_export_dir=str(self.dir / "stick"))
+        self.assertIsInstance(ctx.plugin, ExportPlugin)
+        self.assertEqual(ctx.plugin.uploader.destination, self.dir / "stick")
+        self.assertFalse(ctx.export_dir_ignored)
+        self.assertIs(M.Strategy.of(ctx.plugin), M.Strategy.UPLOADER)
+
+    def test_the_old_name_for_the_setting_still_installs_it(self):
+        """`default_website_export_dir` is the name the setting shipped under.
+        A config written before it was renamed must not stop working."""
+        from dashcam_exporter.infrastructure.plugin import ExportPlugin
+
+        ctx = self.ctx(default_website_export_dir=str(self.dir / "stick"))
+        self.assertIsInstance(ctx.plugin, ExportPlugin)
+        self.assertEqual(ctx.plugin.uploader.destination, self.dir / "stick")
+
+    def test_a_configured_plugin_wins_and_the_built_in_is_not_installed(self):
+        """Both set. The plugin owns the destination and can be asked about it;
+        the built-in would answer from a record about a different place
+        entirely, and two answers about where the footage went is exactly what
+        must not exist."""
+        from dashcam_exporter.infrastructure.plugin import ExportPlugin
+
+        ctx = self.ctx(upload_plugin=EXAMPLE_SPEC,
+                       website_export_dir=str(self.dir / "stick"))
+        self.assertNotIsInstance(ctx.plugin, ExportPlugin)
+        self.assertEqual(ctx.plugin.name, "LocalWebSiteUploader")
+        # Read back, not thrown away: the tool says at startup that it is
+        # ignoring the setting rather than resolving it quietly.
+        self.assertTrue(ctx.export_dir_ignored)
+
+    def test_the_render_output_tree_is_a_different_setting_entirely(self):
+        """`export_dir` has meant "where the renders go" since long before any
+        of this, and the two names are one character apart in conversation. It
+        must not install a publisher, or every existing install would silently
+        acquire an item 8 that copies footage into its own output tree."""
+        ctx = self.ctx(export_dir=str(self.dir / "renders"))
+        self.assertIsNone(ctx.plugin)
+        self.assertEqual(ctx.out_dir, self.dir / "renders")
+        self.assertIsNone(ctx.website_export_dir)
+
+    def test_with_neither_configured_the_edition_is_unchanged(self):
+        """The regression that matters most. A fresh clone has nowhere to put
+        anything, which is why item 8 is switched off rather than refusing when
+        picked -- and adding the built-in export must leave that exactly as it
+        was."""
+        from dashcam_exporter import pipeline as P
+
+        ctx = self.ctx()
+        self.assertIsNone(ctx.plugin)
+        self.assertIsNone(ctx.website_export_dir)
+        self.assertIs(M.Strategy.of(ctx.plugin), M.Strategy.LOCAL_PAGE)
+        built = M.build_menu(M.Strategy.LOCAL_PAGE, P.Work(ctx))
+        upload = built[M.UPLOAD]
+        self.assertEqual(upload.inbound().edges(), frozenset(),
+                         "publishing has no place in the local edition")
+        self.assertEqual(upload.outbound().offers(frozenset(built)), frozenset())
+
+
 if __name__ == "__main__":
     unittest.main()

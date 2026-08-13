@@ -3,7 +3,13 @@ from .settings import Settings
 
 import re
 
-PRIVATE_KEYS = ("upload_plugin", "home_lat", "home_lon", "card")
+# Settings naming a place that belongs to one person. config.txt is tracked,
+# so a real value written there is a value committed; these resolve from the
+# gitignored .env (SET_<KEY>) first. website_export_dir is one of them for the
+# same reason `card` is: it names an external disk or a synced folder on this
+# machine, which is nobody else's business and nothing a clone should inherit.
+PRIVATE_KEYS = ("upload_plugin", "home_lat", "home_lon", "card",
+                "website_export_dir")
 
 def load_config(path):
     out = {}

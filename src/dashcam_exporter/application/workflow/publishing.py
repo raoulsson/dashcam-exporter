@@ -270,6 +270,25 @@ class TargetBuild(PublishingCollaborator):
         return _with_the_count(outcome, before, _holds(self._act))
 
 
+class ExportBuild(TargetBuild):
+    """Item 5 under the built-in export plugin: the same act, logged once.
+
+    The act it delegates to is this repo's own local page build wearing the
+    plugin interface, and that build already files its own step result and
+    prints its own closing line -- it has to, because under the local edition
+    nothing else does. Wrapping it in _logged as well files a SECOND "Build
+    Website" row for one build, which teaches the operator to read the session
+    summary as approximate.
+
+    So the wrapper is the one thing dropped, and nothing else: describe,
+    evaluate, the long description and the plugin's name are TargetBuild's,
+    because the act really is a plugin act and answers all four for itself.
+    """
+
+    def execute(self, world):
+        return self._act.execute(_handed_over(self._ctx, world))
+
+
 class TargetPublish(TargetBuild):
     """Item 8 with a plugin configured: one job, however many transports.
 
