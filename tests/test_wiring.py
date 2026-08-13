@@ -15,7 +15,7 @@ green over it.
 
 The gap got WIDER when the publishing half became an interface. There is a
 surface an outsider implements and this repo calls, and the call sites are
-spread across capture_world, item 5 and item 7. So the question is asked here
+spread across capture_world, item 5 and item 8. So the question is asked here
 for every method on the interface, and the table of call sites is checked
 against the abstract methods of Builder and Uploader — a method added later
 fails this file until someone writes down where it is called from. Binding the
@@ -105,7 +105,7 @@ CALL_SITES = {
     # pipeline.TargetBuild/TargetPublish.describe, for the menu row, and
     # pipeline._target_status once at launch
     "describe": (),
-    # pipeline.TargetBuild/TargetPublish.evaluate, from item 5's and item 7's
+    # pipeline.TargetBuild/TargetPublish.evaluate, from item 5's and item 8's
     # evaluate, on every menu draw
     "evaluate": (A_WORKSPACE,),
     # pipeline.TargetBuild/TargetPublish.execute, from the items' _perform
@@ -207,7 +207,7 @@ class TestTheBuilderFitsItsCallSite(unittest.TestCase):
 
 
 class TestThePublisherFitsItsCallSite(unittest.TestCase):
-    """Item 7 asks its publisher the same three things item 5 asks its
+    """Item 8 asks its publisher the same three things item 5 asks its
     builder, which is what "one act, twice" means at the wiring."""
 
     def _publishers(self):
@@ -226,7 +226,7 @@ class TestThePublisherFitsItsCallSite(unittest.TestCase):
         self.assertTrue(a_work().publisher(LOCAL).evaluate(A_WORLD).blocked)
 
 
-# What items 5 and 7 really ask their collaborator, written where it can be
+# What items 5 and 8 really ask their collaborator, written where it can be
 # checked, exactly as CALL_SITES above does for the plugin-facing interface.
 # The left column is everything the exporter asks its own publishing halves;
 # the right column is all it ever hands over.
@@ -255,7 +255,7 @@ def every_collaborator():
 
 
 class TestEveryCollaboratorIsDeclaredAndNotMerelyShaped(unittest.TestCase):
-    """The seam items 5 and 7 install, declared instead of hoped for.
+    """The seam items 5 and 8 install, declared instead of hoped for.
 
     This is the file the last one of these got past. A long description was
     added to what the items ask their collaborator, none of the four real

@@ -219,7 +219,7 @@ class World:
     # Clips in this import that NOTHING else accounts for: not on the card,
     # not inside a rendered trip, not excluded on purpose. A trip too short to
     # render gets no sidecar, so it reaches neither trip_ids nor
-    # expected_trips and is invisible to both of item 8's gates -- the local
+    # expected_trips and is invisible to both of item 9's gates -- the local
     # floor is met by the renders that do exist, and the destination answers
     # YES honestly about the trips it was asked about.
     orphan_clips: Tuple[str, ...] = ()

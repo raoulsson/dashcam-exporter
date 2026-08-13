@@ -119,7 +119,7 @@ def _handed_over(ctx, world):
 
 
 class PublishingCollaborator(ABC):
-    """What items 5 and 7 install as their body, declared rather than assumed.
+    """What items 5 and 8 install as their body, declared rather than assumed.
 
     NOT uploader.Act, and the difference is the whole reason this exists. An
     Act is handed a Workspace — the reduced, plugin-facing view — and knows
@@ -271,7 +271,7 @@ class TargetBuild(PublishingCollaborator):
 
 
 class TargetPublish(TargetBuild):
-    """Item 7 with a plugin configured: one job, however many transports.
+    """Item 8 with a plugin configured: one job, however many transports.
 
     The same three calls as item 5's collaborator against a different act,
     which is the whole point of the acts having one shape — the only thing that
@@ -281,7 +281,7 @@ class TargetPublish(TargetBuild):
     now that TargetBuild has a base: everything inherited — describe,
     evaluate, the long description, the plugin's name — is a bare delegation to
     self._act, and self._act here is the uploader. There is nothing about item
-    5 left in any of them to be wrong about item 7.
+    5 left in any of them to be wrong about item 8.
 
     It is not an uploader.Uploader either, and deliberately: is_complete() is
     the destination's answer and the exporter asks the ACT for it, in
@@ -343,7 +343,7 @@ def _delta_words(added, total):
 
 
 class NoPublisher(PublishingCollaborator):
-    """Item 7 under the local edition: no edges, and nothing to run.
+    """Item 8 under the local edition: no edges, and nothing to run.
 
     Constructed rather than omitted so that every number means the same thing
     on every installation — a menu that renumbers itself makes every sentence

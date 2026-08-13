@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The pipeline, driven by mock menu items instead of by the real ten.
+"""The pipeline, driven by mock menu items instead of by the real eleven.
 
-test_step_graph.py asks whether the ten items declare the right edges.
+test_step_graph.py asks whether the eleven items declare the right edges.
 test_guards.py asks what the destructive predicates allow. This file asks a
 third thing, which neither of those can: given items that answer whatever the
 test tells them to answer, does the PIPELINE do the right thing with those
@@ -24,7 +24,7 @@ The rules pinned here, in the owner's words:
     position exactly where it was. Not two back, not at the start, and not on
     the item that just refused.
   * "Progress" neighbours everything and is never a position of its own.
-  * "step back by 1" is item 9's whole outbound, and it is not an empty set of
+  * "step back by 1" is item 10's whole outbound, and it is not an empty set of
     successors — freeing the card does not interrupt the cycle.
   * The graph decides what may be selected. An item outside the current
     outbound set is refused before its guard is ever asked.
@@ -236,7 +236,7 @@ class WhereWeLeftOffSurvivesARestart(unittest.TestCase):
         Remembered, it outranks orient() forever: an import that was started
         and interrupted put two clips in the workspace, and the menu went on
         offering only the start entries, so item 1 refused to import on top of
-        them while pointing at an item 8 it would not offer.
+        them while pointing at an item 9 it would not offer.
         """
         menu_items, position = machine(at=M.NOWHERE)
         menu_items[RENDER].completed.return_value = False
@@ -465,7 +465,7 @@ class DiscardingAnImportUnclaimsIt(unittest.TestCase):
     it: a card whose clips are all at or below the mark offers nothing and
     returns satisfied. Left standing after a discard, the banner\'s promise
     that item 1 brings the footage back is a lie, and the operator is left
-    with one copy and item 9 as the next thing on offer.
+    with one copy and item 10 as the next thing on offer.
     """
 
     def setUp(self):
@@ -994,11 +994,11 @@ class TheView(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 9) Delete SIM Data — "step back by 1"
+# 10) Delete SIM Data — "step back by 1"
 # ---------------------------------------------------------------------------
 
 class StepBackByOne(unittest.TestCase):
-    """Item 9's outbound is not a set of successors, and must not be read as
+    """Item 10's outbound is not a set of successors, and must not be read as
     an empty one. Freeing the card does not interrupt the cycle: it hands the
     position back to whoever offered it."""
 

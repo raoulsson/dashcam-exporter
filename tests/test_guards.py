@@ -7,9 +7,9 @@ would be a test you cannot run.
 
 Run with:  ./run-tests.sh          (or: python3 -m unittest discover -s tests)
 
-THREE paths erase things — 4) Exclude Trip, 8) Clean Workspace and 9) Delete
+THREE paths erase things — 4) Exclude Trip, 9) Clean Workspace and 10) Delete
 SIM Data — and each is guarded by a predicate. It used to be four: the import
-step swept the previous round from inside itself, which was item 8's job run
+step swept the previous round from inside itself, which was item 9's job run
 from item 1, and that arc is gone. These lock the predicates down: what makes
 something expendable, what counts as evidence a copy survives, and what the
 sweep keeps when it does run.
@@ -156,7 +156,7 @@ class GuardTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# working_area_is_expendable — the predicate 8) Clean Workspace obeys
+# working_area_is_expendable — the predicate 9) Clean Workspace obeys
 # ---------------------------------------------------------------------------
 
 class TestWorkingAreaIsExpendable(GuardTest):
@@ -416,7 +416,7 @@ class TestLedgerAndDelta(GuardTest):
 
 
 # ---------------------------------------------------------------------------
-# copy_still_exists — the guard on 9) Delete SIM Data, the only item whose
+# copy_still_exists — the guard on 10) Delete SIM Data, the only item whose
 # target has no second copy
 # ---------------------------------------------------------------------------
 
@@ -475,7 +475,7 @@ class TestCleanSimEvidence(GuardTest):
 
 
 # ---------------------------------------------------------------------------
-# 8) Clean Workspace: the site decides when it can be asked, and otherwise
+# 9) Clean Workspace: the site decides when it can be asked, and otherwise
 # every check that CAN answer must say yes
 # ---------------------------------------------------------------------------
 
@@ -700,7 +700,7 @@ class TestNothingRenderedIsBelowTheTargetsWordEntirely(GuardTest):
 
 
 # ---------------------------------------------------------------------------
-# import_is_expendable — freed by the arc removal and kept as 9) Delete SIM
+# import_is_expendable — freed by the arc removal and kept as 10) Delete SIM
 # Data's advisory: erasing the card is allowed on the strength of a copy being
 # here, and if that copy is not published it becomes the only one.
 # ---------------------------------------------------------------------------
@@ -733,7 +733,7 @@ class TestImportIsExpendable(GuardTest):
         self.assertIn("not confirmed", why)
 
     def test_an_answer_about_another_import_confirms_nothing_here(self):
-        """Item 9's advisory walks EVERY import in the workspace; the plugin was
+        """Item 10's advisory walks EVERY import in the workspace; the plugin was
         asked about one of them.
 
         Without this the one import that is published silences the warning
@@ -1011,8 +1011,8 @@ class TestOldFootageIsNotADeadEnd(unittest.TestCase):
 
     Thirteen clips from May and July sat below a high-water mark set in
     August. The delta skipped them as already imported; no rendered trip's
-    span contained them, so item 9 refused to erase the card because they
-    existed nowhere else. Item 1 would not take them and item 9 would not let
+    span contained them, so item 10 refused to erase the card because they
+    existed nowhere else. Item 1 would not take them and item 10 would not let
     them go, and each was right on its own terms.
     """
 
@@ -1091,7 +1091,7 @@ class TestTheImportManifestAccountsForACard(GuardTest):
 
 
 class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
-    """The second way into item 8, and the only one that does not go through
+    """The second way into item 9, and the only one that does not go through
     the publish gates.
 
     It exists because the first way cannot cover the state it is for: an
@@ -1163,7 +1163,7 @@ class TestThrowingAwayAnImportNothingWasMadeFrom(unittest.TestCase):
         self.assertTrue(guards.Gates(world).clean_is_allowed().blocked)
 
     def test_the_cheap_half_lets_a_disposable_import_through(self):
-        """Item 8's evaluate, which is what decides whether the entry is even
+        """Item 9's evaluate, which is what decides whether the entry is even
         offered. Blocked there, the operator never reaches the evidence."""
         self.assertIsNone(guards.Gates(self._import()).nothing_to_clean_up())
         self.assertIsNotNone(
@@ -1208,7 +1208,7 @@ class TestAnImportWithNoClipsLeftCanBeCleared(unittest.TestCase):
                        renders_here=_renders(renders))
 
     def test_the_entry_is_offered_and_then_allowed(self):
-        """Two checks stand in front of item 8: the cheap one that decides
+        """Two checks stand in front of item 9: the cheap one that decides
         whether the menu offers it, and the heavy one behind the typed word.
         An entry that is offered and then refuses is a worse screen than one
         that was never offered, and an entry hidden from a state it would have

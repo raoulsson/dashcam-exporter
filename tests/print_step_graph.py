@@ -20,7 +20,7 @@ inbound is a KIND and not a set of numbers:
     is where footage comes in and is reachable with nothing done at all. The
     owner: "1 has no inbound cause it's a start node".
   * 0) Progress declares Anywhere. It neighbours everything, and must not force
-    the other nine to declare it back.
+    the other ten to declare it back.
 
 Run:  python3 tests/print_step_graph.py
 """
@@ -34,9 +34,9 @@ from dashcam_exporter import items, menu as M  # noqa: E402,F401
 
 
 class NullWork:
-    """Enough `work` to CONSTRUCT the ten items, with no pipeline behind them.
+    """Enough `work` to CONSTRUCT the eleven items, with no pipeline behind them.
 
-    Items 6 and 7 ask for their collaborator in the constructor — that is where
+    Items 5 and 8 ask for their collaborator in the constructor — that is where
     the strategy branch is settled — so the graph cannot be built without
     something to ask. Nothing here is ever called: this module only reads the
     edges the items declare.

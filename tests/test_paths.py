@@ -79,9 +79,9 @@ def _target(strategy):
     the subject is order.
 
     NA, and that is the only answer that works here now that there is one.
-    YES would make item 7 SATISFIED — a legitimate answer and the wrong one to
+    YES would make item 8 SATISFIED — a legitimate answer and the wrong one to
     hold constant in a file about which paths EXIST, because a satisfied item
-    completes without running. NO would refuse item 8. NA is the plugin
+    completes without running. NO would refuse item 9. NA is the plugin
     declining the destination question, which neither satisfies the upload nor
     blocks the erase: it is the state where nothing about the destination is in
     the way of anything, which is what a file about ORDER needs.
@@ -925,7 +925,7 @@ class TestTheMenuIsTheMachine(PainterTest):
     def test_where_we_are_is_said_in_the_items_own_words(self):
         """RESTATED TWICE: first the position moved off the menu footer onto
         the progress screen -- under the grid it was one more thing identical
-        on every draw. Then it stopped being "Position: 8) Clean Workspace"
+        on every draw. Then it stopped being "Position: 9) Clean Workspace"
         and became "Last: Clean Workspace". The number is already beside that
         entry in the grid, and the reader is asking what he last did, not
         where a machine is."""

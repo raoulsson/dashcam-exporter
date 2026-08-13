@@ -7,7 +7,7 @@ SET_UPLOAD_PLUGIN in .env, which is the same setting and stays out of git):
 
     upload_plugin = ~/dev/dashcam-exporter/examples/local_website.py:LocalWebSiteBuilderPlugin:LocalWebSiteUploader
 
-One plugin, two classes: the builder is item 5, the uploader is item 7. Where
+One plugin, two classes: the builder is item 5, the uploader is item 8. Where
 things go is this file's own business, not the exporter's — the two directories
 below come from the environment, and the exporter has exactly one setting about
 publishing, which is which plugin to load.
@@ -18,7 +18,7 @@ The builder COPIES what it needs out of the workspace into a staging directory
 of its own and builds there. It never moves, renames or deletes anything under
 the workspace, and never writes into it. That is not tidiness: the renders and
 sidecars it is handed are the same files the exporter's erase gates then reason
-about, so a mv would leave items 4, 8 and 9 judging a workspace that shifted
+about, so a mv would leave items 4, 9 and 10 judging a workspace that shifted
 under them. Read the workspace; write only where you own the ground.
 """
 
@@ -142,7 +142,7 @@ FTP_SESSION = """\
 
 
 class LocalWebSiteUploader(Uploader):
-    """Item 7: send the staged site to the destination, and answer for it.
+    """Item 8: send the staged site to the destination, and answer for it.
 
     The destination here is another directory, so the example can be run and
     tested without a network. The copy below stands exactly where a real

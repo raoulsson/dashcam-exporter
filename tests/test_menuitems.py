@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The ten menu items, one class at a time, against a hand-built world.
+"""The eleven menu items, one class at a time, against a hand-built world.
 
 Nothing here touches the disk. Every item is handed a `world` object built in
 the test body and a `work` collaborator that records what it was asked to do,
@@ -104,7 +104,7 @@ class FakeBuilder:
 
 
 class FakePublisher:
-    """Item 7's collaborator: the one the constructor installs.
+    """Item 8's collaborator: the one the constructor installs.
 
     Mirrors the pipeline's split — a real Publisher under the publishing
     product, an unavailable one under the local product — so a test can check
@@ -134,7 +134,7 @@ class FakePublisher:
 
 
 class FakeWork:
-    """Enough of pipeline.Work to drive all ten items with no filesystem."""
+    """Enough of pipeline.Work to drive all eleven items with no filesystem."""
 
     def __init__(self, plan=None, publish_reason=None, build_reason=None,
                  word="", fresh=None):
@@ -179,7 +179,7 @@ class FakeWork:
 
     # -- paint, lent to the items ------------------------------------------
     def yellow(self, text):
-        """The paint items 5 and 7 lend their Handover, for the plugin's name.
+        """The paint items 5 and 8 lend their Handover, for the plugin's name.
 
         Identity rather than an escape sequence: what a test asserts about a
         help screen is which words are there and whose they are, and an ANSI
@@ -258,7 +258,7 @@ def a_plan(guard=M.nothing_to_recheck, act=None, banner=("would erase two clips"
 
 
 def menu_for(strategy=UPLOADER, work=None):
-    """The ten items as the pipeline builds them, sharing one `work`."""
+    """The eleven items as the pipeline builds them, sharing one `work`."""
     return M.build_menu(strategy, work or FakeWork())
 
 
@@ -298,7 +298,7 @@ def a_card(**kw):
 def full_card(**kw):
     """A card with two clips on it, imported, and accounted for elsewhere.
 
-    So: nothing left to FETCH. That is what item 9 wants to see and the
+    So: nothing left to FETCH. That is what item 10 wants to see and the
     opposite of what item 1 does — a card with something to import passes
     new_stamps, which is the set accounted for by nothing.
     """
@@ -367,8 +367,8 @@ class TestWhatEachItemDeclares(unittest.TestCase):
             with self.subTest(item=number):
                 self.assertEqual(self.menu[number].name(), name)
 
-    def test_the_ten_numbers_are_0_through_9(self):
-        """Ten items, numbered 0-9 with no gaps. A missing number is an item
+    def test_the_eleven_numbers_are_0_through_10(self):
+        """Eleven items, numbered 0-10 with no gaps. A missing number is an item
         that failed to register at import and would be silently absent."""
         self.assertEqual(sorted(self.menu), list(range(11)))
 
@@ -414,7 +414,7 @@ class TestWhatEachItemDeclares(unittest.TestCase):
         nothing about it. Asking for DELETE there taught the wrong idea of
         what was about to happen.
 
-        The distinctness that earns its place is item 9's way PAST its own
+        The distinctness that earns its place is item 10's way PAST its own
         guard, which asks a word its own prompt never does.
         """
         words = {n: self.menu[n].word() for n in (EXCLUDE, CLEAN_WS, ERASE_CARD)}
@@ -434,7 +434,7 @@ class TestWhatEachItemDeclares(unittest.TestCase):
 # KIND rather than a set of numbers and are asserted separately.
 OUTBOUND = {
     UPLOADER: {
-        # Item 7 is in every mid-cycle outbound: publishing is offered from
+        # Item 8 is in every mid-cycle outbound: publishing is offered from
         # wherever you are, and whether it MAY run is the publisher's answer
         # about built material, not an ordering rule spelled as edges.
         IMPORT:   {IMPORT, META, CLEAN_WS, ERASE_CARD},
@@ -564,7 +564,7 @@ class TestWhereEachItemSits(unittest.TestCase):
         self.assertEqual(item.settles_at(RENDER), CLEAN_WS)
 
     def test_publishing_has_no_edges_at_all_under_the_local_product(self):
-        """Item 7 exists on every installation so the numbers mean the same
+        """Item 8 exists on every installation so the numbers mean the same
         thing everywhere, and under the local product nothing reaches it and it
         offers nothing."""
         item = item_for(UPLOAD, LOCAL)
@@ -929,7 +929,7 @@ class TestBuildWebsite(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 7 — Upload Website
+# 8 — Upload Website
 # ---------------------------------------------------------------------------
 
 def a_published_world(**kw):
@@ -1004,7 +1004,7 @@ class TestUploadWebsite(unittest.TestCase):
         self.assertIn("not writable", verdict.reason)
 
     def test_the_local_product_refuses_through_its_installed_collaborator(self):
-        """Item 7 is unreachable under the local product for two independent
+        """Item 8 is unreachable under the local product for two independent
         reasons — nothing offers it, and it refuses — and neither one is an
         `if` inside this item. It asks whichever publisher it was given."""
         item = item_for(UPLOAD, LOCAL)
@@ -1020,7 +1020,7 @@ class TestUploadWebsite(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 8 — Clean Workspace, and the rule that decides whether the footage may go
+# 9 — Clean Workspace, and the rule that decides whether the footage may go
 # ---------------------------------------------------------------------------
 
 class TestCleanWorkspaceIsOffered(unittest.TestCase):
@@ -1054,7 +1054,7 @@ def workspace_gate(world):
 
 
 def clean_with(guard, fresh, word="CLEAN"):
-    """Drive item 8 all the way to its re-check, with `fresh` as the world the
+    """Drive item 9 all the way to its re-check, with `fresh` as the world the
     guard is re-asked against after the word is typed."""
     act = Act("workspace erased")
     work = FakeWork(plan=a_plan(guard=guard, act=act), word=word, fresh=fresh)
@@ -1204,7 +1204,7 @@ class TestTheRecheckHappensAfterTheWordIsTyped(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 9 — Delete SIM Data, and the per-clip accounting that guards it
+# 10 — Delete SIM Data, and the per-clip accounting that guards it
 # ---------------------------------------------------------------------------
 
 class TestDeleteSimData(unittest.TestCase):
@@ -1384,9 +1384,9 @@ class TestIdempotence(unittest.TestCase):
     def test_cleaning_a_workspace_that_is_already_gone_erases_nothing(self):
         """The idempotence rule alone, stated so it survives an open question.
 
-        Item 8 currently REFUSES a second run where item 9 in the same
+        Item 9 currently REFUSES a second run where item 10 in the same
         situation answers SATISFIED, and the design's postcondition table sides
-        with item 9 — item 8's postcondition is "the import tree is gone", and
+        with item 10 — item 9's postcondition is "the import tree is gone", and
         it is. That is the owner's call and it is pinned as it stands by
         test_nothing_imported_means_nothing_to_clean, which asserts the refusal
         outright.

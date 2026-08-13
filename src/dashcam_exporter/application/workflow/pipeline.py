@@ -12,7 +12,7 @@ uploading costs days on a 250 KB/s line. Deciding what to keep afterwards means
 paying for footage that was never wanted.
 
 The menu itself is a state machine and lives elsewhere: menu.py holds the
-interface and the graph, items.py the ten items, guards.py every predicate that
+interface and the graph, items.py the eleven items, guards.py every predicate that
 stands between this tool and lost footage, world.py the snapshot they judge.
 What is left here is the machinery — the functions that DO the work, the one
 place that goes and looks at the disk (capture_world), and the painter, which
@@ -28,9 +28,9 @@ elapsed-time spinner rather than inventing a percentage.
 
 This repo does import, render and a local page on its own. Publishing is
 supplied from outside: `upload_plugin` names a file and the two classes in
-it — a uploader.Builder for item 5 and a uploader.Uploader for item 7 — and
+it — a uploader.Builder for item 5 and a uploader.Uploader for item 8 — and
 where they send things is their business, not this module's. Set it and items 5
-and 7 do what they do; leave it unset (what a fresh clone gets) and item 7 stays
+and 8 do what they do; leave it unset (what a fresh clone gets) and item 8 stays
 greyed out with the reason printed underneath. Nothing in this repo contacts a
 network host at any point — not as a setting, but because there is no networked
 code left here.
@@ -402,7 +402,7 @@ class Ctx:
         self.import_root = Path(os.environ.get("DASHCAM_IMPORT_ROOT")
                                 or self.render_root).expanduser()
         self.card = card_root(Path(self.cfg.get("card", FALLBACK_CARD)).expanduser())
-        # Where the LOCAL edition puts the finished site. Item 7 under that
+        # Where the LOCAL edition puts the finished site. Item 8 under that
         # edition is a copy into here rather than a network transport; with a
         # plugin configured nothing reads it. Defaults beside the export tree
         # so an unconfigured install still has an answer to print.
@@ -529,7 +529,7 @@ def _renderer_env(ctx):
 
     LOG_DIR above all: make-trips-rendered.sh defaults it to <out>/logs, so a
     call that did not pass it wrote its run log into the EXPORT tree — beside
-    the sidecars, inside the directory item 8 sweeps, and nowhere near the
+    the sidecars, inside the directory item 9 sweeps, and nowhere near the
     logs/ the workspace keeps at its root. Only the render step was passing
     it, so every sidecar pass left a log in the wrong place.
     """
@@ -1688,7 +1688,7 @@ def remember_step(ctx, number):
     Where the cycle has got to is the last thing he did, and nothing on disk
     says that as well as he does. Deriving it was always an inference, and the
     inference went wrong in both directions in one evening: a swept workspace
-    read as "7) Upload Website" because the destination still says the trips
+    read as "8) Upload Website" because the destination still says the trips
     are published, and then as "2) Generate Meta" because six receipts had not
     been archived yet.
 
@@ -1712,7 +1712,7 @@ def remembered_step(ctx):
     offering only the start entries however much has since appeared on disk.
     That is how an interrupted first import became a dead end -- two clips in
     the workspace, item 1 refusing to import on top of them and pointing at
-    item 8, and item 8 not on offer because the position was still nowhere.
+    item 9, and item 9 not on offer because the position was still nowhere.
     """
     at = read_ledger(ctx).get("at")
     if at == menu.NOWHERE:
@@ -1837,7 +1837,7 @@ EXCLUDED_FILE = "excluded.json"
 # output tree holding six files that looked like six trips waiting to be
 # rendered. They are not work; they are the record that the work was done, and
 # the only thing still read from them is whether a card's clips are already
-# inside a trip that was published -- the question 9) Delete SIM Data asks
+# inside a trip that was published -- the question 10) Delete SIM Data asks
 # before erasing footage that has no second copy.
 #
 # So they move out on the way past, keeping their shape under the import they
@@ -2190,7 +2190,7 @@ def _not_at_the_destination(root, target) -> bool:
 def _confirmed_for(root, target) -> bool:
     """YES, and about THIS import.
 
-    Item 9's advisory walks every import in the workspace; the plugin was asked
+    Item 10's advisory walks every import in the workspace; the plugin was asked
     about one of them. An answer about a different import settles nothing here,
     so it has to read the same as no confirmation — otherwise the one import
     that IS published silences the warning about the one that is not.
@@ -2589,7 +2589,7 @@ def record_import(ctx, card):
     That is not hypothetical: the first mark this machine ever wrote came from
     a cleanup, at 20260724185433, and thirteen clips older than it had never
     been copied. Every delta after that skipped them as already imported,
-    while item 9 refused to erase the card because nothing accounted for them.
+    while item 10 refused to erase the card because nothing accounted for them.
 
     The mark is therefore an optimisation, not the authority. What a delta
     actually offers is to_import(): above the mark OR owed, and owed is the
@@ -2859,8 +2859,8 @@ def step_import(ctx):
 
     # Footage from a previous round still in the sink. This used to offer to
     # CLEAR it, and in one branch swept the working area with no prompt at all
-    # — item 8's job done from inside item 1, twice. Under this graph item 1
-    # offers item 8 directly, so the offer has nowhere to earn its place. What
+    # — item 9's job done from inside item 1, twice. Under this graph item 1
+    # offers item 9 directly, so the offer has nowhere to earn its place. What
     # stays is the warning and the gate on this item's own job: importing on
     # top mixes two cards into one grouping and nothing afterwards records
     # which clip came from which.
@@ -2895,7 +2895,7 @@ def step_import(ctx):
     # count below the mark is a fact about rounds long since rendered and
     # swept, not about anything on this machine. What is left is the one
     # number that matters and one y/n. Winding the mark back is what makes a
-    # clip new again, and item 8 does exactly that when it discards an import.
+    # clip new again, and item 9 does exactly that when it discards an import.
     after = last_imported_stamp(ctx)
     excluded_stamps(ctx)                 # refresh the cache the split reads
     delta = _delta_counts(ctx, after)
@@ -2980,7 +2980,7 @@ def step_import(ctx):
     ctx.last_groups = None
 
     # Record the high-water mark HERE, not only at clean-up time. The next
-    # delta import reads it to know what is already in, and item 9 compares the
+    # delta import reads it to know what is already in, and item 10 compares the
     # card against it — recorded only after publishing, an interrupted cycle
     # would leave every clip counting as "never imported".
     record_import(ctx, ctx.card)
@@ -4400,7 +4400,7 @@ def _never_renders(by_index):
     the card erasable while dropping it.
 
     But they ARE the obvious candidates, and the alternative is that they sit
-    in the workspace forever blocking item 9 -- accounted for by nothing,
+    in the workspace forever blocking item 10 -- accounted for by nothing,
     which is the state that gave "13 clips exist nowhere but this card".
 
     Blank stays cancel. This is a delete, and an empty answer must never be
@@ -4761,7 +4761,7 @@ def _drop_commit(ctx, picked, files, started):
 
     # Record the dropped clips' stamps as excluded. From here on they are
     # treated as if imported: the next delta import does not re-copy them off
-    # the card, and item 9 counts them as accounted for — the warning above was
+    # the card, and item 10 counts them as accounted for — the warning above was
     # the decision, made once, at the only moment it can matter.
     dropped_stamps = {m.group(1) for p in files
                       for m in [STAMP_RE.search(p.name)] if m}
@@ -6186,7 +6186,7 @@ def _named(names, cap=8):
     return shown
 
 # ---------------------------------------------------------------------------
-# Item 8 — Clean Workspace. Erase the imported footage and the renders it
+# Item 9 — Clean Workspace. Erase the imported footage and the renders it
 # produced. DESTRUCTIVE, and the half that used to be folded together with the
 # card wipe below.
 # ---------------------------------------------------------------------------
@@ -6338,7 +6338,7 @@ def _nothing_off_this_machine_was_checked(ctx, unproven):
 
 
 def clean_workspace_plan(ctx, world):
-    """Item 8's plan. Prints, asks nothing irreversible, refuses early.
+    """Item 9's plan. Prints, asks nothing irreversible, refuses early.
 
     The heavy guard runs TWICE on purpose: here, so a refusal never reaches
     the prompt, and again inside the commit against a world captured
@@ -6387,7 +6387,7 @@ def clean_workspace_plan(ctx, world):
 
 
 class _CleanTarget:
-    """The folder item 8 erases, measured once.
+    """The folder item 9 erases, measured once.
 
     `root` is the import it belongs to and `target` is what actually goes --
     a discard sweeps the import itself, a finished cycle sweeps only what sits
@@ -6410,7 +6410,7 @@ class _CleanTarget:
 
 
 def _clean_gate(world):
-    """Item 8's heavy guard in the shape menu.Plan asks for: world -> Verdict.
+    """Item 9's heavy guard in the shape menu.Plan asks for: world -> Verdict.
 
     The gates the screen above was printed from are bound to the world it was
     drawn with, and the re-check is only worth running against a world captured
@@ -6666,7 +6666,7 @@ def _why_it_may_go(gates):
 def _the_way_out(world):
     """Name the step that resolves this, when there is one.
 
-    A refusal that only says no leaves the operator to work out which of nine
+    A refusal that only says no leaves the operator to work out which of ten
     entries un-sticks it, and the answer here is not obvious: the clips belong
     to a trip too short to render, which is why nothing accounts for them, and
     the entry that helps is the one for deleting trips on purpose.
@@ -6700,7 +6700,7 @@ def _print_gate_detail(world):
 
 
 def _clean_workspace_commit(ctx, fresh, doomed, started):
-    """The irreversible half of item 8.
+    """The irreversible half of item 9.
 
     `fresh` is the world captured AFTER the word was typed — the same one the
     guard just approved. The render sweep below re-asks a second question of
@@ -6782,7 +6782,7 @@ def _unclaim_the_discarded(ctx, world):
     discard that is no longer true of them. Left standing it is the trap the
     banner would have walked into: item 1 answers "nothing new at the source"
     and returns satisfied without offering the copy, so the clips are on the
-    card, gone from here, and the only remaining offer is item 9.
+    card, gone from here, and the only remaining offer is item 10.
 
     Only the discarded span is unclaimed. Anything older keeps its mark, which
     is what stops this from turning into a full re-copy of a card whose earlier
@@ -6826,14 +6826,14 @@ def _keeping_the_renders(why, stragglers):
 
 
 # ---------------------------------------------------------------------------
-# Item 9 — Delete SIM Data. The card itself: DESTRUCTIVE, and the only target
+# Item 10 — Delete SIM Data. The card itself: DESTRUCTIVE, and the only target
 # whose contents have no second copy unless this machine holds one.
 #
 # Unfolded back out of the clean-up, which is not tidying. Folded, the card's
 # evidence was gathered ("the clips are in the workspace"), the workspace was
 # then erased, and the card half re-checked against a workspace that no longer
 # held them — refusing after the irreversible half had run, having already
-# printed that the card was verified. Item 8's outbound is {1}, so it can
+# printed that the card was verified. Item 9's outbound is {1}, so it can
 # never precede this; the window is closed by the graph, not by discipline.
 # ---------------------------------------------------------------------------
 
@@ -6912,7 +6912,7 @@ def _dropped_on_purpose(ctx, number, stamps, guard, scope, started):
 
 
 def erase_card_plan(ctx, world):
-    """Item 9's plan."""
+    """Item 10's plan."""
     started = time.time()
     # One sentence, one colour. The erase takes more than the clips -- the rear
     # camera, the GPS archives, the photos, the thumbnails, the event log --
@@ -7051,7 +7051,7 @@ def orphan_clips(ctx, root):
 
     They exist because a trip too short to render gets no sidecar, so it is in
     no trip_ids and counts toward no expected_trips — which makes it invisible
-    to both of item 8's other gates. The destination answers YES honestly about
+    to both of item 9's other gates. The destination answers YES honestly about
     the trips it was asked about, the local floor is satisfied by the renders
     that do exist, and the fragment goes with the sweep.
 
@@ -7169,7 +7169,7 @@ def copy_still_exists(ctx):
 def wipe_card(ctx):
     """Erase the card: DCIM and everything under it. Returns (gone, freed, reason).
 
-    The guarded core of item 9 without the conversation. The guard is the same
+    The guarded core of item 10 without the conversation. The guard is the same
     pure predicate the item's evaluate and its post-word re-check use — one
     implementation, three call sites, so they cannot drift — asked against a
     world derived right now.
@@ -7441,7 +7441,7 @@ def to_import(ctx, stamps, mark, excluded, owed):
 
     First the rule was the high-water mark alone, and a card carrying footage
     older than the mark was a dead end: the delta skipped those clips as
-    already imported, item 9 refused to erase the card because they existed
+    already imported, item 10 refused to erase the card because they existed
     nowhere, and each was right on its own terms.
 
     So owed was added to the mark, as a union. That fixed the dead end and
@@ -7811,7 +7811,7 @@ def _card_shares(card_path, root):
 
     card_root() searches down for a DCIM tree, and an import folder holds one.
     Point the card at the workspace -- or at a symlink into it -- and the card
-    resolves to the very folder item 8 is about to delete, at which point
+    resolves to the very folder item 9 is about to delete, at which point
     "every file is on the card" compares a directory against itself and comes
     out true. The one state where the check is meaningless is the one where
     acting on it erases the only copy, so it is asked separately.
@@ -8131,7 +8131,7 @@ class Runner:
     def _not_available(self, number, verdict=None):
         """Plainly, and in terms of what to do rather than of the machine.
 
-        "does not follow 7) Upload Website" described the graph to someone who
+        "does not follow 8) Upload Website" described the graph to someone who
         wanted to know whether they could press the key. The answer is that
         they cannot, and one line says it.
 
@@ -8143,7 +8143,7 @@ class Runner:
         the same way every time.
 
         The same sentence carries a guard's refusal, with its reason on the
-        same line. "8) Clean Workspace is not available: nothing imported"
+        same line. "9) Clean Workspace is not available: nothing imported"
         answers the keypress; opening the screen, printing the heading and
         the description and then reporting that it did not complete is three
         acts of theatre around a no.
@@ -8209,7 +8209,7 @@ class Runner:
         print()
         # The heading, and then whatever the step itself says. The description
         # used to sit between them, restating in a sentence what the rule above
-        # already names and what the menu showed a keypress ago — and at item 7
+        # already names and what the menu showed a keypress ago — and at item 8
         # it was the same two facts the step's own first two lines give. It
         # earns its place where a step is CHOSEN, not after it has been.
         print(rule(item.name(), ch="="))
@@ -8305,9 +8305,9 @@ def _remember_position(ctx, item, position):
 def build_runner(ctx, classes=None):
     """Wire the state machine for this ctx. Injectable for a test.
 
-    The strategy is resolved once, here, and the ten items are constructed
+    The strategy is resolved once, here, and the eleven items are constructed
     for it. `classes` lets a test drive the whole loop with mocks instead of
-    the real ten.
+    the real eleven.
     """
     menu_items, position = _wire_menu(ctx, classes)
     _orient_position(ctx, position)

@@ -3,7 +3,7 @@
 configured plugin that will not load stops the tool.
 
 Both are about the same failure — a plugin that cannot answer must never look
-like one that answered YES. Item 8 erases the only local copy of footage on the
+like one that answered YES. Item 9 erases the only local copy of footage on the
 strength of is_complete(), so "could not ask" arriving as YES or NA is the one
 reading that must be unwritable rather than merely unwritten.
 
@@ -284,7 +284,7 @@ class TestTheLoader(unittest.TestCase):
 
     def test_a_half_implemented_uploader_fails_at_startup_not_mid_erase(self):
         """The one that matters: without this, an uploader missing
-        is_complete() raises at the moment item 8 asks — after the operator
+        is_complete() raises at the moment item 9 asks — after the operator
         typed CLEAN."""
         with self.assertRaises(U.UploaderNotLoaded) as caught:
             self.load(self.spec_for(HALF_DONE))

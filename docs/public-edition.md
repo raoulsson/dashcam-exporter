@@ -61,7 +61,7 @@ The public edition is not a different program; it is this one with nothing
 supplied. `menu.Strategy` resolves one thing — was an implementation supplied —
 and that is the whole branch.
 
-**Disabled, not hidden.** All ten steps are always in the grid at their own
+**Disabled, not hidden.** All eleven steps are always in the grid at their own
 fixed numbers; item 8 is greyed, and `h8` says what it is —
 
 ```

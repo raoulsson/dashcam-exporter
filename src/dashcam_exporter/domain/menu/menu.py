@@ -1,4 +1,4 @@
-"""The menu: ten items, the graph they sit in, and the position we are at.
+"""The menu: eleven items, the graph they sit in, and the position we are at.
 
 Each menu item is one class. It declares what it is (name, description, start,
 end, destr), where it may lead (outbound), and answers two questions about the
@@ -24,7 +24,7 @@ table, printed by tests/print_step_graph.py.
 
 WHAT IS A CLASS AND WHAT IS A NAME. Every behaviour here belongs to a type:
 Verdict and Outcome build and read themselves, Neighbours answers about edges,
-Registry admits an item class, MenuGraph reads the ten classes as a graph for
+Registry admits an item class, MenuGraph reads the eleven classes as a graph for
 one strategy, Position holds where we are. The short block of functions at the
 foot of the file is the module's SURFACE -- the names pipeline.py, guards.py,
 items.py and the published plugin interface in uploader.py already say -- and
@@ -51,7 +51,7 @@ BUILD, RENDER, TRANSCRIBE, UPLOAD, CLEAN_WS, ERASE_CARD = 5, 6, 7, 8, 9, 10
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Neighbours. Three of the ten items name something that is not a set of
+# Neighbours. Three of the eleven items name something that is not a set of
 # numbers, so the kinds are types rather than numbers on an exemption list.
 # ---------------------------------------------------------------------------
 
@@ -126,9 +126,9 @@ class Edges(Neighbours):
 
     @classmethod
     def and_upload(cls, *numbers) -> Dict[Strategy, "Edges"]:
-        """These neighbours, plus item 7 wherever item 7 is a real entry.
+        """These neighbours, plus item 8 wherever item 8 is a real entry.
 
-        Item 7 is offered from everywhere in the cycle, and the graph is
+        Item 8 is offered from everywhere in the cycle, and the graph is
         deliberately not the thing that decides whether it may run. Publishing
         needs a built site, which is a FACT about the destination's material and
         is the publisher's to answer -- it says "nothing has been built to
@@ -137,7 +137,7 @@ class Edges(Neighbours):
         who just rendered an mp4 is told to go and rebuild an index the encode
         did not change.
 
-        Under the local edition item 7 exists but publishes nothing, so it stays
+        Under the local edition item 8 exists but publishes nothing, so it stays
         out of every outbound there, exactly as before.
         """
         return {Strategy.UPLOADER: cls.of(*numbers, UPLOAD),
@@ -148,7 +148,7 @@ class Anywhere(Neighbours):
     """A view: neighbours everything, is never a position, declares no edge.
 
     edges() is None rather than "every number", which is what keeps the other
-    nine items from having to declare the view back — and what keeps the view
+    ten items from having to declare the view back — and what keeps the view
     off the disagreement report by definition instead of by a skip list.
     """
 
@@ -219,7 +219,7 @@ class StepBack(Neighbours):
 # ---------------------------------------------------------------------------
 
 class Registry:
-    """The ten item classes by number, and the gate they pass to get in.
+    """The eleven item classes by number, and the gate they pass to get in.
 
     One instance, filled by __init_subclass__ as items.py imports. It exists as
     a type rather than a module dict because admitting a class and vetting it
@@ -529,7 +529,7 @@ class Disagreement:
 
 
 class MenuGraph:
-    """The ten classes read as a graph, for ONE strategy.
+    """The eleven classes read as a graph, for ONE strategy.
 
     The strategy is bound once, here, instead of being handed to five
     functions in turn. It was the second argument of everything in this
@@ -549,7 +549,7 @@ class MenuGraph:
         self._strategy = strategy
 
     def build(self, work) -> Dict[int, MenuItem]:
-        """Construct the ten items, each handed the inbound derived for it."""
+        """Construct the eleven items, each handed the inbound derived for it."""
         inbound = self.inbound()
         return {n: cls(self._strategy, work, inbound[n])
                 for n, cls in self._classes.items()}
@@ -592,7 +592,7 @@ class MenuGraph:
         Import SIM declares StartNode (its inbound is empty because it is where
         footage comes in, even though Clean Workspace offers it back), and
         Progress declares Anywhere (it neighbours everything and must not force
-        the other nine to declare it back).
+        the other ten to declare it back).
         """
         if cls.INBOUND_KIND is not None:
             return None
@@ -709,10 +709,10 @@ def registry() -> Dict[int, type]:
 
 
 def build_menu(strategy: Strategy, work, classes=None) -> Dict[int, MenuItem]:
-    """Construct the ten items for ONE strategy.
+    """Construct the eleven items for ONE strategy.
 
     The only place the strategy branch is read. `classes` is injectable so a
-    test can drive the runner with mocks instead of the real ten.
+    test can drive the runner with mocks instead of the real eleven.
     """
     return MenuGraph(classes, strategy).build(work)
 

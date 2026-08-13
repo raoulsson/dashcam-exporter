@@ -76,7 +76,7 @@ pipeline is) or the item's own **guard** ("no card at ...", "no GPS track in
 the import"). The numbering never moves, so "run 5" means the same thing on
 every machine.
 
-### The ten steps
+### The eleven steps
 
 Plus `p` — progress: which trips exist, what has been done to them, what can
 be done next and why the rest cannot. It is not numbered, because looking at
@@ -146,9 +146,9 @@ Items 2 and 3 exist because encoding is hours and uploading is days. Deciding
 what to keep has to be possible before either, and a still plus a map is enough
 to make the call.
 
-**Clean Workspace (8) and Delete SIM Data (9) are two items, not one.** They
-erase two different things and the evidence for each is different: 8 wants the
-renders published, 9 wants every clip on the card accounted for somewhere you
+**Clean Workspace (9) and Delete SIM Data (10) are two items, not one.** They
+erase two different things and the evidence for each is different: 9 wants the
+renders published, 10 wants every clip on the card accounted for somewhere you
 can go and look. Folded together they are a defect rather than a tidy-up: a
 single step gathers the card's evidence from the workspace, erases the
 workspace, and only then checks the card — so it refuses after the irreversible
@@ -362,7 +362,7 @@ ledger and the rendered metadata — both of which survive deleting the footage 
 and takes the clips stamped after it. 612 new clips out of 1039 means copying
 116 GB instead of 198.
 
-The card itself is freed by Delete SIM Data (9), which is its own item and can
+The card itself is freed by Delete SIM Data (10), which is its own item and can
 run at any point in the cycle — freeing the card does not interrupt anything,
 so completing it hands the position straight back. It refuses in two cases,
 and refuses rather than asks:
@@ -586,7 +586,7 @@ the rest of the tool.
 writing into the export tree: copy what you need somewhere of your own and work
 there. This is not policed and will not be. It matters because the renders and
 sidecars you are handed are the same files the exporter's erase gates then
-reason about — a `mv` leaves items 4, 8 and 9 judging a workspace that shifted
+reason about — a `mv` leaves items 4, 9 and 10 judging a workspace that shifted
 under them.
 
 ### What the exporter will and will not believe

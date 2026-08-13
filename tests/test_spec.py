@@ -143,9 +143,9 @@ class Bench:
         return self
 
     def verdicts(self, scope=None):
-        """What each of the ten items says about this bench, right now.
+        """What each of the eleven items says about this bench, right now.
 
-        One world, captured once, and ten pure questions over it — which is
+        One world, captured once, and eleven pure questions over it — which is
         the whole point of the move: a guard no longer decides when it goes
         and looks.
         """
@@ -221,7 +221,7 @@ class TestAvailability(SpecTest):
         the old shipped example published the render files themselves and so
         had nothing of its own to be missing.
 
-        The graph has always been 6 then 7 — item 7 puts the BUILT site online
+        The graph has always been 5 then 8 — item 8 puts the BUILT site online
         — and the example now has a build step with an artefact, so "nothing
         staged yet" is a real answer about the destination's material rather
         than about ordering. The exporter still answers its own two questions
@@ -235,7 +235,7 @@ class TestAvailability(SpecTest):
 
     def test_publishing_is_reachable_before_a_render(self):
         """REVERSED, and the reversal is the product. His table removed item
-        2's route to item 7 — "publish the page hours early and find out then
+        2's route to item 8 — "publish the page hours early and find out then
         that the publish path is broken" — but publishing a described trip
         before it is encoded is now the point rather than the hazard: the
         route, the distance, the places and the map all come from the sidecars,
@@ -305,7 +305,7 @@ class TestAvailability(SpecTest):
     def test_nor_when_the_configured_card_IS_the_import(self):
         """card_root() searches down for a DCIM tree and an import holds one,
         so a card path pointing into the workspace resolves to the very folder
-        item 8 would delete. Every file is then "on the card" by identity."""
+        item 9 would delete. Every file is then "on the card" by identity."""
         self.b.imported().publishes()
         self.b.ctx.card = self.b.ctx.render_root
         self.assertBlocked(CLEAN_WS)
@@ -398,7 +398,7 @@ class TestInterruptions(SpecTest):
 
         RESTATED: this used to read the set of owed render names off the world,
         and owes() is gone with the per-name map it filled. What decides
-        whether item 7 has anything left to do is now one answer — is every
+        whether item 8 has anything left to do is now one answer — is every
         trip of this import at the destination — and half-landed must not read
         as done. What a re-run then re-sends is the plugin's own business, and
         the shipped example only sends what is missing.

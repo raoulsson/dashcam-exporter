@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
-"""The seam itself, driven: the real items 5, 7 and 8 against a plugin this
+"""The seam itself, driven: the real items 5, 8 and 9 against a plugin this
 repo does not own.
 
 The other files stop short of this on purpose. test_uploader.py states what an
 answer MEANS and what the loader refuses; test_wiring.py binds the signatures;
 test_paths.py drives the graph with every body mocked; test_spec.py asks the
-real ten what they think of a real workspace but only ever LOOKS at their
+real eleven what they think of a real workspace but only ever LOOKS at their
 verdicts. None of them executes an item whose work is a stranger's code.
 
 That is the one thing the interface exists to make possible, so it is the thing
 this file does: a plugin under the test's control is handed to a real
-pipeline.Work over a real temporary workspace, and the ten real items are then
+pipeline.Work over a real temporary workspace, and the eleven real items are then
 run at it. What it pins, that nothing pinned before:
 
   * item 5 under a configured plugin writes NO local page and gathers nothing
     — the reported bug, as a property of a run rather than of the wiring;
-  * item 5 and item 7 take their reasons, their descriptions and their
+  * item 5 and item 8 take their reasons, their descriptions and their
     "is there anything left to do" from the plugin and not from the disk;
-  * the local edition still builds its page, and item 7 is unreachable there
+  * the local edition still builds its page, and item 8 is unreachable there
     by the edges rather than by a refusal in a body;
   * a plugin that raises, one that cannot say, and one that will not load all
-    fail CLOSED at item 8 — and one that answers yes to everything still
+    fail CLOSED at item 9 — and one that answers yes to everything still
     cannot erase an import that produced no renders;
   * the destructive re-check really does ask the plugin a SECOND time, and one
     that changes its mind between the banner and the typed word stops the
@@ -252,7 +252,7 @@ def _script(plugin):
 
 
 # ---------------------------------------------------------------------------
-# The bench: a real Ctx over a temp workspace, a real Work, the real ten items
+# The bench: a real Ctx over a temp workspace, a real Work, the real eleven items
 # ---------------------------------------------------------------------------
 
 class Bench:
@@ -455,7 +455,7 @@ class TestBuildWebsiteDelegates(SeamTest):
 
         Under a configured target the local edition's deliverable must not
         appear at all: the page announces that nothing leaves this machine
-        while item 7 is one keypress from sending everything, and the gather it
+        while item 8 is one keypress from sending everything, and the gather it
         used to do would rename every published trip out from under whatever
         index the target keeps.
         """
@@ -531,7 +531,7 @@ class TestBuildWebsiteDelegates(SeamTest):
 
 
 # ---------------------------------------------------------------------------
-# Item 7 — one job, and the target decides whether it is owed
+# Item 8 — one job, and the target decides whether it is owed
 # ---------------------------------------------------------------------------
 
 class TestUploadWebsiteDelegates(SeamTest):
@@ -574,7 +574,7 @@ class TestUploadWebsiteDelegates(SeamTest):
         self.assertEqual(target.times("upload"), 0)
 
     def test_the_exporter_still_answers_its_own_questions_first(self):
-        """Two local facts item 7 keeps for itself: something rendered to send,
+        """Two local facts item 8 keeps for itself: something rendered to send,
         and a sidecar somewhere to describe it. Neither is asked of the plugin,
         and a plugin answering yes to everything does not move them."""
         target = Recorder(no_upload=None)
@@ -632,7 +632,7 @@ class TestTheLocalEdition(SeamTest):
 
 
 # ---------------------------------------------------------------------------
-# Item 8 — no answer, and no absence of one, may read as permission
+# Item 9 — no answer, and no absence of one, may read as permission
 # ---------------------------------------------------------------------------
 
 class TestNothingUnprovenErasesFootage(SeamTest):
@@ -844,7 +844,7 @@ class TestIdempotence(SeamTest):
         self.assertFalse(second.outcome.performed)
 
     def test_a_second_erase_is_refused_rather_than_repeated(self):
-        """Once the footage is gone there is no import to clean, and item 8
+        """Once the footage is gone there is no import to clean, and item 9
         says so instead of asking for CLEAN again to find out."""
         b = self.bench(Recorder()).complete()
         self.assertTrue(b.run(CLEAN_WS).completed)
@@ -1861,7 +1861,7 @@ class TestEveryRendererRunIsToldWhereToLog(SeamTest):
     """make-trips-rendered.sh defaults LOG_DIR to <out>/logs.
 
     So a call that does not pass it writes its run log into the EXPORT tree —
-    beside the sidecars, inside the directory item 8 sweeps, and nowhere near
+    beside the sidecars, inside the directory item 9 sweeps, and nowhere near
     the logs/ the workspace keeps at its root. Only the render step passed it,
     so every sidecar pass logged in the wrong place.
     """
@@ -2093,7 +2093,7 @@ class TestARefusalIsAlwaysInTheLog(SeamTest):
     """A step that decided not to act still ran, and the summary is the record
     of what ran.
 
-    Item 8 recorded its plan-time exits through _nothing(); item 4 returned a
+    Item 9 recorded its plan-time exits through _nothing(); item 4 returned a
     plan and logged nothing, so "no import folder", "the trip scan failed",
     "no trips" and "cancelled" left the summary empty for a step the operator
     had just watched refuse. Item 2 was worse than silent: it ran the whole
@@ -2316,10 +2316,10 @@ class TestTheLocalEditionsOwnArc(SeamTest):
         """LEFT FAILING ON PURPOSE — a dead end in the local edition's graph,
         and the fix is a design call rather than a test's to assume.
 
-        Item 5's outbound offers item 8 under LOCAL_PAGE, and the owner's own
-        inbound column for item 8 lists item 5. But gather_into_final moves the
+        Item 5's outbound offers item 9 under LOCAL_PAGE, and the owner's own
+        inbound column for item 9 lists item 5. But gather_into_final moves the
         whole day folder — renders AND sidecars — into final_<day>, so after a
-        local build the working area has no sidecars (item 8's cheap guard
+        local build the working area has no sidecars (item 9's cheap guard
         refuses) and no renders under this import's namespace (the floor,
         nothing_was_rendered_here, refuses). Re-running item 2 clears the first
         and not the second, so the state is terminal: the local operator can
@@ -2336,7 +2336,7 @@ class TestTheLocalEditionsOwnArc(SeamTest):
             is the same evidence working_area_is_expendable already accepts;
           * gather leaves the sidecars in the working area, where the card
             guard and the delta import read them from anyway;
-          * item 5 stops offering item 8 under the local edition, which admits
+          * item 5 stops offering item 9 under the local edition, which admits
             the arc does not exist rather than fixing it.
         When one is taken this test starts passing, and unittest reports an
         unexpected success as a FAILURE — so the tripwire is loud in the

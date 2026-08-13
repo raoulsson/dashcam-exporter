@@ -185,7 +185,7 @@ class MockState:
         return self
 
     def menu(self):
-        """The ten items, built for whatever this ctx configures."""
+        """The eleven items, built for whatever this ctx configures."""
         return M.build_menu(M.Strategy.of(self.ctx.plugin), P.Work(self.ctx))
 
     def verdicts(self, scope=None):
@@ -242,7 +242,7 @@ class TestGraphConsistency(GraphTest):
     def test_only_items_0_and_1_declare_a_kind_instead_of_edges(self):
         """The two exemptions are by definition, not by a skip list.
 
-        Progress neighbours everything and must not force the other nine to
+        Progress neighbours everything and must not force the other ten to
         declare it back; Import SIM is where footage comes in and declares no
         inbound even though Clean Workspace offers it.
         """
@@ -290,12 +290,12 @@ class TestGraphConsistency(GraphTest):
         return seen
 
     def test_publishing_is_offered_from_everywhere_in_the_cycle(self):
-        """REVERSED: the owner's table removed item 2's route to item 7 —
+        """REVERSED: the owner's table removed item 2's route to item 8 —
         "publish the page hours early and find out then that the publish path
         is broken" — and under pages-first that is no longer a hazard but the
         product. A described trip is what gets published; the encode follows.
 
-        So the edges stop deciding it. Item 7 is offered from every mid-cycle
+        So the edges stop deciding it. Item 8 is offered from every mid-cycle
         position and answers for itself: with nothing built it says so, which
         is a fact about the destination's material rather than about which key
         was pressed last. An entry that is hidden teaches nothing; one that is
@@ -308,7 +308,7 @@ class TestGraphConsistency(GraphTest):
                 self.assertIn(UPLOAD, built[number].outbound().offers(universe))
 
     def test_the_local_edition_offers_publishing_from_nowhere(self):
-        """Item 7 exists there so every number means the same thing on every
+        """Item 8 exists there so every number means the same thing on every
         installation, but it publishes nothing and leads nowhere."""
         built = M.build_menu(M.Strategy.LOCAL_PAGE, NullWork())
         universe = frozenset(built)
@@ -319,12 +319,12 @@ class TestGraphConsistency(GraphTest):
                 self.assertNotIn(UPLOAD, built[number].outbound().offers(universe))
 
 class TestTheUnfoldIsStructural(GraphTest):
-    """8 cannot precede 9 in one cycle, and 9 can precede 8.
+    """9 cannot precede 10 in one cycle, and 10 can precede 9.
 
     The folded clean-up gathered the card's evidence from the workspace, erased
     the workspace, then refused the card half after the irreversible half had
     already run — having printed that the card was verified. With the halves
-    unfolded, item 8's outbound is {1}, so that sequence cannot be expressed.
+    unfolded, item 9's outbound is {1}, so that sequence cannot be expressed.
     """
 
     def test_clean_workspace_offers_only_a_new_cycle(self):
@@ -396,7 +396,7 @@ class TestInterfaceMatchesBehaviour(GraphTest):
     def test_the_destructive_items_all_ask_one_word(self):
         """RESTATED TWICE. Three distinct words, then two, now one: the guard
         on each of these is its own evidence, and the word only confirms the
-        operator meant it. Item 9's way PAST its guard still asks a different
+        operator meant it. Item 10's way PAST its guard still asks a different
         word — that is the one prompt habit could carry someone through, and
         the assertion for it lives with the override in test_seam.
         """
@@ -457,8 +457,8 @@ class TestStrategySplit(GraphTest):
     def test_only_the_publishing_items_declare_different_edges(self):
         """The AUTHORED column — outbound — differs for the mid-cycle items.
 
-        Every one of them gains the edge to publishing, because item 7 is
-        offered from wherever you are and answers for itself; and item 7 has
+        Every one of them gains the edge to publishing, because item 8 is
+        offered from wherever you are and answers for itself; and item 8 has
         no edges at all under the local product. Every other difference in the
         table is in the DERIVED inbound and follows from these.
         """
@@ -500,7 +500,7 @@ class TestGuardsSeeTheWorld(GraphTest):
         EXCLUDE: lambda m: m.with_import().with_sidecars(),
         RENDER: lambda m: m.with_import().with_sidecars(),
         BUILD: lambda m: m.with_import().with_sidecars().with_render(),
-        # No card: item 9 is the card's own item now, so the workspace half
+        # No card: item 10 is the card's own item now, so the workspace half
         # never has to reason about one.
         CLEAN_WS: lambda m: m.with_import().with_sidecars(),
     }

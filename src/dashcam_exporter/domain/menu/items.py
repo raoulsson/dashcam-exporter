@@ -1,4 +1,4 @@
-"""The ten menu items, 0-9, and the graph they declare.
+"""The eleven menu items, 0-10, and the graph they declare.
 
 One class per item. Each states what it is, where it may lead, and answers
 `evaluate(world)` — would this do anything, and may it — before `execute`
@@ -8,7 +8,7 @@ a test can drive the whole menu with a mock.
 
 The outbound column is authored here from the owner's table. THREE EDGES
 DIFFER from what he wrote, each marked at its declaration site and reported by
-tests/print_step_graph.py — see the notes on items 5, 6 and 7. The inbound
+tests/print_step_graph.py — see the notes on items 5, 6 and 8. The inbound
 column he wrote is transcribed verbatim into IN_AUTHORED and is never used to
 build the graph; MenuGraph.inbound() computes the real one and
 MenuGraph.disagreements() diffs the two.
@@ -72,9 +72,9 @@ class ImportSim(MenuItem):
     The source is ANY directory holding a DCIM tree — a mounted card is the
     common case, a card copied onto an external disk works the same.
 
-    It no longer offers to clear the previous round. That was item 8's job run
+    It no longer offers to clear the previous round. That was item 9's job run
     from inside item 1, silently in one branch and behind a y/n in the other;
-    under this graph item 1 reaches item 8 directly, so the offer has nowhere
+    under this graph item 1 reaches item 9 directly, so the offer has nowhere
     to earn its place. What survives is the QUESTION it was attached to — an
     unfinished session still refuses a new import, because importing on top
     mixes two cards into one grouping with no record of which clip came from
@@ -89,11 +89,11 @@ class ImportSim(MenuItem):
         "reads it back file for file. The source is any directory holding a "
         "DCIM tree, so a mounted card and a card already copied onto an "
         "external disk work the same way. Nothing is deleted here: the card "
-        "keeps every clip until item 9 is run deliberately.\n\n"
+        "keeps every clip until item 10 is run deliberately.\n\n"
         "An unfinished session refuses a new import. Importing on top of one "
         "mixes two cards into a single grouping with no record of which clip "
         "came from which card, and there is no way to unpick that afterwards. "
-        "Clear the previous round with item 8 first; this entry offers no "
+        "Clear the previous round with item 9 first; this entry offers no "
         "shortcut past it, because a wipe hidden inside a copy is a wipe "
         "nobody chose."
     )
@@ -271,11 +271,11 @@ class ExcludeTrip(Destructive):
         "already known to be unwanted and does not have to be judged twice."
     )
     DESTR = True
-    # DELETE, like item 8. The two erase different things and both erase from
+    # DELETE, like item 9. The two erase different things and both erase from
     # the WORKSPACE; the card keeps its own word, because that is the one with
     # no second copy behind it.
     # EXCLUDE, the entry's own verb. This asked for DELETE, and delete is what
-    # item 8 and item 9 do -- they remove footage and record nothing about it.
+    # item 9 and item 10 do -- they remove footage and record nothing about it.
     # This one records a DECISION, against the trip, honoured for good: the
     # delta import stops offering those clips and a rebuild downstream knows
     # the trip was dropped rather than merely cleaned up. Asking for the word
@@ -317,8 +317,8 @@ class RenderVideos(MenuItem):
     # is_complete() is asked about is the same list, and nothing has been
     # published — which is the question it answers.
     CHANGES_THE_QUESTION = False
-    # RESTORED TO THE OWNER'S TABLE: he gave item 6 an outbound edge to 7 and
-    # it was taken away, on the reasoning that item 7 uploads the BUILT site so
+    # RESTORED TO THE OWNER'S TABLE: he gave item 6 an outbound edge to 8 and
+    # it was taken away, on the reasoning that item 8 uploads the BUILT site so
     # reaching it from Render skips the building. That reasoning was wrong
     # about what a render produces. An encode makes an mp4 and no metadata at
     # all, so the manifest built before it is still correct after it, and
@@ -393,15 +393,15 @@ class BuildWebsite(MenuItem):
     That last part is the bug this shape fixes. Only the MOVER used to be the
     strategy branch; the page writer ran either way, so a publishing install
     got a local page it never asked for, announcing that nothing had left the
-    machine while item 7 was about to send it all.
+    machine while item 8 was about to send it all.
     """
 
     number = BUILD
     NAME = "Build Website"
     DESCRIPTION = "Build the website from the described trips."
-    # DEVIATION FROM THE OWNER'S TABLE: 7 added to the outbound under the
-    # publishing edition. His inbound column for item 7 says {7,5} — build the
-    # site, then put it online — but no outbound set anywhere offered 7, so
+    # DEVIATION FROM THE OWNER'S TABLE: 8 added to the outbound under the
+    # publishing edition. His inbound column for item 8 says {8,5} — build the
+    # site, then put it online — but no outbound set anywhere offered 8, so
     # Upload Website was unreachable by its own natural route. This is the edge
     # that makes publishing work.
     OUT = {
@@ -476,7 +476,7 @@ class BuildWebsite(MenuItem):
 
 
 # ---------------------------------------------------------------------------
-# 7 — Upload Website
+# 8 — Upload Website
 # ---------------------------------------------------------------------------
 
 class UploadWebsite(MenuItem):
@@ -494,8 +494,8 @@ class UploadWebsite(MenuItem):
     DESCRIPTION = "Put the website online. Resumes where it left off."
     SCOPE = Scope.FULL
     # DEVIATION FROM THE OWNER'S TABLE: 6 added to the outbound under the
-    # publishing edition. He wrote 7 into item 5's INBOUND column — after
-    # uploading you fix a caption and rebuild — and left it out of item 7's
+    # publishing edition. He wrote 8 into item 5's INBOUND column — after
+    # uploading you fix a caption and rebuild — and left it out of item 8's
     # outbound. Deriving the inbound would have silently deleted an edge he
     # authored.
     OUT = {
@@ -569,7 +569,7 @@ class UploadWebsite(MenuItem):
 
 
 # ---------------------------------------------------------------------------
-# 8 — Clean Workspace (DESTRUCTIVE, ends the cycle)
+# 9 — Clean Workspace (DESTRUCTIVE, ends the cycle)
 # ---------------------------------------------------------------------------
 
 class CleanWorkspace(Destructive):
@@ -617,7 +617,7 @@ class CleanWorkspace(Destructive):
     DESTR = True
     # CLEAN, the entry's own verb, as at item 4. What this does is empty the
     # working area of copies whose originals are published or still on the
-    # card; DELETE is item 9's word, and it names an act with nothing behind
+    # card; DELETE is item 10's word, and it names an act with nothing behind
     # it.
     WORD = "CLEAN"
     # NO way past. Item 4 is the only place a trip is dropped on purpose, and
@@ -653,7 +653,7 @@ class CleanWorkspace(Destructive):
 
 
 # ---------------------------------------------------------------------------
-# 9 — Delete SIM Data (DESTRUCTIVE, ends the cycle)
+# 10 — Delete SIM Data (DESTRUCTIVE, ends the cycle)
 # ---------------------------------------------------------------------------
 
 class DeleteSimData(Destructive):
@@ -682,7 +682,7 @@ class DeleteSimData(Destructive):
     # THE TWO WERE THE OTHER WAY ROUND. The entry is called Delete SIM Data and
     # then asked for ERASE, which is a name and a password for the same act
     # disagreeing on the screen where the operator is being asked to be sure.
-    # DELETE is now the word, matching the name and matching items 4 and 8 —
+    # DELETE is now the word, matching the name and matching items 4 and 9 —
     # what is given up is that the card no longer has a word of its own, and
     # what that was worth was never the safety here. The guard is the per-clip
     # accounting; the word only confirms he meant it. The property that DOES
@@ -798,7 +798,7 @@ COLD_START_RULES = (
     # The renders have to still be HERE. The destination answering yes is about
     # trips, not about this machine, and after a clean-up it goes on saying yes
     # about trips whose local copies are gone -- which put a swept, empty
-    # workspace at "7) Upload Website" with nothing to upload. Published AND
+    # workspace at "8) Upload Website" with nothing to upload. Published AND
     # still present is the state this rule is for: uploaded, not yet cleaned.
     (UPLOAD, lambda w: bool(w.renders) and w.target.complete is Evidence.YES),
     (BUILD, lambda w: w.local_page or bool(w.final_folders)),

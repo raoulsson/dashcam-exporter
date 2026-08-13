@@ -1,10 +1,10 @@
 """The seam an outside publisher implements: one act of publishing work, twice.
 
-The exporter builds a website at item 5 and puts it online at item 7. What
+The exporter builds a website at item 5 and puts it online at item 8. What
 those two mean — a static page in a folder, an S3 sync and an rsync, a Docker
 push, an FTP session — is nobody's business here. So this module declares the
 shape of ONE act, and a plugin supplies two of them: a builder for item 5 and
-an uploader for item 7.
+an uploader for item 8.
 
 An act answers what a menu item already answers, and nothing more:
 
@@ -29,7 +29,7 @@ Copy what you need somewhere of your own and work there. This is not policed
 and will not be: whoever installs an implementation owns what it does. The
 reason it matters is mechanical rather than moral — the renders and sidecars
 handed over are the same files the exporter's own guards then reason about, and
-items 4, 8 and 9 erase footage on the strength of that reasoning. A mv would
+items 4, 9 and 10 erase footage on the strength of that reasoning. A mv would
 leave those gates judging a workspace that moved under them.
 
 An implementation is otherwise INSIDE the trust boundary and the exporter
@@ -404,7 +404,7 @@ class Builder(Act):
 
 
 class Uploader(Act):
-    """Item 7: put what was built online. One job, however many transports.
+    """Item 8: put what was built online. One job, however many transports.
 
     How many it takes — a bucket and then a server, one rsync, a copy into a
     folder — is yours, not the menu's. What the exporter needs is one answer
@@ -683,7 +683,7 @@ def _checked(cls, base, spec: str):
 
     What the implementation does is its own business — that is settled. What it
     can ANSWER is the exporter's business, because a plugin whose uploader has
-    no is_complete() would otherwise raise at the moment item 8 asks: after the
+    no is_complete() would otherwise raise at the moment item 9 asks: after the
     operator has typed CLEAN, mid-way through a destructive item. Fail at
     startup instead.
     """

@@ -626,7 +626,7 @@ def _graph_row(label, chunks):
 def _next_steps(menu_items, verdicts, offered):
     """What can be done from here, each in one sentence.
 
-    The menu is nine names and a number; it says what the steps ARE, not what
+    The menu is ten names and a number; it says what the steps ARE, not what
     they do. Asked for status, the useful answer is the shortlist of what is
     possible right now with a line of explanation each -- which is the thing a
     grid of names cannot carry and a wall of every step's description would
@@ -661,7 +661,7 @@ def _where_lines(menu_items, position):
 def _last_name(menu_items, position):
     """The step just taken, by name and nothing else.
 
-    It was "Position: 8) Clean Workspace", bold. The number is already beside
+    It was "Position: 9) Clean Workspace", bold. The number is already beside
     that entry two lines down in the grid, bold is for something that wants
     the eye, and "position" described the machine rather than answering what
     the reader wants to know -- which is what he last did.

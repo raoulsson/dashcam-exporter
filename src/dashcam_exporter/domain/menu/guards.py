@@ -35,7 +35,7 @@ def _first_blocking(world, checks) -> Optional[Verdict]:
 
 
 # ---------------------------------------------------------------------------
-# The card — item 9, Delete SIM Data. The only target with no second copy.
+# The card — item 10, Delete SIM Data. The only target with no second copy.
 # ---------------------------------------------------------------------------
 
 def never_imported(world) -> Optional[Verdict]:
@@ -112,11 +112,11 @@ def drop_would_clear_the_card(world) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# The workspace — item 8, Clean Workspace. Two gates and one sentence.
+# The workspace — item 9, Clean Workspace. Two gates and one sentence.
 # ---------------------------------------------------------------------------
 
 class Gates:
-    """Every gate item 8's sweep passes, asked of ONE world.
+    """Every gate item 9's sweep passes, asked of ONE world.
 
     A class for one reason, and it is the reason the module docstring above
     gives: a guard is a pure function of a FROZEN world, and two reads of one
@@ -395,13 +395,13 @@ class Gates:
         return "no sidecars on disk for the import"
 
     def nothing_to_clean_up(self) -> Optional[str]:
-        """Item 8's cheap half: is there anything here it could be asked about.
+        """Item 9's cheap half: is there anything here it could be asked about.
 
         Sidecars are the usual answer -- an import with sidecars is an import the
         cycle has started on, and the heavy gates below decide whether it may go.
         But an import with none is not automatically untouchable, and treating it
         so is what made an interrupted first import a dead end: item 1 refused to
-        import on top of two stray clips and pointed at item 8, and item 8 refused
+        import on top of two stray clips and pointed at item 9, and item 9 refused
         them for having no sidecars. Nothing had been made from those clips and
         the card still held every one; there was nothing to protect.
 
@@ -417,7 +417,7 @@ class Gates:
         return self.sidecars_missing()
 
     def nothing_here_to_protect(self) -> bool:
-        """The two states where item 8 is not guarding anything.
+        """The two states where item 9 is not guarding anything.
 
         Either the source still holds every file of this import, or the import
         holds no footage at all. Both are asked in two places -- the cheap check
@@ -445,7 +445,7 @@ class Gates:
         holding a workspace he could neither use nor empty.
 
         So: the card has it, or it does not. Nothing downstream is weakened,
-        because item 9 asks the same question from the other side -- wipe this
+        because item 10 asks the same question from the other side -- wipe this
         workspace and its clips are owed again, so the card cannot be erased until
         they are somewhere else.
 
@@ -489,7 +489,7 @@ class Gates:
                        for name in self.world.import_files)
 
     def clean_is_allowed(self) -> Verdict:
-        """Item 8's heavy gate, three ways in.
+        """Item 9's heavy gate, three ways in.
 
         Two acts wear one number. Sweeping a finished cycle erases footage whose
         renders are published, and is decided by workspace_is_expendable. Throwing
