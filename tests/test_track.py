@@ -23,7 +23,7 @@ Run with:  ./run-tests.sh          (or: python3 -m unittest discover -s tests)
 import sys
 import tempfile
 import unittest
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -51,6 +51,16 @@ def nmea(local: str, fixes) -> str:
 def _ddmm(deg: float, width: int) -> str:
     d = int(deg)
     return "%0*d%08.5f" % (width, d, (deg - d) * 60)
+
+
+#: UTC of the first fix of clip 20260728141441, whose camera-local header says
+#: 14:14:41 -- so this card sits at UTC-8, as everywhere else in this file.
+_UTC_BASE = datetime(2026, 7, 28, 6, 14, 41)
+
+
+def utc(seconds: int) -> str:
+    """hhmmss that many seconds after the reference clip's first fix."""
+    return (_UTC_BASE + timedelta(seconds=seconds)).strftime("%H%M%S")
 
 
 def clip(ts: str, secs: int = 60) -> Clip:
@@ -203,6 +213,73 @@ class TestSelectionIsByTimeNotByName(TrackTest):
         got = self.track([clip("20260728141441")])
         self.assertEqual(len(got), 1)
         self.assertLess(got[0][0], 14.50)
+
+
+class TestAnOverScopedFileKeepsTheRecordingNotTheStrays(TrackTest):
+    """Which window survives when one clip's GPX holds more than one clip.
+
+    The rule is the NEWEST window of the clip length, because the camera
+    writes the live recording last -- unless an earlier window is several
+    times denser, in which case the newest "window" is not a recording at all
+    but a handful of strays that happen to carry the biggest clock reading.
+
+    Both halves matter and they pull against each other, so both are pinned
+    here: drop the density escape and one forward-stamped phantom becomes the
+    whole track; drop the newest-first preference and a couple of missing
+    fixes hand a clip its predecessor's data.
+    """
+
+    def gpx(self, name: str, fixes) -> Path:
+        """Fixes as (utc_hhmmss, lat, lon), no camera header needed."""
+        return self.write(name, nmea("20260728141441", fixes))
+
+    def test_one_fix_stamped_ahead_does_not_become_the_track(self):
+        """The reproduction. A single phantom an hour in the future made
+        itself the latest fix, and all sixty genuine ones fell outside its
+        window -- so the clip's track WAS the phantom, and every distance,
+        boundary and map frame came off it."""
+        real = [(utc(i), 14.4206 + i * 0.00005, 121.0256) for i in range(60)]
+        path = self.gpx("20260728141441_0060.gpx",
+                        real + [(utc(3600), 14.5177, 121.0296)])
+        got = M.parse_gpx_track(path, window_seconds=60)
+        self.assertEqual(len(got), 60, "the drive's own fixes are the track")
+        self.assertFalse([p for p in got if p[0] > 14.50],
+                         "the forward-stamped stray is not the drive")
+
+    def test_a_fix_stamped_behind_is_still_left_out(self):
+        """The original failure mode, which the newest-window rule already
+        handled. Fixing the forward case must not cost the backward one."""
+        real = [(utc(i), 14.4206 + i * 0.00005, 121.0256) for i in range(60)]
+        path = self.gpx("20260728141441_0060.gpx",
+                        [(utc(-3600), 14.5177, 121.0296)] + real)
+        got = M.parse_gpx_track(path, window_seconds=60)
+        self.assertEqual(len(got), 60)
+        self.assertFalse([p for p in got if p[0] > 14.50])
+
+    def test_a_bundled_neighbour_clip_does_not_win_on_a_dropped_fix(self):
+        """Two clips bundled contiguously, the live one missing two fixes to a
+        dropout. Counting alone would prefer the fuller EARLIER window and
+        hand this clip its predecessor's speeds -- the "already 15 km/h while
+        the wheels haven't moved" symptom. The newest window keeps priority
+        until an earlier one is several times denser, so it does not."""
+        prev = [(utc(i - 60), 14.40, 121.00) for i in range(60)]
+        live = [(utc(i), 14.4206 + i * 0.00005, 121.0256)
+                for i in range(60) if i not in (20, 40)]
+        path = self.gpx("20260728141441_0060.gpx", prev + live)
+        got = M.parse_gpx_track(path, window_seconds=60)
+        self.assertTrue(all(p[0] > 14.41 for p in got[1:]),
+                        "the live clip's own fixes, not the bundled neighbour's")
+
+    def test_the_phantom_costs_the_trip_its_track_end_to_end(self):
+        """Not just the parser: the same file read through the pool, which is
+        where trip boundaries and the map actually get their points."""
+        real = [(utc(i), 14.4206 + i * 0.00005, 121.0256) for i in range(60)]
+        self.write("20260728141441_0060.gpx",
+                   nmea("20260728141441", real + [(utc(3600), 14.5177, 121.0296)]))
+        got = self.track([clip("20260728141441")])
+        self.assertEqual(len(got), 60)
+        tall_km = (max(p[0] for p in got) - min(p[0] for p in got)) * 111
+        self.assertLess(tall_km, 1.0, "one stray must not stretch the bounding box")
 
 
 if __name__ == "__main__":

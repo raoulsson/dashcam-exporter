@@ -9,6 +9,9 @@ KNOTS_TO_KMH = 1.852
 CLIP_GPX_WINDOW_SECONDS = 60
 PARKING_SPEED_THRESHOLD_KMH = 3.0
 PARKING_CLIP_FRACTION = 0.75
+#: How much denser than the newest window an earlier window must be before
+#: parse_gpx_track prefers it. Reasoned about at the point of use.
+_DENSEST_MARGIN = 2
 _TZ_QUANTUM = 900
 _SPAN_MARGIN = timedelta(0)
 
@@ -33,12 +36,16 @@ def parse_gpx_track(gpx_path: Path,
     Return a list of (lat, lon, kmh, utc_datetime) tuples parsed from $GPRMC lines.
     Skips fixes marked invalid (status != 'A').
 
-    If the parsed points span much more than `window_seconds`, only the
-    densest window of that length is returned — discarding stale fixes the
-    dashcam firmware bundled in from a previous drive (a real-world failure
-    mode where drive N's clip GPX contains data from drive N-1's last
-    location, which would otherwise blow up the drive's bounding box and
-    make the marker animation jump across town).
+    If the parsed points span much more than `window_seconds`, only one window
+    of that length is returned — discarding stale fixes the dashcam firmware
+    bundled in from a previous drive (a real-world failure mode where drive N's
+    clip GPX contains data from drive N-1's last location, which would
+    otherwise blow up the drive's bounding box and make the marker animation
+    jump across town).
+
+    Which window: the NEWEST, unless a denser one exists by a wide margin, in
+    which case the densest. The reasoning for that pair of rules — and why
+    neither alone is right — is at the point of use below.
     """
     points: list[tuple[float, float, float, datetime]] = []
     try:
@@ -91,9 +98,50 @@ def parse_gpx_track(gpx_path: Path,
     #      acceleration ramp burned onto the current clip's still-parked
     #      footage (visible as "speed already 15 km/h when wheels haven't
     #      moved yet").
-    # Both cases are handled by keeping only the points within
-    # `window_seconds` of the LATEST fix (= the actual clip's data, since
-    # DDPAI always writes the live recording last and any extra junk earlier).
+    # The NEWEST window of `window_seconds` is the answer to both, because
+    # DDPAI writes the live recording last and bundles the junk in earlier --
+    # UNLESS the newest window is too sparse to be a recording at all.
+    #
+    # That last clause is the bug this carries a fix for. The rule used to be
+    # the newest window unconditionally, and a fix stamped AHEAD of the drive
+    # breaks it: one phantom an hour in the future makes ITSELF the newest,
+    # and all sixty genuine fixes fall outside its window. The clip's track
+    # then IS that single phantom -- and the track is what trip boundaries,
+    # the distance figures, the speed overlay and the map widget are computed
+    # from. A forward-stamped stray is as real as the backward-stamped ones
+    # this function was written for; the newest-wins rule simply never
+    # considered it.
+    #
+    # So: find the densest window (most fixes) as well, and let it displace
+    # the newest one only when it is DECISIVELY denser -- more than
+    # `_DENSEST_MARGIN` times as many fixes.
+    #
+    # The margin is the whole design, not a fudge factor. Plain "densest wins"
+    # was measured against the contiguous two-clip bundle of case 2: with only
+    # 2 percent of fixes dropped, an earlier window out-counts the newest by a
+    # single fix half the time, and winning by one fix moves the kept window
+    # 30 to 60 seconds earlier -- i.e. hands back the PREVIOUS clip's data,
+    # which is the exact defect case 2 exists to prevent. Dropouts perturb the
+    # count by a few percent; a stray group is a different order of magnitude
+    # (the replay this card really produced was seven sentences against sixty).
+    # A factor of two sits in the empty space between those, and it is strict,
+    # so a clip that lost half its fixes still keeps its own window.
+    times = [p[3] for p in points]
+    best_count = 0
+    best_start = best_end = 0
+    newest_count = 0
+    start = 0
+    for end in range(len(points)):
+        while (times[end] - times[start]).total_seconds() > window_seconds:
+            start += 1
+        count = end - start + 1
+        # Ties to the LATEST window, so that when the newest window is itself
+        # among the densest this picks exactly what the newest-wins rule did.
+        if count >= best_count:
+            best_count, best_start, best_end = count, start, end
+        newest_count = count          # last iteration = the window ending latest
+    if best_count > newest_count * _DENSEST_MARGIN:
+        return points[best_start:best_end + 1]
     latest = points[-1][3]
     return [p for p in points if (latest - p[3]).total_seconds() <= window_seconds]
 
