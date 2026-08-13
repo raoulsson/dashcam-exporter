@@ -860,6 +860,10 @@ RE_RSYNC_P2 = re.compile(r"^\s*([\d,]+)\s+(\d+)%\s+(\S+)\s+(\d+:\d{2}:\d{2})")
 # That loop is the long silent stretch of a scan, so it is the only thing that
 # can honestly drive a bar there.
 RE_SCAN = re.compile(r"^\[scan\s+(\d+)/(\d+)\]")
+# The ego-motion pass announces each clip it actually decodes: "[detect  12]
+# NAME.mp4". It has no denominator (only the clips near the anchor are decoded),
+# so it can move the note but never the bar.
+RE_DETECT = re.compile(r"^\[detect\s+(\d+)\]")
 RE_TRIP = re.compile(r"^\[Trip\s+(\d+)/(\d+)\]\s*(\S+\s+\S+)?")
 #                          "  [ 12/ 87] 2026-07-19 12:46:03  encoding ..."
 RE_CLIP = re.compile(r"^\s*\[\s*(\d+)\s*/\s*(\d+)\s*\]")
@@ -1011,29 +1015,41 @@ def make_scan_parser():
     switch to counting those instead of leaving the bar pinned at 100% while the
     slowest part of the run is still going.
     """
-    state = {"i": 0, "n": 0, "trips": 0, "trips_total": 0}
+    state = {"i": 0, "n": 0, "trips": 0, "trips_total": 0, "detect": 0}
 
     def parse(line):
+        m = RE_DETECT.match(line)
+        if m:
+            # The ego-motion pass, which is where a big card spends most of its
+            # minutes. It has no denominator — only the clips near the anchor
+            # get decoded, and which those are is what the pass is working out —
+            # so the honest report is the running count and what it is for, not
+            # a percentage nobody can compute yet.
+            state["detect"] = int(m.group(1))
+            return (None, "decoding clip %d for the pull-out and the park"
+                    % state["detect"])
         m = RE_SCAN.match(line)
         if m and not state["trips"]:
             state["i"], state["n"] = int(m.group(1)), int(m.group(2))
             if state["n"] and state["i"] >= state["n"]:
                 # Reading is done, but the run is not: what follows is the
-                # ego-motion pass that finds each drive-away and park, and it
-                # prints nothing until the table appears. Leaving the bar at
-                # 100% there says "finished" during the slowest part of the
-                # step. Hand back to the elapsed spinner instead — no number is
-                # better than a wrong one.
+                # ego-motion pass above, and there is a stretch before its first
+                # decode where nothing prints at all. Leaving the bar at 100%
+                # there says "finished" during the slowest part of the step.
+                # Hand back to the elapsed spinner instead — no number is better
+                # than a wrong one.
                 # Keep the n/n in the note: it is what the completion line
                 # closes on, and dropping it here leaves that line reporting
                 # the second-to-last clip.
                 return (None,
-                        # trailing \0: clear the tail. Nothing prints during the
-                        # ego-motion pass, so the last clip read would freeze on
-                        # screen for minutes as if it were being processed.
-                        "%d/%d read, finding trip boundaries\0" % (state["n"], state["n"]))
+                        # trailing \0: clear the tail. The last clip read would
+                        # otherwise freeze on screen as if it were the one being
+                        # worked on right now.
+                        "%d/%d read, now watching the video for where the car "
+                        "pulled out and parked\0" % (state["n"], state["n"]))
             return ((state["i"] / state["n"]) if state["n"] else None,
-                    "reading %d/%d" % (state["i"], state["n"]))
+                    "reading clip %d/%d (timestamps and GPS)"
+                    % (state["i"], state["n"]))
         m = RE_TRIP.match(line)
         if m:
             state["trips"] += 1
@@ -1054,9 +1070,26 @@ def make_render_parser():
     """
     state = {"trips_seen": 0, "trips_total": None, "clip": 0, "clips": 0,
              "name": ""}
+    # A render does not start encoding: it starts by scanning the whole card and
+    # finding the trip boundaries, exactly as the sidecar pass does, and that is
+    # minutes before the first "[Trip …]" header. This parser knew nothing about
+    # those lines, so the longest wait of the longest step showed a bar frozen at
+    # zero with a raw filename beside it. Hand that phase to the scan parser --
+    # the same child, the same lines, already read correctly there -- and take
+    # over the moment the first trip header arrives.
+    pre = make_scan_parser()
 
     def parse(line):
         m = RE_TRIP.match(line)
+        if not m and state["trips_total"] is None:
+            got = pre(line)
+            if got is not None:
+                # The note as the scan parser wrote it (its trailing \0 and all,
+                # which feed() understands), but never its fraction: this bar
+                # measures the ENCODE, and filling it to 90% while clips are
+                # being read would say the render is nearly done before a single
+                # frame has been written.
+                return None, got[1]
         if m:
             state["trips_seen"] += 1
             state["trips_total"] = int(m.group(2))
@@ -1095,6 +1128,13 @@ def make_render_parser():
 
 _RE_R_FOUND = re.compile(r"Found (\d+) clip pairs grouped into (\d+)")
 _RE_R_MAP = re.compile(r"^\s*map:\s+([\d.]+) km in (\d+) segments")
+_RE_R_SCANNING = re.compile(r"^Scanning:\s*(\S.*)$")
+# The renderer's own trip header, whole: "[Trip 2/5] 2026-07-19 12:46 → 13:20
+# (87 clips, ~14:02)". RE_TRIP takes only the counter off it because that is all
+# the bar can use; the story wants the span and the size, which is the part that
+# says why this trip is about to take a quarter of an hour.
+_RE_R_TRIP_FULL = re.compile(
+    r"^\[Trip\s+(\d+)/(\d+)\]\s*(\S+)\s+(\S+)\s*(?:→|->)\s*(\S+)\s*\((\d+) clips,\s*~?([\d:]+)\)")
 
 
 def scan_narrator(ctx, verb="Working on", done_word=None):
@@ -1103,28 +1143,63 @@ def scan_narrator(ctx, verb="Working on", done_word=None):
     The bar already says WHERE it is (trip 2/6, clip 40/212); this says WHAT is
     happening, once per milestone, never per clip. `verb` names what the pass
     does to a trip ("Rendering", "Describing"); `done_word`, when set, turns the
-    renderer's per-output ✓ line into a "<done_word> written." line and counts
-    it. Returns a sentence to log, or None for a line that is not a milestone."""
+    renderer's per-output ✓ line into a "<done_word> written: <name>" line and
+    counts it. Returns a sentence to log, or None for a line that is not a
+    milestone."""
     done = {"n": 0}
+    told = {"boundaries": False}
 
     def tell(line):
-        if line.startswith("Scanning:"):
-            return "Loading files…"
+        m = _RE_R_SCANNING.match(line)
+        if m:
+            # Name the folder. "Loading files…" was true of every scan this tool
+            # has ever run, which is another way of saying it identified none of
+            # them -- and on a machine holding several imports the one question
+            # worth answering at the top of a long pass is which card it is
+            # about to spend those minutes on.
+            # tilde, not _compact_paths: the compactor keeps the last three
+            # components, and the last three here are DCIM/200video/front --
+            # the same three for every card ever imported. The import folder,
+            # which is the one part that identifies WHICH card, is the
+            # component it drops.
+            return "Reading clip timestamps and GPS from %s…" % tilde(m.group(1).strip())
         m = _RE_R_FOUND.search(line)
         if m:
             ctx.ui.stat("Clips", int(m.group(1)))
             ctx.ui.stat("Trips", int(m.group(2)))
-            return "Files loaded: %s clips in %s trips." % (m.group(1), m.group(2))
+            return ("%s clips read, grouped into %s trips."
+                    % (m.group(1), m.group(2)))
+        m = _RE_R_TRIP_FULL.match(line)
+        if m:
+            # The span and the clip count are what say how long this one will
+            # take. "Rendering trip 2 of 5…" is the same sentence for a
+            # four-minute hop and a three-hour drive.
+            return ("%s trip %s of %s — %s %s to %s, %s clips, about %s of "
+                    "footage…" % (verb, m.group(1), m.group(2), m.group(3),
+                                  m.group(4), m.group(5), m.group(6), m.group(7)))
         m = RE_TRIP.match(line)
         if m:
             return "%s trip %s of %s…" % (verb, m.group(1), m.group(2))
         m = _RE_R_MAP.match(line)
         if m:
             return "  route: %s km over %s segments." % (m.group(1), m.group(2))
+        if RE_DETECT.match(line) and not told["boundaries"]:
+            # Said once, when the pass that costs the minutes actually starts.
+            # Until this line the operator has watched a counter run to the end
+            # of the card and stop, with no reason given for why the step is
+            # still going.
+            told["boundaries"] = True
+            return ("Watching the video near home to find where the car pulled "
+                    "out and where it parked. This decodes clips and is the "
+                    "slow part of the scan.")
         if done_word and line.strip().startswith("✓"):
             done["n"] += 1
             ctx.ui.stat(done_word + "s written", done["n"])
-            return "  %s written." % done_word
+            # The renderer prints the full path after the tick. Reporting only
+            # that a file was written, when its name is right there on the line,
+            # leaves the operator counting ticks to work out which trip finished.
+            name = line.strip().lstrip("✓").strip()
+            return "  %s written: %s" % (done_word, Path(name).name if name else "(unnamed)")
         return None
 
     return tell
@@ -3196,6 +3271,12 @@ def step_generate_meta(ctx):
     done_line("described %s trips%s, sidecars under %s"
               % (C.yellow("%d" % n), _skipped_note(have),
                  tilde(ctx.out_dir / root.name)))
+    # The boundaries in that table are the thing to check before hours of
+    # encoding, and item 3 is how they are checked. Saying so here is the
+    # difference between a table read and a table looked at.
+    print(C.dim("  Next: 3) Build Preview turns the table above into frames you "
+                "can judge the boundaries from, before 6) Render Trips spends "
+                "the hours."))
     return record(ctx, NAME[META], RAN, started, "%d trips described" % n)
 
 
@@ -3394,6 +3475,14 @@ def load_groups(ctx, root, refresh=False):
     # and its tail already names the very path this sentence was naming. On a
     # cached scan the whole thing came and went in under a second, leaving one
     # more sentence between a confirmation prompt and the figure it is about.
+    #
+    # What the bar says is the scan parser's business, and this call went
+    # without one for a long time: an unparsed Readout is an elapsed clock
+    # beside a raw child line, so the longest wait in the tool -- every item
+    # that needs a grouping pays it -- reported neither how far through the
+    # card it was nor that the silent stretch afterwards is video decoding.
+    # It is the same child, printing the same lines, as the sidecar pass; it
+    # gets the same parser and the same story.
     fd, tmp = tempfile.mkstemp(prefix="dashcam-groups-", suffix=".json")
     os.close(fd)
     try:
@@ -3409,7 +3498,8 @@ def load_groups(ctx, root, refresh=False):
                  "--root", str(root), "--out", str(ctx.out_dir)]
                 + ctx.config_args + ctx.scan_args,
                 ctx.exporter, env=_renderer_env(ctx), stdout_file=tmp),
-            Readout("Grouping", quiet_finish=True))
+            Readout("Finding trips", make_scan_parser(), quiet_finish=True),
+            narrator=scan_narrator(ctx))
         if rc != 0:
             return None
         try:
@@ -3577,10 +3667,22 @@ def write_clip_review(ctx, trips):
     def _clips_of(t):
         return t.get("driving") or t.get("front") or []
     bar, n_done, total = Bar("Clips"), 0, sum(len(_clips_of(t)) for t in trips)
+    # Two ffmpeg seeks per clip, so a card of 240 driving clips is 480 spawns
+    # and several minutes. The bar counts them; this says which trip they belong
+    # to, because the bar's filename alone does not tell the operator whether
+    # the boundaries he is waiting to inspect are half done or barely started.
+    ctx.ui.log("Cutting two frames from each of %d driving clips across %d "
+               "trips, so the trip boundaries can be walked by eye."
+               % (total, len(trips)))
     for trip in trips:
         folder = _review_folder(root, trip)
         clips = _clip_review_order(_clips_of(trip))
         index_width = max(2, len(str(len(clips))))
+        ctx.ui.log("  trip %02d (%s %s): %d clips%s"
+                   % (trip.get("index", 0), trip.get("day", "day unknown"),
+                      str(trip.get("start", ""))[11:16] or "--:--", len(clips),
+                      "" if trip.get("renderable", True)
+                      else ", not renderable — filed under not_renderable/"))
         for n, clip in enumerate(clips, 1):
             n_done += 1
             _still_bar(bar, n_done, total, Path(clip).name)
@@ -4643,9 +4745,19 @@ def _drop_commit(ctx, picked, files, started):
     to be the same list, and re-deriving it here would be a second chance to
     differ.
     """
-    deleted, freed, errors = _unlink_all(files)
+    # Under a bar. Everything up to here printed; this unlinks every clip of
+    # the chosen trips, which on a card is hundreds of files on a slow reader,
+    # and the last thing on screen was the word the operator typed. That is the
+    # one wait in the tool where a hang would be believed and interrupted, and
+    # the interruption would land in the middle of a delete.
+    with ui_handler.active().waiting("Deleting the clips of trips %s"
+                                     % picked.label()):
+        deleted, freed, errors = _unlink_all(files)
     for e in errors[:10]:
         print(C.red("  Could not delete %s" % e))
+    if len(errors) > 10:
+        print(C.red("  …and %d more that could not be deleted."
+                    % (len(errors) - 10)))
 
     # Record the dropped clips' stamps as excluded. From here on they are
     # treated as if imported: the next delta import does not re-copy them off
@@ -4661,18 +4773,30 @@ def _drop_commit(ctx, picked, files, started):
     ctx.last_groups = None
     ctx.last_scan = None
 
-    _drop_orphan_sidecars(picked)
+    sidecars = _drop_orphan_sidecars(picked)
     _record_the_drop(ctx, picked)
 
     if errors:
         print(C.red("  Dropped %s of %s files (%s could not be deleted)."
                     % (deleted, len(files), len(errors))))
+        # The exclusion was recorded before this branch, and a partial delete
+        # that says nothing about the ledger leaves the operator unable to tell
+        # whether running item 4 again would double-count. It would not.
+        print(C.yellow("  The exclusion is already recorded, so these trips will "
+                       "not be re-imported; run 4) Exclude Trip again to retry "
+                       "the files above."))
         return _outcome(record(ctx, NAME[EXCLUDE], FAILED, started,
                                "%d of %d files deleted, %d errors"
                                % (deleted, len(files), len(errors))))
-    done_line("excluded trips %s: %s files, %s freed"
+    done_line("excluded trips %s: %s files, %s freed%s"
               % (picked.label(), C.yellow("%d" % deleted),
-                 human_bytes(freed)))
+                 human_bytes(freed),
+                 (", and %d sidecars describing them" % sidecars) if sidecars else ""))
+    # Excluding is almost always done because Clean Workspace refused and told
+    # the operator to. Closing that loop here saves a walk back through the menu
+    # to find out whether the refusal has cleared.
+    print(C.dim("  Run 9) Clean Workspace again to see whether that clears its "
+                "refusal."))
     return _outcome(record(ctx, NAME[EXCLUDE], RAN, started,
                            "trips %s, %d files, %s freed" % (
                                picked.label(), deleted, human_bytes(freed))))
@@ -4712,8 +4836,14 @@ def _drop_orphan_sidecars(picked):
         base = trip.get("out_base")
         if base:
             orphans.extend(_existing_sidecars(base))
-    if orphans:
-        _unlink_all(orphans)
+    if not orphans:
+        return 0
+    # The count goes back to the caller's closing line. It used to be thrown
+    # away here, so the sentence the operator read after an exclusion described
+    # the footage and never mentioned that the .gpx, the map and the _meta.json
+    # went with it -- which is the half he would otherwise go looking for.
+    deleted, _freed, _errors = _unlink_all(orphans)
+    return deleted
 
 
 def _existing_sidecars(base):
@@ -4990,19 +5120,40 @@ def step_render(ctx):
         if not ui_handler.active().confirm("  Delete and re-render?", True):
             return record(ctx, NAME[RENDER], ABORTED, started,
                           "Aborted by user pre-run.")
-        for f in doomed:
-            try:
-                f.unlink()
-            except OSError:
-                pass
+        # The unlink used to run bare, between the operator's "yes" and the
+        # first frame of the render bar. On a full re-render that is hundreds
+        # of files and tens of gigabytes on an external disk, with the typed
+        # answer the last thing on screen -- the shape of wait that gets
+        # ctrl-C'd. The bar says it is working; the sentence after says what it
+        # actually managed, because a delete that half-failed and a delete that
+        # worked used to look the same from here.
+        removed, failed_drops = 0, []
+        with ui_handler.active().waiting("Removing the videos being replaced"):
+            for f in doomed:
+                try:
+                    f.unlink()
+                    removed += 1
+                except OSError as e:
+                    failed_drops.append("%s (%s)" % (f.name, e))
         # drop the day folders left empty, so the tree matches what exists
+        emptied = []
         if ns.is_dir():
             for d in sorted(ns.rglob("*"), reverse=True):
                 if d.is_dir() and not any(d.iterdir()):
                     try:
                         d.rmdir()
+                        emptied.append(d.name)
                     except OSError:
                         pass
+        print("  Removed %s of %s videos%s."
+              % (C.yellow("%d" % removed), len(doomed),
+                 (", and the day folders left empty: %s"
+                  % ", ".join(sorted(emptied))) if emptied else ""))
+        for line in failed_drops[:10]:
+            print(C.red("  Could not delete %s" % line))
+        if len(failed_drops) > 10:
+            print(C.red("  …and %d more that could not be deleted."
+                        % (len(failed_drops) - 10)))
         before = set(rendered_mp4s(ctx.out_dir))
 
     cmd = ["./make-trips-rendered.sh"]
@@ -5020,12 +5171,28 @@ def step_render(ctx):
     after = set(rendered_mp4s(ctx.out_dir))
     new = after - before
     if rc != 0:
+        # Which trips survived the failure, by name. The tail of the child's
+        # output above says why it stopped; this says what is on disk now, and
+        # that is what decides whether the retry re-renders everything or picks
+        # up where this one died. A count could not tell those apart.
+        if new:
+            print(C.yellow("  Finished before the failure, and kept:"))
+            for p in sorted(new):
+                print(C.dim("    %s" % p.name))
+        else:
+            print(C.yellow("  No video was finished before the failure; nothing "
+                           "new is on disk."))
         return record(ctx, NAME[RENDER], FAILED, started,
                       "exit %d (%d new videos before the failure)" % (rc, len(new)))
     grown = human_bytes(sum(p.stat().st_size for p in new))
     detail = "%d new videos, %s" % (len(new), grown)
     done_line("encoded %s videos (%s) into %s"
-              % (C.yellow("%d" % len(new)), grown, tilde(ctx.out_dir)))
+              % (C.yellow("%d" % len(new)), grown, tilde(ns)))
+    for p in sorted(new):
+        print(C.dim("    %s" % p.name))
+    if new:
+        print(C.dim("  Next: 7) Transcribe Trips for the audio sidecars, or "
+                    "5) Build Website to make the page these appear on."))
     # A finished render leaves renders and sidecars, not scratch.
     after_render(ctx)
 
@@ -5088,6 +5255,23 @@ def _ask_transcription_renders(renders):
     return selected
 
 
+_RE_TRIP_STEM = re.compile(r"^trip_(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})_")
+
+
+def _transcript_label(path, number, total):
+    """"Trip 2/5 2026-07-19 12:46" — the position AND which drive it is.
+
+    It used to be "Trip 2", which is this run's ordinal and nothing else: it
+    matches no filename, no line of the trip table, and no folder on disk, so a
+    transcript pass over four videos gave the operator four labels he could not
+    tie back to anything. The day and clock time are in the render's own name,
+    which is the name he picked the trip by.
+    """
+    m = _RE_TRIP_STEM.match(path.name)
+    where = " %s %s:%s" % (m.group(1), m.group(2), m.group(3)) if m else ""
+    return "Trip %d/%d%s" % (number, total, where)
+
+
 def step_transcribe(ctx, world):
     started = time.time()
     renders = tuple(r.path for r in world.renders if r.path and r.path.is_file())
@@ -5109,6 +5293,12 @@ def step_transcribe(ctx, world):
         diarization_model = None
     splicer = Mp4AudioSplicer()
     enhancer = Mp3VoiceEnhancer()
+    # Constructing the transcriber loads faster-whisper, and on a machine that
+    # has never run it that means downloading the model — minutes with nothing
+    # on screen, straight after a prompt, which is where a hang is most easily
+    # believed. Say what is happening before the wait, not after it.
+    ctx.ui.log("Loading the speech model (the first run downloads it, which can "
+               "take a few minutes)…")
     transcriber = FasterWhisperTranscriber()
     made = 0
     bar = Bar("Transcribe")
@@ -5118,26 +5308,32 @@ def step_transcribe(ctx, world):
     latest_text = [""]
     text_queue = collections.deque()
     display_text = [""]
-    trip_labels = {path: "Trip %d" % number for number, path in enumerate(renders, 1)}
+    bounce = [0]
+    trip_labels = {path: _transcript_label(path, number, len(renders))
+                   for number, path in enumerate(renders, 1)}
 
-    def show(path, percent, phase="Transcribe"):
+    def show(path, percent, phase="Transcribe", infinite=False, note=None):
         # Through the one renderer, like every other bar. The live transcript is
         # the subaction; the draw layer clips it to the row, so no hand-fitting.
         if not C.enabled:
             return
         label = trip_labels[path] + ": " + phase
-        sub = display_text[0] if (phase == "Transcribe" and display_text[0]) else None
-        state = ProgressState(action=label, fraction=percent / 100.0,
-                              percent=int(percent), subaction=sub)
+        sub = note or (display_text[0] if (phase == "Transcribe" and display_text[0]) else None)
+        state = ProgressState(action=label,
+                              fraction=None if infinite else percent / 100.0,
+                              infinite=infinite,
+                              percent=None if infinite else int(percent),
+                              subaction=sub, bounce=bounce[0])
         _write_line("\x1b[2K\x1b[?25l" + render_progress(state, term_width()))
 
-    def pulse(path, progress_ref):
+    def pulse(path, progress_ref, phase="Transcribe", infinite=False, note=None):
         stop = threading.Event()
         def run():
             while not stop.wait(.5):
+                bounce[0] += 1
                 if text_queue:
                     display_text[0] = text_queue.popleft()
-                show(path, progress_ref[0], "Transcribe")
+                show(path, progress_ref[0], phase, infinite, note)
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
         return stop, thread
@@ -5185,7 +5381,25 @@ def step_transcribe(ctx, world):
                         )
                         stop.set(); pulse_thread.join(timeout=1)
                         enhanced.seek(0)
-                        turns = SpeakerDiarizer(model_name=diarization_model, token=hf_token).diarizeMp3(enhanced)
+                        # Diarization used to run with the pulse stopped: the bar
+                        # froze at the percentage transcription had reached and
+                        # stayed there for the longest single operation in the
+                        # step, with the last log line still saying
+                        # "transcribing…". It has no progress to report, so it
+                        # gets the indeterminate bar rather than a made-up
+                        # number, and a sentence saying why it costs a second
+                        # pass over the same audio.
+                        ctx.ui.log("  identifying who is speaking. This reads the "
+                                   "whole audio a second time and takes about as "
+                                   "long again as the transcription did.")
+                        stop, pulse_thread = pulse(
+                            path, progress_ref, "Identify speakers",
+                            infinite=True, note=diarization_model)
+                        try:
+                            turns = SpeakerDiarizer(model_name=diarization_model,
+                                                    token=hf_token).diarizeMp3(enhanced)
+                        finally:
+                            stop.set(); pulse_thread.join(timeout=1)
                         labeler = SpeakerLabeler(turns)
                         with text_path.open("w", encoding="utf-8") as destination:
                             writer = ParagraphWriter(destination, on_paragraph=ctx.ui.paragraph)
@@ -5218,14 +5432,28 @@ def step_transcribe(ctx, world):
                         writer.write_timeline(timeline_path)
                 made += 1
                 show(path, 100.0)
-                ctx.ui.log("  transcript written.")
+                # Name the two files. A trip counts as transcribed only when
+                # BOTH exist, so "transcript written." described half of the
+                # result and located neither half; the paths are right here.
+                ctx.ui.log("  written beside the video: %s and %s"
+                           % (text_path.name, timeline_path.name))
                 ctx.ui.stat("Trips transcribed", made)
             finally:
                 enhanced.close()
     finally:
         if C.enabled:
             bar.close()
-    done_line("transcribed %s rendered videos" % C.yellow(str(made)))
+    # Where they landed, not just how many. The sidecars are named after the
+    # videos and sit in the videos' own day folders, so one line naming those
+    # folders is the whole answer to "where do I find them" -- which the count
+    # on its own left the operator to work out from the filesystem.
+    folders = sorted({str(tilde(p.parent)) for p in renders})
+    where = folders[0] if len(folders) == 1 else "%s and %d other day folders" % (
+        folders[0], len(folders) - 1)
+    done_line("transcribed %s of %s rendered videos; sidecars beside each MP4 in %s"
+              % (C.yellow(str(made)), C.yellow(str(len(renders))), where))
+    print(C.dim("  Re-run item 7 on a trip to redo it; the transcript travels "
+                "with the video, so publish it after transcribing, not before."))
     return record(ctx, NAME[TRANSCRIBE], RAN if made else SATISFIED,
                   started, "%d transcript sidecars" % made)
 
@@ -5663,11 +5891,20 @@ def gather_into_final(ctx, out_dir):
     final.mkdir(parents=True, exist_ok=True)
     if existed:
         print(C.dim("  %s already exists; merging into it." % tilde(final)))
+    # The move is the biggest side effect of Build Website and it used to be
+    # the quietest: a first gather relocates the whole render tree -- tens of
+    # gigabytes, and across filesystems that is a copy, not a rename -- with
+    # nothing on screen until the page was written minutes later. Say where it
+    # is going before it starts, and name each import folder as it goes, so the
+    # wait is attached to something.
+    ctx.ui.log("Gathering the renders into %s so the page and the videos travel "
+               "together…" % tilde(final))
     for child in sorted(out_dir.iterdir()):
         if child == final or child.name.startswith(".") or child.is_file():
             continue
         if child.name in ("logs", "previews") or child.name.startswith(FINAL_PREFIX):
             continue
+        ctx.ui.log("  moving the day folders of import %s…" % child.name)
         for day in sorted(child.iterdir()):
             if not day.is_dir():
                 continue
@@ -5696,6 +5933,13 @@ def gather_into_final(ctx, out_dir):
         print(C.yellow("  %d files already present were left as they were:" % len(kept)))
         for f in kept[:5]:
             print(C.yellow("    %s" % tilde(f)))
+        # The list was capped at five with nothing said about the cap, so a
+        # collision of forty files reported five and looked complete. A count
+        # and a list that disagree teach the reader to believe the list.
+        if len(kept) > 5:
+            print(C.yellow("    …and %d more, all left in place to be looked at."
+                           % (len(kept) - 5)))
+    ctx.ui.log("Gathered %d day folders into %s." % (moved, tilde(final)))
     return final if moved or any(final.iterdir()) else None
 
 
@@ -5748,24 +5992,39 @@ def build_result_page(ctx, out_dir, gather):
     # The second argument is the directory to EXCLUDE from the walk — it exists
     # so a folder-shaped site does not index itself. There is no such folder
     # any more, and passing base here would exclude the entire tree.
+    # collect_site_trips walks the whole output tree. On a workspace holding
+    # several imports that is thousands of files, and it used to run between
+    # the gather and the first trip with nothing said.
+    ctx.ui.log("Indexing the trips under %s…" % tilde(base))
     trips = collect_site_trips(base, base / "__no_such_dir__")
     page = base / RESULT_FILE
-    made = {"trips": len(trips), "path": page, "no_video": 0, "no_gps": 0}
+    # Lists, not counters. Both of these end up on screen as a caveat about the
+    # finished page, and "3 trips have no GPS" is exactly the shape of message
+    # that cannot be acted on -- the operator has to go and find out which three.
+    made = {"trips": len(trips), "path": page, "no_video": [], "no_gps": []}
     if not trips:
         return made
+    ctx.ui.log("Found %d trips; building a card for each (one still is decoded "
+               "per trip, so this takes a moment)." % len(trips))
 
     n_dist = n_move = n_secs = 0.0
     top = 0.0
     rows = []
-    for t in trips:
+    # A bar rather than a line per trip: every iteration spawns ffmpeg for the
+    # poster frame, which is seconds each, and a silent minute here reads as a
+    # finished step that failed to print.
+    bar = Bar("Page")
+    for n, t in enumerate(trips, 1):
         meta = t.get("meta") or {}
         mp4 = t.get("video")
         gpx = t.get("gpx")
+        name = _trip_title(meta, t)
+        _still_bar(bar, n, len(trips), name)
         pts = gpx_track(gpx) if gpx else []
         if not mp4:
-            made["no_video"] += 1
+            made["no_video"].append(name)
         if not pts:
-            made["no_gps"] += 1
+            made["no_gps"].append(name)
 
         dist = _f(meta.get("distance_km"))
         move = _f(meta.get("moving_min"))
@@ -5812,7 +6071,7 @@ def build_result_page(ctx, out_dir, gather):
             '</div></section>' % (
                 left,
                 html.escape(day), (" &middot; " + html.escape(clock)) if clock else "",
-                html.escape(_trip_title(meta, t)), rt,
+                html.escape(name), rt,
                 art,
                 _cell("%.1f km" % dist if dist else "&mdash;", "distance"),
                 _cell(human_secs(move * 60) if move else "&mdash;", "moving"),
@@ -5820,6 +6079,7 @@ def build_result_page(ctx, out_dir, gather):
                 _cell("%.0f km/h" % av if av else "&mdash;", "avg"),
                 "".join(links) or '<span class="k">nothing to link yet</span>',
             ))
+    bar.close()
 
     head = (
         '<div class="wrap">'
@@ -5880,9 +6140,20 @@ def step_site(ctx, gather):
         return record(ctx, NAME[BUILD], SKIPPED, started, "no trips")
 
     _print_all(_page_caveats(info))
-    size = human_bytes(info.get("bytes", 0))
+    # info["bytes"] is written on the only path that reaches here, so a default
+    # of 0 would have been a real page size that never happens -- and if it ever
+    # did, "0 B" would read as an empty page rather than a missing measurement.
+    size = human_bytes(info["bytes"])
+    page = Path(info["path"])
     done_line("built %s trips into %s (%s)"
-              % (C.yellow("%d" % info["trips"]), tilde(Path(info["path"])), size))
+              % (C.yellow("%d" % info["trips"]), tilde(page), size))
+    # The gather is the part nobody expects: the videos are no longer where they
+    # were rendered. Say where the whole thing now lives, and that it moves as
+    # one folder, because that is the promise the move exists to keep.
+    print(C.dim("  Open it with:  open %s" % tilde(page)))
+    print(C.dim("  The videos, maps and tracks moved into %s beside it; drag "
+                "that folder anywhere and the links still resolve."
+                % tilde(page.parent)))
     return record(ctx, NAME[BUILD], RAN, started, "%d trips, %s" % (info["trips"], size))
 
 
@@ -5894,12 +6165,25 @@ def _page_caveats(info):
     """
     lines = []
     if info["no_video"]:
-        lines.append(C.dim("  %d trips have no video yet; the page says so."
-                           % info["no_video"]))
+        lines.append(C.dim("  No video yet, so the page says so, for: %s. Run "
+                           "6) Render Trips to fill these in."
+                           % _named(info["no_video"])))
     if info["no_gps"]:
-        lines.append(C.dim("  %d trips have no GPS, so they show no route."
-                           % info["no_gps"]))
+        lines.append(C.dim("  No GPS recorded, so no route is drawn, for: %s."
+                           % _named(info["no_gps"])))
     return lines
+
+
+def _named(names, cap=8):
+    """The names, and an honest count of the ones that did not fit.
+
+    These lists come off a page build and are usually two or three long. Capped
+    so a workspace of forty half-described trips cannot push the closing lines
+    off the log region, and the overflow is stated rather than silent."""
+    shown = ", ".join(names[:cap])
+    if len(names) > cap:
+        return "%s and %d more" % (shown, len(names) - cap)
+    return shown
 
 # ---------------------------------------------------------------------------
 # Item 8 — Clean Workspace. Erase the imported footage and the renders it
@@ -6436,7 +6720,13 @@ def _clean_workspace_commit(ctx, fresh, doomed, started):
                                "refused: the delete target moved"))
     discarding = guards.Gates(fresh).import_is_disposable()
     try:
-        shutil.rmtree(str(target))
+        # The single longest operation in the tool: a whole import tree, which
+        # is tens to hundreds of gigabytes, removed file by file. It ran bare
+        # between the typed word and the closing line -- the card wipe below
+        # already learned this lesson and wraps its own unlink the same way.
+        with ui_handler.active().waiting("Erasing the imported footage of %s"
+                                         % target.name):
+            shutil.rmtree(str(target))
     except OSError as e:
         print(C.red("  Clean failed: %s" % e))
         return _outcome(record(ctx, NAME[CLEAN_WS], FAILED, started, str(e)))
@@ -6444,9 +6734,9 @@ def _clean_workspace_commit(ctx, fresh, doomed, started):
         ctx.selected_import = None
     ctx.last_scan = None
     ctx.last_groups = None
-    done_line("cleaned %s files (%s) from %s"
-              % (C.yellow("%d" % doomed.files), human_bytes(doomed.size),
-                 tilde(target)))
+    print("  Imported footage gone: %s files (%s) under %s."
+          % (C.yellow("%d" % doomed.files), human_bytes(doomed.size),
+             tilde(target)))
     if discarding:
         _unclaim_the_discarded(ctx, fresh)
 
@@ -6458,14 +6748,27 @@ def _clean_workspace_commit(ctx, fresh, doomed, started):
     #
     # What survives either way: the ledger's high-water mark and the archived
     # receipts of finished cycles.
+    # Both of these walk the export tree and the second one deletes from it, and
+    # they used to run AFTER the step's closing line -- so the operator read
+    # "done" and then watched the tool sit there. The closing line now comes
+    # last, and reports the renders too, which is what the ledger has always
+    # recorded and the screen never did.
+    ctx.ui.log("Checking whether the renders made from it are safe to remove "
+               "as well…")
     ok, why, stragglers = working_area_is_expendable(ctx, fresh.target)
     if discarding:
         ok, why, stragglers = True, "", []
     n = freed = 0
     if ok:
-        n, freed = purge_published_renders(ctx, root, finished=not discarding)
+        with ui_handler.active().waiting("Removing the renders made from %s"
+                                         % target.name):
+            n, freed = purge_published_renders(ctx, root, finished=not discarding)
     else:
         _keeping_the_renders(why, stragglers)
+    done_line("cleaned %s files (%s): %s imported clips under %s, and %s render "
+              "files from the export tree"
+              % (C.yellow("%d" % (doomed.files + n)),
+                 human_bytes(doomed.size + freed), doomed.files, tilde(target), n))
     return _outcome(record(ctx, NAME[CLEAN_WS], RAN, started,
                            "%d files, %s freed"
                            % (doomed.files + n,
@@ -6548,9 +6851,26 @@ def _card_advisory(ctx, world):
                    if not import_is_expendable(ctx, cand, world.target)[0]]
     if not unpublished:
         return []
-    return [C.yellow("  %s imports here are not published yet: after this the copy"
-                     " on this machine is the only one."
-                     % C.yellow("%d" % len(unpublished)))]
+    # Name them. This line is read immediately before erasing a card, and "3
+    # imports" leaves the operator to work out which three are about to become
+    # single-copy -- the import folder names are already in hand here.
+    return [C.yellow("  Not published yet, so after this the copy on this machine"
+                     " is the only one: %s."
+                     % _named([c.name for c in unpublished]))]
+
+
+def _stamp_clock(stamp):
+    """A camera stamp as a person reads it: 20260730141804 -> 2026-07-30 14:18.
+
+    Printed only, never parsed back. A stamp is the camera's own name for a
+    moment and every other screen in this tool shows that moment as a date and
+    a clock time, so showing the raw digits here would make the operator do the
+    conversion to line the two up.
+    """
+    s = str(stamp)
+    if len(s) < 12 or not s[:12].isdigit():
+        return s
+    return "%s-%s-%s %s:%s" % (s[0:4], s[4:6], s[6:8], s[8:10], s[10:12])
 
 
 def _dropped_on_purpose(ctx, number, stamps, guard, scope, started):
@@ -6572,11 +6892,20 @@ def _dropped_on_purpose(ctx, number, stamps, guard, scope, started):
     if not stamps:
         return None, None
     record_excluded_stamps(ctx, stamps)
-    print(C.dim("  %d clips recorded as dropped on purpose." % len(stamps)))
+    # This is the only record on screen of which footage was written off, and
+    # it is written off permanently. A bare count named none of it; the stamps
+    # are the clips' own camera times, so the span says WHICH recording session
+    # just stopped counting.
+    ordered = sorted(stamps)
+    print(C.dim("  %d clips recorded as dropped on purpose, from %s to %s."
+                % (len(stamps), _stamp_clock(ordered[0]), _stamp_clock(ordered[-1]))))
     fresh = looked_at(ctx, scope)
     verdict = guard(fresh)
     if verdict.blocked:
         print(C.red("  Still refusing: %s." % verdict.reason))
+        print(C.dim("  The drop above is recorded and stands; nothing was "
+                    "erased. Clear what the reason names, then run this item "
+                    "again."))
         return None, _outcome(record(ctx, NAME[number], SKIPPED, started,
                                      "refused: %s" % verdict.reason))
     return fresh, None
@@ -6841,7 +7170,12 @@ def wipe_card(ctx):
     dcim = ctx.card / "DCIM"
     if not dcim.is_dir():
         return 0, 0, "no card at %s" % tilde(ctx.card)
-    verdict = guards.card_is_expendable(capture_world(ctx, menu.Scope.LOCAL))
+    # Under the bar too. Capturing the world here re-reads every stamp on the
+    # card and walks the workspace, which on a card reader is the same order of
+    # wait as the delete that follows -- and it happened after the typed word,
+    # so the pause read as the erase having already started.
+    with ui_handler.active().waiting("Re-checking the card against the workspace"):
+        verdict = guards.card_is_expendable(capture_world(ctx, menu.Scope.LOCAL))
     if verdict.blocked:
         return 0, 0, verdict.reason
     return _unlink_card_files(ctx, dcim)
@@ -6865,7 +7199,12 @@ def _unlink_card_files(ctx, dcim):
     # bus, and 888 unlinks over a card reader is not instant. Without it the
     # screen sat on the typed word for a minute or more with nothing between
     # the word and the closing line.
-    failed = ""
+    # A list, not the last errno. It used to keep only the most recent failure,
+    # so a card with forty unreadable files reported one of them and said
+    # nothing about the other thirty-nine -- and the count of what DID go was
+    # thrown away with them, which is the number that says whether the camera
+    # will find a usable card.
+    failures = []
     with ui_handler.active().waiting("Deleting SIM data"):
         gone = freed = 0
         for f in sorted(dcim.rglob("*")):
@@ -6877,14 +7216,25 @@ def _unlink_card_files(ctx, dcim):
                 gone += 1
                 freed += size
             except OSError as e:
-                failed = str(e)
-    if failed:
-        print(C.red("  Could not delete everything under %s: %s"
-                    % (tilde(dcim), failed)))
-        return gone, freed, failed
+                failures.append("%s (%s)" % (f.name, e))
+    if failures:
+        print(C.red("  Deleted %s files (%s) under %s, but %d would not go:"
+                    % (C.yellow("%d" % gone), human_bytes(freed), tilde(dcim),
+                       len(failures))))
+        for line in failures[:10]:
+            print(C.red("    %s" % line))
+        if len(failures) > 10:
+            print(C.red("    …and %d more." % (len(failures) - 10)))
+        return gone, freed, failures[0]
     _unlink_quietly(ctx.workspace / ORPHAN_LIST)
     done_line("deleted %s files from the card, %s freed"
               % (C.yellow("%d" % gone), human_bytes(freed)))
+    # The preserved folder tree is the whole point of doing this file by file,
+    # and it is invisible on screen -- so the one thing the operator does next,
+    # putting the card back, has no confirmation that it will work until he is
+    # in the car.
+    print(C.dim("  The DCIM folder tree was left standing, so the camera will "
+                "record on this card as soon as you put it back."))
     return gone, freed, ""
 
 
